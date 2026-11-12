@@ -1,0 +1,248 @@
+{
+  "entities": {
+    "Settings": {
+      "title": "Settings",
+      "description": "Store configuration including target food cost %, VAT, service charge, daily closing time, and members settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "shopName": { "type": "string" },
+        "targetFoodCostPercent": { "type": "number" },
+        "vatPercent": { "type": "number" },
+        "serviceChargePercent": { "type": "number" },
+        "dailyClosingTime": { "type": "string" },
+        "qrImageId": { "type": "string" },
+        "pointsEarnUnitThb": { "type": "number" },
+        "pointsRedeemValueThb": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Ingredient": {
+      "title": "Ingredient",
+      "description": "Raw ingredient item with purchase cost, yield, and calculated unit cost",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "purchaseUnit": { "type": "string" },
+        "purchasePrice": { "type": "number" },
+        "purchaseQuantity": { "type": "number" },
+        "yieldPercent": { "type": "number" },
+        "unit": { "type": "string" },
+        "version": { "type": "number" }
+      }
+    },
+    "SubRecipe": {
+      "title": "SubRecipe",
+      "description": "Prepared intermediate recipe used in multiple dishes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "outputUnit": { "type": "string" },
+        "outputQuantity": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Packaging": {
+      "title": "Packaging",
+      "description": "Takeaway and delivery packaging items",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "cost": { "type": "number" },
+        "unit": { "type": "string" },
+        "version": { "type": "number" }
+      }
+    },
+    "Dish": {
+      "title": "Dish",
+      "description": "Menu dish item with variants, recipe links, option groups, and image reference",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "nameTh": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "imageId": { "type": "string" },
+        "version": { "type": "number" }
+      }
+    },
+    "OptionGroup": {
+      "title": "OptionGroup",
+      "description": "Group of modifiers or choices with pricing and cost ingredients",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "minSelect": { "type": "number" },
+        "maxSelect": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Food menu categories for navigation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "order": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Channel": {
+      "title": "Channel",
+      "description": "Sales channel such as Dine-in, Takeaway, Grab, LINE MAN",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "commissionPercent": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Table": {
+      "title": "Table",
+      "description": "Floor plan table with coordinate position, shape, chairs, and active bill",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "zoneId": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "chairs": { "type": "number" },
+        "currentBillId": { "type": "string" },
+        "version": { "type": "number" }
+      }
+    },
+    "Zone": {
+      "title": "Zone",
+      "description": "Floor plan seating zone",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "version": { "type": "number" }
+      }
+    },
+    "Bill": {
+      "title": "Bill",
+      "description": "Customer order and bill with cost snapshots, items, payments, and table link",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "billNumber": { "type": "string" },
+        "status": { "type": "string" },
+        "tableId": { "type": "string" },
+        "netSales": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "totalFoodCost": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Operating expense item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "isFixed": { "type": "boolean" },
+        "version": { "type": "number" }
+      }
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Staff employee with monthly or hourly wage configuration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "wageType": { "type": "string" },
+        "wageAmount": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Shift": {
+      "title": "Shift",
+      "description": "Cash register shift session with starting and counted cash",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "openedAt": { "type": "string" },
+        "startingCash": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Member": {
+      "title": "Member",
+      "description": "Loyalty customer profile and accumulated points",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "points": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "ImageDoc": {
+      "title": "ImageDoc",
+      "description": "Compressed photo stored in its own document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "dataUrl": { "type": "string" },
+        "sizeBytes": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "DailySummary": {
+      "title": "DailySummary",
+      "description": "Aggregated daily financial summary updated in real-time on bill payment/void",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "netSales": { "type": "number" },
+        "totalFoodCost": { "type": "number" },
+        "orderCount": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    },
+    "Counter": {
+      "title": "Counter",
+      "description": "Atomic transaction counter for sequential bill numbers",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "count": { "type": "number" },
+        "version": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{uid}/settings/{settingsId}": { "schema": "Settings", "description": "Shop settings" },
+    "/users/{uid}/ingredients/{ingredientId}": { "schema": "Ingredient", "description": "Raw ingredients" },
+    "/users/{uid}/subRecipes/{subRecipeId}": { "schema": "SubRecipe", "description": "Intermediate sub-recipes" },
+    "/users/{uid}/packaging/{packagingId}": { "schema": "Packaging", "description": "Packaging supplies" },
+    "/users/{uid}/dishes/{dishId}": { "schema": "Dish", "description": "Menu dishes" },
+    "/users/{uid}/optionGroups/{groupId}": { "schema": "OptionGroup", "description": "Option modifiers" },
+    "/users/{uid}/categories/{categoryId}": { "schema": "Category", "description": "Menu categories" },
+    "/users/{uid}/channels/{channelId}": { "schema": "Channel", "description": "Sales channels" },
+    "/users/{uid}/tables/{tableId}": { "schema": "Table", "description": "Restaurant tables" },
+    "/users/{uid}/zones/{zoneId}": { "schema": "Zone", "description": "Floor plan zones" },
+    "/users/{uid}/bills/{billId}": { "schema": "Bill", "description": "Sales bills" },
+    "/users/{uid}/expenses/{expenseId}": { "schema": "Expense", "description": "Operating expenses" },
+    "/users/{uid}/employees/{employeeId}": { "schema": "Employee", "description": "Employee wages" },
+    "/users/{uid}/shifts/{shiftId}": { "schema": "Shift", "description": "POS cash shifts" },
+    "/users/{uid}/members/{memberId}": { "schema": "Member", "description": "Customer membership" },
+    "/users/{uid}/images/{imageId}": { "schema": "ImageDoc", "description": "Compressed images" },
+    "/users/{uid}/dailySummaries/{summaryDate}": { "schema": "DailySummary", "description": "Daily P&L aggregates" },
+    "/users/{uid}/counters/{counterId}": { "schema": "Counter", "description": "Atomic number counters" }
+  }
+}
