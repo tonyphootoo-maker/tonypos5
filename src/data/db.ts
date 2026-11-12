@@ -54,14 +54,23 @@ import {
 } from '../types';
 import { getBusinessWorkDate, roundTo2 } from '../engine/calculations';
 
-// Initialize Firebase App safely
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+// Initialize Firebase App safely so it can never throw at import time
+let appInstance: any = null;
+let dbInstance: any = null;
+let authInstance: any = null;
+export let firebaseInitError: string | null = null;
 
-// Initialize Firestore with persistent multi-tab cache and graceful fallback
-function createFirestoreInstance() {
+try {
+  appInstance = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+} catch (err) {
+  firebaseInitError = err instanceof Error ? err.message : String(err);
+  console.error('Failed to initialize Firebase App:', err);
+}
+
+if (appInstance) {
   try {
-    return initializeFirestore(
-      app,
+    dbInstance = initializeFirestore(
+      appInstance,
       {
         localCache: persistentLocalCache({
           tabManager: persistentMultipleTabManager(),
@@ -69,19 +78,30 @@ function createFirestoreInstance() {
       },
       firebaseConfig.firestoreDatabaseId
     );
-  } catch (err) {
-    console.warn('Persistent cache unavailable or already initialized, falling back to standard Firestore:', err);
+  } catch (cacheErr) {
+    console.warn('Persistent cache unavailable, falling back to standard Firestore:', cacheErr);
     try {
-      return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+      dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
     } catch {
-      return getFirestore(app);
+      try {
+        dbInstance = getFirestore(appInstance);
+      } catch (finalErr) {
+        firebaseInitError = finalErr instanceof Error ? finalErr.message : String(finalErr);
+      }
     }
+  }
+
+  try {
+    authInstance = getAuth(appInstance);
+  } catch (authErr) {
+    firebaseInitError = authErr instanceof Error ? authErr.message : String(authErr);
+    console.error('Failed to get Firebase Auth:', authErr);
   }
 }
 
-export const db = createFirestoreInstance();
-
-export const auth = getAuth(app);
+export const app = appInstance;
+export const db = dbInstance;
+export const auth = authInstance;
 
 // Test server connection per skill requirements safely
 async function testConnection() {
@@ -145,6 +165,9 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
 // ==========================================
 
 export async function signInWithGoogle(): Promise<User> {
+  if (!auth) {
+    throw new Error(firebaseInitError || 'Firebase Authentication is not initialized.');
+  }
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   const result = await signInWithPopup(auth, provider);
@@ -152,16 +175,22 @@ export async function signInWithGoogle(): Promise<User> {
 }
 
 export async function signOutOwner(): Promise<void> {
-  await fbSignOut(auth);
+  if (auth) {
+    await fbSignOut(auth);
+  }
 }
 
 export function subscribeAuth(callback: (user: User | null) => void): Unsubscribe {
+  if (!auth) {
+    callback(null);
+    return () => {};
+  }
   return onAuthStateChanged(auth, callback);
 }
 
 // Current User UID helper
 export function getCurrentUid(): string {
-  const user = auth.currentUser;
+  const user = auth?.currentUser;
   if (!user) {
     // If not authenticated, throw so screens catch or redirect
     throw new Error('User is not authenticated.');

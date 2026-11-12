@@ -9,19 +9,43 @@
     <meta property="og:description" content="Bilingual Thai/English restaurant POS, live food cost calculation, recipe engineering, floor plan tables, shifts, and financial P&amp;L reporting." />
     <meta property="og:type" content="website" />
     <script>
-      // Fix GitHub Pages path resolution: ensure directory paths have trailing slash
-      // so that relative asset paths like './assets/index-xxx.js' resolve correctly
       (function() {
         var path = window.location.pathname;
         if (!path.endsWith('/') && !path.split('/').pop().includes('.')) {
-          window.location.replace(path + '/' + window.location.search + window.location.hash);
+          window.location.replace(window.location.origin.concat(path, '/', window.location.search, window.location.hash));
         }
       })();
+
+      window.addEventListener('error', function(e) {
+        var msgEl = document.getElementById('boot-status');
+        if (msgEl) {
+          msgEl.style.color = '#fca5a5';
+          msgEl.innerText = 'Initialization Error: ' + (e.message || 'Script loading failure') + '\n(โปรดตรวจสอบการเชื่อมต่อหรือรีเฟรชหน้าเว็บ)';
+        }
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var msgEl = document.getElementById('boot-status');
+        if (msgEl) {
+          msgEl.style.color = '#fca5a5';
+          var reason = e.reason && e.reason.message ? e.reason.message : String(e.reason);
+          msgEl.innerText = 'Initialization Error: ' + reason + '\n(โปรดตรวจสอบการเชื่อมต่อหรือรีเฟรชหน้าเว็บ)';
+        }
+      });
     </script>
   </head>
   <body style="margin:0;padding:0;background-color:#171717;">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <noscript>
+      <div style="padding: 2rem; color: #fff; background: #991b1b; text-align: center; font-family: sans-serif;">
+        JavaScript is required to run KinPOS. Please enable JavaScript in your browser settings. / กรุณาเปิดใช้งาน JavaScript ในเบราว์เซอร์ของคุณ
+      </div>
+    </noscript>
+    <div id="root">
+      <div id="boot-msg" style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: system-ui, sans-serif; color: #fff; background: #171717; text-align: center; padding: 1.5rem;">
+        <div style="width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, #f97316, #ef4444); display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 24px; margin-bottom: 16px; box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3);">K</div>
+        <h2 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.5px;">KinPOS</h2>
+        <p id="boot-status" style="margin: 8px 0 0; font-size: 13px; color: #fdba74;">Loading KinPOS... / กำลังโหลด...</p>
+      </div>
+    </div>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
-

@@ -4,16 +4,13 @@
     <meta charset="utf-8" />
     <title>KinPOS - Redirecting...</title>
     <script>
-      // Single Page Application redirect for GitHub Pages
       (function() {
         var pathSegments = window.location.pathname.split('/');
         var cleanSegments = pathSegments.filter(Boolean);
-        // On GitHub Pages: https://<username>.github.io/<repo>/...
-        // cleanSegments[0] is the repository name
         if (cleanSegments.length > 0) {
-          window.location.replace('/' + cleanSegments[0] + '/');
+          window.location.replace(window.location.origin.concat('/', cleanSegments[0], '/'));
         } else {
-          window.location.replace('/');
+          window.location.replace(window.location.origin);
         }
       })();
     </script>

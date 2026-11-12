@@ -11,6 +11,7 @@ import {
   signInWithGoogle,
   getSettings,
   fetchCollection,
+  firebaseInitError,
 } from './data/db';
 import { Navigation, AppPage } from './components/Navigation';
 import { ShiftModal } from './components/ShiftModal';
@@ -30,6 +31,7 @@ import {
   Globe,
   Loader2,
   CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 
 export default function App() {
@@ -196,6 +198,16 @@ export default function App() {
               {t.auth.keepSignedInNote}
             </p>
           </div>
+
+          {firebaseInitError && (
+            <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-xs text-rose-300 font-semibold space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-rose-400">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>Firebase Initialization Error / ข้อผิดพลาดการเชื่อมต่อ</span>
+              </div>
+              <div className="text-[11px] text-neutral-300 break-all">{firebaseInitError}</div>
+            </div>
+          )}
 
           {loginError && (
             <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-xs text-rose-300 font-semibold">
