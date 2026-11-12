@@ -2,13 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Redirecting to KinPOS...</title>
+    <title>KinPOS - Redirecting...</title>
     <script>
       // Single Page Application redirect for GitHub Pages
-      window.location.replace("./");
+      (function() {
+        var pathSegments = window.location.pathname.split('/');
+        var cleanSegments = pathSegments.filter(Boolean);
+        // On GitHub Pages: https://<username>.github.io/<repo>/...
+        // cleanSegments[0] is the repository name
+        if (cleanSegments.length > 0) {
+          window.location.replace('/' + cleanSegments[0] + '/');
+        } else {
+          window.location.replace('/');
+        }
+      })();
     </script>
   </head>
-  <body>
-    <p>Redirecting to KinPOS...</p>
+  <body style="margin:0;padding:2rem;background:#171717;color:#fff;font-family:sans-serif;text-align:center;">
+    <p>Loading KinPOS...</p>
   </body>
 </html>

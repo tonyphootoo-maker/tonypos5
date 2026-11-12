@@ -8,9 +8,18 @@
     <meta property="og:title" content="KinPOS - Restaurant POS &amp; Food Cost Engine" />
     <meta property="og:description" content="Bilingual Thai/English restaurant POS, live food cost calculation, recipe engineering, floor plan tables, shifts, and financial P&amp;L reporting." />
     <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Fix GitHub Pages path resolution: ensure directory paths have trailing slash
+      // so that relative asset paths like './assets/index-xxx.js' resolve correctly
+      (function() {
+        var path = window.location.pathname;
+        if (!path.endsWith('/') && !path.split('/').pop().includes('.')) {
+          window.location.replace(path + '/' + window.location.search + window.location.hash);
+        }
+      })();
+    </script>
   </head>
-  <body>
+  <body style="margin:0;padding:0;background-color:#171717;">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

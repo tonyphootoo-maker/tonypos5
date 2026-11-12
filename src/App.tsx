@@ -45,30 +45,70 @@ export default function App() {
 
   const t = translations[lang];
 
-  // Subscribe to Auth state changes
+  // Subscribe to Auth state changes with safety timeout against infinite loading
   useEffect(() => {
+    let isMounted = true;
+
+    // Safety timeout: Never stay stuck on loading screen
+    const timer = setTimeout(() => {
+      if (isMounted) {
+        setAuthLoading(false);
+      }
+    }, 3500);
+
     const unsubscribe = subscribeAuth(async (currentUser) => {
+      if (!isMounted) return;
       setUser(currentUser);
       if (currentUser) {
         try {
           const loadedSettings = await getSettings();
-          setSettings(loadedSettings);
+          if (isMounted) setSettings(loadedSettings);
 
           // Check active shift
           const shifts = await fetchCollection<ShiftDoc>('shifts');
           const openOne = shifts.find((s) => s.status === 'open');
-          setActiveShift(openOne || null);
+          if (isMounted) setActiveShift(openOne || null);
         } catch (err) {
           console.error('Error loading initial data:', err);
+          // Set emergency fallback settings if loading failed
+          if (isMounted) {
+            setSettings({
+              id: 'main',
+              shopName: 'KinPOS Restaurant',
+              shopAddress: 'Bangkok, Thailand',
+              shopPhone: '02-123-4567',
+              taxId: '0105558000000',
+              receiptHeader: 'Welcome to KinPOS',
+              receiptFooter: 'Thank you for your visit!',
+              targetFoodCostPercent: 30,
+              vatPercent: 7,
+              serviceChargePercent: 10,
+              dailyClosingTime: '04:00',
+              pointsEarnUnitThb: 100,
+              pointsRedeemValueThb: 1,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              version: 1,
+            });
+          }
         }
       } else {
-        setSettings(null);
-        setActiveShift(null);
+        if (isMounted) {
+          setSettings(null);
+          setActiveShift(null);
+        }
       }
-      setAuthLoading(false);
+      if (isMounted) {
+        clearTimeout(timer);
+        setAuthLoading(false);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+      unsubscribe();
+    };
   }, []);
 
   const handleToggleLanguage = () => {
@@ -81,7 +121,22 @@ export default function App() {
       await signInWithGoogle();
     } catch (err: unknown) {
       console.error('Google Sign-In Error:', err);
-      setLoginError(err instanceof Error ? err.message : 'Sign-in failed. Please try again.');
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('auth/unauthorized-domain')) {
+        setLoginError(
+          lang === 'th'
+            ? 'โดเมนนี้ยังไม่ได้รับอนุญาตใน Firebase Authentication: ไปที่ Firebase Console > Authentication > Settings > Authorized Domains และเพิ่มโดเมน GitHub Pages ของคุณ'
+            : 'Domain not authorized: Please add your GitHub Pages domain in Firebase Console > Authentication > Settings > Authorized Domains.'
+        );
+      } else if (msg.includes('popup-blocked')) {
+        setLoginError(
+          lang === 'th'
+            ? 'เบราว์เซอร์บล็อกป๊อปอัป กรุณาเปิดใช้งานป๊อปอัปสำหรับหน้านี้'
+            : 'Popup blocked by browser. Please allow popups to sign in.'
+        );
+      } else {
+        setLoginError(msg);
+      }
     }
   };
 

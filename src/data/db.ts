@@ -9,6 +9,7 @@ import {
 } from 'firebase/auth';
 import {
   initializeFirestore,
+  getFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
   collection,
@@ -53,33 +54,53 @@ import {
 } from '../types';
 import { getBusinessWorkDate, roundTo2 } from '../engine/calculations';
 
-// Initialize Firebase App
+// Initialize Firebase App safely
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Firestore with persistent multi-tab local cache for full offline support
-export const db = initializeFirestore(
-  app,
-  {
-    localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
-    }),
-  },
-  firebaseConfig.firestoreDatabaseId
-);
+// Initialize Firestore with persistent multi-tab cache and graceful fallback
+function createFirestoreInstance() {
+  try {
+    return initializeFirestore(
+      app,
+      {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      },
+      firebaseConfig.firestoreDatabaseId
+    );
+  } catch (err) {
+    console.warn('Persistent cache unavailable or already initialized, falling back to standard Firestore:', err);
+    try {
+      return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    } catch {
+      return getFirestore(app);
+    }
+  }
+}
+
+export const db = createFirestoreInstance();
 
 export const auth = getAuth(app);
 
-// Test server connection per skill requirements
+// Test server connection per skill requirements safely
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    if (db) {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+    }
   } catch (error) {
+    // Non-fatal warning if offline
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.warn('Firebase client is currently offline. Operating from persistent local cache.');
     }
   }
 }
-testConnection();
+try {
+  testConnection();
+} catch {
+  // Safe ignore to never block app launch
+}
 
 // Standard Error Handler per Firebase Skill specification
 export enum OperationType {
