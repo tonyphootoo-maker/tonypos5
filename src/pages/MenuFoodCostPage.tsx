@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   IngredientDoc,
   SubRecipeDoc,
@@ -10,9 +10,6 @@ import {
   OptionGroupDoc,
   SettingsDoc,
   Language,
-  RecipeIngredientItem,
-  RecipeSubRecipeItem,
-  RecipePackagingItem,
 } from '../types';
 import { translations } from '../i18n/translations';
 import {
@@ -20,15 +17,12 @@ import {
   calculateIngredientEffectiveCost,
   calculateSubRecipeCost,
   calculateDishVariantCost,
-  calculateSuggestedPrice,
   calculateSuggestedPricing,
   calculateFoodCostPercent,
-  calculateItemContributionMargin,
   extractNetPriceFromMenuPrice,
   isMissingCost,
   formatMoney,
   formatPercent,
-  roundTo2,
 } from '../engine/calculations';
 import {
   fetchCollection,
@@ -38,10 +32,23 @@ import {
   getImageDoc,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
+import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
+import {
+  MenuItem as CostMenuItem,
+  MenuVariant as CostMenuVariant,
+  Ingredient as CostIngredient,
+  Sauce as CostSauce,
+  RestaurantSettings as CostRestaurantSettings,
+} from '../costing/types';
+import { COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
+import { StorageService } from '../costing/services/storageService';
+import {
+  importCostingVariantToDishVariant,
+  importCostingIngredientAsDishVariant,
+} from '../costing/services/posBridge';
+import { calculateVariantCostBreakdown } from '../costing/services/calculationEngine';
 import {
   UtensilsCrossed,
-  Layers,
-  Box,
   Utensils,
   Plus,
   Trash2,
@@ -49,14 +56,11 @@ import {
   AlertTriangle,
   Upload,
   CheckCircle2,
-  Image as ImageIcon,
-  DollarSign,
-  TrendingUp,
-  Percent,
-  History,
   X,
   Search,
-  Radio,
+  Check,
+  ChefHat,
+  Sliders,
 } from 'lucide-react';
 
 interface Props {
@@ -105,6 +109,42 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
+  // Costing Food-Cost Primary Option Picker & Sub-Option Picker states
+  const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
+  const [costIngredients, setCostIngredients] = useState<CostIngredient[]>(() =>
+    StorageService.getIngredients()
+  );
+  const [costSauces, setCostSauces] = useState<CostSauce[]>(() => StorageService.getSauces());
+  const [costSettings] = useState<CostRestaurantSettings>(() => StorageService.getSettings());
+  const [isPrimaryOptionPickerOpen, setIsPrimaryOptionPickerOpen] = useState(false);
+  const [primaryOptionSearch, setPrimaryOptionSearch] = useState('');
+  const [isImportingCostOption, setIsImportingCostOption] = useState(false);
+  const [isOptionGroupPickerOpen, setIsOptionGroupPickerOpen] = useState(false);
+  const [optionGroupSearch, setOptionGroupSearch] = useState('');
+
+  // Tracks which English inputs were manually customized in the current modal session
+  const manualEnKeysRef = useRef<Set<string>>(new Set());
+
+  const loadCostingCatalog = async () => {
+    try {
+      const [cloudMenus, cloudIngs, cloudSauces] = await Promise.all([
+        fetchCollection<CostMenuItem>(COST_COLLECTIONS.MENUS).catch(() => []),
+        fetchCollection<CostIngredient>(COST_COLLECTIONS.INGREDIENTS).catch(() => []),
+        fetchCollection<CostSauce>(COST_COLLECTIONS.SAUCES).catch(() => []),
+      ]);
+      const localMenus = StorageService.getMenus();
+      const localIngs = StorageService.getIngredients();
+      const localSauces = StorageService.getSauces();
+      setCostMenus(cloudMenus.length > 0 ? cloudMenus : localMenus);
+      setCostIngredients(cloudIngs.length > 0 ? cloudIngs : localIngs);
+      setCostSauces(cloudSauces.length > 0 ? cloudSauces : localSauces);
+    } catch {
+      setCostMenus(StorageService.getMenus());
+      setCostIngredients(StorageService.getIngredients());
+      setCostSauces(StorageService.getSauces());
+    }
+  };
+
   // Load all references
   const loadData = async () => {
     const [ings, subs, pkgs, dshs, cats, chs, ogs] = await Promise.all([
@@ -124,6 +164,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     setCategories(cats.sort((a, b) => a.order - b.order));
     setChannels(chs);
     setOptionGroups(ogs);
+
+    loadCostingCatalog();
 
     // Preload dish images
     dshs.forEach((d) => {
@@ -151,7 +193,13 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
   // ==========================================
   const handleSaveIngredient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingIngredient || !editingIngredient.name) return;
+    if (!editingIngredient) return;
+
+    const finalTh = (editingIngredient.nameTh || '').trim();
+    const finalEn =
+      (editingIngredient.name || '').trim() ||
+      (finalTh ? translateThaiToEnglish(finalTh) : '');
+    if (!finalEn && !finalTh) return;
 
     const isNew = !editingIngredient.id;
     const price = editingIngredient.purchasePrice || 0;
@@ -183,8 +231,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
     const ingToSave: IngredientDoc = {
       id: editingIngredient.id || `ing_${Date.now()}`,
-      name: editingIngredient.name,
-      ...(editingIngredient.nameTh ? { nameTh: editingIngredient.nameTh } : {}),
+      name: finalEn || finalTh,
+      ...(finalTh ? { nameTh: finalTh } : {}),
       purchaseUnit: unit,
       purchasePrice: price,
       purchaseQuantity: qty,
@@ -209,13 +257,19 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
   // ==========================================
   const handleSaveSubRecipe = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingSubRecipe || !editingSubRecipe.name) return;
+    if (!editingSubRecipe) return;
+
+    const finalTh = (editingSubRecipe.nameTh || '').trim();
+    const finalEn =
+      (editingSubRecipe.name || '').trim() ||
+      (finalTh ? translateThaiToEnglish(finalTh) : '');
+    if (!finalEn && !finalTh) return;
 
     const isNew = !editingSubRecipe.id;
     const subToSave: SubRecipeDoc = {
       id: editingSubRecipe.id || `sub_${Date.now()}`,
-      name: editingSubRecipe.name,
-      ...(editingSubRecipe.nameTh ? { nameTh: editingSubRecipe.nameTh } : {}),
+      name: finalEn || finalTh,
+      ...(finalTh ? { nameTh: finalTh } : {}),
       outputUnit: editingSubRecipe.outputUnit || 'portion',
       outputQuantity: editingSubRecipe.outputQuantity || 1,
       ingredients: editingSubRecipe.ingredients || [],
@@ -236,13 +290,19 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
   // ==========================================
   const handleSavePackaging = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingPackaging || !editingPackaging.name) return;
+    if (!editingPackaging) return;
+
+    const finalTh = (editingPackaging.nameTh || '').trim();
+    const finalEn =
+      (editingPackaging.name || '').trim() ||
+      (finalTh ? translateThaiToEnglish(finalTh) : '');
+    if (!finalEn && !finalTh) return;
 
     const isNew = !editingPackaging.id;
     const pkgToSave: PackagingDoc = {
       id: editingPackaging.id || `pkg_${Date.now()}`,
-      name: editingPackaging.name,
-      ...(editingPackaging.nameTh ? { nameTh: editingPackaging.nameTh } : {}),
+      name: finalEn || finalTh,
+      ...(finalTh ? { nameTh: finalTh } : {}),
       cost: editingPackaging.cost || 0,
       unit: editingPackaging.unit || 'piece',
       createdAt: editingPackaging.createdAt || new Date().toISOString(),
@@ -280,17 +340,40 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
   const handleSaveDish = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingDish || !editingDish.name) return;
+    if (!editingDish) return;
+
+    const finalDishTh = (editingDish.nameTh || '').trim();
+    const finalDishEn =
+      (editingDish.name || '').trim() ||
+      (finalDishTh ? translateThaiToEnglish(finalDishTh) : '');
+    if (!finalDishEn && !finalDishTh) return;
+
+    const normalizedVariants: DishVariant[] = (editingDish.variants || []).map((v) => {
+      const vTh = (v.nameTh || '').trim();
+      const vEn =
+        (v.name || '').trim() ||
+        (vTh ? translateThaiToEnglish(vTh) : '') ||
+        'Standard';
+      return {
+        ...v,
+        name: vEn,
+        ...(vTh ? { nameTh: vTh } : {}),
+        price: Number(v.price) || 0,
+        ingredients: v.ingredients || [],
+        subRecipes: v.subRecipes || [],
+        packaging: v.packaging || [],
+      };
+    });
 
     const isNew = !editingDish.id;
     const dishToSave: DishDoc = {
       id: editingDish.id || `dish_${Date.now()}`,
-      name: editingDish.name,
-      ...(editingDish.nameTh ? { nameTh: editingDish.nameTh } : {}),
+      name: finalDishEn || finalDishTh,
+      ...(finalDishTh ? { nameTh: finalDishTh } : {}),
       categoryId: editingDish.categoryId || categories[0]?.id || 'cat_main',
       ...(editingDish.imageId ? { imageId: editingDish.imageId } : {}),
       ...(editingDish.description ? { description: editingDish.description } : {}),
-      variants: editingDish.variants?.length ? editingDish.variants : [
+      variants: normalizedVariants.length ? normalizedVariants : [
         {
           id: `var_std_${Date.now()}`,
           name: 'Standard',
@@ -376,6 +459,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             </span>
             <button
               onClick={() => {
+                manualEnKeysRef.current.clear();
                 setEditingDish({
                   name: '',
                   nameTh: '',
@@ -394,6 +478,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   optionGroupIds: [],
                 });
                 setActiveDishVariantIndex(0);
+                loadCostingCatalog();
                 setIsDishModalOpen(true);
               }}
               className="px-3.5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105"
@@ -405,7 +490,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {dishes
-              .filter((d) => d.name.toLowerCase().includes(searchQuery.toLowerCase()))
+              .filter(
+                (d) =>
+                  d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  (d.nameTh && d.nameTh.toLowerCase().includes(searchQuery.toLowerCase()))
+              )
               .map((dish) => {
                 const imgDataUrl = dishImages.get(dish.id);
                 // Evaluate primary variant
@@ -536,8 +625,19 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                     <div className="flex justify-end gap-1.5 mt-3 pt-2 border-t border-neutral-100">
                       <button
                         onClick={() => {
-                          setEditingDish(dish);
+                          manualEnKeysRef.current.clear();
+                          setEditingDish({
+                            ...dish,
+                            variants: (dish.variants || []).map((v) => ({
+                              ...v,
+                              ingredients: [...(v.ingredients || [])],
+                              subRecipes: [...(v.subRecipes || [])],
+                              packaging: [...(v.packaging || [])],
+                            })),
+                            optionGroupIds: [...(dish.optionGroupIds || [])],
+                          });
                           setActiveDishVariantIndex(0);
+                          loadCostingCatalog();
                           setIsDishModalOpen(true);
                         }}
                         className="p-1.5 text-neutral-600 hover:text-orange-600 rounded-lg hover:bg-neutral-100 cursor-pointer"
@@ -576,7 +676,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             </span>
             <button
               onClick={() => {
+                manualEnKeysRef.current.clear();
                 setEditingIngredient({
+                  name: '',
+                  nameTh: '',
                   purchaseUnit: 'kg',
                   purchasePrice: 100,
                   purchaseQuantity: 1,
@@ -606,7 +709,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 </thead>
                 <tbody className="divide-y divide-neutral-100 font-medium">
                   {ingredients
-                    .filter((i) => i.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .filter(
+                      (i) =>
+                        i.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (i.nameTh && i.nameTh.toLowerCase().includes(searchQuery.toLowerCase()))
+                    )
                     .map((ing) => {
                       const effectiveCost = calculateIngredientEffectiveCost(ing);
                       const missing = isMissingCost(effectiveCost);
@@ -638,6 +745,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                           <td className="p-3 text-right">
                             <button
                               onClick={() => {
+                                manualEnKeysRef.current.clear();
                                 setEditingIngredient(ing);
                                 setIsIngredientModalOpen(true);
                               }}
@@ -678,7 +786,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             </span>
             <button
               onClick={() => {
+                manualEnKeysRef.current.clear();
                 setEditingSubRecipe({
+                  name: '',
+                  nameTh: '',
                   outputUnit: 'portion',
                   outputQuantity: 10,
                   ingredients: [],
@@ -731,6 +842,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   <div className="flex justify-end gap-1.5 mt-3 pt-2 border-t border-neutral-100">
                     <button
                       onClick={() => {
+                        manualEnKeysRef.current.clear();
                         setEditingSubRecipe(sub);
                         setIsSubRecipeModalOpen(true);
                       }}
@@ -768,7 +880,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             </span>
             <button
               onClick={() => {
-                setEditingPackaging({ cost: 5, unit: 'piece' });
+                manualEnKeysRef.current.clear();
+                setEditingPackaging({ name: '', nameTh: '', cost: 5, unit: 'piece' });
                 setIsPackagingModalOpen(true);
               }}
               className="px-3.5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105"
@@ -806,6 +919,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 <div className="flex justify-end gap-1.5 mt-3 pt-2 border-t border-neutral-100">
                   <button
                     onClick={() => {
+                      manualEnKeysRef.current.clear();
                       setEditingPackaging(pkg);
                       setIsPackagingModalOpen(true);
                     }}
@@ -843,7 +957,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             </span>
             <button
               onClick={() => {
-                setEditingCategory({ order: categories.length + 1 });
+                manualEnKeysRef.current.clear();
+                setEditingCategory({ name: '', nameTh: '', order: categories.length + 1 });
                 setIsCategoryModalOpen(true);
               }}
               className="px-3.5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105"
@@ -869,6 +984,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => {
+                      manualEnKeysRef.current.clear();
                       setEditingCategory(cat);
                       setIsCategoryModalOpen(true);
                     }}
@@ -905,7 +1021,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             </span>
             <button
               onClick={() => {
-                setEditingChannel({ type: 'delivery', commissionPercent: 30, packagingCost: 10 });
+                manualEnKeysRef.current.clear();
+                setEditingChannel({ name: '', nameTh: '', type: 'delivery', commissionPercent: 30, packagingCost: 10 });
                 setIsChannelModalOpen(true);
               }}
               className="px-3.5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105"
@@ -952,6 +1069,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 <div className="flex justify-end gap-1.5 mt-3 pt-2 border-t border-neutral-100">
                   <button
                     onClick={() => {
+                      manualEnKeysRef.current.clear();
                       setEditingChannel(ch);
                       setIsChannelModalOpen(true);
                     }}
@@ -1002,28 +1120,59 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.menuCost.ingredientName} (English)
+                  ชื่อวัตถุดิบ (ภาษาไทย) *
                 </label>
                 <input
                   type="text"
-                  required
-                  value={editingIngredient.name || ''}
-                  onChange={(e) => setEditingIngredient({ ...editingIngredient, name: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. Pork Tenderloin"
+                  required={!editingIngredient.name}
+                  value={editingIngredient.nameTh || ''}
+                  onChange={(e) => {
+                    const nextTh = e.target.value;
+                    const nextEn = computeAutoEnglishName({
+                      previousThai: editingIngredient.nameTh || '',
+                      nextThai: nextTh,
+                      currentEnglish: editingIngredient.name || '',
+                      isManuallyEdited: manualEnKeysRef.current.has('ing'),
+                    });
+                    setEditingIngredient({ ...editingIngredient, nameTh: nextTh, name: nextEn });
+                  }}
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                  placeholder="เช่น สันในหมู, กุ้งสด"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.common.nameTh}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-neutral-700">
+                    {t.menuCost.ingredientName} (English — แปลอัตโนมัติ)
+                  </label>
+                  {editingIngredient.nameTh && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        manualEnKeysRef.current.delete('ing');
+                        setEditingIngredient({
+                          ...editingIngredient,
+                          name: translateThaiToEnglish(editingIngredient.nameTh || ''),
+                        });
+                      }}
+                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                    >
+                      แปลใหม่
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
-                  value={editingIngredient.nameTh || ''}
-                  onChange={(e) => setEditingIngredient({ ...editingIngredient, nameTh: e.target.value })}
+                  value={editingIngredient.name || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.trim()) manualEnKeysRef.current.add('ing');
+                    else manualEnKeysRef.current.delete('ing');
+                    setEditingIngredient({ ...editingIngredient, name: val });
+                  }}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. สันในหมู"
+                  placeholder="e.g. Pork Tenderloin"
                 />
               </div>
 
@@ -1185,29 +1334,62 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* Dish Name & Category */}
+              {/* Dish Name Thai-first + Auto-EN */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    {t.menuCost.dishName} (EN)
+                    ชื่อเมนู (ภาษาไทย) *
                   </label>
                   <input
                     type="text"
-                    required
-                    value={editingDish.name || ''}
-                    onChange={(e) => setEditingDish({ ...editingDish, name: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                    required={!editingDish.name}
+                    value={editingDish.nameTh || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      const nextEn = computeAutoEnglishName({
+                        previousThai: editingDish.nameTh || '',
+                        nextThai: nextTh,
+                        currentEnglish: editingDish.name || '',
+                        isManuallyEdited: manualEnKeysRef.current.has('dish'),
+                      });
+                      setEditingDish({ ...editingDish, nameTh: nextTh, name: nextEn });
+                    }}
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                    placeholder="เช่น ผัดกะเพรา, ข้าวผัด"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    {t.common.nameTh}
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-neutral-700">
+                      {t.menuCost.dishName} (English — แปลอัตโนมัติ)
+                    </label>
+                    {editingDish.nameTh && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          manualEnKeysRef.current.delete('dish');
+                          setEditingDish({
+                            ...editingDish,
+                            name: translateThaiToEnglish(editingDish.nameTh || ''),
+                          });
+                        }}
+                        className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                      >
+                        แปลใหม่
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    value={editingDish.nameTh || ''}
-                    onChange={(e) => setEditingDish({ ...editingDish, nameTh: e.target.value })}
+                    value={editingDish.name || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.trim()) manualEnKeysRef.current.add('dish');
+                      else manualEnKeysRef.current.delete('dish');
+                      setEditingDish({ ...editingDish, name: val });
+                    }}
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                    placeholder="e.g. Stir-Fried Holy Basil"
                   />
                 </div>
               </div>
@@ -1255,98 +1437,153 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 </div>
               </div>
 
-              {/* Variants & Recipe Builder */}
+              {/* Primary Options Section ("ตัวเลือกหลักของเมนู") */}
               <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-3">
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center gap-2">
                   <span className="text-xs font-bold text-neutral-800">{t.menuCost.variants}</span>
                   <button
                     type="button"
                     onClick={() => {
-                      const newVar: DishVariant = {
-                        id: `var_${Date.now()}`,
-                        name: 'New Variant',
-                        price: 100,
-                        ingredients: [],
-                        subRecipes: [],
-                        packaging: [],
-                      };
-                      setEditingDish({
-                        ...editingDish,
-                        variants: [...(editingDish.variants || []), newVar],
-                      });
-                      setActiveDishVariantIndex((editingDish.variants?.length || 0));
+                      setPrimaryOptionSearch('');
+                      loadCostingCatalog();
+                      setIsPrimaryOptionPickerOpen(true);
                     }}
-                    className="text-xs text-orange-600 hover:text-orange-700 font-bold cursor-pointer"
+                    className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
                   >
-                    {t.menuCost.addVariant}
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>เพิ่มตัวเลือกหลัก</span>
                   </button>
                 </div>
 
-                {/* Variant Tabs */}
+                {/* Primary Option Tabs */}
                 <div className="flex gap-1.5 overflow-x-auto pb-1">
                   {editingDish.variants?.map((v, idx) => (
                     <button
                       key={v.id}
                       type="button"
                       onClick={() => setActiveDishVariantIndex(idx)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold cursor-pointer whitespace-nowrap ${
+                      className={`px-3 py-1 rounded-xl text-xs font-bold cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                         activeDishVariantIndex === idx
                           ? 'bg-orange-500 text-white'
                           : 'bg-white border border-neutral-300 text-neutral-700'
                       }`}
                     >
-                      {v.name} (฿{formatMoney(v.price)})
+                      <span>{v.nameTh || v.name}</span>
+                      <span className="opacity-90">(฿{formatMoney(v.price)})</span>
                     </button>
                   ))}
                 </div>
 
-                {/* Active Variant Recipe Editor */}
+                {/* Compact Active Primary Option Editor (Cost card & Ingredients hidden to avoid clutter) */}
                 {editingDish.variants?.[activeDishVariantIndex] && (() => {
                   const currVar = editingDish.variants[activeDishVariantIndex];
-                  const varCost = calculateDishVariantCost(currVar, ingredientsMap, subRecipesMap, packagingMap);
-                  const varNetPrice = extractNetPriceFromMenuPrice(
-                    currVar.price,
-                    settings.pricesIncludeVat,
-                    settings.vatPercent,
-                    settings.serviceChargeIncludedInPrice,
-                    settings.serviceChargePercent
-                  );
-                  const varFoodCostPct = calculateFoodCostPercent(varCost.foodCost, varNetPrice);
-                  const varPricing = calculateSuggestedPricing(
-                    varCost.foodCost || varCost.totalCost,
-                    settings.targetFoodCostPercent,
-                    settings.pricesIncludeVat,
-                    settings.vatPercent,
-                    settings.serviceChargeIncludedInPrice,
-                    settings.serviceChargePercent,
-                    settings.priceRounding || 5
-                  );
-                  const varCm = calculateItemContributionMargin(varNetPrice, varCost.foodCost, varCost.packagingCost, 0);
-                  const isOver = varFoodCostPct > settings.targetFoodCostPercent;
+                  const linkedCount =
+                    (currVar.ingredients?.length || 0) +
+                    (currVar.subRecipes?.length || 0) +
+                    (currVar.packaging?.length || 0);
+                  const varCost =
+                    linkedCount > 0
+                      ? calculateDishVariantCost(currVar, ingredientsMap, subRecipesMap, packagingMap)
+                      : null;
 
                   return (
-                    <div className="space-y-3 pt-2 border-t border-neutral-200">
-                      <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2.5 pt-2 border-t border-neutral-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <div>
                           <label className="block text-[11px] font-bold text-neutral-600 mb-1">
-                            {t.menuCost.variantName}
+                            ชื่อตัวเลือกหลัก (ภาษาไทย) *
                           </label>
                           <input
                             type="text"
-                            value={currVar.name}
+                            required={!currVar.name}
+                            value={currVar.nameTh || ''}
                             onChange={(e) => {
+                              const nextTh = e.target.value;
                               const updated = [...(editingDish.variants || [])];
-                              updated[activeDishVariantIndex].name = e.target.value;
+                              const prev = updated[activeDishVariantIndex];
+                              const nextEn = computeAutoEnglishName({
+                                previousThai: prev.nameTh || '',
+                                nextThai: nextTh,
+                                currentEnglish: prev.name || '',
+                                isManuallyEdited: manualEnKeysRef.current.has(`var_${currVar.id}`),
+                              });
+                              updated[activeDishVariantIndex] = {
+                                ...prev,
+                                nameTh: nextTh,
+                                name: nextEn,
+                              };
                               setEditingDish({ ...editingDish, variants: updated });
                             }}
-                            className="w-full px-2.5 py-1 text-xs bg-white border border-neutral-300 rounded-lg"
+                            className="w-full px-2.5 py-1 text-xs bg-white border border-orange-300 rounded-lg"
+                            placeholder="เช่น หมูหมัก, ไก่, ทะเล"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold text-neutral-600 mb-1">
-                            Price (THB)
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-[11px] font-bold text-neutral-600">
+                              English (แปลอัตโนมัติ)
+                            </label>
+                            {currVar.nameTh && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  manualEnKeysRef.current.delete(`var_${currVar.id}`);
+                                  const updated = [...(editingDish.variants || [])];
+                                  updated[activeDishVariantIndex] = {
+                                    ...updated[activeDishVariantIndex],
+                                    name: translateThaiToEnglish(currVar.nameTh || ''),
+                                  };
+                                  setEditingDish({ ...editingDish, variants: updated });
+                                }}
+                                className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                              >
+                                แปลใหม่
+                              </button>
+                            )}
+                          </div>
+                          <input
+                            type="text"
+                            value={currVar.name || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const key = `var_${currVar.id}`;
+                              if (val.trim()) manualEnKeysRef.current.add(key);
+                              else manualEnKeysRef.current.delete(key);
+                              const updated = [...(editingDish.variants || [])];
+                              updated[activeDishVariantIndex] = {
+                                ...updated[activeDishVariantIndex],
+                                name: val,
+                              };
+                              setEditingDish({ ...editingDish, variants: updated });
+                            }}
+                            className="w-full px-2.5 py-1 text-xs bg-neutral-100/70 border border-neutral-300 rounded-lg"
+                            placeholder="e.g. Marinated Pork"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-[11px] font-bold text-neutral-600">
+                              ราคาขาย (บาท)
+                            </label>
+                            {(editingDish.variants?.length || 0) > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = (editingDish.variants || []).filter(
+                                    (_, i) => i !== activeDishVariantIndex
+                                  );
+                                  setEditingDish({ ...editingDish, variants: updated });
+                                  setActiveDishVariantIndex(Math.max(0, activeDishVariantIndex - 1));
+                                }}
+                                className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer flex items-center gap-0.5"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>ลบตัวเลือกนี้</span>
+                              </button>
+                            )}
+                          </div>
                           <input
                             type="number"
                             min={0}
@@ -1354,7 +1591,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                             value={currVar.price}
                             onChange={(e) => {
                               const updated = [...(editingDish.variants || [])];
-                              updated[activeDishVariantIndex].price = parseFloat(e.target.value) || 0;
+                              updated[activeDishVariantIndex] = {
+                                ...updated[activeDishVariantIndex],
+                                price: parseFloat(e.target.value) || 0,
+                              };
                               setEditingDish({ ...editingDish, variants: updated });
                             }}
                             className="w-full px-2.5 py-1 text-xs bg-white border border-neutral-300 rounded-lg font-bold"
@@ -1362,299 +1602,13 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                         </div>
                       </div>
 
-                      {/* Recipe Cost Metric Bar */}
-                      <div className="p-2.5 bg-white rounded-xl border border-neutral-200 space-y-2 text-xs">
-                        {varCost.hasMissing && (
-                          <div className="p-1.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold flex items-center gap-1.5">
-                            <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                            <span>{t.menuCost.missingCost}</span>
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                          <div className="p-1.5 bg-neutral-50 rounded-lg">
-                            <div className="text-[10px] text-neutral-500 font-bold">Food COGS</div>
-                            <div className="font-extrabold text-neutral-900 text-xs">฿{formatMoney(varCost.foodCost)}</div>
-                          </div>
-                          <div className="p-1.5 bg-neutral-50 rounded-lg">
-                            <div className="text-[10px] text-neutral-500 font-bold">Packaging</div>
-                            <div className="font-extrabold text-neutral-900 text-xs">฿{formatMoney(varCost.packagingCost)}</div>
-                          </div>
-                          <div className="p-1.5 bg-neutral-50 rounded-lg">
-                            <div className="text-[10px] text-neutral-500 font-bold">Food Cost %</div>
-                            <div className={`font-extrabold text-xs ${isOver ? 'text-rose-600' : 'text-emerald-700'}`}>
-                              {formatPercent(varFoodCostPct)}
-                            </div>
-                          </div>
-                          <div className="p-1.5 bg-neutral-50 rounded-lg">
-                            <div className="text-[10px] text-neutral-500 font-bold">CM %</div>
-                            <div className="font-extrabold text-neutral-900 text-xs">
-                              {formatPercent(varCm.contributionMarginPercent)} (฿{formatMoney(varCm.contributionMargin)})
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between text-[11px] text-neutral-600 pt-1 border-t border-neutral-100">
-                          <div>
-                            <span>{t.menuCost.suggestedNetPrice}: </span>
-                            <strong className="text-neutral-800">฿{formatMoney(varPricing.suggestedNetPrice)}</strong>
-                          </div>
-                          <div>
-                            <span>{t.menuCost.suggestedMenuPrice}: </span>
-                            <strong className="text-orange-600">฿{formatMoney(varPricing.suggestedMenuPrice)}</strong>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Recipe Ingredients List */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center text-[11px] font-bold text-neutral-700">
-                          <span>Ingredients</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = [...(editingDish.variants || [])];
-                              const firstIng = ingredients[0]?.id || '';
-                              updated[activeDishVariantIndex].ingredients = [
-                                ...(updated[activeDishVariantIndex].ingredients || []),
-                                { ingredientId: firstIng, quantity: 100 },
-                              ];
-                              setEditingDish({ ...editingDish, variants: updated });
-                            }}
-                            className="text-orange-600 hover:text-orange-700 cursor-pointer"
-                          >
-                            + Add Ingredient
-                          </button>
-                        </div>
-
-                        {currVar.ingredients?.map((line, lIdx) => {
-                          const ing = ingredientsMap.get(line.ingredientId);
-                          const effectiveCost = ing ? calculateIngredientEffectiveCost(ing) : 0;
-                          const lineMissing = !ing || isMissingCost(effectiveCost);
-                          const lineCost = lineMissing ? 0 : line.quantity * effectiveCost;
-
-                          return (
-                            <div
-                              key={lIdx}
-                              className={`flex items-center gap-2 p-1.5 rounded-lg border text-xs ${
-                                lineMissing ? 'bg-rose-50 border-rose-300' : 'bg-white border-neutral-200'
-                              }`}
-                            >
-                              <select
-                                value={line.ingredientId}
-                                onChange={(e) => {
-                                  const updated = [...(editingDish.variants || [])];
-                                  updated[activeDishVariantIndex].ingredients[lIdx].ingredientId = e.target.value;
-                                  setEditingDish({ ...editingDish, variants: updated });
-                                }}
-                                className="flex-1 px-2 py-1 bg-neutral-50 border border-neutral-300 rounded text-xs"
-                              >
-                                {ingredients.map((i) => {
-                                  const eff = calculateIngredientEffectiveCost(i);
-                                  return (
-                                    <option key={i.id} value={i.id}>
-                                      {i.name} ({isMissingCost(eff) ? 'Missing Cost' : `฿${formatMoney(eff)}/${i.baseUnit}`})
-                                    </option>
-                                  );
-                                })}
-                              </select>
-
-                              <input
-                                type="number"
-                                min={0}
-                                step={1}
-                                value={line.quantity}
-                                onChange={(e) => {
-                                  const updated = [...(editingDish.variants || [])];
-                                  updated[activeDishVariantIndex].ingredients[lIdx].quantity = parseFloat(e.target.value) || 0;
-                                  setEditingDish({ ...editingDish, variants: updated });
-                                }}
-                                className="w-16 px-1.5 py-1 text-right bg-neutral-50 border border-neutral-300 rounded text-xs font-bold"
-                              />
-
-                              <span className="text-[10px] text-neutral-500 w-8">
-                                {ing?.baseUnit || 'unit'}
-                              </span>
-
-                              <span className={`w-16 text-right font-bold ${lineMissing ? 'text-rose-600' : 'text-neutral-800'}`}>
-                                {lineMissing ? 'Missing' : `฿${formatMoney(lineCost)}`}
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = [...(editingDish.variants || [])];
-                                  updated[activeDishVariantIndex].ingredients.splice(lIdx, 1);
-                                  setEditingDish({ ...editingDish, variants: updated });
-                                }}
-                                className="text-neutral-400 hover:text-rose-600 cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Recipe Sub-Recipes List */}
-                      {subRecipes.length > 0 && (
-                        <div className="space-y-1.5 pt-2">
-                          <div className="flex justify-between items-center text-[11px] font-bold text-neutral-700">
-                            <span>Sub-Recipes</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = [...(editingDish.variants || [])];
-                                const firstSub = subRecipes[0]?.id || '';
-                                updated[activeDishVariantIndex].subRecipes = [
-                                  ...(updated[activeDishVariantIndex].subRecipes || []),
-                                  { subRecipeId: firstSub, quantity: 1 },
-                                ];
-                                setEditingDish({ ...editingDish, variants: updated });
-                              }}
-                              className="text-orange-600 hover:text-orange-700 cursor-pointer"
-                            >
-                              + Add Sub-Recipe
-                            </button>
-                          </div>
-
-                          {currVar.subRecipes?.map((line, sIdx) => {
-                            const sub = subRecipesMap.get(line.subRecipeId);
-                            const subCalc = sub ? calculateSubRecipeCost(sub, ingredientsMap, subRecipesMap) : null;
-                            const lineCost = subCalc ? line.quantity * subCalc.costPerOutputUnit : 0;
-
-                            return (
-                              <div key={sIdx} className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-neutral-200 text-xs">
-                                <select
-                                  value={line.subRecipeId}
-                                  onChange={(e) => {
-                                    const updated = [...(editingDish.variants || [])];
-                                    updated[activeDishVariantIndex].subRecipes[sIdx].subRecipeId = e.target.value;
-                                    setEditingDish({ ...editingDish, variants: updated });
-                                  }}
-                                  className="flex-1 px-2 py-1 bg-neutral-50 border border-neutral-300 rounded text-xs"
-                                >
-                                  {subRecipes.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.name}
-                                    </option>
-                                  ))}
-                                </select>
-
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={0.1}
-                                  value={line.quantity}
-                                  onChange={(e) => {
-                                    const updated = [...(editingDish.variants || [])];
-                                    updated[activeDishVariantIndex].subRecipes[sIdx].quantity = parseFloat(e.target.value) || 0;
-                                    setEditingDish({ ...editingDish, variants: updated });
-                                  }}
-                                  className="w-16 px-1.5 py-1 text-right bg-neutral-50 border border-neutral-300 rounded text-xs font-bold"
-                                />
-
-                                <span className="w-14 text-right font-bold text-neutral-800">
-                                  ฿{formatMoney(lineCost)}
-                                </span>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const updated = [...(editingDish.variants || [])];
-                                    updated[activeDishVariantIndex].subRecipes.splice(sIdx, 1);
-                                    setEditingDish({ ...editingDish, variants: updated });
-                                  }}
-                                  className="text-neutral-400 hover:text-rose-600 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {/* Recipe Packaging List (Takeaway/Delivery only) */}
-                      {packagings.length > 0 && (
-                        <div className="space-y-1.5 pt-2">
-                          <div className="flex justify-between items-center text-[11px] font-bold text-neutral-700">
-                            <span>Packaging (Takeaway / Delivery)</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = [...(editingDish.variants || [])];
-                                const firstPkg = packagings[0]?.id || '';
-                                updated[activeDishVariantIndex].packaging = [
-                                  ...(updated[activeDishVariantIndex].packaging || []),
-                                  { packagingId: firstPkg, quantity: 1 },
-                                ];
-                                setEditingDish({ ...editingDish, variants: updated });
-                              }}
-                              className="text-orange-600 hover:text-orange-700 cursor-pointer"
-                            >
-                              {t.menuCost.addPackagingToRecipe}
-                            </button>
-                          </div>
-
-                          {currVar.packaging?.map((line, pIdx) => {
-                            const pkg = packagingMap.get(line.packagingId);
-                            const pkgMissing = !pkg || isMissingCost(pkg.cost);
-                            const lineCost = pkgMissing ? 0 : line.quantity * pkg.cost;
-
-                            return (
-                              <div
-                                key={pIdx}
-                                className={`flex items-center gap-2 p-1.5 rounded-lg border text-xs ${
-                                  pkgMissing ? 'bg-rose-50 border-rose-300' : 'bg-white border-neutral-200'
-                                }`}
-                              >
-                                <select
-                                  value={line.packagingId}
-                                  onChange={(e) => {
-                                    const updated = [...(editingDish.variants || [])];
-                                    updated[activeDishVariantIndex].packaging[pIdx].packagingId = e.target.value;
-                                    setEditingDish({ ...editingDish, variants: updated });
-                                  }}
-                                  className="flex-1 px-2 py-1 bg-neutral-50 border border-neutral-300 rounded text-xs"
-                                >
-                                  {packagings.map((p) => (
-                                    <option key={p.id} value={p.id}>
-                                      {p.name} ({isMissingCost(p.cost) ? 'Missing Cost' : `฿${formatMoney(p.cost)}/${p.unit}`})
-                                    </option>
-                                  ))}
-                                </select>
-
-                                <input
-                                  type="number"
-                                  min={0}
-                                  step={1}
-                                  value={line.quantity}
-                                  onChange={(e) => {
-                                    const updated = [...(editingDish.variants || [])];
-                                    updated[activeDishVariantIndex].packaging[pIdx].quantity = parseFloat(e.target.value) || 0;
-                                    setEditingDish({ ...editingDish, variants: updated });
-                                  }}
-                                  className="w-16 px-1.5 py-1 text-right bg-neutral-50 border border-neutral-300 rounded text-xs font-bold"
-                                />
-
-                                <span className={`w-16 text-right font-bold ${pkgMissing ? 'text-rose-600' : 'text-neutral-800'}`}>
-                                  {pkgMissing ? 'Missing' : `฿${formatMoney(lineCost)}`}
-                                </span>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const updated = [...(editingDish.variants || [])];
-                                    updated[activeDishVariantIndex].packaging.splice(pIdx, 1);
-                                    setEditingDish({ ...editingDish, variants: updated });
-                                  }}
-                                  className="text-neutral-400 hover:text-rose-600 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            );
-                          })}
+                      {linkedCount > 0 && varCost && (
+                        <div className="flex items-center justify-between px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-800">
+                          <span className="font-bold flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>ผูกข้อมูลต้นทุนจากระบบต้นทุนอาหารอัตโนมัติแล้ว ({linkedCount} รายการ)</span>
+                          </span>
+                          <span className="font-extrabold">ต้นทุน ฿{formatMoney(varCost.foodCost)}</span>
                         </div>
                       )}
                     </div>
@@ -1662,36 +1616,76 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 })()}
               </div>
 
-              {/* Attach Option Groups */}
-              <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1.5">
-                  {t.menuCost.attachedOptionGroups}
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {optionGroups.map((grp) => {
-                    const isAttached = (editingDish.optionGroupIds || []).includes(grp.id);
-                    return (
-                      <button
-                        key={grp.id}
-                        type="button"
-                        onClick={() => {
-                          const curr = editingDish.optionGroupIds || [];
-                          const next = isAttached
-                            ? curr.filter((id) => id !== grp.id)
-                            : [...curr, grp.id];
-                          setEditingDish({ ...editingDish, optionGroupIds: next });
-                        }}
-                        className={`p-2 rounded-xl border text-xs font-semibold text-left cursor-pointer transition-colors ${
-                          isAttached
-                            ? 'bg-orange-500 text-white border-orange-600'
-                            : 'bg-neutral-50 text-neutral-800 border-neutral-300 hover:bg-neutral-100'
-                        }`}
-                      >
-                        {grp.name}
-                      </button>
-                    );
-                  })}
+              {/* Selected Sub-Option Groups Only + Picker Button */}
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-neutral-800">
+                    {t.menuCost.attachedOptionGroups}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOptionGroupSearch('');
+                      setIsOptionGroupPickerOpen(true);
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>เพิ่มตัวเลือกย่อย</span>
+                  </button>
                 </div>
+
+                {(() => {
+                  const selectedGroups = optionGroups.filter((grp) =>
+                    (editingDish.optionGroupIds || []).includes(grp.id)
+                  );
+                  if (selectedGroups.length === 0) {
+                    return (
+                      <div className="p-2.5 bg-white rounded-xl border border-dashed border-neutral-300 text-[11px] text-neutral-500 text-center">
+                        ยังไม่ได้เลือกตัวเลือกย่อย กดปุ่ม &quot;+ เพิ่มตัวเลือกย่อย&quot; เพื่อเลือกจากกลุ่มที่สร้างไว้
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {selectedGroups.map((grp) => (
+                        <div
+                          key={grp.id}
+                          className="p-2.5 bg-white rounded-xl border border-orange-200 flex items-start justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-extrabold text-neutral-900 truncate">
+                              {grp.nameTh || grp.name}
+                              {grp.nameTh && grp.name && grp.name !== grp.nameTh && (
+                                <span className="ml-1 text-[10px] font-medium text-neutral-400">
+                                  ({grp.name})
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-neutral-500 truncate mt-0.5">
+                              {grp.choices.map((c) => c.nameTh || c.name).join(', ')}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDish({
+                                ...editingDish,
+                                optionGroupIds: (editingDish.optionGroupIds || []).filter(
+                                  (id) => id !== grp.id
+                                ),
+                              });
+                            }}
+                            className="p-1 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer shrink-0"
+                            title="นำออก"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -1737,15 +1731,59 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.menuCost.subRecipeName}
+                  ชื่อสูตรกึ่งสำเร็จรูป (ภาษาไทย) *
                 </label>
                 <input
                   type="text"
-                  required
+                  required={!editingSubRecipe.name}
+                  value={editingSubRecipe.nameTh || ''}
+                  onChange={(e) => {
+                    const nextTh = e.target.value;
+                    const nextEn = computeAutoEnglishName({
+                      previousThai: editingSubRecipe.nameTh || '',
+                      nextThai: nextTh,
+                      currentEnglish: editingSubRecipe.name || '',
+                      isManuallyEdited: manualEnKeysRef.current.has('sub'),
+                    });
+                    setEditingSubRecipe({ ...editingSubRecipe, nameTh: nextTh, name: nextEn });
+                  }}
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
+                  placeholder="เช่น ซอสผัดกระทะมาตรฐาน, น้ำซุปกระดูก"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-neutral-700">
+                    {t.menuCost.subRecipeName} (English — แปลอัตโนมัติ)
+                  </label>
+                  {editingSubRecipe.nameTh && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        manualEnKeysRef.current.delete('sub');
+                        setEditingSubRecipe({
+                          ...editingSubRecipe,
+                          name: translateThaiToEnglish(editingSubRecipe.nameTh || ''),
+                        });
+                      }}
+                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                    >
+                      แปลใหม่
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
                   value={editingSubRecipe.name || ''}
-                  onChange={(e) => setEditingSubRecipe({ ...editingSubRecipe, name: e.target.value })}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.trim()) manualEnKeysRef.current.add('sub');
+                    else manualEnKeysRef.current.delete('sub');
+                    setEditingSubRecipe({ ...editingSubRecipe, name: val });
+                  }}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. Tom Yum Broth Base"
+                  placeholder="e.g. House Stir-Fry Sauce"
                 />
               </div>
 
@@ -1824,15 +1862,59 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.menuCost.packagingName}
+                  ชื่อบรรจุภัณฑ์ (ภาษาไทย) *
                 </label>
                 <input
                   type="text"
-                  required
+                  required={!editingPackaging.name}
+                  value={editingPackaging.nameTh || ''}
+                  onChange={(e) => {
+                    const nextTh = e.target.value;
+                    const nextEn = computeAutoEnglishName({
+                      previousThai: editingPackaging.nameTh || '',
+                      nextThai: nextTh,
+                      currentEnglish: editingPackaging.name || '',
+                      isManuallyEdited: manualEnKeysRef.current.has('pkg'),
+                    });
+                    setEditingPackaging({ ...editingPackaging, nameTh: nextTh, name: nextEn });
+                  }}
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
+                  placeholder="เช่น กล่องข้าว, แก้วน้ำ"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-neutral-700">
+                    {t.menuCost.packagingName} (English — แปลอัตโนมัติ)
+                  </label>
+                  {editingPackaging.nameTh && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        manualEnKeysRef.current.delete('pkg');
+                        setEditingPackaging({
+                          ...editingPackaging,
+                          name: translateThaiToEnglish(editingPackaging.nameTh || ''),
+                        });
+                      }}
+                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                    >
+                      แปลใหม่
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
                   value={editingPackaging.name || ''}
-                  onChange={(e) => setEditingPackaging({ ...editingPackaging, name: e.target.value })}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.trim()) manualEnKeysRef.current.add('pkg');
+                    else manualEnKeysRef.current.delete('pkg');
+                    setEditingPackaging({ ...editingPackaging, name: val });
+                  }}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. Bento Box, Drink Cup"
+                  placeholder="e.g. Food Box, Drink Cup"
                 />
               </div>
 
@@ -1877,12 +1959,16 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              if (!editingCategory.name) return;
+              const finalTh = (editingCategory.nameTh || '').trim();
+              const finalEn =
+                (editingCategory.name || '').trim() ||
+                (finalTh ? translateThaiToEnglish(finalTh) : '');
+              if (!finalEn && !finalTh) return;
               const isNew = !editingCategory.id;
               const catToSave: CategoryDoc = {
                 id: editingCategory.id || `cat_${Date.now()}`,
-                name: editingCategory.name,
-                ...(editingCategory.nameTh ? { nameTh: editingCategory.nameTh } : {}),
+                name: finalEn || finalTh,
+                ...(finalTh ? { nameTh: finalTh } : {}),
                 order: editingCategory.order || categories.length + 1,
                 createdAt: editingCategory.createdAt || new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -1909,25 +1995,58 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.menuCost.categoryName} (English)
+                  ชื่อหมวดหมู่ (ภาษาไทย) *
                 </label>
                 <input
                   type="text"
-                  required
-                  value={editingCategory.name || ''}
-                  onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                  required={!editingCategory.name}
+                  value={editingCategory.nameTh || ''}
+                  onChange={(e) => {
+                    const nextTh = e.target.value;
+                    const nextEn = computeAutoEnglishName({
+                      previousThai: editingCategory.nameTh || '',
+                      nextThai: nextTh,
+                      currentEnglish: editingCategory.name || '',
+                      isManuallyEdited: manualEnKeysRef.current.has('cat'),
+                    });
+                    setEditingCategory({ ...editingCategory, nameTh: nextTh, name: nextEn });
+                  }}
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
+                  placeholder="เช่น อาหารจานหลัก, เครื่องดื่ม"
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.common.nameTh}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-neutral-700">
+                    {t.menuCost.categoryName} (English — แปลอัตโนมัติ)
+                  </label>
+                  {editingCategory.nameTh && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        manualEnKeysRef.current.delete('cat');
+                        setEditingCategory({
+                          ...editingCategory,
+                          name: translateThaiToEnglish(editingCategory.nameTh || ''),
+                        });
+                      }}
+                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                    >
+                      แปลใหม่
+                    </button>
+                  )}
+                </div>
                 <input
                   type="text"
-                  value={editingCategory.nameTh || ''}
-                  onChange={(e) => setEditingCategory({ ...editingCategory, nameTh: e.target.value })}
+                  value={editingCategory.name || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.trim()) manualEnKeysRef.current.add('cat');
+                    else manualEnKeysRef.current.delete('cat');
+                    setEditingCategory({ ...editingCategory, name: val });
+                  }}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                  placeholder="e.g. Main Dishes"
                 />
               </div>
             </div>
@@ -1957,12 +2076,16 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
-              if (!editingChannel.name) return;
+              const finalTh = (editingChannel.nameTh || '').trim();
+              const finalEn =
+                (editingChannel.name || '').trim() ||
+                (finalTh ? translateThaiToEnglish(finalTh) : '');
+              if (!finalEn && !finalTh) return;
               const isNew = !editingChannel.id;
               const chToSave: ChannelDoc = {
                 id: editingChannel.id || `ch_${Date.now()}`,
-                name: editingChannel.name,
-                ...(editingChannel.nameTh ? { nameTh: editingChannel.nameTh } : {}),
+                name: finalEn || finalTh,
+                ...(finalTh ? { nameTh: finalTh } : {}),
                 type: editingChannel.type || 'delivery',
                 commissionPercent: editingChannel.commissionPercent || 0,
                 packagingCost: editingChannel.packagingCost || 0,
@@ -1992,13 +2115,57 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.menuCost.channelName}
+                  ชื่อช่องทางขาย (ภาษาไทย) *
                 </label>
                 <input
                   type="text"
-                  required
+                  required={!editingChannel.name}
+                  value={editingChannel.nameTh || ''}
+                  onChange={(e) => {
+                    const nextTh = e.target.value;
+                    const nextEn = computeAutoEnglishName({
+                      previousThai: editingChannel.nameTh || '',
+                      nextThai: nextTh,
+                      currentEnglish: editingChannel.name || '',
+                      isManuallyEdited: manualEnKeysRef.current.has('ch'),
+                    });
+                    setEditingChannel({ ...editingChannel, nameTh: nextTh, name: nextEn });
+                  }}
+                  className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
+                  placeholder="เช่น หน้าร้าน, กลับบ้าน, GrabFood"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-neutral-700">
+                    {t.menuCost.channelName} (English — แปลอัตโนมัติ)
+                  </label>
+                  {editingChannel.nameTh && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        manualEnKeysRef.current.delete('ch');
+                        setEditingChannel({
+                          ...editingChannel,
+                          name: translateThaiToEnglish(editingChannel.nameTh || ''),
+                        });
+                      }}
+                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                    >
+                      แปลใหม่
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
                   value={editingChannel.name || ''}
-                  onChange={(e) => setEditingChannel({ ...editingChannel, name: e.target.value })}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.trim()) manualEnKeysRef.current.add('ch');
+                    else manualEnKeysRef.current.delete('ch');
+                    setEditingChannel({ ...editingChannel, name: val });
+                  }}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                   placeholder="e.g. LINE MAN, GrabFood"
                 />
@@ -2073,6 +2240,421 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* FOOD COST PRIMARY OPTION PICKER MODAL ("เพิ่มตัวเลือกหลัก") */}
+      {/* ========================================================= */}
+      {isPrimaryOptionPickerOpen && editingDish && (() => {
+        const q = primaryOptionSearch.trim().toLowerCase();
+        const dishThLower = (editingDish.nameTh || '').trim().toLowerCase();
+        const dishEnLower = (editingDish.name || '').trim().toLowerCase();
+
+        const costIngMap = new Map<string, CostIngredient>(costIngredients.map((i) => [i.id, i]));
+        const costSauceMap = new Map<string, CostSauce>(costSauces.map((s) => [s.id, s]));
+
+        // Sort costing menus so matching dish name comes first
+        const sortedCostMenus = [...costMenus]
+          .filter((m) => m.active !== false && (m.variants || []).length > 0)
+          .sort((a, b) => {
+            const aName = a.name.toLowerCase();
+            const bName = b.name.toLowerCase();
+            const aMatch =
+              (dishThLower && (aName.includes(dishThLower) || dishThLower.includes(aName))) ||
+              (dishEnLower && aName.includes(dishEnLower));
+            const bMatch =
+              (dishThLower && (bName.includes(dishThLower) || dishThLower.includes(bName))) ||
+              (dishEnLower && bName.includes(dishEnLower));
+            if (aMatch && !bMatch) return -1;
+            if (!aMatch && bMatch) return 1;
+            return (a.displayOrder || 99) - (b.displayOrder || 99);
+          });
+
+        const matchingVariants: Array<{
+          menu: CostMenuItem;
+          variant: CostMenuVariant;
+          isDishMatch: boolean;
+          foodCost: number;
+          foodCostPct: number;
+        }> = [];
+
+        for (const menu of sortedCostMenus) {
+          const mNameLower = menu.name.toLowerCase();
+          const isDishMatch = Boolean(
+            (dishThLower && (mNameLower.includes(dishThLower) || dishThLower.includes(mNameLower))) ||
+              (dishEnLower && mNameLower.includes(dishEnLower))
+          );
+
+          for (const v of menu.variants || []) {
+            if (v.active === false) continue;
+            const hay = `${menu.name} ${v.name} ${v.proteinType || ''}`.toLowerCase();
+            if (q && !hay.includes(q)) continue;
+
+            const bd = calculateVariantCostBreakdown(
+              v,
+              menu.name,
+              costIngMap,
+              costSauceMap,
+              costSettings
+            );
+
+            matchingVariants.push({
+              menu,
+              variant: v,
+              isDishMatch,
+              foodCost: bd.totalIngredientCost || 0,
+              foodCostPct: bd.restaurantFoodCostPercent || 0,
+            });
+          }
+        }
+
+        // Protein / Meat ingredients from Costing (fallback when user wants raw protein directly)
+        const proteinIngredients = costIngredients.filter((ing) => {
+          if (ing.active === false) return false;
+          const isMeat = ing.category === 'เนื้อสัตว์และอาหารทะเล';
+          const matchesSearch = q ? ing.name.toLowerCase().includes(q) : isMeat;
+          return matchesSearch;
+        });
+
+        const appendImportedVariant = async (newVariant: DishVariant) => {
+          const currentVars = editingDish.variants || [];
+          const hasOnlyBlankPlaceholder =
+            currentVars.length === 1 &&
+            !editingDish.id &&
+            (currentVars[0].name === 'Standard' || currentVars[0].nameTh === 'มาตรฐาน') &&
+            (currentVars[0].ingredients?.length || 0) === 0 &&
+            (currentVars[0].subRecipes?.length || 0) === 0 &&
+            (currentVars[0].packaging?.length || 0) === 0;
+
+          const nextVariants = hasOnlyBlankPlaceholder ? [newVariant] : [...currentVars, newVariant];
+          setEditingDish({ ...editingDish, variants: nextVariants });
+          setActiveDishVariantIndex(nextVariants.length - 1);
+
+          // Reload POS ingredients/subRecipes/packaging so cost calculations stay current
+          const [ings, subs, pkgs] = await Promise.all([
+            fetchCollection<IngredientDoc>('ingredients'),
+            fetchCollection<SubRecipeDoc>('subRecipes'),
+            fetchCollection<PackagingDoc>('packaging'),
+          ]);
+          setIngredients(ings);
+          setSubRecipes(subs);
+          setPackagings(pkgs);
+
+          setIsPrimaryOptionPickerOpen(false);
+        };
+
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[88vh] flex flex-col border border-orange-200 overflow-hidden">
+              <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ChefHat className="w-5 h-5" />
+                  <div>
+                    <h3 className="font-extrabold text-base">เลือกตัวเลือกหลักจากต้นทุนอาหาร</h3>
+                    <p className="text-[11px] text-orange-100">
+                      เลือกตัวเลือกเนื้อสัตว์/สูตรที่สร้างไว้แล้ว เพื่อนำราคาและต้นทุนวัตถุดิบมาใช้งานอัตโนมัติ
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPrimaryOptionPickerOpen(false)}
+                  className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3 border-b border-neutral-200 bg-neutral-50">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={primaryOptionSearch}
+                    onChange={(e) => setPrimaryOptionSearch(e.target.value)}
+                    placeholder="ค้นหาเนื้อสัตว์ หรือชื่อสูตรต้นทุนอาหาร (เช่น หมูหมัก, ไก่, กุ้ง, ทะเล)..."
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* Section 1: Costing Menu Variants (Recipes + Proteins + Selling Price) */}
+                <div className="space-y-2">
+                  <div className="text-xs font-extrabold text-neutral-800 flex items-center justify-between">
+                    <span>ตัวเลือกหลักพร้อมสูตรและต้นทุน ({matchingVariants.length})</span>
+                    {isImportingCostOption && (
+                      <span className="text-orange-600 font-bold">กำลังนำเข้าข้อมูลต้นทุน...</span>
+                    )}
+                  </div>
+
+                  {matchingVariants.length === 0 ? (
+                    <div className="p-4 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
+                      ไม่พบตัวเลือกในระบบต้นทุนอาหารที่ตรงกับคำค้นหา
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {matchingVariants.map(({ menu, variant, isDishMatch, foodCost, foodCostPct }) => {
+                        const displayProtein =
+                          variant.proteinType &&
+                          variant.proteinType !== 'ทั่วไป' &&
+                          variant.proteinType !== 'Standard'
+                            ? variant.proteinType
+                            : variant.name;
+
+                        return (
+                          <button
+                            key={`${menu.id}_${variant.id}`}
+                            type="button"
+                            disabled={isImportingCostOption}
+                            onClick={async () => {
+                              setIsImportingCostOption(true);
+                              try {
+                                const alreadyExists = (editingDish.variants || []).some(
+                                  (ev) => (ev.nameTh || ev.name) === displayProtein
+                                );
+                                const preferredNameTh = alreadyExists ? variant.name : displayProtein;
+                                const converted = await importCostingVariantToDishVariant({
+                                  variant,
+                                  costIngredients,
+                                  costSauces,
+                                  preferredNameTh,
+                                });
+                                await appendImportedVariant(converted);
+                              } finally {
+                                setIsImportingCostOption(false);
+                              }
+                            }}
+                            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer hover:shadow-md active:scale-[0.99] disabled:opacity-60 ${
+                              isDishMatch
+                                ? 'bg-orange-50/70 border-orange-300 hover:border-orange-500'
+                                : 'bg-white border-neutral-200 hover:border-orange-300'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-black text-sm text-neutral-900">
+                                    {displayProtein}
+                                  </span>
+                                  {isDishMatch && (
+                                    <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-orange-500 text-white">
+                                      ตรงกับเมนูนี้
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-neutral-500 truncate">
+                                  {menu.name} • {variant.name}
+                                </div>
+                              </div>
+                              <span className="text-xs font-black text-orange-600 shrink-0">
+                                ฿{formatMoney(variant.sellingPrice || 0)}
+                              </span>
+                            </div>
+
+                            <div className="mt-2 pt-1.5 border-t border-neutral-200/70 flex items-center justify-between text-[10px] text-neutral-600">
+                              <span>
+                                วัตถุดิบ {(variant.recipeItems || []).length} รายการ
+                              </span>
+                              <span className="font-bold text-emerald-700">
+                                ต้นทุน ฿{formatMoney(foodCost)} ({formatPercent(foodCostPct)})
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Section 2: Quick Protein / Meat Ingredients */}
+                {proteinIngredients.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-neutral-200">
+                    <div className="text-xs font-extrabold text-neutral-800">
+                      หรือเลือกจากวัตถุดิบเนื้อสัตว์ในคลังต้นทุน ({proteinIngredients.length})
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {proteinIngredients.map((ing) => (
+                        <button
+                          key={ing.id}
+                          type="button"
+                          disabled={isImportingCostOption}
+                          onClick={async () => {
+                            setIsImportingCostOption(true);
+                            try {
+                              const converted = await importCostingIngredientAsDishVariant(ing, 100);
+                              converted.price = editingDish.variants?.[0]?.price || 65;
+                              await appendImportedVariant(converted);
+                            } finally {
+                              setIsImportingCostOption(false);
+                            }
+                          }}
+                          className="p-2.5 bg-neutral-50 hover:bg-orange-50 rounded-xl border border-neutral-200 hover:border-orange-300 text-left cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-neutral-900 truncate">{ing.name}</div>
+                            <div className="text-[10px] text-neutral-500">
+                              ฿{formatMoney(ing.costPerBaseUnit)} / {ing.baseUnit}
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-bold text-orange-600 shrink-0">
+                            + เลือกใช้
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newVar: DishVariant = {
+                      id: `var_${Date.now()}`,
+                      nameTh: '',
+                      name: '',
+                      price: editingDish.variants?.[0]?.price || 100,
+                      ingredients: [],
+                      subRecipes: [],
+                      packaging: [],
+                    };
+                    const nextVars = [...(editingDish.variants || []), newVar];
+                    setEditingDish({ ...editingDish, variants: nextVars });
+                    setActiveDishVariantIndex(nextVars.length - 1);
+                    setIsPrimaryOptionPickerOpen(false);
+                  }}
+                  className="px-3.5 py-1.5 bg-white hover:bg-neutral-50 text-orange-700 border border-orange-300 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  + สร้างตัวเลือกหลักใหม่เอง
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPrimaryOptionPickerOpen(false)}
+                  className="px-4 py-1.5 bg-neutral-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  {t.common.close}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================= */}
+      {/* OPTION GROUP PICKER MODAL ("เพิ่มตัวเลือกย่อยที่ใช้งาน") */}
+      {/* ========================================================= */}
+      {isOptionGroupPickerOpen && editingDish && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[84vh] flex flex-col border border-orange-200 overflow-hidden">
+            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5" />
+                <div>
+                  <h3 className="font-extrabold text-base">เลือกตัวเลือกย่อยที่ใช้งาน</h3>
+                  <p className="text-[11px] text-orange-100">
+                    เลือกกลุ่มตัวเลือกเสริมที่ต้องการนำมาใช้งานกับเมนูนี้
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOptionGroupPickerOpen(false)}
+                className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 border-b border-neutral-200 bg-neutral-50">
+              <div className="relative">
+                <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  autoFocus
+                  value={optionGroupSearch}
+                  onChange={(e) => setOptionGroupSearch(e.target.value)}
+                  placeholder="ค้นหากลุ่มตัวเลือกย่อย..."
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {optionGroups.length === 0 ? (
+                <div className="p-4 text-center text-xs text-neutral-500">
+                  ยังไม่มีกลุ่มตัวเลือกย่อย กรุณาสร้างในเมนู &quot;กลุ่มตัวเลือกเสริม&quot; ก่อน
+                </div>
+              ) : (
+                optionGroups
+                  .filter((grp) => {
+                    const q = optionGroupSearch.trim().toLowerCase();
+                    if (!q) return true;
+                    return (
+                      grp.name.toLowerCase().includes(q) ||
+                      (grp.nameTh && grp.nameTh.toLowerCase().includes(q))
+                    );
+                  })
+                  .map((grp) => {
+                    const isSelected = (editingDish.optionGroupIds || []).includes(grp.id);
+                    return (
+                      <button
+                        key={grp.id}
+                        type="button"
+                        onClick={() => {
+                          const curr = editingDish.optionGroupIds || [];
+                          const next = isSelected
+                            ? curr.filter((id) => id !== grp.id)
+                            : [...curr, grp.id];
+                          setEditingDish({ ...editingDish, optionGroupIds: next });
+                        }}
+                        className={`w-full p-3 rounded-2xl border text-left cursor-pointer transition-colors flex items-start justify-between gap-2 ${
+                          isSelected
+                            ? 'bg-orange-50 border-orange-500'
+                            : 'bg-white border-neutral-200 hover:bg-neutral-50'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="font-extrabold text-xs text-neutral-900">
+                            {grp.nameTh || grp.name}
+                            {grp.nameTh && grp.name && grp.name !== grp.nameTh && (
+                              <span className="ml-1.5 text-[10px] font-medium text-neutral-400">
+                                ({grp.name})
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-neutral-500 mt-0.5">
+                            {grp.choices.map((c) => c.nameTh || c.name).join(' • ')}
+                          </div>
+                        </div>
+                        <span
+                          className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border ${
+                            isSelected
+                              ? 'bg-orange-500 border-orange-600 text-white'
+                              : 'bg-white border-neutral-300 text-transparent'
+                          }`}
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </span>
+                      </button>
+                    );
+                  })
+              )}
+            </div>
+
+            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsOptionGroupPickerOpen(false)}
+                className="px-5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
+              >
+                ตกลง ({(editingDish.optionGroupIds || []).length})
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   OptionGroupDoc,
   OptionChoice,
@@ -9,6 +9,7 @@ import {
 import { translations } from '../i18n/translations';
 import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
 import { fetchCollection, saveDocument, deleteDocument } from '../data/db';
+import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
 import {
   Sliders,
   Plus,
@@ -34,6 +35,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<Partial<OptionGroupDoc> | null>(null);
+  const manualEnKeysRef = useRef<Set<string>>(new Set());
 
   const loadData = async () => {
     const [ogs, ings] = await Promise.all([
@@ -52,17 +54,39 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
   const handleSaveGroup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingGroup || !editingGroup.name) return;
+    if (!editingGroup) return;
+
+    const finalNameTh = (editingGroup.nameTh || '').trim();
+    const finalNameEn =
+      (editingGroup.name || '').trim() ||
+      (finalNameTh ? translateThaiToEnglish(finalNameTh) : '');
+
+    if (!finalNameEn && !finalNameTh) return;
+
+    const normalizedChoices: OptionChoice[] = (editingGroup.choices || [])
+      .map((c) => {
+        const cTh = (c.nameTh || '').trim();
+        const cEn = (c.name || '').trim() || (cTh ? translateThaiToEnglish(cTh) : '');
+        if (!cTh && !cEn) return null;
+        return {
+          id: c.id,
+          name: cEn || cTh,
+          ...(cTh ? { nameTh: cTh } : {}),
+          price: Number(c.price) || 0,
+          ...(c.ingredients ? { ingredients: c.ingredients } : {}),
+        } as OptionChoice;
+      })
+      .filter((c): c is OptionChoice => c !== null);
 
     const isNew = !editingGroup.id;
     const groupToSave: OptionGroupDoc = {
       id: editingGroup.id || `og_${Date.now()}`,
-      name: editingGroup.name,
-      ...(editingGroup.nameTh ? { nameTh: editingGroup.nameTh } : {}),
+      name: finalNameEn || finalNameTh,
+      ...(finalNameTh ? { nameTh: finalNameTh } : {}),
       minSelect: editingGroup.minSelect || 0,
       maxSelect: editingGroup.maxSelect || 1,
       order: editingGroup.order || optionGroups.length + 1,
-      choices: editingGroup.choices || [],
+      choices: normalizedChoices,
       createdAt: editingGroup.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       version: editingGroup.version || 1,
@@ -102,13 +126,15 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
         <button
           onClick={() => {
+            manualEnKeysRef.current.clear();
             setEditingGroup({
               name: '',
+              nameTh: '',
               minSelect: 0,
               maxSelect: 1,
               choices: [
-                { id: `c_${Date.now()}_1`, name: 'Choice 1', price: 0 },
-                { id: `c_${Date.now()}_2`, name: 'Choice 2', price: 10 },
+                { id: `c_${Date.now()}_1`, nameTh: '', name: '', price: 0 },
+                { id: `c_${Date.now()}_2`, nameTh: '', name: '', price: 0 },
               ],
             });
             setIsEditorOpen(true);
@@ -173,7 +199,11 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="flex justify-end gap-1.5 mt-4 pt-2 border-t border-neutral-100">
               <button
                 onClick={() => {
-                  setEditingGroup(group);
+                  manualEnKeysRef.current.clear();
+                  setEditingGroup({
+                    ...group,
+                    choices: (group.choices || []).map((c) => ({ ...c })),
+                  });
                   setIsEditorOpen(true);
                 }}
                 className="p-1.5 text-neutral-600 hover:text-orange-600 rounded-lg hover:bg-neutral-100 cursor-pointer"
@@ -217,30 +247,64 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    Group Name (EN)
+                    ชื่อกลุ่มตัวเลือก (ภาษาไทย) *
                   </label>
                   <input
                     type="text"
-                    required
-                    value={editingGroup.name || ''}
-                    onChange={(e) => setEditingGroup({ ...editingGroup, name: e.target.value })}
-                    className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                    placeholder="e.g. Spice Level"
+                    required={!editingGroup.name}
+                    value={editingGroup.nameTh || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      const nextEn = computeAutoEnglishName({
+                        previousThai: editingGroup.nameTh || '',
+                        nextThai: nextTh,
+                        currentEnglish: editingGroup.name || '',
+                        isManuallyEdited: manualEnKeysRef.current.has('group'),
+                      });
+                      setEditingGroup({ ...editingGroup, nameTh: nextTh, name: nextEn });
+                    }}
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                    placeholder="เช่น ระดับความเผ็ด, ท็อปปิ้ง"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    Group Name (TH)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-neutral-700">
+                      Group Name (English — แปลอัตโนมัติ)
+                    </label>
+                    {editingGroup.nameTh && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          manualEnKeysRef.current.delete('group');
+                          setEditingGroup({
+                            ...editingGroup,
+                            name: translateThaiToEnglish(editingGroup.nameTh || ''),
+                          });
+                        }}
+                        className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                      >
+                        แปลใหม่
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
-                    value={editingGroup.nameTh || ''}
-                    onChange={(e) => setEditingGroup({ ...editingGroup, nameTh: e.target.value })}
+                    value={editingGroup.name || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.trim()) {
+                        manualEnKeysRef.current.add('group');
+                      } else {
+                        manualEnKeysRef.current.delete('group');
+                      }
+                      setEditingGroup({ ...editingGroup, name: val });
+                    }}
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                    placeholder="e.g. ระดับความเผ็ด"
+                    placeholder="e.g. Spice Level"
                   />
                 </div>
               </div>
@@ -274,7 +338,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                 </div>
               </div>
 
-              {/* Choices with Reorder Buttons (▲ ▼) */}
+              {/* Choices with Reorder Buttons (▲ ▼) & Thai-first + Auto-EN */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-xs font-bold text-neutral-800">{t.menuCost.optionsList}</span>
@@ -283,7 +347,8 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                     onClick={() => {
                       const newChoice: OptionChoice = {
                         id: `c_${Date.now()}`,
-                        name: 'New Option',
+                        nameTh: '',
+                        name: '',
                         price: 0,
                       };
                       setEditingGroup({
@@ -297,14 +362,14 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                   </button>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {editingGroup.choices?.map((choice, idx) => (
                     <div
                       key={choice.id}
                       className="p-2.5 bg-neutral-50 rounded-xl border border-neutral-200 flex items-center gap-2 text-xs"
                     >
                       {/* Reorder Buttons */}
-                      <div className="flex flex-col gap-0.5">
+                      <div className="flex flex-col gap-0.5 shrink-0">
                         <button
                           type="button"
                           disabled={idx === 0}
@@ -323,19 +388,48 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                         </button>
                       </div>
 
-                      <input
-                        type="text"
-                        value={choice.name}
-                        onChange={(e) => {
-                          const updated = [...(editingGroup.choices || [])];
-                          updated[idx].name = e.target.value;
-                          setEditingGroup({ ...editingGroup, choices: updated });
-                        }}
-                        className="flex-1 px-2 py-1 bg-white border border-neutral-300 rounded-lg text-xs"
-                        placeholder="Option name"
-                      />
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        <input
+                          type="text"
+                          required={!choice.name}
+                          value={choice.nameTh || ''}
+                          onChange={(e) => {
+                            const nextTh = e.target.value;
+                            const updated = [...(editingGroup.choices || [])];
+                            const prev = updated[idx];
+                            const nextEn = computeAutoEnglishName({
+                              previousThai: prev.nameTh || '',
+                              nextThai: nextTh,
+                              currentEnglish: prev.name || '',
+                              isManuallyEdited: manualEnKeysRef.current.has(`choice_${choice.id}`),
+                            });
+                            updated[idx] = { ...prev, nameTh: nextTh, name: nextEn };
+                            setEditingGroup({ ...editingGroup, choices: updated });
+                          }}
+                          className="w-full px-2 py-1 bg-white border border-orange-300 rounded-lg text-xs"
+                          placeholder="ชื่อไทย (เช่น เผ็ดน้อย)"
+                        />
+                        <input
+                          type="text"
+                          value={choice.name || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const key = `choice_${choice.id}`;
+                            if (val.trim()) {
+                              manualEnKeysRef.current.add(key);
+                            } else {
+                              manualEnKeysRef.current.delete(key);
+                            }
+                            const updated = [...(editingGroup.choices || [])];
+                            updated[idx] = { ...updated[idx], name: val };
+                            setEditingGroup({ ...editingGroup, choices: updated });
+                          }}
+                          className="w-full px-2 py-1 bg-neutral-100/70 border border-neutral-300 rounded-lg text-xs"
+                          placeholder="English (auto)"
+                        />
+                      </div>
 
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 shrink-0">
                         <span className="text-[11px] font-bold text-neutral-500">+฿</span>
                         <input
                           type="number"
@@ -344,7 +438,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                           value={choice.price}
                           onChange={(e) => {
                             const updated = [...(editingGroup.choices || [])];
-                            updated[idx].price = parseFloat(e.target.value) || 0;
+                            updated[idx] = { ...updated[idx], price: parseFloat(e.target.value) || 0 };
                             setEditingGroup({ ...editingGroup, choices: updated });
                           }}
                           className="w-16 px-1.5 py-1 text-right bg-white border border-neutral-300 rounded-lg text-xs font-bold"
@@ -358,7 +452,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                           updated.splice(idx, 1);
                           setEditingGroup({ ...editingGroup, choices: updated });
                         }}
-                        className="text-neutral-400 hover:text-rose-600 cursor-pointer"
+                        className="text-neutral-400 hover:text-rose-600 cursor-pointer shrink-0"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
