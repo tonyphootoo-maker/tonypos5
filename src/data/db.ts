@@ -855,7 +855,8 @@ export async function payBillAtomic(
         const dishId = item.dishId;
         const qty = item.quantity || 1;
         const itemRevenue = roundTo2(item.unitPrice * qty);
-        const itemCost = roundTo2(item.totalUnitCostSnapshot * qty);
+        const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
+        const itemCost = roundTo2(unitFoodCost * qty);
 
         if (!summary.dishStats[dishId]) {
           summary.dishStats[dishId] = {
@@ -991,8 +992,9 @@ export async function voidBillAtomic(
               summary.dishStats[dishId].revenue = roundTo2(
                 Math.max(0, summary.dishStats[dishId].revenue - item.unitPrice * qty)
               );
+              const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
               summary.dishStats[dishId].cost = roundTo2(
-                Math.max(0, summary.dishStats[dishId].cost - item.totalUnitCostSnapshot * qty)
+                Math.max(0, summary.dishStats[dishId].cost - unitFoodCost * qty)
               );
             }
           }
@@ -1190,8 +1192,9 @@ export async function rebuildSummariesFromBills(): Promise<{
         summary.dishStats[dishId].revenue = roundTo2(
           summary.dishStats[dishId].revenue + item.unitPrice * qty
         );
+        const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
         summary.dishStats[dishId].cost = roundTo2(
-          summary.dishStats[dishId].cost + item.totalUnitCostSnapshot * qty
+          summary.dishStats[dishId].cost + unitFoodCost * qty
         );
       }
     }

@@ -5,6 +5,8 @@ import {
   IngredientDoc,
   SubRecipeDoc,
   PackagingDoc,
+  ExpenseDoc,
+  EmployeeDoc,
   SettingsDoc,
   Language,
 } from '../types';
@@ -15,18 +17,15 @@ import {
   getBusinessWorkDate,
   calculateDishVariantCost,
   calculateFoodCostPercent,
-  roundTo2,
+  extractNetPriceFromMenuPrice,
+  calculatePeriodExpensesAndLabor,
+  calculateUsaliPnl,
 } from '../engine/calculations';
 import { fetchSingleDailySummary, fetchCollection } from '../data/db';
 import { AppPage } from '../components/Navigation';
 import {
   LayoutDashboard,
-  TrendingUp,
   AlertTriangle,
-  Award,
-  UtensilsCrossed,
-  Receipt,
-  CircleDollarSign,
   ArrowRight,
   Flame,
 } from 'lucide-react';
@@ -46,23 +45,29 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
   const [ingredients, setIngredients] = useState<IngredientDoc[]>([]);
   const [subRecipes, setSubRecipes] = useState<SubRecipeDoc[]>([]);
   const [packagings, setPackagings] = useState<PackagingDoc[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseDoc[]>([]);
+  const [employees, setEmployees] = useState<EmployeeDoc[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [sum, dshs, ings, subs, pkgs] = await Promise.all([
+        const [sum, dshs, ings, subs, pkgs, exps, emps] = await Promise.all([
           fetchSingleDailySummary(todayStr),
           fetchCollection<DishDoc>('dishes'),
           fetchCollection<IngredientDoc>('ingredients'),
           fetchCollection<SubRecipeDoc>('subRecipes'),
           fetchCollection<PackagingDoc>('packaging'),
+          fetchCollection<ExpenseDoc>('expenses'),
+          fetchCollection<EmployeeDoc>('employees'),
         ]);
         setTodaySummary(sum);
         setDishes(dshs);
         setIngredients(ings);
         setSubRecipes(subs);
         setPackagings(pkgs);
+        setExpenses(exps);
+        setEmployees(emps);
       } catch (err) {
         console.error('Dashboard load error:', err);
       } finally {
@@ -77,9 +82,10 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
   const subRecipesMap = new Map<string, SubRecipeDoc>(subRecipes.map((s) => [s.id, s]));
   const packagingMap = new Map<string, PackagingDoc>(packagings.map((p) => [p.id, p]));
 
-  // Audit warnings: dishes with no recipe or food cost % > target
+  // Audit warnings: dishes with no recipe, missing ingredient cost, or food cost % > target (Food COGS only)
   const dishesWithoutRecipe: DishDoc[] = [];
-  const dishesAboveTarget: { dish: DishDoc; costPct: number }[] = [];
+  const dishesAboveTarget: { dish: DishDoc; costPct: number; hasMissing: boolean }[] = [];
+  const dishesWithMissingCost: DishDoc[] = [];
 
   for (const dish of dishes) {
     const primary = dish.variants[0];
@@ -91,9 +97,20 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
     if (!costCalc.hasRecipe) {
       dishesWithoutRecipe.push(dish);
     } else {
-      const pct = calculateFoodCostPercent(costCalc.totalCost, primary.price);
+      if (costCalc.hasMissing) {
+        dishesWithMissingCost.push(dish);
+      }
+      // Strictly compare Food COGS (excluding packaging) against net selling price
+      const netVariantPrice = extractNetPriceFromMenuPrice(
+        primary.price,
+        settings.pricesIncludeVat,
+        settings.vatPercent,
+        settings.serviceChargeIncludedInPrice,
+        settings.serviceChargePercent
+      );
+      const pct = calculateFoodCostPercent(costCalc.foodCost, netVariantPrice);
       if (pct > settings.targetFoodCostPercent) {
-        dishesAboveTarget.push({ dish, costPct: pct });
+        dishesAboveTarget.push({ dish, costPct: pct, hasMissing: costCalc.hasMissing });
       }
     }
   }
@@ -103,13 +120,14 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
     ? Object.values(todaySummary.dishStats).sort((a, b) => b.quantity - a.quantity).slice(0, 5)
     : [];
 
-  const todayNetSales = todaySummary?.netSales || 0;
-  const todayFoodCost = todaySummary?.totalFoodCost || 0;
-  const todayOrders = todaySummary?.orderCount || 0;
-  const todayGrossProfit = roundTo2(
-    todayNetSales - todayFoodCost - (todaySummary?.platformFees || 0) - (todaySummary?.packagingCost || 0)
+  // Centralized USALI P&L for today
+  const todaySummaries = todaySummary ? [todaySummary] : [];
+  const todayCosts = calculatePeriodExpensesAndLabor('day', todayStr, expenses, employees, todaySummaries);
+  const todayPnl = calculateUsaliPnl(
+    todaySummaries,
+    todayCosts,
+    settings.serviceChargeTreatment || 'staff_pool'
   );
-  const todayFoodCostPct = todayNetSales > 0 ? (todayFoodCost / todayNetSales) * 100 : 0;
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4 select-none">
@@ -122,6 +140,7 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
           </h2>
           <p className="text-xs text-neutral-500">
             Work Date: <strong className="text-neutral-800">{todayStr}</strong> (Cutoff: {settings.dailyClosingTime})
+            {isLoading ? ` • ${t.common.loading}` : ''}
           </p>
         </div>
 
@@ -140,35 +159,71 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
         <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs">
           <div className="text-[11px] font-bold text-neutral-500">{t.dashboard.todaySales}</div>
           <div className="text-xl font-black text-neutral-900 mt-1">
-            ฿{formatMoney(todayNetSales)}
+            ฿{formatMoney(todayPnl.netSales)}
           </div>
-          <div className="text-[10px] text-neutral-400 mt-0.5">{todayOrders} {t.dashboard.todayOrders}</div>
+          <div className="text-[10px] text-neutral-400 mt-0.5">
+            {todayPnl.orderCount} {t.dashboard.todayOrders}
+          </div>
         </div>
 
         <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs">
-          <div className="text-[11px] font-bold text-neutral-500">{t.dashboard.todayFoodCostPct}</div>
-          <div className={`text-xl font-black mt-1 ${todayFoodCostPct > settings.targetFoodCostPercent ? 'text-rose-600' : 'text-emerald-700'}`}>
-            {formatPercent(todayFoodCostPct)}
+          <div className="text-[11px] font-bold text-neutral-500">{t.reports.foodCostPct}</div>
+          <div
+            className={`text-xl font-black mt-1 ${
+              todayPnl.theoreticalFoodCostPercent > settings.targetFoodCostPercent ? 'text-rose-600' : 'text-emerald-700'
+            }`}
+          >
+            {formatPercent(todayPnl.theoreticalFoodCostPercent)}
           </div>
           <div className="text-[10px] text-neutral-400 mt-0.5">Target: {settings.targetFoodCostPercent}%</div>
         </div>
 
         <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs">
-          <div className="text-[11px] font-bold text-neutral-500">Today's Food Cost</div>
+          <div className="text-[11px] font-bold text-neutral-500">{t.reports.grossProfit}</div>
           <div className="text-xl font-black text-neutral-900 mt-1">
-            ฿{formatMoney(todayFoodCost)}
+            ฿{formatMoney(todayPnl.grossProfit)}
           </div>
-          <div className="text-[10px] text-neutral-400 mt-0.5">Live ingredient snapshots</div>
+          <div className="text-[10px] text-neutral-400 mt-0.5">
+            Food COGS: ฿{formatMoney(todayPnl.totalFoodCost)} ({formatPercent(todayPnl.grossProfitMarginPercent)})
+          </div>
         </div>
 
-        <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 shadow-xs">
-          <div className="text-[11px] font-bold text-emerald-800">{t.dashboard.todayNetProfit}</div>
-          <div className="text-xl font-black text-emerald-950 mt-1">
-            ฿{formatMoney(todayGrossProfit)}
+        <div
+          className={`p-4 rounded-2xl border shadow-xs ${
+            todayPnl.netOperatingProfit >= 0 ? 'bg-emerald-50/60 border-emerald-200' : 'bg-rose-50/60 border-rose-200'
+          }`}
+        >
+          <div className="text-[11px] font-bold text-neutral-700">{t.dashboard.todayNetProfit}</div>
+          <div
+            className={`text-xl font-black mt-1 ${
+              todayPnl.netOperatingProfit >= 0 ? 'text-emerald-950' : 'text-rose-900'
+            }`}
+          >
+            ฿{formatMoney(todayPnl.netOperatingProfit)}
           </div>
-          <div className="text-[10px] text-emerald-700 mt-0.5">Gross Profit</div>
+          <div className="text-[10px] text-neutral-600 mt-0.5">
+            USALI NOP (OpEx &amp; Labor allocated/day)
+          </div>
         </div>
       </div>
+
+      {/* Missing Ingredient Cost Banner if any */}
+      {dishesWithMissingCost.length > 0 && (
+        <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 text-rose-800 font-bold">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>
+              {t.menuCost.missingCost}: {dishesWithMissingCost.map((d) => d.name).join(', ')}
+            </span>
+          </div>
+          <button
+            onClick={() => onNavigate('menu_cost')}
+            className="text-xs font-black text-rose-700 hover:underline cursor-pointer"
+          >
+            {t.dashboard.fixRecipe} →
+          </button>
+        </div>
+      )}
 
       {/* Critical Warnings Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

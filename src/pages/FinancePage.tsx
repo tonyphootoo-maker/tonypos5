@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   ExpenseDoc,
   EmployeeDoc,
+  DailySummaryDoc,
   WageType,
   SettingsDoc,
   Language,
@@ -11,10 +12,13 @@ import {
   formatMoney,
   calculateEmployeeMonthlyCost,
   calculateBreakEven,
+  calculatePeriodExpensesAndLabor,
+  deriveVariableCostPercent,
+  getBusinessWorkDate,
   roundTo2,
   formatPercent,
 } from '../engine/calculations';
-import { fetchCollection, saveDocument, deleteDocument } from '../data/db';
+import { fetchCollection, fetchDailySummariesInRange, saveDocument, deleteDocument } from '../data/db';
 import {
   CircleDollarSign,
   Users,
@@ -44,6 +48,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
 
   const [expenses, setExpenses] = useState<ExpenseDoc[]>([]);
   const [employees, setEmployees] = useState<EmployeeDoc[]>([]);
+  const [last30Summaries, setLast30Summaries] = useState<DailySummaryDoc[]>([]);
 
   // Modals state
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -52,39 +57,50 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Partial<EmployeeDoc> | null>(null);
 
-  // Break-even target margin input
-  const [customContributionMargin, setCustomContributionMargin] = useState<number>(65); // 65% default contribution margin
+  // Break-even optional custom override (derived automatically from real 30-day data by default)
+  const [useCustomOverride, setUseCustomOverride] = useState<boolean>(false);
+  const [overrideContributionMargin, setOverrideContributionMargin] = useState<number>(65);
+
+  const todayStr = getBusinessWorkDate(new Date(), settings.dailyClosingTime);
 
   const loadData = async () => {
-    const [exps, emps] = await Promise.all([
+    const past30Date = new Date();
+    past30Date.setDate(past30Date.getDate() - 30);
+    const start30Str = getBusinessWorkDate(past30Date, settings.dailyClosingTime);
+
+    const [exps, emps, sums30] = await Promise.all([
       fetchCollection<ExpenseDoc>('expenses'),
       fetchCollection<EmployeeDoc>('employees'),
+      fetchDailySummariesInRange(start30Str, todayStr).catch(() => [] as DailySummaryDoc[]),
     ]);
     setExpenses(exps);
     setEmployees(emps);
+    setLast30Summaries(sums30);
   };
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [todayStr]);
 
-  // Compute total monthly fixed expenses
-  const totalMonthlyFixedExpenses = roundTo2(
-    expenses
-      .filter((e) => e.isFixed || e.isRecurring)
-      .reduce((sum, e) => sum + e.amount, 0)
-  );
+  // Compute current month fixed expenses & labor via centralized engine
+  const currentMonth = todayStr.substring(0, 7);
+  const monthlyCosts = calculatePeriodExpensesAndLabor('month', currentMonth, expenses, employees);
+  const totalMonthlyFixedExpenses = monthlyCosts.fixedExpenses;
+  const totalMonthlyLabor = monthlyCosts.laborCost;
 
-  // Compute total monthly labor
-  const totalMonthlyLabor = roundTo2(
-    employees.reduce((sum, emp) => sum + calculateEmployeeMonthlyCost(emp), 0)
-  );
+  // Derive Variable Cost % and Contribution Margin % from last 30 days' real data
+  const derivedMargin = deriveVariableCostPercent(last30Summaries);
+  const activeContributionMarginPercent = useCustomOverride
+    ? overrideContributionMargin
+    : derivedMargin.contributionMarginPercent;
 
-  // Break-even calculation
+  // Break-even calculation using real derived CM% (or user override) and configured operating days
+  const operatingDays = settings.operatingDaysPerMonth || 30;
   const breakEven = calculateBreakEven(
     totalMonthlyFixedExpenses,
     totalMonthlyLabor,
-    customContributionMargin
+    activeContributionMarginPercent,
+    operatingDays
   );
 
   // ==========================================
@@ -374,7 +390,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
             <p className="text-xs text-neutral-500 mt-0.5">{t.finance.breakEvenFormulaNote}</p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 p-3 bg-neutral-50 rounded-2xl text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-neutral-50 rounded-2xl text-xs">
             <div>
               <span className="text-neutral-500">{t.finance.totalMonthlyFixedExpenses}:</span>
               <div className="text-base font-extrabold text-neutral-900">
@@ -387,22 +403,74 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                 ฿{formatMoney(totalMonthlyLabor)}
               </div>
             </div>
+            <div>
+              <span className="text-neutral-500">{t.finance.operatingDaysNote}</span>
+              <div className="text-base font-extrabold text-neutral-900">
+                {breakEven.operatingDays} days
+              </div>
+            </div>
           </div>
 
-          {/* Contribution margin parameter */}
-          <div>
-            <div className="flex justify-between items-center text-xs font-bold text-neutral-700 mb-1">
-              <span>{t.finance.avgContributionMargin}:</span>
-              <span className="text-orange-600 text-sm font-black">{customContributionMargin}%</span>
+          {/* 30-Day Real Data Variable Cost % Banner */}
+          <div
+            className={`p-3.5 rounded-2xl border text-xs space-y-1.5 ${
+              derivedMargin.hasRealData
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                : 'bg-amber-50/70 border-amber-200 text-amber-950'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-extrabold">
+                {derivedMargin.hasRealData ? t.finance.derivedVariableCostNote : t.finance.estimatedDefaultNote}
+              </span>
+              <span className="font-black text-sm">
+                Var Cost {formatPercent(derivedMargin.variableCostPercent)} → CM {formatPercent(derivedMargin.contributionMarginPercent)}
+              </span>
             </div>
-            <input
-              type="range"
-              min={20}
-              max={90}
-              value={customContributionMargin}
-              onChange={(e) => setCustomContributionMargin(parseInt(e.target.value, 10))}
-              className="w-full accent-orange-600 cursor-pointer"
-            />
+            {derivedMargin.hasRealData ? (
+              <div className="text-[11px] opacity-80">
+                30-Day Real Net Sales: ฿{formatMoney(derivedMargin.totalNetSales)} ({last30Summaries.length} business days)
+              </div>
+            ) : (
+              <div className="text-[11px] opacity-80">
+                Estimate (35% Variable Cost / 65% Contribution Margin) shown until sales are recorded.
+              </div>
+            )}
+          </div>
+
+          {/* Optional Custom CM% Override */}
+          <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
+            <label className="flex items-center justify-between cursor-pointer text-xs font-bold text-neutral-800">
+              <span className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={useCustomOverride}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setUseCustomOverride(checked);
+                    if (checked) {
+                      setOverrideContributionMargin(Math.round(derivedMargin.contributionMarginPercent));
+                    }
+                  }}
+                  className="w-4 h-4 accent-orange-600 rounded"
+                />
+                <span>{t.finance.customOverrideToggle}</span>
+              </span>
+              <span className="text-orange-600 text-sm font-black">
+                {formatPercent(activeContributionMarginPercent)}
+              </span>
+            </label>
+
+            {useCustomOverride && (
+              <input
+                type="range"
+                min={10}
+                max={95}
+                value={overrideContributionMargin}
+                onChange={(e) => setOverrideContributionMargin(parseInt(e.target.value, 10))}
+                className="w-full accent-orange-600 cursor-pointer"
+              />
+            )}
           </div>
 
           {/* Results Display */}
@@ -418,6 +486,9 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
               <div className="text-xs font-bold text-emerald-800">{t.finance.breakEvenDailyRevenue}</div>
               <div className="text-xl font-black text-emerald-900 mt-1">
                 ฿{formatMoney(breakEven.dailyBreakEvenSales)}
+              </div>
+              <div className="text-[10px] text-emerald-700 mt-0.5">
+                ÷ {breakEven.operatingDays} operating days
               </div>
             </div>
           </div>

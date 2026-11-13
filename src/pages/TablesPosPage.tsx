@@ -22,6 +22,9 @@ import {
   calculateDishVariantCost,
   calculateOptionChoiceCost,
   calculateBillFinancials,
+  calculateEffectiveChannelPrice,
+  calculateFoodCostPercent,
+  extractNetPriceFromMenuPrice,
   getBusinessWorkDate,
   formatMoney,
   formatPercent,
@@ -256,9 +259,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
       }
     });
 
-    const unitPrice = (variant.price || 0) + optionsPrice;
-    const dishCostSnapshot = variantCostCalc.totalCost;
-    const totalUnitCostSnapshot = dishCostSnapshot + optionsCost;
+    const currentChannel = channels.find((c) => c.id === selectedChannelId) || channels[0];
+    const isDineIn = currentChannel?.type === 'dine_in';
+    const effectiveVariantPrice = calculateEffectiveChannelPrice(variant.price || 0, currentChannel);
+    const unitPrice = effectiveVariantPrice + optionsPrice;
+
+    // Strictly separate Food COGS from packaging:
+    // Packaging from recipe variant applies ONLY for takeaway/delivery channels, never dine-in.
+    const foodCostSnapshot = roundTo2(variantCostCalc.foodCost + optionsCost);
+    const packagingCostSnapshot = isDineIn ? 0 : roundTo2(variantCostCalc.packagingCost);
+    const totalUnitCostSnapshot = roundTo2(foodCostSnapshot + packagingCostSnapshot);
 
     const newItem: OrderItem = {
       dishId: selectedDishForOptions.id,
@@ -266,8 +276,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
       variantId: variant.id,
       variantName: lang === 'th' && variant.nameTh ? variant.nameTh : variant.name,
       unitPrice,
-      dishCostSnapshot,
+      dishCostSnapshot: foodCostSnapshot,
       optionsCostSnapshot: optionsCost,
+      foodCostSnapshot,
+      packagingCostSnapshot,
       totalUnitCostSnapshot,
       quantity: itemQuantity,
       notes: itemNotes.trim() || undefined,
@@ -289,14 +301,21 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
     }
   };
 
-  // Compute live cart financials
+  // Compute live cart financials with USALI standards
   const currentChannel = channels.find((c) => c.id === selectedChannelId) || channels[0];
   const financials = calculateBillFinancials(
     cartItems,
     orderDiscount,
     settings.serviceChargePercent,
     settings.vatPercent,
-    currentChannel
+    currentChannel,
+    {
+      pricesIncludeVat: settings.pricesIncludeVat,
+      serviceChargeIncludedInPrice: settings.serviceChargeIncludedInPrice,
+      serviceChargeTreatment: settings.serviceChargeTreatment,
+      commissionBase: settings.commissionBase,
+      commissionVatAsCost: settings.commissionVatAsCost,
+    }
   );
 
   // Confirm Order -> Open Save Order Modal to select or confirm table
@@ -823,13 +842,19 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
               </div>
               {financials.serviceChargeAmount > 0 && (
                 <div className="flex justify-between text-neutral-600">
-                  <span>{t.pos.serviceCharge} ({settings.serviceChargePercent}%)</span>
+                  <span>
+                    {t.pos.serviceCharge} ({settings.serviceChargePercent}%)
+                    {settings.pricesIncludeVat && settings.serviceChargeIncludedInPrice ? ' (Incl.)' : ''}
+                  </span>
                   <span>฿{formatMoney(financials.serviceChargeAmount)}</span>
                 </div>
               )}
               {financials.vatAmount > 0 && (
                 <div className="flex justify-between text-neutral-600">
-                  <span>{t.pos.vat} ({settings.vatPercent}%)</span>
+                  <span>
+                    {t.pos.vat} ({settings.vatPercent}%)
+                    {settings.pricesIncludeVat ? ' (Incl.)' : ''}
+                  </span>
                   <span>฿{formatMoney(financials.vatAmount)}</span>
                 </div>
               )}
@@ -964,6 +989,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                   {selectedDishForOptions.variants.map((v) => {
                     const isSelected = selectedVariantId === v.id;
                     const vCost = calculateDishVariantCost(v, ingredientsMap, subRecipesMap, packagingMap);
+                    const effectivePrice = calculateEffectiveChannelPrice(v.price, currentChannel);
+                    const hasMarkup = (currentChannel?.priceMarkupPercent || 0) > 0;
                     return (
                       <button
                         key={v.id}
@@ -975,17 +1002,31 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                             : 'border-neutral-200 bg-white hover:bg-neutral-50'
                         }`}
                       >
-                        <div className="font-extrabold text-xs text-neutral-900">
-                          {lang === 'th' && v.nameTh ? v.nameTh : v.name}
+                        <div className="font-extrabold text-xs text-neutral-900 flex items-center justify-between">
+                          <span>{lang === 'th' && v.nameTh ? v.nameTh : v.name}</span>
+                          {hasMarkup && (
+                            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200">
+                              +{currentChannel.priceMarkupPercent}%
+                            </span>
+                          )}
                         </div>
                         <div className="text-sm font-black text-orange-600 mt-1">
-                          ฿{formatMoney(v.price)}
+                          ฿{formatMoney(effectivePrice)}
                         </div>
-                        {vCost.hasRecipe && (
-                          <div className="text-[10px] text-neutral-500">
-                            Cost: ฿{formatMoney(vCost.totalCost)} ({formatPercent((vCost.totalCost / v.price) * 100)})
-                          </div>
-                        )}
+                        {vCost.hasRecipe && (() => {
+                          const netEffectivePrice = extractNetPriceFromMenuPrice(
+                            effectivePrice,
+                            settings.pricesIncludeVat,
+                            settings.vatPercent,
+                            settings.serviceChargeIncludedInPrice,
+                            settings.serviceChargePercent
+                          );
+                          return (
+                            <div className="text-[10px] text-neutral-500">
+                              Food: ฿{formatMoney(vCost.foodCost)} ({formatPercent(calculateFoodCostPercent(vCost.foodCost, netEffectivePrice))})
+                            </div>
+                          );
+                        })()}
                       </button>
                     );
                   })}

@@ -7,7 +7,7 @@ import {
   Language,
 } from '../types';
 import { translations } from '../i18n/translations';
-import { formatMoney } from '../engine/calculations';
+import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
 import { fetchCollection, saveDocument, deleteDocument } from '../data/db';
 import {
   Sliders,
@@ -19,6 +19,7 @@ import {
   X,
   CheckCircle2,
   DollarSign,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface Props {
@@ -46,6 +47,8 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
   useEffect(() => {
     loadData();
   }, []);
+
+  const ingredientsMap = new Map<string, IngredientDoc>(ingredients.map((i) => [i.id, i]));
 
   const handleSaveGroup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,17 +140,33 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
               {/* Choices list */}
               <div className="mt-3 space-y-1.5">
-                {group.choices.map((c) => (
-                  <div
-                    key={c.id}
-                    className="flex justify-between items-center p-2 bg-neutral-50 rounded-xl text-xs border border-neutral-100 font-semibold"
-                  >
-                    <span>{lang === 'th' && c.nameTh ? c.nameTh : c.name}</span>
-                    <span className="font-bold text-orange-600">
-                      {c.price > 0 ? `+฿${formatMoney(c.price)}` : 'Free'}
-                    </span>
-                  </div>
-                ))}
+                {group.choices.map((c) => {
+                  const choiceCostCalc = calculateOptionChoiceCost(c, ingredientsMap);
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex justify-between items-center p-2 bg-neutral-50 rounded-xl text-xs border border-neutral-100 font-semibold"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>{lang === 'th' && c.nameTh ? c.nameTh : c.name}</span>
+                        {choiceCostCalc.hasMissing && (
+                          <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                            <AlertTriangle className="w-2.5 h-2.5" />
+                            <span>{t.menuCost.missingCost}</span>
+                          </span>
+                        )}
+                        {choiceCostCalc.cost > 0 && (
+                          <span className="text-[10px] text-neutral-500 font-normal">
+                            (Cost ฿{formatMoney(choiceCostCalc.cost)})
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-bold text-orange-600">
+                        {c.price > 0 ? `+฿${formatMoney(c.price)}` : 'Free'}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

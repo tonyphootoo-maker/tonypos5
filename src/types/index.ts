@@ -29,6 +29,14 @@ export interface SettingsDoc extends BaseDoc {
   qrImageId?: string;
   pointsEarnUnitThb: number; // e.g. spend 100 THB get 1 point
   pointsRedeemValueThb: number; // e.g. 1 point = 1 THB discount
+  // USALI-style Accounting & Costing Standards
+  pricesIncludeVat?: boolean; // Menu prices already include VAT (default false)
+  serviceChargeIncludedInPrice?: boolean; // Menu prices include service charge (default false)
+  serviceChargeTreatment?: 'staff_pool' | 'retained'; // 'staff_pool' = pass-through, 'retained' = other revenue
+  commissionBase?: 'net_food_sales'; // Commission base (default 'net_food_sales')
+  commissionVatAsCost?: boolean; // If true, add 7% VAT on platform commission as a cost
+  priceRounding?: 1 | 5 | 10; // Suggested price rounding (default 5 THB)
+  operatingDaysPerMonth?: number; // Number of operating days for daily break-even (default 30)
 }
 
 export interface IngredientDoc extends BaseDoc {
@@ -40,6 +48,7 @@ export interface IngredientDoc extends BaseDoc {
   yieldPercent: number; // e.g. 85 for 85% yield after trimming
   baseUnit: 'g' | 'ml' | 'piece'; // Normalized unit
   costPerBaseUnit: number; // Automatic cost per g / ml / piece
+  costMethod?: 'latest' | 'average'; // 'latest' = current price, 'average' = avg of last 3 priceHistory
   priceHistory?: { date: string; price: number; yieldPercent: number }[];
 }
 
@@ -124,6 +133,7 @@ export interface ChannelDoc extends BaseDoc {
   type: OrderType;
   commissionPercent: number; // e.g. 30% for delivery platforms
   packagingCost: number; // default packaging cost for channel
+  priceMarkupPercent?: number; // e.g. 15 for 15% price markup on channel (default 0)
 }
 
 export interface TableDoc extends BaseDoc {
@@ -156,10 +166,12 @@ export interface OrderItem {
   dishName: string;
   variantId: string;
   variantName: string;
-  unitPrice: number; // Snapshot of variant price + options
+  unitPrice: number; // Snapshot of variant price (with channel markup if applicable) + options
   dishCostSnapshot: number; // Snapshot of dish cost
   optionsCostSnapshot: number; // Snapshot of options cost
-  totalUnitCostSnapshot: number; // Dish cost + options cost snapshot
+  foodCostSnapshot?: number; // Snapshot of Food COGS only (ingredients + sub-recipes + options)
+  packagingCostSnapshot?: number; // Snapshot of packaging only (variant packaging for takeaway/delivery)
+  totalUnitCostSnapshot: number; // Food cost + packaging cost snapshot (backward compatibility)
   quantity: number;
   notes?: string;
   options: OrderItemOption[];

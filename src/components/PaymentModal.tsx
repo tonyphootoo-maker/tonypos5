@@ -6,6 +6,7 @@ import {
   PaymentMethod,
   PaymentSplit,
   MemberDoc,
+  ChannelDoc,
 } from '../types';
 import { translations } from '../i18n/translations';
 import {
@@ -13,6 +14,7 @@ import {
   roundTo2,
   calculateChangeDue,
   calculatePointsEarned,
+  calculateBillFinancials,
 } from '../engine/calculations';
 import { getImageDoc, fetchCollection, payBillAtomic } from '../data/db';
 import {
@@ -64,11 +66,14 @@ export const PaymentModal: React.FC<Props> = ({
   const [matchedMember, setMatchedMember] = useState<MemberDoc | null>(null);
   const [pointsToRedeem, setPointsToRedeem] = useState<number>(0);
 
+  // Channel reference for recalculating points discount if needed
+  const [billChannel, setBillChannel] = useState<ChannelDoc | undefined>(undefined);
+
   // Processing state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load QR Image & Members list
+  // Load QR Image, Members list, & Channel
   useEffect(() => {
     if (settings.qrImageId) {
       getImageDoc(settings.qrImageId).then((img) => {
@@ -79,7 +84,14 @@ export const PaymentModal: React.FC<Props> = ({
     fetchCollection<MemberDoc>('members')
       .then((mems) => setMembers(mems))
       .catch(() => {});
-  }, [settings.qrImageId]);
+
+    fetchCollection<ChannelDoc>('channels')
+      .then((chs) => {
+        const match = chs.find((c) => c.id === bill.channelId);
+        setBillChannel(match);
+      })
+      .catch(() => {});
+  }, [settings.qrImageId, bill.channelId]);
 
   // Member phone search
   useEffect(() => {
@@ -93,9 +105,41 @@ export const PaymentModal: React.FC<Props> = ({
     if (!found) setPointsToRedeem(0);
   }, [memberPhone, members]);
 
-  // Points discount calculation
+  // Points discount calculation (recalculate via centralized engine if redeemed)
   const pointsDiscountValue = roundTo2(pointsToRedeem * (settings.pointsRedeemValueThb || 1));
-  const effectiveGrandTotal = Math.max(0, roundTo2(bill.grandTotal - pointsDiscountValue));
+  const recalculatedFinancials =
+    pointsDiscountValue > 0
+      ? calculateBillFinancials(
+          bill.items,
+          bill.discountAmount + pointsDiscountValue,
+          bill.serviceChargeRate,
+          bill.vatRate,
+          billChannel || {
+            id: bill.channelId,
+            name: bill.channelName,
+            type: bill.orderType,
+            commissionPercent: 0,
+            packagingCost: bill.packagingCost,
+            createdAt: '',
+            updatedAt: '',
+            version: 1,
+          },
+          {
+            pricesIncludeVat: settings.pricesIncludeVat,
+            serviceChargeIncludedInPrice: settings.serviceChargeIncludedInPrice,
+            serviceChargeTreatment: settings.serviceChargeTreatment,
+            commissionBase: settings.commissionBase,
+            commissionVatAsCost: settings.commissionVatAsCost,
+          }
+        )
+      : null;
+
+  const effectiveGrandTotal = recalculatedFinancials
+    ? recalculatedFinancials.grandTotal
+    : bill.grandTotal;
+  const effectiveNetSales = recalculatedFinancials
+    ? recalculatedFinancials.netSales
+    : bill.netSales;
 
   // Update payment amounts when total changes
   useEffect(() => {
@@ -115,7 +159,7 @@ export const PaymentModal: React.FC<Props> = ({
       : 0;
 
   // Points earned
-  const estimatedPointsEarned = calculatePointsEarned(bill.netSales, settings.pointsEarnUnitThb);
+  const estimatedPointsEarned = calculatePointsEarned(effectiveNetSales, settings.pointsEarnUnitThb);
 
   const handleSelectSingleMethod = (method: PaymentMethod) => {
     setActiveMethod(method);
@@ -164,9 +208,20 @@ export const PaymentModal: React.FC<Props> = ({
 
       const updatedBill: BillDoc = {
         ...bill,
-        discountAmount: roundTo2(bill.discountAmount + pointsDiscountValue),
+        discountAmount: recalculatedFinancials
+          ? recalculatedFinancials.discountAmount
+          : bill.discountAmount,
+        serviceChargeAmount: recalculatedFinancials
+          ? recalculatedFinancials.serviceChargeAmount
+          : bill.serviceChargeAmount,
+        vatAmount: recalculatedFinancials
+          ? recalculatedFinancials.vatAmount
+          : bill.vatAmount,
         grandTotal: effectiveGrandTotal,
-        netSales: roundTo2(Math.max(0, bill.netSales - pointsDiscountValue)),
+        netSales: effectiveNetSales,
+        platformFee: recalculatedFinancials
+          ? recalculatedFinancials.platformFee
+          : bill.platformFee,
         memberId: matchedMember?.id || null,
         memberName: matchedMember?.name || undefined,
         pointsEarned: matchedMember ? estimatedPointsEarned : 0,

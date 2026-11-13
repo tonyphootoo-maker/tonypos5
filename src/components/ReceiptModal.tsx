@@ -189,13 +189,18 @@ export const ReceiptModal: React.FC<Props> = ({
               )}
               {bill.serviceChargeAmount > 0 && (
                 <div className="flex justify-between">
-                  <span>Service Charge ({bill.serviceChargeRate}%):</span>
+                  <span>
+                    Service Charge ({bill.serviceChargeRate}%
+                    {settings.pricesIncludeVat && settings.serviceChargeIncludedInPrice ? ', Incl.' : ''}):
+                  </span>
                   <span>{formatMoney(bill.serviceChargeAmount)}</span>
                 </div>
               )}
               {bill.vatAmount > 0 && (
                 <div className="flex justify-between">
-                  <span>VAT ({bill.vatRate}%):</span>
+                  <span>
+                    VAT ({bill.vatRate}%{settings.pricesIncludeVat ? ', Incl.' : ''}):
+                  </span>
                   <span>{formatMoney(bill.vatAmount)}</span>
                 </div>
               )}

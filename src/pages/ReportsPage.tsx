@@ -10,23 +10,22 @@ import { translations } from '../i18n/translations';
 import {
   formatMoney,
   formatPercent,
-  roundTo2,
-  calculateEmployeeMonthlyCost,
   getBusinessWorkDate,
+  getMonthDateRange,
+  calculatePeriodExpensesAndLabor,
+  calculateUsaliPnl,
+  BenchmarkStatus,
 } from '../engine/calculations';
 import { fetchDailySummariesInRange, fetchCollection } from '../data/db';
 import {
   BarChart3,
-  Calendar,
   Printer,
   Download,
   TrendingUp,
-  Percent,
   CircleDollarSign,
-  PieChart,
-  ShoppingBag,
   Award,
   AlertTriangle,
+  Flame,
 } from 'lucide-react';
 
 interface Props {
@@ -57,8 +56,9 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
     let endDate = selectedDate;
 
     if (period === 'month') {
-      startDate = `${selectedMonth}-01`;
-      endDate = `${selectedMonth}-31`;
+      const range = getMonthDateRange(selectedMonth);
+      startDate = range.startDate;
+      endDate = range.endDate;
     } else if (period === 'year') {
       startDate = `${selectedYear}-01-01`;
       endDate = `${selectedYear}-12-31`;
@@ -84,35 +84,18 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
     loadReportData();
   }, [period, selectedDate, selectedMonth, selectedYear]);
 
-  // Aggregate values across fetched daily summaries
-  let totalNetSales = 0;
-  let totalGrossSales = 0;
-  let totalDiscounts = 0;
-  let totalFoodCost = 0;
-  let totalPlatformFees = 0;
-  let totalPackagingCost = 0;
-  let totalOrdersCount = 0;
+  // Aggregate payment/channel/dish breakdown across fetched daily summaries
   const paymentMethodTotals: Record<string, number> = { cash: 0, qr: 0, card: 0, transfer: 0 };
   const channelSales: Record<string, { orderCount: number; netSales: number }> = {};
   const dishAggregates: Record<string, { name: string; quantity: number; revenue: number; cost: number }> = {};
 
   for (const s of summaries) {
-    totalNetSales += s.netSales || 0;
-    totalGrossSales += s.grossSales || 0;
-    totalDiscounts += s.discounts || 0;
-    totalFoodCost += s.totalFoodCost || 0;
-    totalPlatformFees += s.platformFees || 0;
-    totalPackagingCost += s.packagingCost || 0;
-    totalOrdersCount += s.orderCount || 0;
-
-    // Payment totals
     if (s.paymentTotals) {
       for (const [m, amt] of Object.entries(s.paymentTotals)) {
         paymentMethodTotals[m] = (paymentMethodTotals[m] || 0) + amt;
       }
     }
 
-    // Channel totals
     if (s.channelTotals) {
       for (const [ch, stat] of Object.entries(s.channelTotals)) {
         if (!channelSales[ch]) channelSales[ch] = { orderCount: 0, netSales: 0 };
@@ -121,7 +104,6 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
       }
     }
 
-    // Dish Stats
     if (s.dishStats) {
       for (const [id, dStat] of Object.entries(s.dishStats)) {
         if (!dishAggregates[id]) {
@@ -134,34 +116,27 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
     }
   }
 
-  // Calculate expenses & labor proportionate to period
-  const monthlyFixedExpenses = expenses
-    .filter((e) => e.isFixed || e.isRecurring)
-    .reduce((sum, e) => sum + e.amount, 0);
-
-  const monthlyLabor = employees.reduce(
-    (sum, emp) => sum + calculateEmployeeMonthlyCost(emp),
-    0
+  // Centralized date-filtered expense & labor allocation + USALI P&L
+  const dateParam = period === 'day' ? selectedDate : period === 'month' ? selectedMonth : selectedYear;
+  const allocatedPeriodCosts = calculatePeriodExpensesAndLabor(
+    period,
+    dateParam,
+    expenses,
+    employees,
+    summaries
   );
 
-  let allocatedExpenses = monthlyFixedExpenses;
-  let allocatedLabor = monthlyLabor;
+  const pnl = calculateUsaliPnl(
+    summaries,
+    allocatedPeriodCosts,
+    settings.serviceChargeTreatment || 'staff_pool'
+  );
 
-  if (period === 'day') {
-    allocatedExpenses = roundTo2(monthlyFixedExpenses / 30);
-    allocatedLabor = roundTo2(monthlyLabor / 30);
-  } else if (period === 'year') {
-    allocatedExpenses = roundTo2(monthlyFixedExpenses * 12);
-    allocatedLabor = roundTo2(monthlyLabor * 12);
-  }
-
-  // Financial calculations
-  const grossProfit = roundTo2(totalNetSales - totalFoodCost - totalPlatformFees - totalPackagingCost);
-  const netOperatingProfit = roundTo2(grossProfit - allocatedExpenses - allocatedLabor);
-  const foodCostPercent = totalNetSales > 0 ? (totalFoodCost / totalNetSales) * 100 : 0;
-  const grossProfitMargin = totalNetSales > 0 ? (grossProfit / totalNetSales) * 100 : 0;
-  const netProfitMargin = totalNetSales > 0 ? (netOperatingProfit / totalNetSales) * 100 : 0;
-  const avgOrderValue = totalOrdersCount > 0 ? roundTo2(totalNetSales / totalOrdersCount) : 0;
+  const getBadgeStyle = (status: BenchmarkStatus) => {
+    if (status === 'good') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    if (status === 'warning') return 'bg-amber-100 text-amber-800 border-amber-200';
+    return 'bg-rose-100 text-rose-800 border-rose-200';
+  };
 
   // Best sellers list (sorted by quantity)
   const bestSellers = Object.values(dishAggregates).sort((a, b) => b.quantity - a.quantity).slice(0, 5);
@@ -184,25 +159,34 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
   const handleExportCsv = () => {
     const rows = [
       ['Metric', 'Amount (THB)'],
-      ['Net Sales', totalNetSales.toFixed(2)],
-      ['Discounts', totalDiscounts.toFixed(2)],
-      ['Food Cost', totalFoodCost.toFixed(2)],
-      ['Food Cost %', `${foodCostPercent.toFixed(1)}%`],
-      ['Platform Commissions', totalPlatformFees.toFixed(2)],
-      ['Packaging Cost', totalPackagingCost.toFixed(2)],
-      ['Gross Profit', grossProfit.toFixed(2)],
-      ['Allocated Expenses', allocatedExpenses.toFixed(2)],
-      ['Allocated Labor', allocatedLabor.toFixed(2)],
-      ['Net Operating Profit', netOperatingProfit.toFixed(2)],
-      ['Total Orders', totalOrdersCount.toString()],
-      ['Average Order Value', avgOrderValue.toFixed(2)],
+      ['Net Sales Revenue', pnl.netSales.toFixed(2)],
+      ...(settings.serviceChargeTreatment === 'retained'
+        ? [['Other Revenue (Retained Service Charge)', pnl.retainedServiceCharge.toFixed(2)]]
+        : []),
+      ['Total P&L Revenue', pnl.totalRevenue.toFixed(2)],
+      ['Discounts', pnl.discounts.toFixed(2)],
+      ['Food COGS', pnl.totalFoodCost.toFixed(2)],
+      ['Theoretical Food Cost %', `${pnl.theoreticalFoodCostPercent.toFixed(1)}%`],
+      ['Gross Profit', pnl.grossProfit.toFixed(2)],
+      ['Gross Profit Margin %', `${pnl.grossProfitMarginPercent.toFixed(1)}%`],
+      ['Packaging Cost', pnl.packagingCost.toFixed(2)],
+      ['Platform Commissions', pnl.platformFees.toFixed(2)],
+      ['Labor Cost', pnl.laborCost.toFixed(2)],
+      ['Labor %', `${pnl.laborPercent.toFixed(1)}%`],
+      ['Operating Expenses (Fixed + Variable)', pnl.operatingExpenses.toFixed(2)],
+      ['Prime Cost (Food COGS + Labor)', pnl.primeCost.toFixed(2)],
+      ['Prime Cost %', `${pnl.primeCostPercent.toFixed(1)}%`],
+      ['Net Operating Profit (NOP)', pnl.netOperatingProfit.toFixed(2)],
+      ['Net Profit Margin %', `${pnl.netProfitMarginPercent.toFixed(1)}%`],
+      ['Total Orders', pnl.orderCount.toString()],
+      ['Average Order Value', pnl.avgOrderValue.toFixed(2)],
     ];
 
     const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `P_and_L_Report_${period}_${selectedDate}.csv`);
+    link.setAttribute('download', `USALI_PNL_${period}_${dateParam}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -218,7 +202,8 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
             <span>{t.reports.title}</span>
           </h2>
           <p className="text-xs text-neutral-500">
-            Read directly from daily summaries, expenses and labor. High performance, zero bills scanning.
+            USALI-standard P&amp;L from daily summaries, date-filtered expenses &amp; labor ({pnl.daysInPeriod} days
+            {period === 'year' ? ` • ${pnl.coveredMonths} mo` : ''}).
           </p>
         </div>
 
@@ -313,77 +298,153 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs">
           <div className="text-[11px] font-bold text-neutral-500">{t.reports.netSales}</div>
-          <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(totalNetSales)}</div>
-          <div className="text-[10px] text-neutral-400 mt-0.5">{totalOrdersCount} orders (avg ฿{formatMoney(avgOrderValue)})</div>
+          <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(pnl.netSales)}</div>
+          <div className="text-[10px] text-neutral-400 mt-0.5">
+            {pnl.orderCount} orders (avg ฿{formatMoney(pnl.avgOrderValue)})
+          </div>
         </div>
 
         <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs">
           <div className="text-[11px] font-bold text-neutral-500">{t.reports.foodCost}</div>
-          <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(totalFoodCost)}</div>
-          <div className={`text-[11px] font-extrabold mt-0.5 ${foodCostPercent > settings.targetFoodCostPercent ? 'text-rose-600' : 'text-emerald-700'}`}>
-            {formatPercent(foodCostPercent)} of Net Sales
+          <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(pnl.totalFoodCost)}</div>
+          <div
+            className={`text-[11px] font-extrabold mt-0.5 ${
+              pnl.theoreticalFoodCostPercent > settings.targetFoodCostPercent ? 'text-rose-600' : 'text-emerald-700'
+            }`}
+          >
+            {formatPercent(pnl.theoreticalFoodCostPercent)} ({t.reports.foodCostPct})
           </div>
         </div>
 
         <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs">
           <div className="text-[11px] font-bold text-neutral-500">{t.reports.grossProfit}</div>
-          <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(grossProfit)}</div>
+          <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(pnl.grossProfit)}</div>
           <div className="text-[11px] font-bold text-neutral-600 mt-0.5">
-            Margin: {formatPercent(grossProfitMargin)}
+            {t.reports.grossProfitMargin}: {formatPercent(pnl.grossProfitMarginPercent)}
           </div>
         </div>
 
-        <div className={`p-4 rounded-2xl border shadow-xs ${netOperatingProfit >= 0 ? 'bg-emerald-50/50 border-emerald-300' : 'bg-rose-50/50 border-rose-300'}`}>
+        <div
+          className={`p-4 rounded-2xl border shadow-xs ${
+            pnl.netOperatingProfit >= 0 ? 'bg-emerald-50/50 border-emerald-300' : 'bg-rose-50/50 border-rose-300'
+          }`}
+        >
           <div className="text-[11px] font-bold text-neutral-600">{t.reports.netOperatingProfit}</div>
-          <div className={`text-xl font-black mt-1 ${netOperatingProfit >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
-            ฿{formatMoney(netOperatingProfit)}
+          <div className={`text-xl font-black mt-1 ${pnl.netOperatingProfit >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
+            ฿{formatMoney(pnl.netOperatingProfit)}
           </div>
           <div className="text-[11px] font-bold text-neutral-600 mt-0.5">
-            Net Margin: {formatPercent(netProfitMargin)}
+            {t.reports.netProfitMargin}: {formatPercent(pnl.netProfitMarginPercent)}
           </div>
         </div>
       </div>
 
-      {/* P&L Statement Card */}
+      {/* Prime Cost & Labor KPI Card */}
+      <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+        <div>
+          <div className="text-xs font-black text-neutral-800 flex items-center gap-1.5">
+            <Flame className="w-4 h-4 text-orange-600" />
+            <span>{t.reports.primeCost}</span>
+          </div>
+          <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(pnl.primeCost)}</div>
+          <div className="text-[11px] text-neutral-500">
+            Food ฿{formatMoney(pnl.totalFoodCost)} + Labor ฿{formatMoney(pnl.laborCost)}
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-neutral-50 border border-neutral-200 flex items-center justify-between">
+          <div>
+            <div className="text-[11px] font-bold text-neutral-500">{t.reports.primeCostPct}</div>
+            <div className="text-lg font-black text-neutral-900">{formatPercent(pnl.primeCostPercent)}</div>
+          </div>
+          <span className={`text-[10px] font-extrabold px-2 py-1 rounded-lg border ${getBadgeStyle(pnl.primeCostStatus)}`}>
+            {pnl.primeCostStatus === 'good'
+              ? t.reports.primeCostStatusGood
+              : pnl.primeCostStatus === 'warning'
+              ? t.reports.primeCostStatusWarning
+              : t.reports.primeCostStatusDanger}
+          </span>
+        </div>
+
+        <div className="p-3 rounded-xl bg-neutral-50 border border-neutral-200 flex items-center justify-between">
+          <div>
+            <div className="text-[11px] font-bold text-neutral-500">{t.reports.laborPct}</div>
+            <div className="text-lg font-black text-neutral-900">{formatPercent(pnl.laborPercent)}</div>
+          </div>
+          <span className={`text-[10px] font-extrabold px-2 py-1 rounded-lg border ${getBadgeStyle(pnl.laborStatus)}`}>
+            {pnl.laborStatus === 'good' ? 'Target ≤ 30%' : pnl.laborStatus === 'warning' ? '30% - 35%' : '> 35%'}
+          </span>
+        </div>
+      </div>
+
+      {/* USALI P&L Statement Card */}
       <div className="p-5 bg-white rounded-3xl border border-neutral-200 shadow-xs space-y-3">
-        <h3 className="font-black text-base text-neutral-900 flex items-center gap-2">
-          <CircleDollarSign className="w-5 h-5 text-emerald-600" />
-          <span>{t.reports.pnlStatement}</span>
-        </h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-black text-base text-neutral-900 flex items-center gap-2">
+            <CircleDollarSign className="w-5 h-5 text-emerald-600" />
+            <span>{t.reports.pnlStatement}</span>
+          </h3>
+          {isLoading && <span className="text-xs text-neutral-400">{t.common.loading}</span>}
+        </div>
 
         <div className="divide-y divide-neutral-100 text-xs font-semibold">
           <div className="py-2 flex justify-between text-neutral-800">
             <span>{t.reports.netSales}</span>
-            <span className="font-bold">฿{formatMoney(totalNetSales)}</span>
+            <span className="font-bold">฿{formatMoney(pnl.netSales)}</span>
           </div>
+
+          {settings.serviceChargeTreatment === 'retained' ? (
+            <div className="py-2 flex justify-between text-emerald-700 pl-3">
+              <span>+ Other Revenue (Retained Service Charge)</span>
+              <span>+฿{formatMoney(pnl.retainedServiceCharge)}</span>
+            </div>
+          ) : pnl.serviceChargeCollected > 0 ? (
+            <div className="py-1.5 flex justify-between text-neutral-400 pl-3 text-[11px]">
+              <span>Service Charge Collected (Pass-through / Staff Pool, excluded)</span>
+              <span>฿{formatMoney(pnl.serviceChargeCollected)}</span>
+            </div>
+          ) : null}
+
           <div className="py-2 flex justify-between text-neutral-600 pl-3">
-            <span>- {t.reports.foodCost}</span>
-            <span>-฿{formatMoney(totalFoodCost)}</span>
+            <span>
+              - {t.reports.foodCost} ({formatPercent(pnl.theoreticalFoodCostPercent)})
+            </span>
+            <span>-฿{formatMoney(pnl.totalFoodCost)}</span>
+          </div>
+
+          <div className="py-2 flex justify-between font-bold text-neutral-900 bg-neutral-50 px-2 rounded-lg">
+            <span>
+              = {t.reports.grossProfit} ({formatPercent(pnl.grossProfitMarginPercent)})
+            </span>
+            <span>฿{formatMoney(pnl.grossProfit)}</span>
+          </div>
+
+          <div className="py-2 flex justify-between text-neutral-600 pl-3">
+            <span>- {t.reports.packagingCost}</span>
+            <span>-฿{formatMoney(pnl.packagingCost)}</span>
           </div>
           <div className="py-2 flex justify-between text-neutral-600 pl-3">
             <span>- {t.reports.platformFees}</span>
-            <span>-฿{formatMoney(totalPlatformFees)}</span>
+            <span>-฿{formatMoney(pnl.platformFees)}</span>
           </div>
           <div className="py-2 flex justify-between text-neutral-600 pl-3">
-            <span>- {t.reports.packagingCost}</span>
-            <span>-฿{formatMoney(totalPackagingCost)}</span>
-          </div>
-          <div className="py-2 flex justify-between font-bold text-neutral-900 bg-neutral-50 px-2 rounded-lg">
-            <span>= {t.reports.grossProfit}</span>
-            <span>฿{formatMoney(grossProfit)}</span>
+            <span>
+              - {t.reports.laborCost} ({formatPercent(pnl.laborPercent)})
+            </span>
+            <span>-฿{formatMoney(pnl.laborCost)}</span>
           </div>
           <div className="py-2 flex justify-between text-neutral-600 pl-3">
-            <span>- {t.reports.operatingExpenses}</span>
-            <span>-฿{formatMoney(allocatedExpenses)}</span>
-          </div>
-          <div className="py-2 flex justify-between text-neutral-600 pl-3">
-            <span>- {t.reports.laborCost}</span>
-            <span>-฿{formatMoney(allocatedLabor)}</span>
+            <span>
+              - {t.reports.operatingExpenses} (Fixed ฿{formatMoney(pnl.fixedExpenses)} + Var ฿{formatMoney(pnl.variableExpenses)})
+            </span>
+            <span>-฿{formatMoney(pnl.operatingExpenses)}</span>
           </div>
           <div className="py-2.5 flex justify-between font-black text-sm text-neutral-900 bg-orange-50 px-2 rounded-lg">
-            <span>= {t.reports.netOperatingProfit}</span>
-            <span className={netOperatingProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
-              ฿{formatMoney(netOperatingProfit)}
+            <span>
+              = {t.reports.netOperatingProfit} ({formatPercent(pnl.netProfitMarginPercent)})
+            </span>
+            <span className={pnl.netOperatingProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+              ฿{formatMoney(pnl.netOperatingProfit)}
             </span>
           </div>
         </div>

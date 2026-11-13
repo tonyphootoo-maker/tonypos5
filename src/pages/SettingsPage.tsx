@@ -22,6 +22,9 @@ import {
   RefreshCw,
   Save,
   ShieldCheck,
+  BookOpen,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface Props {
@@ -38,6 +41,7 @@ export const SettingsPage: React.FC<Props> = ({
   const t = translations[lang];
 
   const [form, setForm] = useState<SettingsDoc>({ ...settings });
+  const [showFormulaGuide, setShowFormulaGuide] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -315,19 +319,159 @@ export const SettingsPage: React.FC<Props> = ({
           </div>
 
           {/* Daily closing time */}
-          <div>
-            <label className="block text-xs font-bold text-neutral-700 mb-1 flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-orange-600" />
-              <span>{t.settings.dailyClosingTime}</span>
-            </label>
-            <input
-              type="time"
-              required
-              value={form.dailyClosingTime || '04:00'}
-              onChange={(e) => setForm({ ...form, dailyClosingTime: e.target.value })}
-              className="px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
-            />
-            <p className="text-[11px] text-neutral-400 mt-1">{t.settings.dailyClosingTimeNote}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-neutral-100">
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-orange-600" />
+                <span>{t.settings.dailyClosingTime}</span>
+              </label>
+              <input
+                type="time"
+                required
+                value={form.dailyClosingTime || '04:00'}
+                onChange={(e) => setForm({ ...form, dailyClosingTime: e.target.value })}
+                className="px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
+              />
+              <p className="text-[11px] text-neutral-400 mt-1">{t.settings.dailyClosingTimeNote}</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-700 mb-1">
+                {t.settings.operatingDaysPerMonth}
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={form.operatingDaysPerMonth ?? 30}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    operatingDaysPerMonth: Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 30)),
+                  })
+                }
+                className="w-32 px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
+              />
+            </div>
+          </div>
+
+          {/* USALI Accounting Controls */}
+          <div className="pt-3 border-t border-neutral-200 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Prices Include VAT */}
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.pricesIncludeVat)}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        pricesIncludeVat: e.target.checked,
+                        serviceChargeIncludedInPrice: e.target.checked
+                          ? Boolean(form.serviceChargeIncludedInPrice)
+                          : false,
+                      })
+                    }
+                    className="mt-0.5 w-4 h-4 accent-orange-600 rounded"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-neutral-900 block">
+                      {t.settings.pricesIncludeVat}
+                    </span>
+                    <span className="text-[11px] text-neutral-500 block mt-0.5">
+                      {t.settings.pricesIncludeVatDesc}
+                    </span>
+                  </div>
+                </label>
+
+                {form.pricesIncludeVat && (
+                  <label className="flex items-center gap-2 pl-6 pt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.serviceChargeIncludedInPrice)}
+                      onChange={(e) =>
+                        setForm({ ...form, serviceChargeIncludedInPrice: e.target.checked })
+                      }
+                      className="w-4 h-4 accent-orange-600 rounded"
+                    />
+                    <span className="text-xs font-semibold text-neutral-800">
+                      {t.settings.serviceChargeIncludedInPrice}
+                    </span>
+                  </label>
+                )}
+              </div>
+
+              {/* Commission VAT as Cost */}
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.commissionVatAsCost)}
+                    onChange={(e) =>
+                      setForm({ ...form, commissionVatAsCost: e.target.checked })
+                    }
+                    className="mt-0.5 w-4 h-4 accent-orange-600 rounded"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-neutral-900 block">
+                      {t.settings.commissionVatAsCost}
+                    </span>
+                    <span className="text-[11px] text-neutral-500 block mt-0.5">
+                      {t.settings.commissionVatAsCostDesc}
+                    </span>
+                  </div>
+                </label>
+
+                <div className="pl-6 text-[11px] text-neutral-600">
+                  <span className="font-bold">{t.settings.commissionBase}: </span>
+                  <span>{t.settings.commissionBaseNetFood}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Service Charge Treatment */}
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  {t.settings.serviceChargeTreatment}
+                </label>
+                <select
+                  value={form.serviceChargeTreatment || 'staff_pool'}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      serviceChargeTreatment: e.target.value as 'staff_pool' | 'retained',
+                    })
+                  }
+                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-semibold"
+                >
+                  <option value="staff_pool">{t.settings.serviceChargeStaffPool}</option>
+                  <option value="retained">{t.settings.serviceChargeRetained}</option>
+                </select>
+              </div>
+
+              {/* Suggested Price Rounding */}
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  {t.settings.priceRounding}
+                </label>
+                <select
+                  value={form.priceRounding || 5}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      priceRounding: (parseInt(e.target.value, 10) as 1 | 5 | 10) || 5,
+                    })
+                  }
+                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-semibold"
+                >
+                  <option value={1}>{t.settings.priceRounding1}</option>
+                  <option value={5}>{t.settings.priceRounding5}</option>
+                  <option value={10}>{t.settings.priceRounding10}</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -476,6 +620,154 @@ export const SettingsPage: React.FC<Props> = ({
             <span>{isRebuilding ? 'Rebuilding...' : t.settings.rebuildSummariesBtn}</span>
           </button>
         </div>
+      </div>
+
+      {/* USALI Accounting & Costing Formula Guide */}
+      <div className="p-5 bg-white rounded-3xl border border-neutral-200 shadow-xs space-y-3">
+        <button
+          type="button"
+          onClick={() => setShowFormulaGuide(!showFormulaGuide)}
+          className="w-full flex items-center justify-between text-left cursor-pointer"
+        >
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-orange-600 shrink-0" />
+            <div>
+              <h3 className="font-extrabold text-sm text-neutral-900">
+                {t.settings.formulaGuideBtn}
+              </h3>
+              <p className="text-xs text-neutral-500">
+                {lang === 'th'
+                  ? 'คู่มืออธิบายสูตรและตัวอย่างตัวเลขจริงสำหรับตรวจสอบบัญชีด้วยตนเอง (USALI Standard)'
+                  : 'Complete reference of every costing & P&L formula with worked numeric examples'}
+              </p>
+            </div>
+          </div>
+          {showFormulaGuide ? (
+            <ChevronUp className="w-5 h-5 text-neutral-500 shrink-0" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-neutral-500 shrink-0" />
+          )}
+        </button>
+
+        {showFormulaGuide && (
+          <div className="pt-3 border-t border-neutral-200 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs select-text">
+            {/* 1. EP Cost & Cost Method */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-1.5">
+              <div className="font-black text-neutral-900">
+                {lang === 'th'
+                  ? '1. ต้นทุนวัตถุดิบที่ใช้ได้จริง (EP Cost & Cost Method)'
+                  : '1. Edible Portion (EP) Ingredient Cost'}
+              </div>
+              <div className="font-mono text-[11px] bg-white p-2 rounded-lg border border-neutral-200 text-neutral-800">
+                EP Cost = Purchase Price / (Qty × Unit Multiplier × Yield%)
+              </div>
+              <p className="text-[11px] text-neutral-600">
+                {lang === 'th'
+                  ? 'ตัวอย่าง: ซื้อเนื้อวัว 1 kg (1,000 g) ราคา 300 บาท, Yield 80% → ต้นทุนจริง = 300 ÷ (1,000 × 0.80) = 0.375 บาท/กรัม (โหมด Average จะเฉลี่ยจากประวัติราคาล่าสุด 3 ครั้ง)'
+                  : 'Example: Beef 1 kg (1,000 g) at ฿300 with 80% yield → 300 ÷ (1,000 × 0.80) = ฿0.375/g. Average mode averages the last 3 price history entries.'}
+              </p>
+            </div>
+
+            {/* 2. Food COGS vs Packaging & Suggested Price */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-1.5">
+              <div className="font-black text-neutral-900">
+                {lang === 'th'
+                  ? '2. แยกต้นทุนอาหารกับบรรจุภัณฑ์ & ราคาขายแนะนำ'
+                  : '2. Food COGS vs Packaging & Suggested Price'}
+              </div>
+              <div className="font-mono text-[11px] bg-white p-2 rounded-lg border border-neutral-200 text-neutral-800">
+                Net Price = Food Cost / (Target% / 100)
+                <br />
+                Menu Price = RoundUp(Net × (1 + VAT%), Step)
+              </div>
+              <p className="text-[11px] text-neutral-600">
+                {lang === 'th'
+                  ? 'ตัวอย่าง: Food COGS = 45 บาท, เป้าหมาย 30% → ราคาสุทธิแนะนำ = 45 ÷ 0.30 = 150 บาท ถ้ารวม VAT 7% = 160.50 → ปัดขึ้นทีละ 5 บาท = 165 บาท (บรรจุภัณฑ์ไม่รวมในทานที่ร้าน)'
+                  : 'Example: Food Cost = ฿45, Target 30% → Suggested Net = 45 ÷ 0.30 = ฿150. If VAT-inclusive (7%): 150 × 1.07 = ฿160.50 → Rounded UP to nearest 5 = ฿165.'}
+              </p>
+            </div>
+
+            {/* 3. Channel Markup & Platform Commission */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-1.5">
+              <div className="font-black text-neutral-900">
+                {lang === 'th'
+                  ? '3. ราคาตามช่องทางขาย และค่าคอมมิชชันแพลตฟอร์ม'
+                  : '3. Channel Markup & Platform Commission'}
+              </div>
+              <div className="font-mono text-[11px] bg-white p-2 rounded-lg border border-neutral-200 text-neutral-800">
+                Channel Price = Base Price × (1 + Markup%)
+                <br />
+                Commission = Net Food Sales × GP% (× 1.07 if Commission VAT)
+              </div>
+              <p className="text-[11px] text-neutral-600">
+                {lang === 'th'
+                  ? 'ตัวอย่าง: ราคาหน้าร้าน 100 บาท + Markup 20% = 120 บาท, ค่าคอม GP 30% ของยอดสุทธิ = 36 บาท (ถ้าคิด VAT 7% ของค่าคอมเป็นต้นทุน = 36 × 1.07 = 38.52 บาท)'
+                  : 'Example: Base ฿100 with 20% markup = ฿120. At 30% GP = ฿36 commission (or ฿36 × 1.07 = ฿38.52 if 7% VAT on commission is enabled).'}
+              </p>
+            </div>
+
+            {/* 4. Theoretical Food Cost % & Item CM */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-1.5">
+              <div className="font-black text-neutral-900">
+                {lang === 'th'
+                  ? '4. ต้นทุนอาหารตามทฤษฎี % และกำไรส่วนเกินต่อจาน (CM)'
+                  : '4. Theoretical Food Cost % & Item Contribution Margin'}
+              </div>
+              <div className="font-mono text-[11px] bg-white p-2 rounded-lg border border-neutral-200 text-neutral-800">
+                Food Cost % = (Food COGS / Net Sales) × 100
+                <br />
+                CM = Net Price - Food Cost - Packaging - Commission
+              </div>
+              <p className="text-[11px] text-neutral-600">
+                {lang === 'th'
+                  ? 'ตัวอย่าง: ขายสุทธิ 150 บาท, ต้นทุนอาหาร 45 บาท, กล่อง 5 บาท → Food Cost % = 30.0%, กำไรส่วนเกิน CM = 150 - 45 - 5 = 100 บาท (CM% = 66.7%)'
+                  : 'Example: Net Price ฿150, Food Cost ฿45, Packaging ฿5 → Food Cost % = 30.0%, Item CM = 150 - 45 - 5 = ฿100 (66.7%).'}
+              </p>
+            </div>
+
+            {/* 5. USALI Income Statement & Prime Cost */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-1.5">
+              <div className="font-black text-neutral-900">
+                {lang === 'th'
+                  ? '5. งบกำไรขาดทุน USALI และ Prime Cost %'
+                  : '5. USALI P&L & Prime Cost Benchmark'}
+              </div>
+              <div className="font-mono text-[11px] bg-white p-2 rounded-lg border border-neutral-200 text-neutral-800">
+                Gross Profit = Net Sales - Food COGS (+ Retained SC)
+                <br />
+                Prime Cost = Food COGS + Labor (Target ≤ 65%, Labor ≤ 30%)
+                <br />
+                NOP = Gross Profit - Packaging - GP - Labor - OpEx
+              </div>
+              <p className="text-[11px] text-neutral-600">
+                {lang === 'th'
+                  ? 'ตัวอย่าง: ยอดสุทธิ 300,000, Food COGS 90,000 (30%), ค่าแรง 75,000 (25%) → กำไรขั้นต้น 210,000 (70%), Prime Cost = 165,000 (55% อยู่ในเกณฑ์ดี), หักกล่อง/GP/ค่าเช่า = NOP'
+                  : 'Example: Net Sales ฿300,000, Food COGS ฿90,000 (30%), Labor ฿75,000 (25%) → Gross Profit ฿210,000 (70%), Prime Cost = ฿165,000 (55% Healthy).'}
+              </p>
+            </div>
+
+            {/* 6. Real-Data Break-Even & Period Allocation */}
+            <div className="p-3.5 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-1.5">
+              <div className="font-black text-neutral-900">
+                {lang === 'th'
+                  ? '6. จุดคุ้มทุนจากข้อมูลจริง 30 วัน & การปันส่วนรายวัน/ปี'
+                  : '6. 30-Day Break-Even & Period Cost Allocation'}
+              </div>
+              <div className="font-mono text-[11px] bg-white p-2 rounded-lg border border-neutral-200 text-neutral-800">
+                Var Cost % = (Food + Packaging + GP) / Net Sales (30d)
+                <br />
+                Monthly Break-Even = (Fixed OpEx + Labor) / (1 - Var%)
+                <br />
+                Daily Break-Even = Monthly Break-Even / Operating Days
+              </div>
+              <p className="text-[11px] text-neutral-600">
+                {lang === 'th'
+                  ? 'ตัวอย่าง: ต้นทุนผันแปร 30 วัน = 38% → CM% = 62%, ค่าเช่า+ค่าแรง = 124,000 → จุดคุ้มทุนเดือนละ 200,000 บาท (วันละ 200,000 ÷ 30 = 6,666.67 บาท) ค่าใช้จ่ายรายวันหารด้วยจำนวนวันจริงของเดือนนั้น'
+                  : 'Example: 30-day Variable Cost = 38% → CM = 62%. Fixed+Labor = ฿124,000 → Monthly Break-Even = 124,000 ÷ 0.62 = ฿200,000 (Daily ÷ 30 days = ฿6,666.67). Daily OpEx divides by real days in that month.'}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

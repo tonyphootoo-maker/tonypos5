@@ -17,10 +17,15 @@ import {
 import { translations } from '../i18n/translations';
 import {
   calculateIngredientCostPerBaseUnit,
+  calculateIngredientEffectiveCost,
   calculateSubRecipeCost,
   calculateDishVariantCost,
   calculateSuggestedPrice,
+  calculateSuggestedPricing,
   calculateFoodCostPercent,
+  calculateItemContributionMargin,
+  extractNetPriceFromMenuPrice,
+  isMissingCost,
   formatMoney,
   formatPercent,
   roundTo2,
@@ -153,11 +158,22 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     const qty = editingIngredient.purchaseQuantity || 1;
     const yieldPct = editingIngredient.yieldPercent || 100;
     const unit = editingIngredient.purchaseUnit || 'kg';
+    const costMethod = editingIngredient.costMethod || 'latest';
 
     const calc = calculateIngredientCostPerBaseUnit(price, qty, yieldPct, unit);
 
-    const updatedPriceHistory = editingIngredient.priceHistory || [];
-    if (!isNew && editingIngredient.purchasePrice) {
+    const existing = !isNew ? ingredients.find((i) => i.id === editingIngredient.id) : null;
+    let updatedPriceHistory = editingIngredient.priceHistory ? [...editingIngredient.priceHistory] : [];
+
+    if (isNew) {
+      updatedPriceHistory = [
+        {
+          date: new Date().toISOString().split('T')[0],
+          price,
+          yieldPercent: yieldPct,
+        },
+      ];
+    } else if (existing && (existing.purchasePrice !== price || existing.yieldPercent !== yieldPct)) {
       updatedPriceHistory.push({
         date: new Date().toISOString().split('T')[0],
         price,
@@ -175,6 +191,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
       yieldPercent: yieldPct,
       baseUnit: calc.baseUnit,
       costPerBaseUnit: calc.costPerBaseUnit,
+      costMethod,
       priceHistory: updatedPriceHistory,
       createdAt: editingIngredient.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -395,15 +412,30 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 const primaryVariant = dish.variants[0];
                 const costCalc = primaryVariant
                   ? calculateDishVariantCost(primaryVariant, ingredientsMap, subRecipesMap, packagingMap)
-                  : { totalCost: 0, hasRecipe: false, hasMissing: true };
+                  : { totalCost: 0, foodCost: 0, packagingCost: 0, ingredientsCost: 0, subRecipesCost: 0, hasRecipe: false, hasMissing: true };
 
-                const foodCostPct = primaryVariant
-                  ? calculateFoodCostPercent(costCalc.totalCost, primaryVariant.price)
+                const primaryNetPrice = primaryVariant
+                  ? extractNetPriceFromMenuPrice(
+                      primaryVariant.price,
+                      settings.pricesIncludeVat,
+                      settings.vatPercent,
+                      settings.serviceChargeIncludedInPrice,
+                      settings.serviceChargePercent
+                    )
                   : 0;
 
-                const suggestedPrice = calculateSuggestedPrice(
-                  costCalc.totalCost,
-                  settings.targetFoodCostPercent
+                const foodCostPct = primaryVariant
+                  ? calculateFoodCostPercent(costCalc.foodCost, primaryNetPrice)
+                  : 0;
+
+                const suggestedPricing = calculateSuggestedPricing(
+                  costCalc.foodCost || costCalc.totalCost,
+                  settings.targetFoodCostPercent,
+                  settings.pricesIncludeVat,
+                  settings.vatPercent,
+                  settings.serviceChargeIncludedInPrice,
+                  settings.serviceChargePercent,
+                  settings.priceRounding || 5
                 );
 
                 const isOverTarget = foodCostPct > settings.targetFoodCostPercent;
@@ -457,13 +489,27 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                           </div>
                         ) : (
                           <>
+                            {costCalc.hasMissing && (
+                              <div className="p-1 bg-rose-50 border border-rose-200 text-rose-700 rounded-md text-[10px] font-bold flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                                <span>{t.menuCost.missingCost}</span>
+                              </div>
+                            )}
+
                             <div className="flex justify-between">
-                              <span className="text-neutral-500">{t.common.cost}:</span>
-                              <span className="font-bold">฿{formatMoney(costCalc.totalCost)}</span>
+                              <span className="text-neutral-500">Food COGS:</span>
+                              <span className="font-bold text-neutral-900">฿{formatMoney(costCalc.foodCost)}</span>
                             </div>
 
+                            {costCalc.packagingCost > 0 && (
+                              <div className="flex justify-between text-[11px] text-neutral-500">
+                                <span>Packaging:</span>
+                                <span>฿{formatMoney(costCalc.packagingCost)}</span>
+                              </div>
+                            )}
+
                             <div className="flex justify-between items-center">
-                              <span className="text-neutral-500">{t.menuCost.currentFoodCostPct}:</span>
+                              <span className="text-neutral-500">{t.menuCost.theoreticalFoodCost}:</span>
                               <span
                                 className={`font-extrabold px-1.5 py-0.5 rounded-md text-[11px] ${
                                   isOverTarget
@@ -477,8 +523,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
                             {isOverTarget && (
                               <div className="flex justify-between text-[11px] text-orange-700 font-semibold pt-1 border-t border-neutral-200">
-                                <span>{t.menuCost.suggestedPrice}:</span>
-                                <span>฿{formatMoney(suggestedPrice)}</span>
+                                <span>{t.menuCost.suggestedMenuPrice}:</span>
+                                <span>฿{formatMoney(suggestedPricing.suggestedMenuPrice)}</span>
                               </div>
                             )}
                           </>
@@ -535,6 +581,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   purchasePrice: 100,
                   purchaseQuantity: 1,
                   yieldPercent: 100,
+                  costMethod: 'latest',
                 });
                 setIsIngredientModalOpen(true);
               }}
@@ -560,42 +607,59 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 <tbody className="divide-y divide-neutral-100 font-medium">
                   {ingredients
                     .filter((i) => i.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                    .map((ing) => (
-                      <tr key={ing.id} className="hover:bg-orange-50/30">
-                        <td className="p-3 font-bold text-neutral-900">
-                          {lang === 'th' && ing.nameTh ? ing.nameTh : ing.name}
-                        </td>
-                        <td className="p-3 text-neutral-700">
-                          ฿{formatMoney(ing.purchasePrice)} / {ing.purchaseQuantity} {ing.purchaseUnit}
-                        </td>
-                        <td className="p-3 text-neutral-700">{ing.yieldPercent}%</td>
-                        <td className="p-3 font-bold text-emerald-700">
-                          ฿{formatMoney(ing.costPerBaseUnit)} / {ing.baseUnit}
-                        </td>
-                        <td className="p-3 text-right">
-                          <button
-                            onClick={() => {
-                              setEditingIngredient(ing);
-                              setIsIngredientModalOpen(true);
-                            }}
-                            className="p-1.5 text-neutral-600 hover:text-orange-600 rounded-lg hover:bg-neutral-100 cursor-pointer mr-1"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={async () => {
-                              if (confirm(`Delete ${ing.name}?`)) {
-                                await deleteDocument('ingredients', ing.id);
-                                loadData();
-                              }
-                            }}
-                            className="p-1.5 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    .map((ing) => {
+                      const effectiveCost = calculateIngredientEffectiveCost(ing);
+                      const missing = isMissingCost(effectiveCost);
+                      return (
+                        <tr key={ing.id} className="hover:bg-orange-50/30">
+                          <td className="p-3 font-bold text-neutral-900">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{lang === 'th' && ing.nameTh ? ing.nameTh : ing.name}</span>
+                              {ing.costMethod === 'average' && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                                  Avg 3x
+                                </span>
+                              )}
+                              {missing && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 flex items-center gap-0.5">
+                                  <AlertTriangle className="w-2.5 h-2.5" />
+                                  {t.menuCost.missingCost}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 text-neutral-700">
+                            ฿{formatMoney(ing.purchasePrice)} / {ing.purchaseQuantity} {ing.purchaseUnit}
+                          </td>
+                          <td className="p-3 text-neutral-700">{ing.yieldPercent}%</td>
+                          <td className={`p-3 font-bold ${missing ? 'text-rose-600' : 'text-emerald-700'}`}>
+                            {missing ? '—' : `฿${formatMoney(effectiveCost)} / ${ing.baseUnit}`}
+                          </td>
+                          <td className="p-3 text-right">
+                            <button
+                              onClick={() => {
+                                setEditingIngredient(ing);
+                                setIsIngredientModalOpen(true);
+                              }}
+                              className="p-1.5 text-neutral-600 hover:text-orange-600 rounded-lg hover:bg-neutral-100 cursor-pointer mr-1"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (confirm(`Delete ${ing.name}?`)) {
+                                  await deleteDocument('ingredients', ing.id);
+                                  loadData();
+                                }
+                              }}
+                              className="p-1.5 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -637,9 +701,17 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   className="p-3.5 bg-white rounded-2xl border border-neutral-200 shadow-xs flex flex-col justify-between"
                 >
                   <div className="space-y-2">
-                    <h4 className="font-black text-sm text-neutral-900">
-                      {lang === 'th' && sub.nameTh ? sub.nameTh : sub.name}
-                    </h4>
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="font-black text-sm text-neutral-900">
+                        {lang === 'th' && sub.nameTh ? sub.nameTh : sub.name}
+                      </h4>
+                      {calc.hasMissing && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 flex items-center gap-0.5 shrink-0">
+                          <AlertTriangle className="w-3 h-3" />
+                          <span>{t.menuCost.missingCost}</span>
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-neutral-500">
                       Batch Output: {sub.outputQuantity} {sub.outputUnit}
                     </p>
@@ -707,19 +779,29 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            {packagings.map((pkg) => (
-              <div
-                key={pkg.id}
-                className="p-3.5 bg-white rounded-2xl border border-neutral-200 shadow-xs flex flex-col justify-between"
-              >
-                <div>
-                  <h4 className="font-black text-sm text-neutral-900">
-                    {lang === 'th' && pkg.nameTh ? pkg.nameTh : pkg.name}
-                  </h4>
-                  <div className="text-base font-black text-orange-600 mt-1">
-                    ฿{formatMoney(pkg.cost)} / {pkg.unit}
+            {packagings.map((pkg) => {
+              const missingPkgCost = isMissingCost(pkg.cost);
+              return (
+                <div
+                  key={pkg.id}
+                  className="p-3.5 bg-white rounded-2xl border border-neutral-200 shadow-xs flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="font-black text-sm text-neutral-900">
+                        {lang === 'th' && pkg.nameTh ? pkg.nameTh : pkg.name}
+                      </h4>
+                      {missingPkgCost && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 flex items-center gap-0.5 shrink-0">
+                          <AlertTriangle className="w-2.5 h-2.5" />
+                          <span>{t.menuCost.missingCost}</span>
+                        </span>
+                      )}
+                    </div>
+                    <div className={`text-base font-black mt-1 ${missingPkgCost ? 'text-rose-600' : 'text-orange-600'}`}>
+                      {missingPkgCost ? '—' : `฿${formatMoney(pkg.cost)} / ${pkg.unit}`}
+                    </div>
                   </div>
-                </div>
 
                 <div className="flex justify-end gap-1.5 mt-3 pt-2 border-t border-neutral-100">
                   <button
@@ -744,7 +826,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -850,12 +933,18 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
                   <div className="mt-2 space-y-1 text-xs text-neutral-600">
                     <div className="flex justify-between">
-                      <span>Commission / GP:</span>
+                      <span>{t.menuCost.commissionPercent}:</span>
                       <span className="font-bold text-neutral-900">{ch.commissionPercent}%</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Packaging Cost:</span>
+                      <span>{t.menuCost.defaultPackagingCost}:</span>
                       <span className="font-bold text-neutral-900">฿{formatMoney(ch.packagingCost)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>{t.menuCost.priceMarkupPercent}:</span>
+                      <span className="font-bold text-orange-600">
+                        {(ch.priceMarkupPercent || 0) > 0 ? `+${ch.priceMarkupPercent}%` : '0%'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1012,6 +1101,43 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   />
                 </div>
               </div>
+
+              {/* Costing Method (Latest vs Average of last 3) */}
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  {t.menuCost.costMethod}
+                </label>
+                <select
+                  value={editingIngredient.costMethod || 'latest'}
+                  onChange={(e) =>
+                    setEditingIngredient({
+                      ...editingIngredient,
+                      costMethod: e.target.value as 'latest' | 'average',
+                    })
+                  }
+                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-medium"
+                >
+                  <option value="latest">{t.menuCost.costMethodLatest}</option>
+                  <option value="average">{t.menuCost.costMethodAverage}</option>
+                </select>
+              </div>
+
+              {/* Price History Preview */}
+              {editingIngredient.priceHistory && editingIngredient.priceHistory.length > 0 && (
+                <div className="p-2.5 bg-neutral-50 rounded-xl border border-neutral-200">
+                  <div className="text-[11px] font-bold text-neutral-600 mb-1">
+                    {t.menuCost.priceHistory} ({editingIngredient.priceHistory.length})
+                  </div>
+                  <div className="max-h-24 overflow-y-auto space-y-1 text-[10px] text-neutral-500">
+                    {editingIngredient.priceHistory.slice(-5).reverse().map((h, i) => (
+                      <div key={i} className="flex justify-between py-0.5 border-b border-neutral-100 last:border-0">
+                        <span>{h.date}</span>
+                        <span>฿{formatMoney(h.price)} (Yield {h.yieldPercent}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
@@ -1178,8 +1304,24 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 {editingDish.variants?.[activeDishVariantIndex] && (() => {
                   const currVar = editingDish.variants[activeDishVariantIndex];
                   const varCost = calculateDishVariantCost(currVar, ingredientsMap, subRecipesMap, packagingMap);
-                  const varFoodCostPct = calculateFoodCostPercent(varCost.totalCost, currVar.price);
-                  const varSuggested = calculateSuggestedPrice(varCost.totalCost, settings.targetFoodCostPercent);
+                  const varNetPrice = extractNetPriceFromMenuPrice(
+                    currVar.price,
+                    settings.pricesIncludeVat,
+                    settings.vatPercent,
+                    settings.serviceChargeIncludedInPrice,
+                    settings.serviceChargePercent
+                  );
+                  const varFoodCostPct = calculateFoodCostPercent(varCost.foodCost, varNetPrice);
+                  const varPricing = calculateSuggestedPricing(
+                    varCost.foodCost || varCost.totalCost,
+                    settings.targetFoodCostPercent,
+                    settings.pricesIncludeVat,
+                    settings.vatPercent,
+                    settings.serviceChargeIncludedInPrice,
+                    settings.serviceChargePercent,
+                    settings.priceRounding || 5
+                  );
+                  const varCm = calculateItemContributionMargin(varNetPrice, varCost.foodCost, varCost.packagingCost, 0);
                   const isOver = varFoodCostPct > settings.targetFoodCostPercent;
 
                   return (
@@ -1221,20 +1363,46 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                       </div>
 
                       {/* Recipe Cost Metric Bar */}
-                      <div className="p-2.5 bg-white rounded-xl border border-neutral-200 flex items-center justify-between text-xs">
-                        <div>
-                          <span className="text-neutral-500">Food Cost: </span>
-                          <strong className="text-neutral-900">฿{formatMoney(varCost.totalCost)}</strong>
+                      <div className="p-2.5 bg-white rounded-xl border border-neutral-200 space-y-2 text-xs">
+                        {varCost.hasMissing && (
+                          <div className="p-1.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-bold flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                            <span>{t.menuCost.missingCost}</span>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <div className="p-1.5 bg-neutral-50 rounded-lg">
+                            <div className="text-[10px] text-neutral-500 font-bold">Food COGS</div>
+                            <div className="font-extrabold text-neutral-900 text-xs">฿{formatMoney(varCost.foodCost)}</div>
+                          </div>
+                          <div className="p-1.5 bg-neutral-50 rounded-lg">
+                            <div className="text-[10px] text-neutral-500 font-bold">Packaging</div>
+                            <div className="font-extrabold text-neutral-900 text-xs">฿{formatMoney(varCost.packagingCost)}</div>
+                          </div>
+                          <div className="p-1.5 bg-neutral-50 rounded-lg">
+                            <div className="text-[10px] text-neutral-500 font-bold">Food Cost %</div>
+                            <div className={`font-extrabold text-xs ${isOver ? 'text-rose-600' : 'text-emerald-700'}`}>
+                              {formatPercent(varFoodCostPct)}
+                            </div>
+                          </div>
+                          <div className="p-1.5 bg-neutral-50 rounded-lg">
+                            <div className="text-[10px] text-neutral-500 font-bold">CM %</div>
+                            <div className="font-extrabold text-neutral-900 text-xs">
+                              {formatPercent(varCm.contributionMarginPercent)} (฿{formatMoney(varCm.contributionMargin)})
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-neutral-500">Food Cost %: </span>
-                          <strong className={`px-1.5 py-0.5 rounded-md ${isOver ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-800'}`}>
-                            {formatPercent(varFoodCostPct)}
-                          </strong>
-                        </div>
-                        <div>
-                          <span className="text-neutral-500">Suggested: </span>
-                          <strong className="text-orange-600">฿{formatMoney(varSuggested)}</strong>
+
+                        <div className="flex flex-wrap items-center justify-between text-[11px] text-neutral-600 pt-1 border-t border-neutral-100">
+                          <div>
+                            <span>{t.menuCost.suggestedNetPrice}: </span>
+                            <strong className="text-neutral-800">฿{formatMoney(varPricing.suggestedNetPrice)}</strong>
+                          </div>
+                          <div>
+                            <span>{t.menuCost.suggestedMenuPrice}: </span>
+                            <strong className="text-orange-600">฿{formatMoney(varPricing.suggestedMenuPrice)}</strong>
+                          </div>
                         </div>
                       </div>
 
@@ -1261,10 +1429,17 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
                         {currVar.ingredients?.map((line, lIdx) => {
                           const ing = ingredientsMap.get(line.ingredientId);
-                          const lineCost = ing ? line.quantity * ing.costPerBaseUnit : 0;
+                          const effectiveCost = ing ? calculateIngredientEffectiveCost(ing) : 0;
+                          const lineMissing = !ing || isMissingCost(effectiveCost);
+                          const lineCost = lineMissing ? 0 : line.quantity * effectiveCost;
 
                           return (
-                            <div key={lIdx} className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-neutral-200 text-xs">
+                            <div
+                              key={lIdx}
+                              className={`flex items-center gap-2 p-1.5 rounded-lg border text-xs ${
+                                lineMissing ? 'bg-rose-50 border-rose-300' : 'bg-white border-neutral-200'
+                              }`}
+                            >
                               <select
                                 value={line.ingredientId}
                                 onChange={(e) => {
@@ -1274,11 +1449,14 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                                 }}
                                 className="flex-1 px-2 py-1 bg-neutral-50 border border-neutral-300 rounded text-xs"
                               >
-                                {ingredients.map((i) => (
-                                  <option key={i.id} value={i.id}>
-                                    {i.name} (฿{formatMoney(i.costPerBaseUnit)}/{i.baseUnit})
-                                  </option>
-                                ))}
+                                {ingredients.map((i) => {
+                                  const eff = calculateIngredientEffectiveCost(i);
+                                  return (
+                                    <option key={i.id} value={i.id}>
+                                      {i.name} ({isMissingCost(eff) ? 'Missing Cost' : `฿${formatMoney(eff)}/${i.baseUnit}`})
+                                    </option>
+                                  );
+                                })}
                               </select>
 
                               <input
@@ -1298,8 +1476,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                                 {ing?.baseUnit || 'unit'}
                               </span>
 
-                              <span className="w-14 text-right font-bold text-neutral-800">
-                                ฿{formatMoney(lineCost)}
+                              <span className={`w-16 text-right font-bold ${lineMissing ? 'text-rose-600' : 'text-neutral-800'}`}>
+                                {lineMissing ? 'Missing' : `฿${formatMoney(lineCost)}`}
                               </span>
 
                               <button
@@ -1385,6 +1563,89 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                                   onClick={() => {
                                     const updated = [...(editingDish.variants || [])];
                                     updated[activeDishVariantIndex].subRecipes.splice(sIdx, 1);
+                                    setEditingDish({ ...editingDish, variants: updated });
+                                  }}
+                                  className="text-neutral-400 hover:text-rose-600 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {/* Recipe Packaging List (Takeaway/Delivery only) */}
+                      {packagings.length > 0 && (
+                        <div className="space-y-1.5 pt-2">
+                          <div className="flex justify-between items-center text-[11px] font-bold text-neutral-700">
+                            <span>Packaging (Takeaway / Delivery)</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = [...(editingDish.variants || [])];
+                                const firstPkg = packagings[0]?.id || '';
+                                updated[activeDishVariantIndex].packaging = [
+                                  ...(updated[activeDishVariantIndex].packaging || []),
+                                  { packagingId: firstPkg, quantity: 1 },
+                                ];
+                                setEditingDish({ ...editingDish, variants: updated });
+                              }}
+                              className="text-orange-600 hover:text-orange-700 cursor-pointer"
+                            >
+                              {t.menuCost.addPackagingToRecipe}
+                            </button>
+                          </div>
+
+                          {currVar.packaging?.map((line, pIdx) => {
+                            const pkg = packagingMap.get(line.packagingId);
+                            const pkgMissing = !pkg || isMissingCost(pkg.cost);
+                            const lineCost = pkgMissing ? 0 : line.quantity * pkg.cost;
+
+                            return (
+                              <div
+                                key={pIdx}
+                                className={`flex items-center gap-2 p-1.5 rounded-lg border text-xs ${
+                                  pkgMissing ? 'bg-rose-50 border-rose-300' : 'bg-white border-neutral-200'
+                                }`}
+                              >
+                                <select
+                                  value={line.packagingId}
+                                  onChange={(e) => {
+                                    const updated = [...(editingDish.variants || [])];
+                                    updated[activeDishVariantIndex].packaging[pIdx].packagingId = e.target.value;
+                                    setEditingDish({ ...editingDish, variants: updated });
+                                  }}
+                                  className="flex-1 px-2 py-1 bg-neutral-50 border border-neutral-300 rounded text-xs"
+                                >
+                                  {packagings.map((p) => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name} ({isMissingCost(p.cost) ? 'Missing Cost' : `฿${formatMoney(p.cost)}/${p.unit}`})
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  value={line.quantity}
+                                  onChange={(e) => {
+                                    const updated = [...(editingDish.variants || [])];
+                                    updated[activeDishVariantIndex].packaging[pIdx].quantity = parseFloat(e.target.value) || 0;
+                                    setEditingDish({ ...editingDish, variants: updated });
+                                  }}
+                                  className="w-16 px-1.5 py-1 text-right bg-neutral-50 border border-neutral-300 rounded text-xs font-bold"
+                                />
+
+                                <span className={`w-16 text-right font-bold ${pkgMissing ? 'text-rose-600' : 'text-neutral-800'}`}>
+                                  {pkgMissing ? 'Missing' : `฿${formatMoney(lineCost)}`}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = [...(editingDish.variants || [])];
+                                    updated[activeDishVariantIndex].packaging.splice(pIdx, 1);
                                     setEditingDish({ ...editingDish, variants: updated });
                                   }}
                                   className="text-neutral-400 hover:text-rose-600 cursor-pointer"
@@ -1705,6 +1966,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 type: editingChannel.type || 'delivery',
                 commissionPercent: editingChannel.commissionPercent || 0,
                 packagingCost: editingChannel.packagingCost || 0,
+                priceMarkupPercent: editingChannel.priceMarkupPercent || 0,
                 createdAt: editingChannel.createdAt || new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
                 version: editingChannel.version || 1,
@@ -1773,6 +2035,24 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                     setEditingChannel({ ...editingChannel, packagingCost: parseFloat(e.target.value) || 0 })
                   }
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  {t.menuCost.priceMarkupPercent} (%)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={200}
+                  step={1}
+                  value={editingChannel.priceMarkupPercent || 0}
+                  onChange={(e) =>
+                    setEditingChannel({ ...editingChannel, priceMarkupPercent: parseFloat(e.target.value) || 0 })
+                  }
+                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                  placeholder="e.g. 15 for 15% price markup"
                 />
               </div>
             </div>
