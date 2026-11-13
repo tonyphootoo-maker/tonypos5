@@ -114,7 +114,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
     const expToSave: ExpenseDoc = {
       id: editingExpense.id || `exp_${Date.now()}`,
       title: editingExpense.title,
-      titleTh: editingExpense.titleTh || undefined,
+      ...(editingExpense.titleTh ? { titleTh: editingExpense.titleTh } : {}),
       category: editingExpense.category || 'other',
       amount: editingExpense.amount || 0,
       date: editingExpense.date || new Date().toISOString().split('T')[0],
@@ -146,7 +146,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
       wageType: editingEmployee.wageType || 'monthly',
       wageAmount: editingEmployee.wageAmount || 0,
       workDaysOrHoursPerMonth: editingEmployee.workDaysOrHoursPerMonth || 26,
-      phone: editingEmployee.phone || undefined,
+      ...(editingEmployee.phone ? { phone: editingEmployee.phone } : {}),
       isActive: editingEmployee.isActive ?? true,
       createdAt: editingEmployee.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),

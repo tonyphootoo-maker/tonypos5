@@ -223,6 +223,157 @@
         "count": { "type": "number" },
         "version": { "type": "number" }
       }
+    },
+    "CostSettings": {
+      "title": "CostSettings",
+      "description": "Costing module settings (target food cost %, delivery GP %, Q-Factor, operating days)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "restaurantName": { "type": "string" },
+        "targetFoodCostPercent": { "type": "number" },
+        "qFactorPercent": { "type": "number" },
+        "vatRatePercent": { "type": "number" },
+        "operatingDaysPerMonth": { "type": "number" }
+      }
+    },
+    "CostIngredient": {
+      "title": "CostIngredient",
+      "description": "Costing raw ingredient with AP/EP price and yield percentage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "purchaseUnit": { "type": "string" },
+        "purchasePrice": { "type": "number" },
+        "yieldPercent": { "type": "number" },
+        "costPerBaseUnit": { "type": "number" }
+      }
+    },
+    "CostSauce": {
+      "title": "CostSauce",
+      "description": "Batch sauce or intermediate broth recipe with total batch yield and cost per gram",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "yieldWeight": { "type": "number" },
+        "yieldUnit": { "type": "string" }
+      }
+    },
+    "CostMenu": {
+      "title": "CostMenu",
+      "description": "Costing menu item with serving variants, recipes, and channel pricing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "servingMode": { "type": "string" }
+      }
+    },
+    "CostDailySales": {
+      "title": "CostDailySales",
+      "description": "Daily sales summary imported from POS or manually entered for executive P&L",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "netSales": { "type": "number" },
+        "grossSales": { "type": "number" },
+        "totalOrders": { "type": "number" }
+      }
+    },
+    "CostExpense": {
+      "title": "CostExpense",
+      "description": "Detailed costing expense record including fixed overhead, installments, and depreciation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "amount": { "type": "number" }
+      }
+    },
+    "CostEmployee": {
+      "title": "CostEmployee",
+      "description": "Costing module employee record with department and compensation breakdown",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "department": { "type": "string" },
+        "baseSalary": { "type": "number" }
+      }
+    },
+    "CostInventory": {
+      "title": "CostInventory",
+      "description": "Costing module ingredient inventory stock levels",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ingredientId": { "type": "string" },
+        "ingredientName": { "type": "string" },
+        "currentStock": { "type": "number" },
+        "unit": { "type": "string" }
+      }
+    },
+    "CostPurchase": {
+      "title": "CostPurchase",
+      "description": "Purchase invoice record for costing ingredients",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "ingredientId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "totalPrice": { "type": "number" }
+      }
+    },
+    "CostWasteLog": {
+      "title": "CostWasteLog",
+      "description": "Ingredient spoilage and kitchen waste log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "ingredientId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "costLoss": { "type": "number" }
+      }
+    },
+    "CostSupplier": {
+      "title": "CostSupplier",
+      "description": "Ingredient supplier directory for purchasing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" }
+      }
+    },
+    "CostPriceHistory": {
+      "title": "CostPriceHistory",
+      "description": "Historical ingredient purchase price change log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ingredientId": { "type": "string" },
+        "date": { "type": "string" },
+        "newPrice": { "type": "number" }
+      }
+    },
+    "CostSaleOrder": {
+      "title": "CostSaleOrder",
+      "description": "Itemized sale order records for costing reports",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "total": { "type": "number" }
+      }
     }
   },
   "firestore": {
@@ -243,6 +394,19 @@
     "/users/{uid}/members/{memberId}": { "schema": "Member", "description": "Customer membership" },
     "/users/{uid}/images/{imageId}": { "schema": "ImageDoc", "description": "Compressed images" },
     "/users/{uid}/dailySummaries/{summaryDate}": { "schema": "DailySummary", "description": "Daily P&L aggregates" },
-    "/users/{uid}/counters/{counterId}": { "schema": "Counter", "description": "Atomic number counters" }
+    "/users/{uid}/counters/{counterId}": { "schema": "Counter", "description": "Atomic number counters" },
+    "/users/{uid}/costSettings/{settingsId}": { "schema": "CostSettings", "description": "Costing module settings" },
+    "/users/{uid}/costIngredients/{ingredientId}": { "schema": "CostIngredient", "description": "Costing raw ingredients" },
+    "/users/{uid}/costSauces/{sauceId}": { "schema": "CostSauce", "description": "Costing batch sauces" },
+    "/users/{uid}/costMenus/{menuId}": { "schema": "CostMenu", "description": "Costing menu items" },
+    "/users/{uid}/costDailySales/{salesId}": { "schema": "CostDailySales", "description": "Costing daily sales" },
+    "/users/{uid}/costExpenses/{expenseId}": { "schema": "CostExpense", "description": "Costing expenses" },
+    "/users/{uid}/costEmployees/{employeeId}": { "schema": "CostEmployee", "description": "Costing employees" },
+    "/users/{uid}/costInventory/{inventoryId}": { "schema": "CostInventory", "description": "Costing inventory items" },
+    "/users/{uid}/costPurchases/{purchaseId}": { "schema": "CostPurchase", "description": "Costing purchase records" },
+    "/users/{uid}/costWasteLog/{wasteId}": { "schema": "CostWasteLog", "description": "Costing waste logs" },
+    "/users/{uid}/costSuppliers/{supplierId}": { "schema": "CostSupplier", "description": "Costing suppliers" },
+    "/users/{uid}/costPriceHistory/{historyId}": { "schema": "CostPriceHistory", "description": "Costing price history" },
+    "/users/{uid}/costSalesOrders/{orderId}": { "schema": "CostSaleOrder", "description": "Costing sale orders" }
   }
 }

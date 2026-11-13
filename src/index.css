@@ -29,3 +29,289 @@
     color: black !important;
   }
 }
+
+/* ========================================================
+   SCOPED COSTING MODULE THEME (.tonycost-workspace)
+   Strictly scoped so KinPOS login, navigation, POS modals,
+   and thermal print styles remain untouched.
+   ======================================================== */
+.tonycost-workspace {
+  background-color: #FAF8F5;
+  color: #1C1917;
+  font-variant-numeric: tabular-nums;
+}
+
+.tonycost-workspace .glass-panel {
+  background-color: #FFFFFF;
+  border: 1px solid #EAE4D9;
+  box-shadow: 0 1px 3px 0 rgba(180, 83, 9, 0.04);
+}
+
+.tonycost-workspace .glass-panel-subtle {
+  background-color: #FFFDF9;
+  border: 1px solid #EAE4D9;
+}
+
+.tonycost-workspace .glass-card-interactive {
+  background-color: #FFFFFF;
+  border: 1px solid #EAE4D9;
+  box-shadow: 0 1px 3px 0 rgba(180, 83, 9, 0.04);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tonycost-workspace .glass-card-interactive:hover {
+  background-color: #FFFDF9;
+  border-color: #F27D26;
+  box-shadow: 0 4px 12px 0 rgba(242, 125, 38, 0.12);
+}
+
+.tonycost-workspace .glass-input {
+  background-color: #FFFFFF;
+  border: 1px solid #D6CEBE;
+  color: #1C1917;
+}
+
+.tonycost-workspace .bg-\[\#151518\],
+.tonycost-workspace .bg-\[\#0F0F11\],
+.tonycost-workspace .bg-\[\#0f0f11\],
+.tonycost-workspace .bg-\[\#0D0D0F\],
+.tonycost-workspace .bg-\[\#0d0d0f\],
+.tonycost-workspace .bg-\[\#0a0a0c\],
+.tonycost-workspace .bg-\[\#141414\],
+.tonycost-workspace .bg-\[\#0f0f0f\],
+.tonycost-workspace .bg-\[\#111111\],
+.tonycost-workspace .bg-\[\#121212\],
+.tonycost-workspace .bg-\[\#1a1a1a\],
+.tonycost-workspace .bg-\[\#1a1a1a\]\/95,
+.tonycost-workspace .bg-\[\#1a1a1a\]\/90,
+.tonycost-workspace .bg-\[\#1a1a1a\]\/80,
+.tonycost-workspace .bg-\[\#1a1a1a\]\/75,
+.tonycost-workspace .bg-\[\#151518\]\/95,
+.tonycost-workspace .bg-\[\#151518\]\/90,
+.tonycost-workspace .bg-\[\#0F0F11\]\/95,
+.tonycost-workspace .bg-\[\#0F0F11\]\/90,
+.tonycost-workspace .bg-\[\#1e1e1e\],
+.tonycost-workspace .bg-\[\#1c1c1e\],
+.tonycost-workspace .bg-\[\#222\],
+.tonycost-workspace .bg-zinc-900,
+.tonycost-workspace .bg-neutral-900,
+.tonycost-workspace .bg-slate-900:not(.fixed),
+.tonycost-workspace .bg-gray-900,
+.tonycost-workspace .bg-stone-900 {
+  background-color: #FFFFFF !important;
+  border-color: #EAE4D9 !important;
+  box-shadow: 0 1px 3px 0 rgba(180, 83, 9, 0.04);
+}
+
+.tonycost-workspace .bg-black\/30,
+.tonycost-workspace .bg-black\/40,
+.tonycost-workspace .bg-black\/50,
+.tonycost-workspace .bg-black\/60 {
+  background-color: #FFFFFF !important;
+  border-color: #EAE4D9 !important;
+}
+
+.tonycost-workspace .bg-black\/20,
+.tonycost-workspace .bg-black\/10,
+.tonycost-workspace .bg-white\/5 {
+  background-color: #FFFDF9 !important;
+  border-color: #EAE4D9 !important;
+}
+
+.tonycost-workspace .bg-white\/10 {
+  background-color: #F7F3EB !important;
+  border-color: #EAE4D9 !important;
+}
+
+.tonycost-workspace .bg-white\/15,
+.tonycost-workspace .bg-white\/20 {
+  background-color: #EFE9DF !important;
+  border-color: #E2DBD0 !important;
+}
+
+.tonycost-workspace div.bg-black:not(.fixed),
+.tonycost-workspace section.bg-black,
+.tonycost-workspace article.bg-black {
+  background-color: #FFFDF9 !important;
+  border-color: #EAE4D9 !important;
+}
+
+.tonycost-workspace .fixed.inset-0.bg-black\/70,
+.tonycost-workspace .fixed.inset-0.bg-black\/75,
+.tonycost-workspace .fixed.inset-0.bg-black\/80,
+.tonycost-workspace div.fixed.inset-0[class*="bg-black/"],
+.tonycost-workspace div.fixed.inset-0[class*="bg-slate-900/"] {
+  background-color: rgba(28, 25, 23, 0.55) !important;
+}
+
+.tonycost-workspace div.fixed.inset-0 > div:not(.fixed) {
+  background-color: #FFFDF9 !important;
+  border-color: #EAE4D9 !important;
+  color: #1C1917 !important;
+}
+
+.tonycost-workspace .border-white\/5,
+.tonycost-workspace .border-white\/10,
+.tonycost-workspace .border-white\/15 {
+  border-color: #EAE4D9 !important;
+}
+
+.tonycost-workspace .border-white\/20,
+.tonycost-workspace .border-white\/30 {
+  border-color: #DDD6C8 !important;
+}
+
+.tonycost-workspace .text-white {
+  color: #1C1917 !important;
+}
+
+.tonycost-workspace .text-white\/90,
+.tonycost-workspace .text-white\/80 {
+  color: #292524 !important;
+}
+
+.tonycost-workspace .text-white\/70,
+.tonycost-workspace .text-white\/60 {
+  color: #57534E !important;
+}
+
+.tonycost-workspace .text-white\/50,
+.tonycost-workspace .text-white\/45,
+.tonycost-workspace .text-white\/40 {
+  color: #78716C !important;
+}
+
+.tonycost-workspace .text-white\/35,
+.tonycost-workspace .text-white\/30,
+.tonycost-workspace .text-white\/25,
+.tonycost-workspace .text-white\/20 {
+  color: #A8A29E !important;
+}
+
+.tonycost-workspace .text-\[\#FFC107\] {
+  color: #b45309 !important;
+  font-weight: 700 !important;
+}
+
+.tonycost-workspace .text-\[\#00B1FF\] {
+  color: #0284c7 !important;
+}
+
+.tonycost-workspace .text-\[\#F27D26\] {
+  color: #ea580c !important;
+}
+
+.tonycost-workspace .text-emerald-400,
+.tonycost-workspace .text-green-400 {
+  color: #059669 !important;
+}
+
+.tonycost-workspace .text-rose-400,
+.tonycost-workspace .text-red-400 {
+  color: #e11d48 !important;
+}
+
+.tonycost-workspace .text-emerald-300,
+.tonycost-workspace .text-emerald-200 {
+  color: #064e3b !important;
+}
+
+.tonycost-workspace .text-green-300,
+.tonycost-workspace .text-green-200 {
+  color: #052e16 !important;
+}
+
+.tonycost-workspace .text-teal-300,
+.tonycost-workspace .text-teal-200 {
+  color: #134e4a !important;
+}
+
+.tonycost-workspace .text-red-300,
+.tonycost-workspace .text-red-200,
+.tonycost-workspace .text-rose-300,
+.tonycost-workspace .text-rose-200 {
+  color: #881337 !important;
+}
+
+.tonycost-workspace .text-amber-300,
+.tonycost-workspace .text-amber-200,
+.tonycost-workspace .text-yellow-300,
+.tonycost-workspace .text-yellow-200 {
+  color: #78350f !important;
+}
+
+.tonycost-workspace .text-blue-300,
+.tonycost-workspace .text-blue-200 {
+  color: #1e3a8a !important;
+}
+
+.tonycost-workspace .text-purple-200,
+.tonycost-workspace .text-purple-300 {
+  color: #581c87 !important;
+}
+
+.tonycost-workspace .bg-\[\#F27D26\],
+.tonycost-workspace .bg-\[\#F27D26\] *:not(.bg-white):not(.bg-white *),
+.tonycost-workspace .bg-\[\#F27D26\] .text-black {
+  color: #000000 !important;
+}
+
+.tonycost-workspace .bg-\[\#F27D26\] .bg-white,
+.tonycost-workspace .bg-\[\#F27D26\] .bg-white * {
+  color: #1C1917 !important;
+}
+
+.tonycost-workspace .bg-rose-500, .tonycost-workspace .bg-rose-600,
+.tonycost-workspace .bg-red-500, .tonycost-workspace .bg-red-600,
+.tonycost-workspace .bg-emerald-500, .tonycost-workspace .bg-emerald-600,
+.tonycost-workspace .bg-green-500, .tonycost-workspace .bg-green-600,
+.tonycost-workspace .bg-blue-500, .tonycost-workspace .bg-blue-600,
+.tonycost-workspace .bg-orange-600, .tonycost-workspace .bg-indigo-600,
+.tonycost-workspace .bg-rose-500 *, .tonycost-workspace .bg-rose-600 *,
+.tonycost-workspace .bg-red-500 *, .tonycost-workspace .bg-red-600 *,
+.tonycost-workspace .bg-emerald-500 *, .tonycost-workspace .bg-emerald-600 *,
+.tonycost-workspace .bg-green-500 *, .tonycost-workspace .bg-green-600 *,
+.tonycost-workspace .bg-blue-500 *, .tonycost-workspace .bg-blue-600 *,
+.tonycost-workspace .bg-orange-600 *, .tonycost-workspace .bg-indigo-600 * {
+  color: #ffffff !important;
+}
+
+.tonycost-workspace input:not([type="checkbox"]):not([type="radio"]),
+.tonycost-workspace select,
+.tonycost-workspace textarea {
+  background-color: #FFFFFF !important;
+  color: #1C1917 !important;
+  border-color: #D6CEBE !important;
+}
+
+.tonycost-workspace input:focus,
+.tonycost-workspace select:focus,
+.tonycost-workspace textarea:focus {
+  border-color: #F27D26 !important;
+  box-shadow: 0 0 0 2px rgba(242, 125, 38, 0.2) !important;
+}
+
+.tonycost-workspace option {
+  background-color: #FFFFFF !important;
+  color: #1C1917 !important;
+}
+
+.tonycost-workspace table th {
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+  font-size: 12.5px !important;
+  color: #57534E !important;
+  background-color: #F7F3EB !important;
+  border-bottom: 1px solid #EAE4D9 !important;
+}
+
+.tonycost-workspace table td {
+  padding-top: 9px !important;
+  padding-bottom: 9px !important;
+  font-size: 13.5px !important;
+  border-bottom: 1px solid #F7F3EB !important;
+}
+
+.tonycost-workspace table tr:hover {
+  background-color: #FFF7ED !important;
+}

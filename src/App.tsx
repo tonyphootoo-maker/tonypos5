@@ -24,6 +24,7 @@ import { ReportsPage } from './pages/ReportsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { BackupPage } from './pages/BackupPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { CostingWorkspace, CostingTabId } from './costing/CostingWorkspace';
 import {
   UtensilsCrossed,
   Sparkles,
@@ -305,6 +306,15 @@ export default function App() {
             settings={settings}
             lang={lang}
             onSettingsUpdated={(newSet) => setSettings(newSet)}
+          />
+        )}
+        {currentPage.startsWith('cost_') && (
+          <CostingWorkspace
+            activeTab={currentPage.replace(/^cost_/, '') as CostingTabId}
+            onSelectCostTab={(tab) => setCurrentPage(`cost_${tab}` as AppPage)}
+            onNavigateToPos={() => setCurrentPage('pos')}
+            user={user}
+            lang={lang}
           />
         )}
       </main>

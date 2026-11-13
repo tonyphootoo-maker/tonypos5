@@ -184,7 +184,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     const ingToSave: IngredientDoc = {
       id: editingIngredient.id || `ing_${Date.now()}`,
       name: editingIngredient.name,
-      nameTh: editingIngredient.nameTh || undefined,
+      ...(editingIngredient.nameTh ? { nameTh: editingIngredient.nameTh } : {}),
       purchaseUnit: unit,
       purchasePrice: price,
       purchaseQuantity: qty,
@@ -215,7 +215,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     const subToSave: SubRecipeDoc = {
       id: editingSubRecipe.id || `sub_${Date.now()}`,
       name: editingSubRecipe.name,
-      nameTh: editingSubRecipe.nameTh || undefined,
+      ...(editingSubRecipe.nameTh ? { nameTh: editingSubRecipe.nameTh } : {}),
       outputUnit: editingSubRecipe.outputUnit || 'portion',
       outputQuantity: editingSubRecipe.outputQuantity || 1,
       ingredients: editingSubRecipe.ingredients || [],
@@ -242,7 +242,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     const pkgToSave: PackagingDoc = {
       id: editingPackaging.id || `pkg_${Date.now()}`,
       name: editingPackaging.name,
-      nameTh: editingPackaging.nameTh || undefined,
+      ...(editingPackaging.nameTh ? { nameTh: editingPackaging.nameTh } : {}),
       cost: editingPackaging.cost || 0,
       unit: editingPackaging.unit || 'piece',
       createdAt: editingPackaging.createdAt || new Date().toISOString(),
@@ -286,10 +286,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     const dishToSave: DishDoc = {
       id: editingDish.id || `dish_${Date.now()}`,
       name: editingDish.name,
-      nameTh: editingDish.nameTh || undefined,
+      ...(editingDish.nameTh ? { nameTh: editingDish.nameTh } : {}),
       categoryId: editingDish.categoryId || categories[0]?.id || 'cat_main',
-      imageId: editingDish.imageId || undefined,
-      description: editingDish.description || undefined,
+      ...(editingDish.imageId ? { imageId: editingDish.imageId } : {}),
+      ...(editingDish.description ? { description: editingDish.description } : {}),
       variants: editingDish.variants?.length ? editingDish.variants : [
         {
           id: `var_std_${Date.now()}`,
@@ -1882,7 +1882,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
               const catToSave: CategoryDoc = {
                 id: editingCategory.id || `cat_${Date.now()}`,
                 name: editingCategory.name,
-                nameTh: editingCategory.nameTh || undefined,
+                ...(editingCategory.nameTh ? { nameTh: editingCategory.nameTh } : {}),
                 order: editingCategory.order || categories.length + 1,
                 createdAt: editingCategory.createdAt || new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -1962,7 +1962,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
               const chToSave: ChannelDoc = {
                 id: editingChannel.id || `ch_${Date.now()}`,
                 name: editingChannel.name,
-                nameTh: editingChannel.nameTh || undefined,
+                ...(editingChannel.nameTh ? { nameTh: editingChannel.nameTh } : {}),
                 type: editingChannel.type || 'delivery',
                 commissionPercent: editingChannel.commissionPercent || 0,
                 packagingCost: editingChannel.packagingCost || 0,

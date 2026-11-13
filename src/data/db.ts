@@ -144,7 +144,7 @@ export interface FirestoreErrorInfo {
   };
 }
 
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -221,6 +221,35 @@ function updateMetadata(existingVersion: number) {
     updatedAt: new Date().toISOString(),
     version: existingVersion + 1,
   };
+}
+
+/**
+ * Recursively strips `undefined` properties from objects and arrays before writing to Firestore.
+ * Firestore SDK throws "Unsupported field value: undefined" if any field is `undefined`.
+ */
+export function stripUndefined<T>(value: T): T {
+  if (value === null || value === undefined || typeof value !== 'object') {
+    return value;
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefined(item)) as unknown as T;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    return value;
+  }
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (val !== undefined) {
+      cleaned[key] = stripUndefined(val);
+    }
+  }
+  return cleaned as T;
 }
 
 // ==========================================
@@ -500,10 +529,14 @@ export async function updateSettings(settings: Partial<SettingsDoc>, expectedVer
           throw new Error('VERSION_CONFLICT');
         }
       }
-      txn.set(ref, {
-        ...settings,
-        ...updateMetadata(expectedVersion),
-      }, { merge: true });
+      txn.set(
+        ref,
+        stripUndefined({
+          ...settings,
+          ...updateMetadata(expectedVersion),
+        }),
+        { merge: true }
+      );
     });
   } catch (error) {
     if (error instanceof Error && error.message === 'VERSION_CONFLICT') {
@@ -537,10 +570,10 @@ export async function saveDocument<T extends { id: string; version: number }>(
 
   try {
     if (isNew) {
-      const newDoc = {
+      const newDoc = stripUndefined({
         ...docData,
         ...createMetadata(0),
-      };
+      });
       await setDoc(docRef, newDoc);
     } else {
       // Optimistic concurrency check
@@ -552,10 +585,10 @@ export async function saveDocument<T extends { id: string; version: number }>(
             throw new Error('VERSION_CONFLICT');
           }
         }
-        const updatedDoc = {
+        const updatedDoc = stripUndefined({
           ...docData,
           ...updateMetadata(docData.version),
-        };
+        });
         txn.set(docRef, updatedDoc);
       });
     }
@@ -639,7 +672,7 @@ export async function saveImageDoc(imageId: string, dataUrl: string, sizeBytes: 
     ...createMetadata(0),
   };
   try {
-    await setDoc(ref, imageDoc);
+    await setDoc(ref, stripUndefined(imageDoc));
     return imageId;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -679,12 +712,15 @@ export async function generateNextBillNumber(workDate: string): Promise<string> 
         }
       }
 
-      txn.set(counterRef, {
-        id: 'bills',
-        workDate,
-        count: nextCount,
-        ...updateMetadata(snap.exists() ? snap.data().version || 0 : 0),
-      });
+      txn.set(
+        counterRef,
+        stripUndefined({
+          id: 'bills',
+          workDate,
+          count: nextCount,
+          ...updateMetadata(snap.exists() ? snap.data().version || 0 : 0),
+        })
+      );
 
       const padded = String(nextCount).padStart(4, '0');
       return `B-${cleanDate}-${padded}`;
@@ -726,23 +762,26 @@ export async function saveOrderToTableAtomic(
         const tableRef = doc(db, `users/${uid}/tables/${tableId}`);
         const tableSnap = await txn.get(tableRef);
         if (tableSnap.exists()) {
-          txn.update(tableRef, {
-            currentBillId: billId,
-            updatedAt: new Date().toISOString(),
-            version: (tableSnap.data().version || 0) + 1,
-          });
+          txn.update(
+            tableRef,
+            stripUndefined({
+              currentBillId: billId,
+              updatedAt: new Date().toISOString(),
+              version: (tableSnap.data().version || 0) + 1,
+            })
+          );
         }
       }
 
       // 3. Write bill document
-      const completeBill: BillDoc = {
+      const completeBill: BillDoc = stripUndefined({
         ...billData,
         id: billId,
         billNumber,
         status: 'saved',
         tableId: tableId || null,
         ...(isNew ? createMetadata(0) : updateMetadata(existingVersion)),
-      };
+      });
       txn.set(billRef, completeBill);
     });
 
@@ -877,26 +916,32 @@ export async function payBillAtomic(
 
       // 4. Update Bill to 'paid'
       const nowIso = new Date().toISOString();
-      txn.update(billRef, {
-        status: 'paid',
-        payments,
-        paidAt: nowIso,
-        updatedAt: nowIso,
-        version: (currentBillData.version || 0) + 1,
-      });
+      txn.update(
+        billRef,
+        stripUndefined({
+          status: 'paid',
+          payments,
+          paidAt: nowIso,
+          updatedAt: nowIso,
+          version: (currentBillData.version || 0) + 1,
+        })
+      );
 
       // 5. Update Daily Summary document atomically
-      txn.set(summaryRef, summary);
+      txn.set(summaryRef, stripUndefined(summary));
 
       // 6. If table attached, free the table atomically
       if (tableRef) {
         const tableSnap = await txn.get(tableRef);
         if (tableSnap.exists()) {
-          txn.update(tableRef, {
-            currentBillId: null,
-            updatedAt: nowIso,
-            version: (tableSnap.data().version || 0) + 1,
-          });
+          txn.update(
+            tableRef,
+            stripUndefined({
+              currentBillId: null,
+              updatedAt: nowIso,
+              version: (tableSnap.data().version || 0) + 1,
+            })
+          );
         }
       }
 
@@ -907,13 +952,16 @@ export async function payBillAtomic(
         if (memberSnap.exists()) {
           const mem = memberSnap.data() as MemberDoc;
           const newPoints = Math.max(0, mem.points - (bill.pointsRedeemed || 0) + (bill.pointsEarned || 0));
-          txn.update(memberRef, {
-            points: newPoints,
-            totalSpent: roundTo2((mem.totalSpent || 0) + bill.netSales),
-            visitCount: (mem.visitCount || 0) + 1,
-            updatedAt: nowIso,
-            version: (mem.version || 0) + 1,
-          });
+          txn.update(
+            memberRef,
+            stripUndefined({
+              points: newPoints,
+              totalSpent: roundTo2((mem.totalSpent || 0) + bill.netSales),
+              visitCount: (mem.visitCount || 0) + 1,
+              updatedAt: nowIso,
+              version: (mem.version || 0) + 1,
+            })
+          );
         }
       }
     });
@@ -1001,7 +1049,7 @@ export async function voidBillAtomic(
 
           summary.updatedAt = nowIso;
           summary.version = (summary.version || 0) + 1;
-          txn.set(summaryRef, summary);
+          txn.set(summaryRef, stripUndefined(summary));
         }
       }
 
@@ -1010,22 +1058,28 @@ export async function voidBillAtomic(
         const tableRef = doc(db, `users/${uid}/tables/${bill.tableId}`);
         const tableSnap = await txn.get(tableRef);
         if (tableSnap.exists() && tableSnap.data().currentBillId === billId) {
-          txn.update(tableRef, {
-            currentBillId: null,
-            updatedAt: nowIso,
-            version: (tableSnap.data().version || 0) + 1,
-          });
+          txn.update(
+            tableRef,
+            stripUndefined({
+              currentBillId: null,
+              updatedAt: nowIso,
+              version: (tableSnap.data().version || 0) + 1,
+            })
+          );
         }
       }
 
       // Update bill to voided
-      txn.update(billRef, {
-        status: 'voided',
-        voidReason,
-        voidedAt: nowIso,
-        updatedAt: nowIso,
-        version: (bill.version || 0) + 1,
-      });
+      txn.update(
+        billRef,
+        stripUndefined({
+          status: 'voided',
+          voidReason,
+          voidedAt: nowIso,
+          updatedAt: nowIso,
+          version: (bill.version || 0) + 1,
+        })
+      );
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, billRef.path);
@@ -1199,7 +1253,7 @@ export async function rebuildSummariesFromBills(): Promise<{
       }
     }
 
-    batch.set(summaryRef, summary);
+    batch.set(summaryRef, stripUndefined(summary));
   }
 
   await batch.commit();
@@ -1314,7 +1368,7 @@ export async function importFullDatabase(backupData: Record<string, unknown>): P
       for (const item of list) {
         if (item && typeof item === 'object' && 'id' in item) {
           const docRef = doc(db, `users/${uid}/${colName}/${item.id}`);
-          batch.set(docRef, item);
+          batch.set(docRef, stripUndefined(item));
           count++;
           if (count >= 400) {
             await batch.commit();

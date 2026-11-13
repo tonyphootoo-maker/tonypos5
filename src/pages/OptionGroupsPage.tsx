@@ -58,7 +58,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
     const groupToSave: OptionGroupDoc = {
       id: editingGroup.id || `og_${Date.now()}`,
       name: editingGroup.name,
-      nameTh: editingGroup.nameTh || undefined,
+      ...(editingGroup.nameTh ? { nameTh: editingGroup.nameTh } : {}),
       minSelect: editingGroup.minSelect || 0,
       maxSelect: editingGroup.maxSelect || 1,
       order: editingGroup.order || optionGroups.length + 1,

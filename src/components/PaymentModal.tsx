@@ -223,7 +223,7 @@ export const PaymentModal: React.FC<Props> = ({
           ? recalculatedFinancials.platformFee
           : bill.platformFee,
         memberId: matchedMember?.id || null,
-        memberName: matchedMember?.name || undefined,
+        ...(matchedMember?.name ? { memberName: matchedMember.name } : {}),
         pointsEarned: matchedMember ? estimatedPointsEarned : 0,
         pointsRedeemed: pointsToRedeem > 0 ? pointsToRedeem : 0,
         payments: finalizedPayments,

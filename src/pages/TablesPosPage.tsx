@@ -282,7 +282,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
       packagingCostSnapshot,
       totalUnitCostSnapshot,
       quantity: itemQuantity,
-      notes: itemNotes.trim() || undefined,
+      ...(itemNotes.trim() ? { notes: itemNotes.trim() } : {}),
       options: optionsSnapshot,
       hasRecipe: variantCostCalc.hasRecipe,
     };
