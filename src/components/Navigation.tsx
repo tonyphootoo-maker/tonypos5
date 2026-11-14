@@ -32,6 +32,7 @@ import {
 import { Language, ShiftDoc } from '../types';
 import { translations } from '../i18n/translations';
 import { OnlineStatusBadge } from './OnlineStatusBadge';
+import { PWAInstallButton } from './PWAInstallButton';
 import { signOutOwner } from '../data/db';
 
 export type AppPage =
@@ -555,6 +556,9 @@ export const Navigation: React.FC<Props> = ({
 
           {/* Online status indicator */}
           <OnlineStatusBadge lang={lang} />
+
+          {/* PWA Install Button (Android POS / Tablet / iPad / iOS) */}
+          <PWAInstallButton lang={lang} variant="header" />
 
           {/* Language Switcher */}
           <button

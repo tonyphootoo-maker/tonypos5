@@ -9,6 +9,7 @@ import {
   auditSummariesAgainstBills,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
+import { PWAInstallButton } from '../components/PWAInstallButton';
 import {
   Settings,
   Store,
@@ -158,6 +159,8 @@ export const SettingsPage: React.FC<Props> = ({
           <span>{errorMsg}</span>
         </div>
       )}
+
+      <PWAInstallButton lang={lang} variant="card" />
 
       <form onSubmit={handleSave} className="space-y-6">
         {/* Shop Profile & Receipt */}

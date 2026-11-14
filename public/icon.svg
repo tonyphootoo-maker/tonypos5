@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="kinpos-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316" />
+      <stop offset="55%" stop-color="#ef4444" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#kinpos-grad)" />
+  <rect x="36" y="36" width="440" height="440" rx="88" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="8" />
+  <g fill="#ffffff" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Bold K monogram + fork/spoon accent -->
+    <path d="M150 132 L150 380" stroke-width="44" />
+    <path d="M332 132 L182 256 L342 380" fill="none" stroke-width="44" />
+    <!-- Top-right chef/POS dot accent -->
+    <circle cx="366" cy="146" r="24" fill="#fef08a" stroke="none" />
+  </g>
+</svg>

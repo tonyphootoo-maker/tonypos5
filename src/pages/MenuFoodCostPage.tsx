@@ -19,6 +19,7 @@ import {
   calculateDishVariantCost,
   calculateSuggestedPricing,
   calculateFoodCostPercent,
+  calculateItemContributionMargin,
   extractNetPriceFromMenuPrice,
   isMissingCost,
   formatMoney,
@@ -61,6 +62,8 @@ import {
   Check,
   ChefHat,
   Sliders,
+  ArrowLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface Props {
@@ -117,6 +120,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
   const [costSauces, setCostSauces] = useState<CostSauce[]>(() => StorageService.getSauces());
   const [costSettings] = useState<CostRestaurantSettings>(() => StorageService.getSettings());
   const [isPrimaryOptionPickerOpen, setIsPrimaryOptionPickerOpen] = useState(false);
+  const [selectedCostMenuId, setSelectedCostMenuId] = useState<string | null>(null);
+  const [pickerSourceTab, setPickerSourceTab] = useState<'menus' | 'ingredients'>('menus');
   const [primaryOptionSearch, setPrimaryOptionSearch] = useState('');
   const [isImportingCostOption, setIsImportingCostOption] = useState(false);
   const [isOptionGroupPickerOpen, setIsOptionGroupPickerOpen] = useState(false);
@@ -517,6 +522,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   ? calculateFoodCostPercent(costCalc.foodCost, primaryNetPrice)
                   : 0;
 
+                const primaryProfit = primaryVariant
+                  ? calculateItemContributionMargin(primaryNetPrice, costCalc.foodCost, 0, 0)
+                  : { contributionMargin: 0, contributionMarginPercent: 0 };
+
                 const suggestedPricing = calculateSuggestedPricing(
                   costCalc.foodCost || costCalc.totalCost,
                   settings.targetFoodCostPercent,
@@ -588,6 +597,17 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                             <div className="flex justify-between">
                               <span className="text-neutral-500">Food COGS:</span>
                               <span className="font-bold text-neutral-900">฿{formatMoney(costCalc.foodCost)}</span>
+                            </div>
+
+                            <div className="flex justify-between">
+                              <span className="text-neutral-500">{t.menuCost.grossProfit}:</span>
+                              <span
+                                className={`font-bold ${
+                                  primaryProfit.contributionMargin > 0 ? 'text-emerald-700' : 'text-rose-600'
+                                }`}
+                              >
+                                ฿{formatMoney(primaryProfit.contributionMargin)} ({formatPercent(primaryProfit.contributionMarginPercent)})
+                              </span>
                             </div>
 
                             {costCalc.packagingCost > 0 && (
@@ -1444,6 +1464,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   <button
                     type="button"
                     onClick={() => {
+                      setSelectedCostMenuId(null);
+                      setPickerSourceTab('menus');
                       setPrimaryOptionSearch('');
                       loadCostingCatalog();
                       setIsPrimaryOptionPickerOpen(true);
@@ -1485,6 +1507,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                     linkedCount > 0
                       ? calculateDishVariantCost(currVar, ingredientsMap, subRecipesMap, packagingMap)
                       : null;
+                  const currFoodCost = varCost?.foodCost || 0;
+                  const currNetPrice = extractNetPriceFromMenuPrice(
+                    currVar.price || 0,
+                    settings.pricesIncludeVat,
+                    settings.vatPercent,
+                    settings.serviceChargeIncludedInPrice,
+                    settings.serviceChargePercent
+                  );
+                  const currProfit = calculateItemContributionMargin(currNetPrice, currFoodCost, 0, 0);
 
                   return (
                     <div className="space-y-2.5 pt-2 border-t border-neutral-200">
@@ -1602,15 +1633,42 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                         </div>
                       </div>
 
-                      {linkedCount > 0 && varCost && (
-                        <div className="flex items-center justify-between px-2.5 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-800">
+                      <div
+                        className={`px-3 py-2 rounded-xl border text-[11px] space-y-1 ${
+                          linkedCount > 0 && varCost
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                            : 'bg-white border-neutral-200 text-neutral-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
                           <span className="font-bold flex items-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                            <span>ผูกข้อมูลต้นทุนจากระบบต้นทุนอาหารอัตโนมัติแล้ว ({linkedCount} รายการ)</span>
+                            {linkedCount > 0 && varCost ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>ผูกข้อมูลต้นทุนจากระบบต้นทุนอาหารอัตโนมัติแล้ว ({linkedCount} รายการ)</span>
+                              </>
+                            ) : (
+                              <span className="text-neutral-500">ยังไม่ได้ผูกสูตรวัตถุดิบ (ต้นทุน ฿0.00)</span>
+                            )}
                           </span>
-                          <span className="font-extrabold">ต้นทุน ฿{formatMoney(varCost.foodCost)}</span>
+                          <span className="font-extrabold shrink-0">
+                            ต้นทุน ฿{formatMoney(currFoodCost)} บาท
+                          </span>
                         </div>
-                      )}
+
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-neutral-200/70">
+                          <span className="text-neutral-600 font-semibold">
+                            กำไรที่คาดว่าจะได้รับ (หากตั้งราคาขาย ฿{formatMoney(currVar.price || 0)}):
+                          </span>
+                          <span
+                            className={`font-black shrink-0 ${
+                              currProfit.contributionMargin > 0 ? 'text-emerald-700' : 'text-rose-600'
+                            }`}
+                          >
+                            {currProfit.contributionMargin > 0 ? '+' : ''}฿{formatMoney(currProfit.contributionMargin)} บาท ({formatPercent(currProfit.contributionMarginPercent)})
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   );
                 })()}
@@ -2256,7 +2314,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
         // Sort costing menus so matching dish name comes first
         const sortedCostMenus = [...costMenus]
-          .filter((m) => m.active !== false && (m.variants || []).length > 0)
+          .filter((m) => m.active !== false && (m.variants || []).some((v) => v.active !== false))
           .sort((a, b) => {
             const aName = a.name.toLowerCase();
             const bName = b.name.toLowerCase();
@@ -2271,45 +2329,59 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             return (a.displayOrder || 99) - (b.displayOrder || 99);
           });
 
-        const matchingVariants: Array<{
-          menu: CostMenuItem;
+        const selectedCostMenu = selectedCostMenuId
+          ? sortedCostMenus.find((m) => m.id === selectedCostMenuId) || null
+          : null;
+
+        const filteredMenus = sortedCostMenus.filter((menu) => {
+          if (!q) return true;
+          return `${menu.name} ${menu.category || ''}`.toLowerCase().includes(q);
+        });
+
+        const selectedMenuVariants: Array<{
           variant: CostMenuVariant;
-          isDishMatch: boolean;
           foodCost: number;
           foodCostPct: number;
+          estimatedProfit: number;
+          estimatedProfitPct: number;
         }> = [];
 
-        for (const menu of sortedCostMenus) {
-          const mNameLower = menu.name.toLowerCase();
-          const isDishMatch = Boolean(
-            (dishThLower && (mNameLower.includes(dishThLower) || dishThLower.includes(mNameLower))) ||
-              (dishEnLower && mNameLower.includes(dishEnLower))
-          );
-
-          for (const v of menu.variants || []) {
+        if (selectedCostMenu) {
+          for (const v of selectedCostMenu.variants || []) {
             if (v.active === false) continue;
-            const hay = `${menu.name} ${v.name} ${v.proteinType || ''}`.toLowerCase();
+            const hay = `${v.name} ${v.proteinType || ''}`.toLowerCase();
             if (q && !hay.includes(q)) continue;
 
             const bd = calculateVariantCostBreakdown(
               v,
-              menu.name,
+              selectedCostMenu.name,
               costIngMap,
               costSauceMap,
               costSettings
             );
 
-            matchingVariants.push({
-              menu,
+            const foodCost = bd.totalIngredientCost || 0;
+            const sellingPrice = v.sellingPrice || 0;
+            const netSellingPrice = extractNetPriceFromMenuPrice(
+              sellingPrice,
+              settings.pricesIncludeVat,
+              settings.vatPercent,
+              settings.serviceChargeIncludedInPrice,
+              settings.serviceChargePercent
+            );
+            const profitCalc = calculateItemContributionMargin(netSellingPrice, foodCost, 0, 0);
+
+            selectedMenuVariants.push({
               variant: v,
-              isDishMatch,
-              foodCost: bd.totalIngredientCost || 0,
+              foodCost,
               foodCostPct: bd.restaurantFoodCostPercent || 0,
+              estimatedProfit: profitCalc.contributionMargin,
+              estimatedProfitPct: profitCalc.contributionMarginPercent,
             });
           }
         }
 
-        // Protein / Meat ingredients from Costing (fallback when user wants raw protein directly)
+        // Protein / Meat ingredients from Costing (separate optional tab)
         const proteinIngredients = costIngredients.filter((ing) => {
           if (ing.active === false) return false;
           const isMeat = ing.category === 'เนื้อสัตว์และอาหารทะเล';
@@ -2351,9 +2423,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 <div className="flex items-center gap-2">
                   <ChefHat className="w-5 h-5" />
                   <div>
-                    <h3 className="font-extrabold text-base">เลือกตัวเลือกหลักจากต้นทุนอาหาร</h3>
+                    <h3 className="font-extrabold text-base">
+                      {selectedCostMenu
+                        ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
+                        : 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'}
+                    </h3>
                     <p className="text-[11px] text-orange-100">
-                      เลือกตัวเลือกเนื้อสัตว์/สูตรที่สร้างไว้แล้ว เพื่อนำราคาและต้นทุนวัตถุดิบมาใช้งานอัตโนมัติ
+                      {selectedCostMenu
+                        ? 'แสดงเฉพาะตัวเลือกที่มีอยู่ในรายการเมนูที่เลือกเท่านั้น'
+                        : 'ขั้นตอนที่ 1: เลือกรายการเมนูอาหารก่อน จากนั้นเลือกตัวเลือกของเมนูนั้นๆ'}
                     </p>
                   </div>
                 </div>
@@ -2366,7 +2444,60 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                 </button>
               </div>
 
-              <div className="p-3 border-b border-neutral-200 bg-neutral-50">
+              {/* Search & Step/Tab Bar */}
+              <div className="p-3 border-b border-neutral-200 bg-neutral-50 space-y-2">
+                {selectedCostMenu ? (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCostMenuId(null);
+                        setPrimaryOptionSearch('');
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>เปลี่ยนรายการเมนูอาหาร</span>
+                    </button>
+                    <span className="text-xs font-extrabold text-neutral-700">
+                      เมนูที่เลือก: <span className="text-orange-600">{selectedCostMenu.name}</span> ({selectedMenuVariants.length} ตัวเลือก)
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPickerSourceTab('menus');
+                        setPrimaryOptionSearch('');
+                      }}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                        pickerSourceTab === 'menus'
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-100'
+                      }`}
+                    >
+                      เลือกจากรายการเมนู ({sortedCostMenus.length})
+                    </button>
+                    {proteinIngredients.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPickerSourceTab('ingredients');
+                          setPrimaryOptionSearch('');
+                        }}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                          pickerSourceTab === 'ingredients'
+                            ? 'bg-orange-500 text-white'
+                            : 'bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-100'
+                        }`}
+                      >
+                        เลือกจากวัตถุดิบเนื้อสัตว์เดี่ยว
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div className="relative">
                   <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
                   <input
@@ -2374,137 +2505,211 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                     autoFocus
                     value={primaryOptionSearch}
                     onChange={(e) => setPrimaryOptionSearch(e.target.value)}
-                    placeholder="ค้นหาเนื้อสัตว์ หรือชื่อสูตรต้นทุนอาหาร (เช่น หมูหมัก, ไก่, กุ้ง, ทะเล)..."
+                    placeholder={
+                      selectedCostMenu
+                        ? `ค้นหาตัวเลือกในเมนู "${selectedCostMenu.name}" (เช่น หมู, ไก่, ทะเล)...`
+                        : pickerSourceTab === 'menus'
+                          ? 'ค้นหารายการเมนูอาหาร (เช่น ข้าวผัด, กะเพรา, ผัดไทย)...'
+                          : 'ค้นหาวัตถุดิบเนื้อสัตว์...'
+                    }
                     className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* Section 1: Costing Menu Variants (Recipes + Proteins + Selling Price) */}
-                <div className="space-y-2">
-                  <div className="text-xs font-extrabold text-neutral-800 flex items-center justify-between">
-                    <span>ตัวเลือกหลักพร้อมสูตรและต้นทุน ({matchingVariants.length})</span>
-                    {isImportingCostOption && (
-                      <span className="text-orange-600 font-bold">กำลังนำเข้าข้อมูลต้นทุน...</span>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {isImportingCostOption && (
+                  <div className="p-2 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-700 font-bold text-center">
+                    กำลังนำเข้าข้อมูลต้นทุน...
+                  </div>
+                )}
+
+                {pickerSourceTab === 'menus' && !selectedCostMenu && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-extrabold text-neutral-800">
+                      เลือกรายการเมนูอาหารที่ต้องการ ({filteredMenus.length} เมนู)
+                    </div>
+
+                    {filteredMenus.length === 0 ? (
+                      <div className="p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
+                        ไม่พบรายการเมนูอาหารในระบบต้นทุนที่ตรงกับคำค้นหา
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {filteredMenus.map((menu) => {
+                          const mNameLower = menu.name.toLowerCase();
+                          const isDishMatch = Boolean(
+                            (dishThLower && (mNameLower.includes(dishThLower) || dishThLower.includes(mNameLower))) ||
+                              (dishEnLower && mNameLower.includes(dishEnLower))
+                          );
+                          const activeVarCount = (menu.variants || []).filter((v) => v.active !== false).length;
+
+                          return (
+                            <button
+                              key={menu.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedCostMenuId(menu.id);
+                                setPrimaryOptionSearch('');
+                              }}
+                              className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer hover:shadow-md active:scale-[0.99] flex items-center justify-between gap-3 ${
+                                isDishMatch
+                                  ? 'bg-orange-50/70 border-orange-300 hover:border-orange-500'
+                                  : 'bg-white border-neutral-200 hover:border-orange-400'
+                              }`}
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-black text-sm text-neutral-900 truncate">
+                                    {menu.name}
+                                  </span>
+                                  {isDishMatch && (
+                                    <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0">
+                                      ตรงกับเมนูนี้
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-neutral-500 mt-0.5">
+                                  {menu.category || 'เมนูอาหาร'} • มี {activeVarCount} ตัวเลือกหลัก
+                                </div>
+                              </div>
+                              <ChevronRight className="w-4 h-4 text-orange-500 shrink-0" />
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
+                )}
 
-                  {matchingVariants.length === 0 ? (
-                    <div className="p-4 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
-                      ไม่พบตัวเลือกในระบบต้นทุนอาหารที่ตรงกับคำค้นหา
+                {pickerSourceTab === 'menus' && selectedCostMenu && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-extrabold text-neutral-800">
+                      ตัวเลือกที่มีใน "{selectedCostMenu.name}" ({selectedMenuVariants.length} รายการ)
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {matchingVariants.map(({ menu, variant, isDishMatch, foodCost, foodCostPct }) => {
-                        const displayProtein =
-                          variant.proteinType &&
-                          variant.proteinType !== 'ทั่วไป' &&
-                          variant.proteinType !== 'Standard'
-                            ? variant.proteinType
-                            : variant.name;
 
-                        return (
+                    {selectedMenuVariants.length === 0 ? (
+                      <div className="p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
+                        ไม่พบตัวเลือกที่ตรงกับคำค้นหาในเมนู "{selectedCostMenu.name}"
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {selectedMenuVariants.map(({ variant, foodCost, foodCostPct, estimatedProfit, estimatedProfitPct }) => {
+                          const displayProtein =
+                            variant.proteinType &&
+                            variant.proteinType !== 'ทั่วไป' &&
+                            variant.proteinType !== 'Standard'
+                              ? variant.proteinType
+                              : variant.name;
+
+                          return (
+                            <button
+                              key={`${selectedCostMenu.id}_${variant.id}`}
+                              type="button"
+                              disabled={isImportingCostOption}
+                              onClick={async () => {
+                                setIsImportingCostOption(true);
+                                try {
+                                  const alreadyExists = (editingDish.variants || []).some(
+                                    (ev) => (ev.nameTh || ev.name) === displayProtein
+                                  );
+                                  const preferredNameTh = alreadyExists ? variant.name : displayProtein;
+                                  const converted = await importCostingVariantToDishVariant({
+                                    variant,
+                                    costIngredients,
+                                    costSauces,
+                                    preferredNameTh,
+                                  });
+                                  await appendImportedVariant(converted);
+                                } finally {
+                                  setIsImportingCostOption(false);
+                                }
+                              }}
+                              className="p-3 rounded-2xl border bg-white border-neutral-200 hover:border-orange-400 hover:bg-orange-50/40 text-left transition-all cursor-pointer hover:shadow-md active:scale-[0.99] disabled:opacity-60"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="font-black text-sm text-neutral-900 truncate">
+                                    {displayProtein}
+                                  </div>
+                                  <div className="text-[11px] text-neutral-500 truncate">
+                                    {selectedCostMenu.name} • {variant.name}
+                                  </div>
+                                </div>
+                                <span className="text-xs font-black text-orange-600 shrink-0">
+                                  ฿{formatMoney(variant.sellingPrice || 0)}
+                                </span>
+                              </div>
+
+                              <div className="mt-2 pt-1.5 border-t border-neutral-200/70 space-y-1 text-[10px]">
+                                <div className="flex items-center justify-between text-neutral-600">
+                                  <span>วัตถุดิบ {(variant.recipeItems || []).length} รายการ</span>
+                                  <span className="font-bold text-neutral-800">
+                                    ต้นทุน ฿{formatMoney(foodCost)} ({formatPercent(foodCostPct)})
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-neutral-500">
+                                    กำไร (หากขาย ฿{formatMoney(variant.sellingPrice || 0)}):
+                                  </span>
+                                  <span
+                                    className={`font-extrabold ${
+                                      estimatedProfit > 0 ? 'text-emerald-700' : 'text-rose-600'
+                                    }`}
+                                  >
+                                    {estimatedProfit > 0 ? '+' : ''}฿{formatMoney(estimatedProfit)} ({formatPercent(estimatedProfitPct)})
+                                  </span>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {pickerSourceTab === 'ingredients' && !selectedCostMenu && (
+                  <div className="space-y-2">
+                    <div className="text-xs font-extrabold text-neutral-800">
+                      เลือกจากวัตถุดิบเนื้อสัตว์ในคลังต้นทุน ({proteinIngredients.length})
+                    </div>
+                    {proteinIngredients.length === 0 ? (
+                      <div className="p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
+                        ไม่พบวัตถุดิบเนื้อสัตว์ที่ตรงกับคำค้นหา
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {proteinIngredients.map((ing) => (
                           <button
-                            key={`${menu.id}_${variant.id}`}
+                            key={ing.id}
                             type="button"
                             disabled={isImportingCostOption}
                             onClick={async () => {
                               setIsImportingCostOption(true);
                               try {
-                                const alreadyExists = (editingDish.variants || []).some(
-                                  (ev) => (ev.nameTh || ev.name) === displayProtein
-                                );
-                                const preferredNameTh = alreadyExists ? variant.name : displayProtein;
-                                const converted = await importCostingVariantToDishVariant({
-                                  variant,
-                                  costIngredients,
-                                  costSauces,
-                                  preferredNameTh,
-                                });
+                                const converted = await importCostingIngredientAsDishVariant(ing, 100);
+                                converted.price = editingDish.variants?.[0]?.price || 65;
                                 await appendImportedVariant(converted);
                               } finally {
                                 setIsImportingCostOption(false);
                               }
                             }}
-                            className={`p-3 rounded-2xl border text-left transition-all cursor-pointer hover:shadow-md active:scale-[0.99] disabled:opacity-60 ${
-                              isDishMatch
-                                ? 'bg-orange-50/70 border-orange-300 hover:border-orange-500'
-                                : 'bg-white border-neutral-200 hover:border-orange-300'
-                            }`}
+                            className="p-2.5 bg-neutral-50 hover:bg-orange-50 rounded-xl border border-neutral-200 hover:border-orange-300 text-left cursor-pointer flex items-center justify-between gap-2"
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="font-black text-sm text-neutral-900">
-                                    {displayProtein}
-                                  </span>
-                                  {isDishMatch && (
-                                    <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-orange-500 text-white">
-                                      ตรงกับเมนูนี้
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[11px] text-neutral-500 truncate">
-                                  {menu.name} • {variant.name}
-                                </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-neutral-900 truncate">{ing.name}</div>
+                              <div className="text-[10px] text-neutral-500">
+                                ฿{formatMoney(ing.costPerBaseUnit)} / {ing.baseUnit}
                               </div>
-                              <span className="text-xs font-black text-orange-600 shrink-0">
-                                ฿{formatMoney(variant.sellingPrice || 0)}
-                              </span>
                             </div>
-
-                            <div className="mt-2 pt-1.5 border-t border-neutral-200/70 flex items-center justify-between text-[10px] text-neutral-600">
-                              <span>
-                                วัตถุดิบ {(variant.recipeItems || []).length} รายการ
-                              </span>
-                              <span className="font-bold text-emerald-700">
-                                ต้นทุน ฿{formatMoney(foodCost)} ({formatPercent(foodCostPct)})
-                              </span>
-                            </div>
+                            <span className="text-[10px] font-bold text-orange-600 shrink-0">
+                              + เลือกใช้
+                            </span>
                           </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Section 2: Quick Protein / Meat Ingredients */}
-                {proteinIngredients.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-neutral-200">
-                    <div className="text-xs font-extrabold text-neutral-800">
-                      หรือเลือกจากวัตถุดิบเนื้อสัตว์ในคลังต้นทุน ({proteinIngredients.length})
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {proteinIngredients.map((ing) => (
-                        <button
-                          key={ing.id}
-                          type="button"
-                          disabled={isImportingCostOption}
-                          onClick={async () => {
-                            setIsImportingCostOption(true);
-                            try {
-                              const converted = await importCostingIngredientAsDishVariant(ing, 100);
-                              converted.price = editingDish.variants?.[0]?.price || 65;
-                              await appendImportedVariant(converted);
-                            } finally {
-                              setIsImportingCostOption(false);
-                            }
-                          }}
-                          className="p-2.5 bg-neutral-50 hover:bg-orange-50 rounded-xl border border-neutral-200 hover:border-orange-300 text-left cursor-pointer flex items-center justify-between gap-2"
-                        >
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-neutral-900 truncate">{ing.name}</div>
-                            <div className="text-[10px] text-neutral-500">
-                              ฿{formatMoney(ing.costPerBaseUnit)} / {ing.baseUnit}
-                            </div>
-                          </div>
-                          <span className="text-[10px] font-bold text-orange-600 shrink-0">
-                            + เลือกใช้
-                          </span>
-                        </button>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

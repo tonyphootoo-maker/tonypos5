@@ -14,6 +14,7 @@ import {
   firebaseInitError,
 } from './data/db';
 import { Navigation, AppPage } from './components/Navigation';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { ShiftModal } from './components/ShiftModal';
 import { TablesPosPage } from './pages/TablesPosPage';
 import { MenuFoodCostPage } from './pages/MenuFoodCostPage';
@@ -162,8 +163,9 @@ export default function App() {
   if (!user) {
     return (
       <div className="min-h-screen bg-neutral-900 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-orange-950 via-neutral-900 to-neutral-950 flex flex-col justify-between p-4 sm:p-6 select-none text-white">
-        {/* Top Bar with Language Switcher */}
-        <div className="flex justify-end">
+        {/* Top Bar with PWA Install & Language Switcher */}
+        <div className="flex justify-end items-center gap-2">
+          <PWAInstallButton lang={lang} variant="button" />
           <button
             onClick={handleToggleLanguage}
             className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md"
