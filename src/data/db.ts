@@ -610,6 +610,54 @@ export async function deleteDocument(collectionName: string, docId: string): Pro
   }
 }
 
+/**
+ * Auto-save table layout/geometry/details safely to Cloud Firestore.
+ * Uses a transaction that advances from the latest server version and preserves
+ * any active `currentBillId` so rapid drags, resizes, or double-click edits never
+ * trigger stale VERSION_CONFLICT errors or clear an active customer bill.
+ */
+export async function saveTableLayoutAuto(
+  tableData: TableDoc,
+  isNew: boolean = false
+): Promise<TableDoc> {
+  const path = `${getColPath('tables')}/${tableData.id}`;
+  const docRef = doc(db, path);
+
+  try {
+    return await runTransaction(db, async (txn) => {
+      const snap = await txn.get(docRef);
+      if (isNew && !snap.exists()) {
+        const created = stripUndefined({
+          ...tableData,
+          ...createMetadata(0),
+        }) as TableDoc;
+        txn.set(docRef, created);
+        return created;
+      }
+
+      const existing = snap.exists() ? (snap.data() as TableDoc) : null;
+      const latestVersion = existing?.version || tableData.version || 0;
+      const preservedBillId =
+        existing && existing.currentBillId !== undefined
+          ? existing.currentBillId
+          : tableData.currentBillId;
+
+      const merged = stripUndefined({
+        ...(existing || {}),
+        ...tableData,
+        currentBillId: preservedBillId ?? null,
+        createdAt: existing?.createdAt || tableData.createdAt || new Date().toISOString(),
+        ...updateMetadata(latestVersion),
+      }) as TableDoc;
+
+      txn.set(docRef, merged);
+      return merged;
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
 // ==========================================
 // Realtime Listeners for Tables and Open Bills
 // ==========================================

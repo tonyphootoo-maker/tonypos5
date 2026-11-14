@@ -5,6 +5,7 @@ export const translations = {
     // Navigation
     nav: {
       tablesPos: 'Tables / POS',
+      floorPlan: 'Floor Plan Studio',
       menuCost: 'Menu & Food Cost',
       optionGroups: 'Option Groups',
       billsHistory: 'Bills & History',
@@ -415,6 +416,7 @@ export const translations = {
     tagline: 'ระบบขายหน้าร้าน คำนวณต้นทุนอาหาร และวิเคราะห์การเงินครบวงจร',
     nav: {
       tablesPos: 'โต๊ะ / จุดขาย (POS)',
+      floorPlan: 'จัดการผังโต๊ะ (Floor Plan)',
       menuCost: 'เมนูและคำนวณต้นทุน',
       optionGroups: 'กลุ่มตัวเลือกเสริม',
       billsHistory: 'ประวัติบิลและการขาย',

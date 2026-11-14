@@ -37,11 +37,19 @@ import {
   saveDocument,
   deleteDocument,
   saveOrderToTableAtomic,
+  saveTableLayoutAuto,
   getImageDoc,
 } from '../data/db';
 import { SaveOrderModal } from '../components/SaveOrderModal';
 import { PaymentModal } from '../components/PaymentModal';
 import { ReceiptModal } from '../components/ReceiptModal';
+import { TableVisual } from '../components/TableVisual';
+import {
+  FLOOR_CANVAS_MIN_WIDTH,
+  FLOOR_CANVAS_MIN_HEIGHT,
+  clampTablePosition,
+  getTableDimensions,
+} from '../utils/tablePresets';
 import {
   Users,
   Plus,
@@ -58,14 +66,16 @@ import {
   Check,
   ChevronRight,
   Move,
+  Layers,
 } from 'lucide-react';
 
 interface Props {
   settings: SettingsDoc;
   lang: Language;
+  onOpenFloorPlan?: () => void;
 }
 
-export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
+export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan }) => {
   const t = translations[lang];
 
   // Firestore real-time state
@@ -114,9 +124,20 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
   const [isAddingZone, setIsAddingZone] = useState(false);
   const [newZoneName, setNewZoneName] = useState('');
 
-  // Dragging table state
+  // Dragging table state (thresholded so plain clicks never fire spurious writes)
   const [draggingTableId, setDraggingTableId] = useState<string | null>(null);
   const floorPlanRef = useRef<HTMLDivElement>(null);
+  const dragOriginRef = useRef<{
+    tableId: string;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origX: number;
+    origY: number;
+    hasMoved: boolean;
+  } | null>(null);
+  const tablesLatestRef = useRef<TableDoc[]>([]);
+  tablesLatestRef.current = tables;
 
   // Maps for dynamic recipe cost calculation
   const ingredientsMap = new Map<string, IngredientDoc>(ingredients.map((i) => [i.id, i]));
@@ -421,28 +442,69 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
     setIsReceiptModalOpen(true);
   };
 
-  // Dragging table support
-  const handleMouseDownOnTable = (tableId: string) => {
-    setDraggingTableId(tableId);
+  // Dragging table support via Pointer Events (Mouse & Touch) with 5px drag threshold
+  const handlePointerDownOnTable = (
+    e: React.PointerEvent<HTMLDivElement>,
+    tbl: TableDoc
+  ) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    dragOriginRef.current = {
+      tableId: tbl.id,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: tbl.x,
+      origY: tbl.y,
+      hasMoved: false,
+    };
   };
 
-  const handleMouseMoveOnFloorPlan = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!draggingTableId || !floorPlanRef.current) return;
-    const rect = floorPlanRef.current.getBoundingClientRect();
-    const x = Math.max(10, Math.min(rect.width - 100, e.clientX - rect.left - 40));
-    const y = Math.max(10, Math.min(rect.height - 100, e.clientY - rect.top - 40));
+  const handlePointerMoveOnFloorPlan = (e: React.PointerEvent<HTMLDivElement>) => {
+    const origin = dragOriginRef.current;
+    if (!origin || origin.pointerId !== e.pointerId) return;
+
+    const dx = e.clientX - origin.startX;
+    const dy = e.clientY - origin.startY;
+    if (!origin.hasMoved && Math.hypot(dx, dy) < 6) {
+      return;
+    }
+
+    if (!origin.hasMoved) {
+      origin.hasMoved = true;
+      setDraggingTableId(origin.tableId);
+    }
+
+    const target = tablesLatestRef.current.find((t) => t.id === origin.tableId);
+    if (!target) return;
+
+    const dim = getTableDimensions(target);
+    const canvasW = floorPlanRef.current?.clientWidth || FLOOR_CANVAS_MIN_WIDTH;
+    const canvasH = floorPlanRef.current?.clientHeight || FLOOR_CANVAS_MIN_HEIGHT;
+    const pos = clampTablePosition(
+      origin.origX + dx,
+      origin.origY + dy,
+      dim.effWidth,
+      dim.effHeight,
+      Math.max(canvasW, FLOOR_CANVAS_MIN_WIDTH),
+      Math.max(canvasH, FLOOR_CANVAS_MIN_HEIGHT),
+      false
+    );
 
     setTables((prev) =>
-      prev.map((t) => (t.id === draggingTableId ? { ...t, x: Math.round(x), y: Math.round(y) } : t))
+      prev.map((t) => (t.id === origin.tableId ? { ...t, x: pos.x, y: pos.y } : t))
     );
   };
 
-  const handleMouseUpOnFloorPlan = async () => {
-    if (!draggingTableId) return;
-    const tbl = tables.find((t) => t.id === draggingTableId);
+  const handlePointerUpOnFloorPlan = async () => {
+    const origin = dragOriginRef.current;
+    dragOriginRef.current = null;
     setDraggingTableId(null);
-    if (tbl) {
-      await saveDocument('tables', tbl, false);
+
+    if (origin?.hasMoved) {
+      const tbl = tablesLatestRef.current.find((t) => t.id === origin.tableId);
+      if (tbl) {
+        await saveTableLayoutAuto(tbl, false);
+      }
     }
   };
 
@@ -453,19 +515,20 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
 
     const isNew = !editingTable.id;
     const tableToSave: TableDoc = {
+      ...editingTable,
       id: editingTable.id || `tbl_${Date.now()}`,
       name: editingTable.name,
       zoneId: editingTable.zoneId || zones[0]?.id || 'zone_main',
       shape: editingTable.shape || 'square',
-      chairs: editingTable.chairs || 4,
-      x: editingTable.x || 100,
-      y: editingTable.y || 100,
+      chairs: editingTable.chairs ?? 4,
+      x: editingTable.x ?? 100,
+      y: editingTable.y ?? 100,
       createdAt: editingTable.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       version: editingTable.version || 1,
     };
 
-    await saveDocument('tables', tableToSave, isNew);
+    await saveTableLayoutAuto(tableToSave, isNew);
     setIsTableEditorOpen(false);
     setEditingTable(null);
   };
@@ -569,6 +632,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
 
           {/* Table Management Actions */}
           <div className="flex items-center gap-1.5">
+            {onOpenFloorPlan && (
+              <button
+                type="button"
+                onClick={onOpenFloorPlan}
+                className="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 shadow-[0_2px_0_#fde68a] cursor-pointer flex items-center gap-1.5 active:translate-y-[1px]"
+              >
+                <Layers className="w-3.5 h-3.5 text-orange-600" />
+                <span>{t.nav.floorPlan}</span>
+              </button>
+            )}
             <button
               onClick={() => {
                 setEditingTable({
@@ -700,56 +773,55 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
               )}
             </div>
           ) : (
-            // Specific Zone Floor Plan: Raised 3D Sculpted Tables on Architectural Grid
-            <div
-              ref={floorPlanRef}
-              onMouseMove={handleMouseMoveOnFloorPlan}
-              onMouseUp={handleMouseUpOnFloorPlan}
-              className="kin-3d-floorplan flex-1 relative w-full h-full overflow-hidden cursor-default"
-            >
-              {zoneTables.map((tbl) => {
-                const isOccupied = !!tbl.currentBillId;
-                const isSelected = activeBill?.tableId === tbl.id;
+            // Specific Zone Floor Plan: Raised 3D Sculpted Tables & Chairs matching Floor Plan Studio
+            <div className="flex-1 overflow-auto bg-slate-100/60">
+              <div
+                ref={floorPlanRef}
+                onPointerMove={handlePointerMoveOnFloorPlan}
+                onPointerUp={handlePointerUpOnFloorPlan}
+                onPointerCancel={handlePointerUpOnFloorPlan}
+                style={{
+                  minWidth: `${FLOOR_CANVAS_MIN_WIDTH}px`,
+                  minHeight: `${FLOOR_CANVAS_MIN_HEIGHT}px`,
+                }}
+                className="kin-3d-floorplan relative w-full h-full overflow-hidden cursor-default"
+              >
+                {zoneTables.map((tbl) => {
+                  const isOccupied = !!tbl.currentBillId;
+                  const isSelected = activeBill?.tableId === tbl.id;
+                  const isDragging = draggingTableId === tbl.id;
 
-                const shapeClass =
-                  tbl.shape === 'round'
-                    ? 'rounded-full w-24 h-24'
-                    : tbl.shape === 'rectangle'
-                    ? 'rounded-2xl w-32 h-20'
-                    : 'rounded-2xl w-24 h-24';
-
-                return (
-                  <div
-                    key={tbl.id}
-                    onMouseDown={() => handleMouseDownOnTable(tbl.id)}
-                    onClick={() => handleSelectTable(tbl)}
-                    style={{ left: `${tbl.x}px`, top: `${tbl.y}px` }}
-                    className={`kin-3d-table absolute cursor-move flex flex-col items-center justify-center p-1.5 select-none ${shapeClass} ${
-                      isSelected
-                        ? 'ring-4 ring-orange-400 bg-orange-50 border-2 border-orange-500 z-20 -translate-y-0.5'
-                        : isOccupied
-                        ? 'border-2 border-red-500 bg-rose-50/90 text-red-950 shadow-[0_6px_0_#fca5a5,0_14px_24px_-8px_rgba(220,38,38,0.28)]'
-                        : 'border-2 border-emerald-600 bg-white text-emerald-950 shadow-[0_6px_0_#cbd5e1,0_12px_20px_-8px_rgba(15,23,42,0.14)]'
-                    }`}
-                  >
-                    <span className="font-black text-base">{tbl.name}</span>
-                    <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
-                      <Users className="w-3 h-3" />
-                      {tbl.chairs}
-                    </span>
-                    {isOccupied && (
-                      <span className="text-[9px] font-black uppercase text-red-700 bg-red-100 px-1.5 py-0.5 rounded-sm mt-0.5">
-                        Occupied
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
+                  return (
+                    <div
+                      key={tbl.id}
+                      onPointerDown={(e) => handlePointerDownOnTable(e, tbl)}
+                      onClick={() => handleSelectTable(tbl)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        setEditingTable(tbl);
+                        setIsTableEditorOpen(true);
+                      }}
+                      style={{ left: `${tbl.x}px`, top: `${tbl.y}px` }}
+                      className={`absolute cursor-pointer touch-none ${
+                        isSelected ? 'z-20' : 'z-10'
+                      }`}
+                    >
+                      <TableVisual
+                        table={tbl}
+                        isSelected={isSelected}
+                        isDragging={isDragging}
+                        isOccupied={isOccupied}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
 
-        {/* Right Side: Active Order Sidebar / Elevated 3D Bill Card */}
+        {/* Right Side: Active Order Sidebar / Elevated 3D Bill Card (Hidden in Floor Plan / Current Bill view) */}
+        {selectedCategoryId !== null && (
         <div className="w-80 sm:w-96 bg-white border-l border-slate-200 flex flex-col shadow-[-8px_0_28px_-12px_rgba(15,23,42,0.12)] z-10">
           {/* Order Header */}
           <div className="p-3.5 bg-slate-50/90 border-b border-slate-200 space-y-2">
@@ -930,6 +1002,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Always-Visible Bottom Bar: Permanent "Bill" card + Sculpted 3D Category Cards */}

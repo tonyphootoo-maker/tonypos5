@@ -17,6 +17,7 @@ import { Navigation, AppPage } from './components/Navigation';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { ShiftModal } from './components/ShiftModal';
 import { TablesPosPage } from './pages/TablesPosPage';
+import { FloorPlanPage } from './pages/FloorPlanPage';
 import { MenuFoodCostPage } from './pages/MenuFoodCostPage';
 import { OptionGroupsPage } from './pages/OptionGroupsPage';
 import { BillsHistoryPage } from './pages/BillsHistoryPage';
@@ -307,7 +308,17 @@ export default function App() {
       {/* Main Active Page Content */}
       <main className="flex-1 overflow-x-hidden">
         {currentPage === 'pos' && (
-          <TablesPosPage settings={settings} lang={lang} />
+          <TablesPosPage
+            settings={settings}
+            lang={lang}
+            onOpenFloorPlan={() => setCurrentPage('floor_plan')}
+          />
+        )}
+        {currentPage === 'floor_plan' && (
+          <FloorPlanPage
+            lang={lang}
+            onNavigateToPos={() => setCurrentPage('pos')}
+          />
         )}
         {currentPage === 'menu_cost' && (
           <MenuFoodCostPage settings={settings} lang={lang} />

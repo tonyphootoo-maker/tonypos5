@@ -5,6 +5,7 @@ export type BillStatus = 'saved' | 'paid' | 'voided';
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
 export type PaymentMethod = 'cash' | 'qr' | 'card' | 'transfer';
 export type TableShape = 'square' | 'round' | 'rectangle';
+export type TableStylePreset = 'standard' | 'booth' | 'bar';
 export type WageType = 'monthly' | 'daily' | 'hourly';
 export type ExpenseType = 'fixed' | 'variable';
 
@@ -143,6 +144,13 @@ export interface TableDoc extends BaseDoc {
   chairs: number;
   x: number; // px coordinate in floor plan
   y: number; // px coordinate in floor plan
+  width?: number; // custom px width in floor plan
+  height?: number; // custom px height in floor plan
+  scale?: number; // scale multiplier (default 1)
+  rotation?: number; // 0 | 90 | 180 | 270 degrees
+  tableStyle?: TableStylePreset; // 'standard' | 'booth' | 'bar'
+  presetId?: string; // template preset id
+  notes?: string;
   currentBillId?: string | null;
 }
 

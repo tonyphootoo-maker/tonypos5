@@ -28,6 +28,7 @@ import {
   Users,
   FileSpreadsheet,
   ClipboardList,
+  Layers,
 } from 'lucide-react';
 import { Language, ShiftDoc } from '../types';
 import { translations } from '../i18n/translations';
@@ -37,6 +38,7 @@ import { signOutOwner } from '../data/db';
 
 export type AppPage =
   | 'pos'
+  | 'floor_plan'
   | 'menu_cost'
   | 'option_groups'
   | 'bills'
@@ -120,6 +122,15 @@ export const Navigation: React.FC<Props> = ({
             en: 'Floor plan, takeaway & checkout',
           },
           icon: <LayoutGrid className="w-5 h-5 text-orange-600" />,
+        },
+        {
+          id: 'floor_plan',
+          label: t.nav.floorPlan,
+          desc: {
+            th: 'ลากวาง ย่อ-ขยาย เลือกรูปแบบโต๊ะ & เก้าอี้',
+            en: 'Drag, resize & customize tables & chairs',
+          },
+          icon: <Layers className="w-5 h-5 text-amber-600" />,
         },
         {
           id: 'menu_cost',

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { TableDoc, ZoneDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
+import { TableVisual } from './TableVisual';
+import { FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT } from '../utils/tablePresets';
 import { X, CheckCircle, Users } from 'lucide-react';
 
 interface Props {
@@ -124,42 +126,44 @@ export const SaveOrderModal: React.FC<Props> = ({
             </div>
           ) : (
             // Specific Zone Floor Plan
-            <div className="relative w-full h-[360px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-hidden p-2">
-              <div className="text-[11px] font-bold text-neutral-400 absolute top-2 left-3 select-none">
-                Floor Plan View
+            <div className="relative w-full h-[380px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto">
+              <div
+                className="kin-3d-floorplan relative"
+                style={{
+                  width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * 0.65)}px`,
+                  height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * 0.65)}px`,
+                }}
+              >
+                <div className="text-[11px] font-bold text-neutral-400 absolute top-2 left-3 select-none pointer-events-none">
+                  Floor Plan View
+                </div>
+                {visibleTables.map((tbl) => {
+                  const isOccupied = !!tbl.currentBillId;
+                  const isSelected = selectedTableId === tbl.id;
+
+                  return (
+                    <div
+                      key={tbl.id}
+                      onClick={() => onSelectTable(tbl.id)}
+                      style={{
+                        left: `${Math.round(tbl.x * 0.65)}px`,
+                        top: `${Math.round(tbl.y * 0.65)}px`,
+                      }}
+                      className={`absolute cursor-pointer select-none ${
+                        isSelected ? 'z-20' : 'z-10'
+                      }`}
+                    >
+                      <TableVisual
+                        table={tbl}
+                        isSelected={isSelected}
+                        isOccupied={isOccupied}
+                        showOccupiedBadge={false}
+                        scaleFactor={0.65}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-              {visibleTables.map((tbl) => {
-                const isOccupied = !!tbl.currentBillId;
-                const isSelected = selectedTableId === tbl.id;
-
-                const shapeClass =
-                  tbl.shape === 'round'
-                    ? 'rounded-full'
-                    : tbl.shape === 'rectangle'
-                    ? 'rounded-xl w-24 h-16'
-                    : 'rounded-xl w-20 h-20';
-
-                return (
-                  <div
-                    key={tbl.id}
-                    onClick={() => onSelectTable(tbl.id)}
-                    style={{ left: `${tbl.x}px`, top: `${tbl.y}px` }}
-                    className={`absolute cursor-pointer flex flex-col items-center justify-center p-1 select-none transition-all duration-150 ${shapeClass} ${
-                      isSelected
-                        ? 'ring-4 ring-orange-500 bg-orange-100 shadow-lg scale-105'
-                        : isOccupied
-                        ? 'border-3 border-red-600 bg-red-50 text-red-950 shadow-sm'
-                        : 'border-3 border-emerald-800 bg-white text-emerald-950 shadow-sm'
-                    }`}
-                  >
-                    <span className="font-black text-sm">{tbl.name}</span>
-                    <span className="text-[10px] font-semibold text-neutral-500 flex items-center gap-0.5">
-                      <Users className="w-3 h-3" />
-                      {tbl.chairs}
-                    </span>
-                  </div>
-                );
-              })}
             </div>
           )}
         </div>
