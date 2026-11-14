@@ -16,7 +16,7 @@ import {
   calculatePointsEarned,
   calculateBillFinancials,
 } from '../engine/calculations';
-import { getImageDoc, fetchCollection, payBillAtomic } from '../data/db';
+import { getImageDoc, subscribeCollection, payBillAtomic } from '../data/db';
 import {
   X,
   Banknote,
@@ -73,24 +73,26 @@ export const PaymentModal: React.FC<Props> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load QR Image, Members list, & Channel
+  // Load QR Image & subscribe to Members and Channel in real time
   useEffect(() => {
     if (settings.qrImageId) {
       getImageDoc(settings.qrImageId).then((img) => {
         if (img?.dataUrl) setQrDataUrl(img.dataUrl);
       });
+    } else {
+      setQrDataUrl(null);
     }
 
-    fetchCollection<MemberDoc>('members')
-      .then((mems) => setMembers(mems))
-      .catch(() => {});
+    const unsubMembers = subscribeCollection<MemberDoc>('members', (mems) => setMembers(mems));
+    const unsubChannels = subscribeCollection<ChannelDoc>('channels', (chs) => {
+      const match = chs.find((c) => c.id === bill.channelId);
+      setBillChannel(match);
+    });
 
-    fetchCollection<ChannelDoc>('channels')
-      .then((chs) => {
-        const match = chs.find((c) => c.id === bill.channelId);
-        setBillChannel(match);
-      })
-      .catch(() => {});
+    return () => {
+      unsubMembers();
+      unsubChannels();
+    };
   }, [settings.qrImageId, bill.channelId]);
 
   // Member phone search

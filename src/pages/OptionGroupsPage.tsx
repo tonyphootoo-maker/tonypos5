@@ -8,7 +8,7 @@ import {
 } from '../types';
 import { translations } from '../i18n/translations';
 import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
-import { fetchCollection, saveDocument, deleteDocument } from '../data/db';
+import { subscribeCollection, saveDocument, deleteDocument } from '../data/db';
 import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
 import {
   Sliders,
@@ -38,16 +38,20 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
   const manualEnKeysRef = useRef<Set<string>>(new Set());
 
   const loadData = async () => {
-    const [ogs, ings] = await Promise.all([
-      fetchCollection<OptionGroupDoc>('optionGroups'),
-      fetchCollection<IngredientDoc>('ingredients'),
-    ]);
-    setOptionGroups(ogs.sort((a, b) => a.order - b.order));
-    setIngredients(ings);
+    // Handled continuously in real time by Firestore onSnapshot subscriptions below
   };
 
   useEffect(() => {
-    loadData();
+    const unsubGroups = subscribeCollection<OptionGroupDoc>('optionGroups', (ogs) => {
+      setOptionGroups([...ogs].sort((a, b) => (a.order || 0) - (b.order || 0)));
+    });
+    const unsubIngs = subscribeCollection<IngredientDoc>('ingredients', (ings) => {
+      setIngredients(ings);
+    });
+    return () => {
+      unsubGroups();
+      unsubIngs();
+    };
   }, []);
 
   const ingredientsMap = new Map<string, IngredientDoc>(ingredients.map((i) => [i.id, i]));

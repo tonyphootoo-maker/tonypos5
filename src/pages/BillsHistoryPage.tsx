@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BillDoc, BillStatus, SettingsDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { formatMoney, getBusinessWorkDate } from '../engine/calculations';
-import { fetchBillsWithFilter, voidBillAtomic } from '../data/db';
+import { subscribeBillsWithFilter, voidBillAtomic } from '../data/db';
 import { ReceiptModal } from '../components/ReceiptModal';
 import {
   Receipt,
@@ -80,27 +80,30 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
   };
 
   const loadFilteredBills = async () => {
-    setIsLoading(true);
-    const { startDate, endDate } = getDateRange();
-
-    try {
-      const data = await fetchBillsWithFilter({
-        status: statusFilter,
-        startDate,
-        endDate,
-        limitCount: 100, // Cheap query
-      });
-      setBills(data);
-      setPage(1);
-    } catch (err) {
-      console.error('Error fetching bills:', err);
-    } finally {
-      setIsLoading(false);
-    }
+    // Handled continuously in real time by Firestore onSnapshot listener
   };
 
   useEffect(() => {
-    loadFilteredBills();
+    setIsLoading(true);
+    const { startDate, endDate } = getDateRange();
+    const unsub = subscribeBillsWithFilter(
+      {
+        status: statusFilter,
+        startDate,
+        endDate,
+        limitCount: 100,
+      },
+      (data) => {
+        setBills(data);
+        setPage(1);
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error('Error subscribing bills:', err);
+        setIsLoading(false);
+      }
+    );
+    return () => unsub();
   }, [statusFilter, datePreset, customDate]);
 
   const handleConfirmVoid = async () => {

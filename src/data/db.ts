@@ -640,7 +640,7 @@ export function subscribeOpenBills(
   onData: (bills: BillDoc[]) => void,
   onError?: (err: Error) => void
 ): Unsubscribe {
-  if (!auth.currentUser) {
+  if (!auth?.currentUser || !db) {
     return () => {};
   }
   const path = getColPath('bills');
@@ -655,6 +655,95 @@ export function subscribeOpenBills(
       console.error('Open bills listener error:', err);
       onError?.(err);
       handleFirestoreError(err, OperationType.LIST, path);
+    }
+  );
+}
+
+// ==========================================
+// Universal Realtime Listeners for All Collections & Settings
+// ==========================================
+export function subscribeCollection<T>(
+  collectionName: string,
+  onData: (items: T[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  if (!auth?.currentUser || !db) {
+    return () => {};
+  }
+  const path = getColPath(collectionName);
+  const colRef = collection(db, path);
+  return onSnapshot(
+    colRef,
+    (snap) => {
+      const items = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as T);
+      onData(items);
+    },
+    (err) => {
+      console.error(`Realtime listener error (${collectionName}):`, err);
+      onError?.(err);
+      handleFirestoreError(err, OperationType.LIST, path);
+    }
+  );
+}
+
+export function subscribeDocument<T>(
+  collectionName: string,
+  docId: string,
+  onData: (data: T | null) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  if (!auth?.currentUser || !db || !docId) {
+    return () => {};
+  }
+  const path = `${getColPath(collectionName)}/${docId}`;
+  const docRef = doc(db, path);
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.exists()) {
+        onData({ ...snap.data(), id: snap.id } as T);
+      } else {
+        onData(null);
+      }
+    },
+    (err) => {
+      console.error(`Realtime doc listener error (${path}):`, err);
+      onError?.(err);
+      handleFirestoreError(err, OperationType.GET, path);
+    }
+  );
+}
+
+export function subscribeSettings(
+  onData: (settings: SettingsDoc) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  if (!auth?.currentUser || !db) {
+    return () => {};
+  }
+  const uid = getCurrentUid();
+  const path = `users/${uid}/settings/main`;
+  const ref = doc(db, path);
+  let initializing = false;
+
+  return onSnapshot(
+    ref,
+    async (snap) => {
+      if (snap.exists()) {
+        onData(snap.data() as SettingsDoc);
+      } else if (!initializing) {
+        initializing = true;
+        try {
+          await initializeDefaultsIfEmpty();
+        } catch (err) {
+          onError?.(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    },
+    (err) => {
+      console.error('Settings listener error:', err);
+      onError?.(err);
+      handleFirestoreError(err, OperationType.GET, path);
     }
   );
 }
@@ -1156,6 +1245,104 @@ export async function fetchSingleDailySummary(date: string): Promise<DailySummar
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, path);
   }
+}
+
+export function subscribeBillsWithFilter(
+  options: {
+    status?: BillStatus | 'all';
+    startDate?: string;
+    endDate?: string;
+    limitCount?: number;
+  },
+  onData: (bills: BillDoc[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  if (!auth?.currentUser || !db) {
+    return () => {};
+  }
+  const path = getColPath('bills');
+  const constraints = [];
+
+  if (options.status && options.status !== 'all') {
+    constraints.push(where('status', '==', options.status));
+  }
+
+  if (options.startDate && options.endDate) {
+    if (options.startDate === options.endDate) {
+      constraints.push(where('workDate', '==', options.startDate));
+    } else {
+      constraints.push(where('workDate', '>=', options.startDate));
+      constraints.push(where('workDate', '<=', options.endDate));
+    }
+  }
+
+  constraints.push(orderBy('workDate', 'desc'));
+  constraints.push(limit(options.limitCount || 50));
+
+  const q = query(collection(db, path), ...constraints);
+  return onSnapshot(
+    q,
+    (snap) => {
+      onData(snap.docs.map((d) => d.data() as BillDoc));
+    },
+    (err) => {
+      console.error('Bills filter listener error:', err);
+      onError?.(err);
+      handleFirestoreError(err, OperationType.LIST, path);
+    }
+  );
+}
+
+export function subscribeDailySummariesInRange(
+  startDate: string,
+  endDate: string,
+  onData: (summaries: DailySummaryDoc[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  if (!auth?.currentUser || !db) {
+    return () => {};
+  }
+  const path = getColPath('dailySummaries');
+  const q = query(
+    collection(db, path),
+    where('date', '>=', startDate),
+    where('date', '<=', endDate),
+    orderBy('date', 'asc')
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      onData(snap.docs.map((d) => d.data() as DailySummaryDoc));
+    },
+    (err) => {
+      console.error('Daily summaries range listener error:', err);
+      onError?.(err);
+      handleFirestoreError(err, OperationType.LIST, path);
+    }
+  );
+}
+
+export function subscribeSingleDailySummary(
+  date: string,
+  onData: (summary: DailySummaryDoc | null) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  if (!auth?.currentUser || !db || !date) {
+    return () => {};
+  }
+  const path = `${getColPath('dailySummaries')}/${date}`;
+  const ref = doc(db, path);
+  return onSnapshot(
+    ref,
+    (snap) => {
+      onData(snap.exists() ? (snap.data() as DailySummaryDoc) : null);
+    },
+    (err) => {
+      console.error('Single daily summary listener error:', err);
+      onError?.(err);
+      handleFirestoreError(err, OperationType.GET, path);
+    }
+  );
 }
 
 // ==========================================

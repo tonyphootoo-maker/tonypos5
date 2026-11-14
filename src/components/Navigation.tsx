@@ -371,17 +371,17 @@ export const Navigation: React.FC<Props> = ({
       />
 
       {/* Left Sidebar Bar: Spans from top all the way down to bottom */}
-      <div className="relative w-80 sm:w-88 max-w-[85vw] h-screen h-[100dvh] bg-white shadow-2xl flex flex-col z-10 border-r border-orange-200 animate-in slide-in-from-left duration-200">
+      <div className="relative w-80 sm:w-88 max-w-[85vw] h-screen h-[100dvh] bg-[#F8FAFC] shadow-[16px_0_40px_-10px_rgba(15,23,42,0.22)] flex flex-col z-10 border-r border-slate-200">
         {/* Drawer Header */}
-        <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between shadow-xs shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center font-black text-white text-lg border border-white/30 shadow-xs">
+        <div className="p-4 bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 text-white flex items-center justify-between shadow-[0_4px_0_rgba(154,52,18,0.3),0_10px_20px_-6px_rgba(234,88,12,0.3)] shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center font-black text-white text-lg border border-white/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_3px_0_rgba(0,0,0,0.16)]">
               K
             </div>
             <div className="leading-tight">
               <div className="flex items-center gap-1.5">
                 <span className="font-extrabold text-base tracking-tight">KinPOS</span>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md bg-white/25 text-white">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-white/20 text-white">
                   Pro
                 </span>
               </div>
@@ -393,17 +393,17 @@ export const Navigation: React.FC<Props> = ({
           <button
             onClick={() => setIsOpen(false)}
             aria-label="Close sidebar menu"
-            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/25 text-white cursor-pointer transition-colors active:scale-95"
+            className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white cursor-pointer transition-colors active:scale-95"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Menu Navigation Items (Scrollable from top to bottom) */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
           {menuGroups.map((group) => (
-            <div key={group.title.en} className="space-y-1">
-              <div className="px-2 pt-1 pb-0.5 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
+            <div key={group.title.en} className="space-y-1.5">
+              <div className="px-2.5 pt-1 pb-0.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 {group.title[lang]}
               </div>
               {group.items.map((item) => {
@@ -415,15 +415,15 @@ export const Navigation: React.FC<Props> = ({
                       onSelectPage(item.id);
                       setIsOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition-all cursor-pointer group ${
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-left transition-all cursor-pointer group ${
                       isActive
-                        ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md shadow-orange-500/20 translate-x-0.5'
-                        : 'text-neutral-700 hover:bg-orange-50/90 hover:text-orange-950 border border-transparent hover:border-orange-200'
+                        ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_8px_16px_-6px_rgba(234,88,12,0.32)]'
+                        : 'bg-white text-slate-700 hover:bg-orange-50/70 hover:text-orange-950 border border-slate-200/80 shadow-[0_2px_0_rgba(203,213,225,0.5)]'
                     }`}
                   >
                     <div
-                      className={`p-1.5 rounded-lg shrink-0 transition-colors ${
-                        isActive ? 'bg-white/20 text-white' : 'bg-neutral-100 group-hover:bg-white'
+                      className={`p-1.5 rounded-xl shrink-0 transition-colors ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-slate-100 group-hover:bg-white'
                       }`}
                     >
                       {item.icon}
@@ -432,12 +432,12 @@ export const Navigation: React.FC<Props> = ({
                       <div className="flex items-center justify-between gap-1">
                         <span className="text-xs sm:text-sm font-bold truncate">{item.label}</span>
                         {isActive && (
-                          <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse shrink-0" />
+                          <Sparkles className="w-3.5 h-3.5 text-amber-200 shrink-0" />
                         )}
                       </div>
                       <p
                         className={`text-[11px] truncate mt-0.5 ${
-                          isActive ? 'text-orange-100' : 'text-neutral-400 group-hover:text-neutral-600'
+                          isActive ? 'text-orange-100' : 'text-slate-400 group-hover:text-slate-600'
                         }`}
                       >
                         {item.desc[lang]}
@@ -503,7 +503,7 @@ export const Navigation: React.FC<Props> = ({
   );
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-orange-200 shadow-sm">
+    <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-slate-200/90 shadow-[inset_0_1px_0_rgba(255,255,255,1),0_6px_20px_-8px_rgba(15,23,42,0.1)]">
       <div className="max-w-7xl mx-auto px-3 sm:px-5 py-2.5 flex items-center justify-between gap-2">
         {/* Left: Hamburger & Brand */}
         <div className="flex items-center gap-2.5">
@@ -511,26 +511,26 @@ export const Navigation: React.FC<Props> = ({
             onClick={() => setIsOpen(true)}
             aria-label="Open Sidebar Menu"
             title={lang === 'th' ? 'เปิดแถบเมนูด้านซ้าย' : 'Open Left Sidebar Menu'}
-            className="p-2 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-300 shadow-xs transition-transform active:scale-95 flex items-center justify-center cursor-pointer"
+            className="p-2 rounded-xl bg-white hover:bg-orange-50 text-orange-700 border border-slate-200 shadow-[0_2px_0_#e2e8f0,0_4px_10px_-4px_rgba(15,23,42,0.08)] transition-transform active:translate-y-[1px] flex items-center justify-center cursor-pointer"
           >
-            <Menu className="w-6 h-6" />
+            <Menu className="w-5 h-5" />
           </button>
 
           <div
             onClick={() => onSelectPage('pos')}
-            className="flex items-center gap-2 cursor-pointer select-none"
+            className="flex items-center gap-2.5 cursor-pointer select-none"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 via-red-500 to-amber-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20 font-black text-lg border border-orange-300">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 flex items-center justify-center text-white font-black text-lg border border-orange-300/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_3px_0_#c2410c,0_8px_16px_-4px_rgba(234,88,12,0.35)]">
               K
             </div>
             <div className="leading-tight">
-              <div className="font-extrabold text-neutral-900 tracking-tight flex items-center gap-1.5">
+              <div className="font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
                 <span>KinPOS</span>
-                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-2xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700 border border-orange-200">
                   Pro
                 </span>
               </div>
-              <div className="text-[10px] text-neutral-500 font-medium truncate max-w-[150px] sm:max-w-xs">
+              <div className="text-[10px] text-slate-500 font-medium truncate max-w-[150px] sm:max-w-xs">
                 {t.appName}
               </div>
             </div>
@@ -538,14 +538,14 @@ export const Navigation: React.FC<Props> = ({
         </div>
 
         {/* Right: Quick actions, Status, Lang Switcher */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-2.5">
           {/* Shift Button */}
           <button
             onClick={onOpenShiftModal}
-            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all cursor-pointer shadow-xs active:scale-95 ${
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-all cursor-pointer active:translate-y-[1px] ${
               activeShift
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-[0_2px_0_#a7f3d0] hover:bg-emerald-100'
+                : 'bg-amber-50 text-amber-900 border-amber-200 shadow-[0_2px_0_#fde68a] hover:bg-amber-100'
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
@@ -563,10 +563,10 @@ export const Navigation: React.FC<Props> = ({
           {/* Language Switcher */}
           <button
             onClick={onToggleLang}
-            className="px-2.5 py-1 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 border border-neutral-300 text-xs font-bold flex items-center gap-1.5 shadow-2xs active:scale-95 transition-all cursor-pointer"
+            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-xs font-bold flex items-center gap-1.5 shadow-[0_2px_0_#e2e8f0] active:translate-y-[1px] transition-all cursor-pointer"
             title="Toggle Thai / English"
           >
-            <Globe className="w-3.5 h-3.5 text-neutral-600" />
+            <Globe className="w-3.5 h-3.5 text-slate-600" />
             <span>{lang === 'th' ? 'ไทย' : 'EN'}</span>
           </button>
         </div>

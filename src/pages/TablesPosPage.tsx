@@ -33,7 +33,7 @@ import {
 import {
   subscribeTables,
   subscribeOpenBills,
-  fetchCollection,
+  subscribeCollection,
   saveDocument,
   deleteDocument,
   saveOrderToTableAtomic,
@@ -124,39 +124,63 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
   const packagingMap = new Map<string, PackagingDoc>(packagings.map((p) => [p.id, p]));
   const optionGroupsMap = new Map<string, OptionGroupDoc>(optionGroups.map((g) => [g.id, g]));
 
-  // Setup Realtime Listeners
-  useEffect(() => {
-    const unsubTables = subscribeTables((tbls) => setTables(tbls));
-    const unsubBills = subscribeOpenBills((bills) => setOpenBills(bills));
+  const loadedDishImageIdsRef = useRef<Map<string, string>>(new Map());
 
-    // Fetch master references
-    fetchCollection<ZoneDoc>('zones').then((z) => setZones(z));
-    fetchCollection<CategoryDoc>('categories').then((c) => setCategories(c));
-    fetchCollection<ChannelDoc>('channels').then((ch) => {
-      setChannels(ch);
-      if (ch.length > 0) setSelectedChannelId(ch[0].id);
-    });
-    fetchCollection<DishDoc>('dishes').then((d) => {
-      setDishes(d);
-      // Preload images
-      d.forEach((dish) => {
-        if (dish.imageId) {
-          getImageDoc(dish.imageId).then((imgDoc) => {
-            if (imgDoc?.dataUrl) {
-              setDishImages((prev) => new Map(prev).set(dish.id, imgDoc.dataUrl));
-            }
-          });
+  // Setup Realtime Listeners across ALL POS tables, bills, menus, options & ingredients
+  useEffect(() => {
+    const unsubs = [
+      subscribeTables((tbls) => setTables(tbls)),
+      subscribeOpenBills((bills) => setOpenBills(bills)),
+      subscribeCollection<ZoneDoc>('zones', (z) =>
+        setZones([...z].sort((a, b) => (a.order || 0) - (b.order || 0)))
+      ),
+      subscribeCollection<CategoryDoc>('categories', (c) =>
+        setCategories([...c].sort((a, b) => (a.order || 0) - (b.order || 0)))
+      ),
+      subscribeCollection<ChannelDoc>('channels', (ch) => {
+        setChannels(ch);
+        if (ch.length > 0) {
+          setSelectedChannelId((prev) => (ch.some((c) => c.id === prev) ? prev : ch[0].id));
         }
-      });
-    });
-    fetchCollection<OptionGroupDoc>('optionGroups').then((og) => setOptionGroups(og));
-    fetchCollection<IngredientDoc>('ingredients').then((ing) => setIngredients(ing));
-    fetchCollection<SubRecipeDoc>('subRecipes').then((sub) => setSubRecipes(sub));
-    fetchCollection<PackagingDoc>('packaging').then((pkg) => setPackagings(pkg));
+      }),
+      subscribeCollection<DishDoc>('dishes', (d) => {
+        setDishes([...d].sort((a, b) => (a.order || 0) - (b.order || 0)));
+        const activeIds = new Set(d.map((item) => item.id));
+        loadedDishImageIdsRef.current.forEach((_, dishId) => {
+          if (!activeIds.has(dishId)) {
+            loadedDishImageIdsRef.current.delete(dishId);
+          }
+        });
+        d.forEach((dish) => {
+          if (dish.imageId) {
+            if (loadedDishImageIdsRef.current.get(dish.id) !== dish.imageId) {
+              loadedDishImageIdsRef.current.set(dish.id, dish.imageId);
+              getImageDoc(dish.imageId).then((imgDoc) => {
+                if (imgDoc?.dataUrl) {
+                  setDishImages((prev) => new Map(prev).set(dish.id, imgDoc.dataUrl));
+                }
+              });
+            }
+          } else if (loadedDishImageIdsRef.current.has(dish.id)) {
+            loadedDishImageIdsRef.current.delete(dish.id);
+            setDishImages((prev) => {
+              const next = new Map(prev);
+              next.delete(dish.id);
+              return next;
+            });
+          }
+        });
+      }),
+      subscribeCollection<OptionGroupDoc>('optionGroups', (og) =>
+        setOptionGroups([...og].sort((a, b) => (a.order || 0) - (b.order || 0)))
+      ),
+      subscribeCollection<IngredientDoc>('ingredients', (ing) => setIngredients(ing)),
+      subscribeCollection<SubRecipeDoc>('subRecipes', (sub) => setSubRecipes(sub)),
+      subscribeCollection<PackagingDoc>('packaging', (pkg) => setPackagings(pkg)),
+    ];
 
     return () => {
-      unsubTables();
-      unsubBills();
+      unsubs.forEach((u) => u());
     };
   }, []);
 
@@ -477,17 +501,17 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
     : tables.filter((t) => t.zoneId === activeZoneId);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-62px)] bg-neutral-100 overflow-hidden select-none">
+    <div className="flex flex-col h-[calc(100vh-62px)] bg-transparent overflow-hidden select-none">
       {/* Top Zone Chip Bar: Only visible when NOT full screen in a category */}
       {!selectedCategoryId && (
-        <div className="px-3 sm:px-4 py-2 bg-white border-b border-orange-200 flex items-center justify-between gap-2 shadow-2xs">
-          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none flex-1">
+        <div className="px-3 sm:px-4 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-2 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.08)]">
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none flex-1 py-0.5">
             <button
               onClick={() => setActiveZoneId('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap shadow-2xs active:scale-95 ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap active:translate-y-[1px] ${
                 activeZoneId === 'all'
-                  ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-xs'
-                  : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200 border border-neutral-300'
+                  ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_6px_14px_-4px_rgba(234,88,12,0.3)]'
+                  : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
               }`}
             >
               {t.pos.allZones} ({tablesWithSavedOrder.length})
@@ -499,10 +523,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                 <button
                   key={z.id}
                   onClick={() => setActiveZoneId(z.id)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap shadow-2xs active:scale-95 ${
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap active:translate-y-[1px] ${
                     activeZoneId === z.id
-                      ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-xs'
-                      : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200 border border-neutral-300'
+                      ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_6px_14px_-4px_rgba(234,88,12,0.3)]'
+                      : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
                   }`}
                 >
                   {lang === 'th' && z.nameTh ? z.nameTh : z.name} {countInZone > 0 && `(${countInZone})`}
@@ -512,13 +536,13 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
 
             {/* Add Zone Trigger */}
             {isAddingZone ? (
-              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-orange-300">
+              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-orange-300 shadow-xs">
                 <input
                   type="text"
                   placeholder={t.pos.zoneName}
                   value={newZoneName}
                   onChange={(e) => setNewZoneName(e.target.value)}
-                  className="px-2 py-1 text-xs w-28 bg-neutral-50 rounded-lg border border-neutral-300 focus:outline-hidden"
+                  className="px-2 py-1 text-xs w-28 bg-slate-50 rounded-lg border border-slate-300 focus:outline-hidden"
                 />
                 <button
                   onClick={handleCreateZone}
@@ -528,7 +552,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                 </button>
                 <button
                   onClick={() => setIsAddingZone(false)}
-                  className="p-1 text-neutral-500 hover:text-neutral-700 cursor-pointer"
+                  className="p-1 text-slate-500 hover:text-slate-700 cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -556,7 +580,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                 });
                 setIsTableEditorOpen(true);
               }}
-              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white text-orange-800 border border-orange-300 hover:bg-orange-50 shadow-2xs cursor-pointer flex items-center gap-1 active:scale-95"
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-orange-800 border border-slate-200 hover:bg-orange-50 shadow-[0_2px_0_#e2e8f0] cursor-pointer flex items-center gap-1 active:translate-y-[1px]"
             >
               <Plus className="w-3.5 h-3.5 text-orange-600" />
               <span>{t.pos.addTable}</span>
@@ -568,7 +592,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Side: Tables Floor Plan or Dishes Grid */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-neutral-100">
+        <div className="flex-1 flex flex-col overflow-hidden bg-transparent">
           {selectedCategoryId ? (
             // Full Screen Category Menu View
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -588,16 +612,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
               </div>
 
               {/* Dish Cards: Shows ONLY Photo and Name below it (no price) */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
                 {displayedDishes.map((dish) => {
                   const imgDataUrl = dishImages.get(dish.id);
                   return (
                     <div
                       key={dish.id}
                       onClick={() => handleOpenDishOptions(dish)}
-                      className="group bg-white rounded-2xl border border-neutral-200 hover:border-orange-400 p-2.5 shadow-sm hover:shadow-md transition-all duration-150 cursor-pointer flex flex-col items-center text-center select-none active:scale-97"
+                      className="group bg-white rounded-2xl border border-slate-200 hover:border-orange-400 p-2.5 shadow-[inset_0_1px_0_#ffffff,0_3px_0_#e2e8f0,0_10px_20px_-8px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 hover:shadow-[0_4px_0_#fdba74,0_14px_24px_-8px_rgba(234,88,12,0.18)] transition-all duration-150 cursor-pointer flex flex-col items-center text-center select-none active:translate-y-[2px]"
                     >
-                      <div className="w-full aspect-square rounded-xl bg-neutral-100 overflow-hidden mb-2 relative flex items-center justify-center">
+                      <div className="w-full aspect-square rounded-xl bg-slate-100 overflow-hidden mb-2 relative flex items-center justify-center shadow-[inset_0_1px_3px_rgba(15,23,42,0.06)]">
                         {imgDataUrl ? (
                           <img
                             src={imgDataUrl}
@@ -606,10 +630,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                           />
                         ) : (
-                          <Utensils className="w-10 h-10 text-neutral-300" />
+                          <Utensils className="w-10 h-10 text-slate-300" />
                         )}
                       </div>
-                      <span className="font-extrabold text-sm text-neutral-900 group-hover:text-orange-600 transition-colors line-clamp-2">
+                      <span className="font-extrabold text-sm text-slate-900 group-hover:text-orange-600 transition-colors line-clamp-2">
                         {lang === 'th' && dish.nameTh ? dish.nameTh : dish.name}
                       </span>
                     </div>
@@ -621,15 +645,17 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
             // "All zones": ONLY tables that have a saved order!
             <div className="flex-1 overflow-y-auto p-4">
               {tablesWithSavedOrder.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-neutral-400 text-center p-6">
-                  <Receipt className="w-14 h-14 mb-2 text-neutral-300" />
-                  <p className="font-bold text-sm text-neutral-600">No tables with active orders</p>
-                  <p className="text-xs text-neutral-400 max-w-xs mt-1">
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center p-6">
+                  <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 shadow-[0_4px_0_#e2e8f0,0_10px_20px_-6px_rgba(15,23,42,0.08)] flex items-center justify-center mb-3">
+                    <Receipt className="w-8 h-8 text-slate-300" />
+                  </div>
+                  <p className="font-bold text-sm text-slate-600">No tables with active orders</p>
+                  <p className="text-xs text-slate-400 max-w-xs mt-1">
                     Select a specific zone above to view all free tables and start a new order.
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
                   {tablesWithSavedOrder.map((tbl) => {
                     const bill = openBills.find((b) => b.id === tbl.currentBillId);
                     const isSelected = activeBill?.tableId === tbl.id;
@@ -638,19 +664,19 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                       <div
                         key={tbl.id}
                         onClick={() => handleSelectTable(tbl)}
-                        className={`p-4 rounded-2xl cursor-pointer transition-all duration-150 flex flex-col justify-between h-36 border-2 border-red-600 bg-red-50/50 shadow-sm hover:shadow-md select-none ${
-                          isSelected ? 'ring-4 ring-orange-500 bg-orange-50' : ''
+                        className={`kin-3d-table p-4 rounded-2xl cursor-pointer flex flex-col justify-between h-36 border-2 border-red-500 bg-white select-none ${
+                          isSelected ? 'ring-4 ring-orange-400 bg-orange-50/40' : ''
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className="font-black text-xl text-neutral-900">{tbl.name}</span>
+                          <span className="font-black text-xl text-slate-900">{tbl.name}</span>
                           <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-red-600 text-white shadow-2xs">
                             {t.pos.occupiedTable}
                           </span>
                         </div>
 
                         <div className="space-y-0.5">
-                          <div className="text-xs font-bold text-neutral-700">
+                          <div className="text-xs font-bold text-slate-600">
                             Bill: {bill?.billNumber || 'Unsaved'}
                           </div>
                           <div className="text-lg font-black text-red-600">
@@ -658,7 +684,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-xs text-neutral-500 font-semibold pt-1 border-t border-red-200">
+                        <div className="flex items-center justify-between text-xs text-slate-500 font-semibold pt-1 border-t border-red-100">
                           <span className="flex items-center gap-1">
                             <Users className="w-3.5 h-3.5" />
                             {tbl.chairs}
@@ -674,12 +700,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
               )}
             </div>
           ) : (
-            // Specific Zone Floor Plan: Free = Dark Green border, Occupied = Red border
+            // Specific Zone Floor Plan: Raised 3D Sculpted Tables on Architectural Grid
             <div
               ref={floorPlanRef}
               onMouseMove={handleMouseMoveOnFloorPlan}
               onMouseUp={handleMouseUpOnFloorPlan}
-              className="flex-1 relative w-full h-full bg-white overflow-hidden shadow-inner cursor-default"
+              className="kin-3d-floorplan flex-1 relative w-full h-full overflow-hidden cursor-default"
             >
               {zoneTables.map((tbl) => {
                 const isOccupied = !!tbl.currentBillId;
@@ -698,21 +724,21 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                     onMouseDown={() => handleMouseDownOnTable(tbl.id)}
                     onClick={() => handleSelectTable(tbl)}
                     style={{ left: `${tbl.x}px`, top: `${tbl.y}px` }}
-                    className={`absolute cursor-move flex flex-col items-center justify-center p-1.5 transition-shadow select-none ${shapeClass} ${
+                    className={`kin-3d-table absolute cursor-move flex flex-col items-center justify-center p-1.5 select-none ${shapeClass} ${
                       isSelected
-                        ? 'ring-4 ring-orange-500 shadow-xl bg-orange-100 z-20'
+                        ? 'ring-4 ring-orange-400 bg-orange-50 border-2 border-orange-500 z-20 -translate-y-0.5'
                         : isOccupied
-                        ? 'border-4 border-red-600 bg-red-50 text-red-950 shadow-md'
-                        : 'border-4 border-emerald-800 bg-white text-emerald-950 shadow-sm hover:shadow-md'
+                        ? 'border-2 border-red-500 bg-rose-50/90 text-red-950 shadow-[0_6px_0_#fca5a5,0_14px_24px_-8px_rgba(220,38,38,0.28)]'
+                        : 'border-2 border-emerald-600 bg-white text-emerald-950 shadow-[0_6px_0_#cbd5e1,0_12px_20px_-8px_rgba(15,23,42,0.14)]'
                     }`}
                   >
                     <span className="font-black text-base">{tbl.name}</span>
-                    <span className="text-[11px] font-bold text-neutral-500 flex items-center gap-1">
+                    <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
                       <Users className="w-3 h-3" />
                       {tbl.chairs}
                     </span>
                     {isOccupied && (
-                      <span className="text-[9px] font-black uppercase text-red-600 bg-red-100 px-1 rounded-sm mt-0.5">
+                      <span className="text-[9px] font-black uppercase text-red-700 bg-red-100 px-1.5 py-0.5 rounded-sm mt-0.5">
                         Occupied
                       </span>
                     )}
@@ -723,10 +749,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
           )}
         </div>
 
-        {/* Right Side: Active Order Sidebar / Bill Card */}
-        <div className="w-80 sm:w-96 bg-white border-l border-neutral-200 flex flex-col shadow-lg z-10">
+        {/* Right Side: Active Order Sidebar / Elevated 3D Bill Card */}
+        <div className="w-80 sm:w-96 bg-white border-l border-slate-200 flex flex-col shadow-[-8px_0_28px_-12px_rgba(15,23,42,0.12)] z-10">
           {/* Order Header */}
-          <div className="p-3.5 bg-neutral-50 border-b border-neutral-200 space-y-2">
+          <div className="p-3.5 bg-slate-50/90 border-b border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="font-black text-sm text-neutral-900 flex items-center gap-1.5">
@@ -906,28 +932,28 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
         </div>
       </div>
 
-      {/* Always-Visible Bottom Bar: Permanent "Bill" card + Food Category Cards */}
-      <div className="h-16 bg-white border-t border-orange-200 px-3 flex items-center gap-2 overflow-x-auto shadow-md z-30">
+      {/* Always-Visible Bottom Bar: Permanent "Bill" card + Sculpted 3D Category Cards */}
+      <div className="h-[68px] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 flex items-center gap-2 overflow-x-auto shadow-[0_-6px_20px_-10px_rgba(15,23,42,0.1)] z-30">
         {/* Permanent Bill Card (linked to floor plan) */}
         <button
           onClick={() => setSelectedCategoryId(null)}
-          className={`h-12 px-4 rounded-xl flex items-center gap-2 font-black text-xs cursor-pointer transition-all shrink-0 active:scale-95 shadow-sm ${
+          className={`h-12 px-4 rounded-xl flex items-center gap-2 font-black text-xs cursor-pointer transition-all shrink-0 active:translate-y-[1px] ${
             selectedCategoryId === null
-              ? 'bg-gradient-to-r from-neutral-900 to-neutral-800 text-white shadow-md ring-2 ring-orange-500'
-              : 'bg-neutral-100 text-neutral-800 hover:bg-neutral-200 border border-neutral-300'
+              ? 'bg-slate-900 text-white shadow-[0_3px_0_#0f172a,0_8px_16px_-6px_rgba(15,23,42,0.35)] ring-2 ring-orange-500'
+              : 'bg-white text-slate-800 hover:bg-slate-50 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
           }`}
         >
           <Receipt className="w-4 h-4 text-orange-400" />
           <div className="text-left">
             <div className="leading-tight">{t.pos.billCard}</div>
-            <div className="text-[10px] text-neutral-400 font-semibold">
+            <div className="text-[10px] text-slate-400 font-semibold">
               {tablesWithSavedOrder.length} Active Orders
             </div>
           </div>
         </button>
 
         {/* Separator */}
-        <div className="h-8 w-px bg-neutral-300 shrink-0" />
+        <div className="h-8 w-px bg-slate-200 shrink-0" />
 
         {/* Food Category Cards */}
         {categories.map((cat) => {
@@ -938,10 +964,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
             <button
               key={cat.id}
               onClick={() => setSelectedCategoryId(cat.id)}
-              className={`h-12 px-4 rounded-xl flex items-center gap-2.5 font-bold text-xs cursor-pointer transition-all shrink-0 active:scale-95 ${
+              className={`h-12 px-4 rounded-xl flex items-center gap-2.5 font-bold text-xs cursor-pointer transition-all shrink-0 active:translate-y-[1px] ${
                 isSelected
-                  ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md shadow-orange-500/20'
-                  : 'bg-white text-neutral-800 hover:bg-orange-50/60 border border-orange-200'
+                  ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_8px_16px_-6px_rgba(234,88,12,0.32)]'
+                  : 'bg-white text-slate-800 hover:bg-orange-50/70 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
               }`}
             >
               <Utensils className={`w-4 h-4 ${isSelected ? 'text-amber-200' : 'text-orange-500'}`} />
@@ -949,7 +975,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang }) => {
                 <div className="leading-tight font-extrabold">
                   {lang === 'th' && cat.nameTh ? cat.nameTh : cat.name}
                 </div>
-                <div className={`text-[10px] font-semibold ${isSelected ? 'text-orange-100' : 'text-neutral-500'}`}>
+                <div className={`text-[10px] font-semibold ${isSelected ? 'text-orange-100' : 'text-slate-500'}`}>
                   {dishCount} dishes
                 </div>
               </div>

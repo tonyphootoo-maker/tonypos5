@@ -16,7 +16,7 @@ import {
   calculateUsaliPnl,
   BenchmarkStatus,
 } from '../engine/calculations';
-import { fetchDailySummariesInRange, fetchCollection } from '../data/db';
+import { subscribeDailySummariesInRange, subscribeCollection } from '../data/db';
 import {
   BarChart3,
   Printer,
@@ -48,9 +48,18 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
   const [summaries, setSummaries] = useState<DailySummaryDoc[]>([]);
   const [expenses, setExpenses] = useState<ExpenseDoc[]>([]);
   const [employees, setEmployees] = useState<EmployeeDoc[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const loadReportData = async () => {
+  useEffect(() => {
+    const unsubExp = subscribeCollection<ExpenseDoc>('expenses', (exps) => setExpenses(exps));
+    const unsubEmp = subscribeCollection<EmployeeDoc>('employees', (emps) => setEmployees(emps));
+    return () => {
+      unsubExp();
+      unsubEmp();
+    };
+  }, []);
+
+  useEffect(() => {
     setIsLoading(true);
     let startDate = selectedDate;
     let endDate = selectedDate;
@@ -64,24 +73,22 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
       endDate = `${selectedYear}-12-31`;
     }
 
-    try {
-      const [sums, exps, emps] = await Promise.all([
-        fetchDailySummariesInRange(startDate, endDate),
-        fetchCollection<ExpenseDoc>('expenses'),
-        fetchCollection<EmployeeDoc>('employees'),
-      ]);
-      setSummaries(sums);
-      setExpenses(exps);
-      setEmployees(emps);
-    } catch (err) {
-      console.error('Error loading report:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    const unsubSums = subscribeDailySummariesInRange(
+      startDate,
+      endDate,
+      (sums) => {
+        setSummaries(sums);
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error('Error subscribing report:', err);
+        setIsLoading(false);
+      }
+    );
 
-  useEffect(() => {
-    loadReportData();
+    return () => {
+      unsubSums();
+    };
   }, [period, selectedDate, selectedMonth, selectedYear]);
 
   // Aggregate payment/channel/dish breakdown across fetched daily summaries

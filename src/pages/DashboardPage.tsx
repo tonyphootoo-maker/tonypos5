@@ -21,7 +21,7 @@ import {
   calculatePeriodExpensesAndLabor,
   calculateUsaliPnl,
 } from '../engine/calculations';
-import { fetchSingleDailySummary, fetchCollection } from '../data/db';
+import { subscribeSingleDailySummary, subscribeCollection } from '../data/db';
 import { AppPage } from '../components/Navigation';
 import {
   LayoutDashboard,
@@ -50,31 +50,34 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const [sum, dshs, ings, subs, pkgs, exps, emps] = await Promise.all([
-          fetchSingleDailySummary(todayStr),
-          fetchCollection<DishDoc>('dishes'),
-          fetchCollection<IngredientDoc>('ingredients'),
-          fetchCollection<SubRecipeDoc>('subRecipes'),
-          fetchCollection<PackagingDoc>('packaging'),
-          fetchCollection<ExpenseDoc>('expenses'),
-          fetchCollection<EmployeeDoc>('employees'),
-        ]);
+    setIsLoading(true);
+    const unsubSummary = subscribeSingleDailySummary(
+      todayStr,
+      (sum) => {
         setTodaySummary(sum);
-        setDishes(dshs);
-        setIngredients(ings);
-        setSubRecipes(subs);
-        setPackagings(pkgs);
-        setExpenses(exps);
-        setEmployees(emps);
-      } catch (err) {
-        console.error('Dashboard load error:', err);
-      } finally {
+        setIsLoading(false);
+      },
+      (err) => {
+        console.error('Dashboard summary listener error:', err);
         setIsLoading(false);
       }
+    );
+    const unsubDishes = subscribeCollection<DishDoc>('dishes', (d) => setDishes(d));
+    const unsubIngredients = subscribeCollection<IngredientDoc>('ingredients', (i) => setIngredients(i));
+    const unsubSubs = subscribeCollection<SubRecipeDoc>('subRecipes', (s) => setSubRecipes(s));
+    const unsubPkgs = subscribeCollection<PackagingDoc>('packaging', (p) => setPackagings(p));
+    const unsubExps = subscribeCollection<ExpenseDoc>('expenses', (e) => setExpenses(e));
+    const unsubEmps = subscribeCollection<EmployeeDoc>('employees', (emp) => setEmployees(emp));
+
+    return () => {
+      unsubSummary();
+      unsubDishes();
+      unsubIngredients();
+      unsubSubs();
+      unsubPkgs();
+      unsubExps();
+      unsubEmps();
     };
-    load();
   }, [todayStr]);
 
   // Maps for costing checks

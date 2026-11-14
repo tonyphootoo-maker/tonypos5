@@ -26,7 +26,8 @@ import {
   formatPercent,
 } from '../engine/calculations';
 import {
-  fetchCollection,
+  subscribeCollection,
+  subscribeDocument,
   saveDocument,
   deleteDocument,
   saveImageDoc,
@@ -111,6 +112,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
   const [editingChannel, setEditingChannel] = useState<Partial<ChannelDoc> | null>(null);
 
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [editingDishPreviewUrl, setEditingDishPreviewUrl] = useState<string | null>(null);
+  const [editingDishImageSizeKb, setEditingDishImageSizeKb] = useState<number | null>(null);
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
 
   // Costing Food-Cost Primary Option Picker & Sub-Option Picker states
   const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
@@ -118,7 +122,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     StorageService.getIngredients()
   );
   const [costSauces, setCostSauces] = useState<CostSauce[]>(() => StorageService.getSauces());
-  const [costSettings] = useState<CostRestaurantSettings>(() => StorageService.getSettings());
+  const [costSettings, setCostSettings] = useState<CostRestaurantSettings>(() =>
+    StorageService.getSettings()
+  );
   const [isPrimaryOptionPickerOpen, setIsPrimaryOptionPickerOpen] = useState(false);
   const [selectedCostMenuId, setSelectedCostMenuId] = useState<string | null>(null);
   const [pickerSourceTab, setPickerSourceTab] = useState<'menus' | 'ingredients'>('menus');
@@ -129,63 +135,72 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
 
   // Tracks which English inputs were manually customized in the current modal session
   const manualEnKeysRef = useRef<Set<string>>(new Set());
+  const loadedDishImageIdsRef = useRef<Map<string, string>>(new Map());
 
-  const loadCostingCatalog = async () => {
-    try {
-      const [cloudMenus, cloudIngs, cloudSauces] = await Promise.all([
-        fetchCollection<CostMenuItem>(COST_COLLECTIONS.MENUS).catch(() => []),
-        fetchCollection<CostIngredient>(COST_COLLECTIONS.INGREDIENTS).catch(() => []),
-        fetchCollection<CostSauce>(COST_COLLECTIONS.SAUCES).catch(() => []),
-      ]);
-      const localMenus = StorageService.getMenus();
-      const localIngs = StorageService.getIngredients();
-      const localSauces = StorageService.getSauces();
-      setCostMenus(cloudMenus.length > 0 ? cloudMenus : localMenus);
-      setCostIngredients(cloudIngs.length > 0 ? cloudIngs : localIngs);
-      setCostSauces(cloudSauces.length > 0 ? cloudSauces : localSauces);
-    } catch {
-      setCostMenus(StorageService.getMenus());
-      setCostIngredients(StorageService.getIngredients());
-      setCostSauces(StorageService.getSauces());
-    }
-  };
-
-  // Load all references
-  const loadData = async () => {
-    const [ings, subs, pkgs, dshs, cats, chs, ogs] = await Promise.all([
-      fetchCollection<IngredientDoc>('ingredients'),
-      fetchCollection<SubRecipeDoc>('subRecipes'),
-      fetchCollection<PackagingDoc>('packaging'),
-      fetchCollection<DishDoc>('dishes'),
-      fetchCollection<CategoryDoc>('categories'),
-      fetchCollection<ChannelDoc>('channels'),
-      fetchCollection<OptionGroupDoc>('optionGroups'),
-    ]);
-
-    setIngredients(ings);
-    setSubRecipes(subs);
-    setPackagings(pkgs);
-    setDishes(dshs);
-    setCategories(cats.sort((a, b) => a.order - b.order));
-    setChannels(chs);
-    setOptionGroups(ogs);
-
-    loadCostingCatalog();
-
-    // Preload dish images
-    dshs.forEach((d) => {
-      if (d.imageId) {
-        getImageDoc(d.imageId).then((imgDoc) => {
-          if (imgDoc?.dataUrl) {
-            setDishImages((prev) => new Map(prev).set(d.id, imgDoc.dataUrl));
-          }
-        });
-      }
-    });
-  };
+  // No-ops kept for existing handler call sites since real-time listeners handle updates
+  const loadCostingCatalog = async () => {};
+  const loadData = async () => {};
 
   useEffect(() => {
-    loadData();
+    const unsubs = [
+      subscribeCollection<IngredientDoc>('ingredients', (ings) => setIngredients(ings)),
+      subscribeCollection<SubRecipeDoc>('subRecipes', (subs) => setSubRecipes(subs)),
+      subscribeCollection<PackagingDoc>('packaging', (pkgs) => setPackagings(pkgs)),
+      subscribeCollection<CategoryDoc>('categories', (cats) =>
+        setCategories([...cats].sort((a, b) => (a.order || 0) - (b.order || 0)))
+      ),
+      subscribeCollection<ChannelDoc>('channels', (chs) => setChannels(chs)),
+      subscribeCollection<OptionGroupDoc>('optionGroups', (ogs) =>
+        setOptionGroups([...ogs].sort((a, b) => (a.order || 0) - (b.order || 0)))
+      ),
+      subscribeCollection<DishDoc>('dishes', (dshs) => {
+        const sortedDishes = [...dshs].sort((a, b) => (a.order || 0) - (b.order || 0));
+        setDishes(sortedDishes);
+
+        const activeIds = new Set(sortedDishes.map((item) => item.id));
+        loadedDishImageIdsRef.current.forEach((_, dishId) => {
+          if (!activeIds.has(dishId)) {
+            loadedDishImageIdsRef.current.delete(dishId);
+          }
+        });
+
+        sortedDishes.forEach((d) => {
+          if (d.imageId) {
+            if (loadedDishImageIdsRef.current.get(d.id) !== d.imageId) {
+              loadedDishImageIdsRef.current.set(d.id, d.imageId);
+              getImageDoc(d.imageId).then((imgDoc) => {
+                if (imgDoc?.dataUrl) {
+                  setDishImages((prev) => new Map(prev).set(d.id, imgDoc.dataUrl));
+                }
+              });
+            }
+          } else if (loadedDishImageIdsRef.current.has(d.id)) {
+            loadedDishImageIdsRef.current.delete(d.id);
+            setDishImages((prev) => {
+              const next = new Map(prev);
+              next.delete(d.id);
+              return next;
+            });
+          }
+        });
+      }),
+      subscribeCollection<CostMenuItem>(COST_COLLECTIONS.MENUS, (cloudMenus) => {
+        if (cloudMenus.length > 0) setCostMenus(cloudMenus);
+      }),
+      subscribeCollection<CostIngredient>(COST_COLLECTIONS.INGREDIENTS, (cloudIngs) => {
+        if (cloudIngs.length > 0) setCostIngredients(cloudIngs);
+      }),
+      subscribeCollection<CostSauce>(COST_COLLECTIONS.SAUCES, (cloudSauces) => {
+        if (cloudSauces.length > 0) setCostSauces(cloudSauces);
+      }),
+      subscribeDocument<CostRestaurantSettings>(COST_COLLECTIONS.SETTINGS, 'default', (cloudSet) => {
+        if (cloudSet) setCostSettings(cloudSet);
+      }),
+    ];
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
   }, []);
 
   // Compute live Maps for dynamic costing
@@ -325,21 +340,34 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
   // DISH & RECIPE HANDLERS
   // ==========================================
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file || !editingDish) return;
 
     setIsUploadingImage(true);
+    setImageUploadError(null);
     try {
       const { dataUrl, sizeBytes } = await compressImage(file);
       const imageId = `img_${Date.now()}`;
       await saveImageDoc(imageId, dataUrl, sizeBytes);
 
-      setEditingDish({ ...editingDish, imageId });
-      setDishImages((prev) => new Map(prev).set(editingDish.id || 'preview', dataUrl));
+      setEditingDish((prev) => (prev ? { ...prev, imageId } : prev));
+      setEditingDishPreviewUrl(dataUrl);
+      setEditingDishImageSizeKb(Math.max(1, Math.round(sizeBytes / 1024)));
+      if (editingDish.id) {
+        loadedDishImageIdsRef.current.set(editingDish.id, imageId);
+        setDishImages((prev) => new Map(prev).set(editingDish.id!, dataUrl));
+      }
     } catch (err) {
       console.error('Image compression error:', err);
+      setImageUploadError(
+        lang === 'th'
+          ? 'อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองไฟล์อื่น'
+          : 'Failed to upload image. Please try another file.'
+      );
     } finally {
       setIsUploadingImage(false);
+      input.value = '';
     }
   };
 
@@ -397,8 +425,24 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     };
 
     await saveDocument('dishes', dishToSave, isNew);
+    if (editingDishPreviewUrl) {
+      if (dishToSave.imageId) {
+        loadedDishImageIdsRef.current.set(dishToSave.id, dishToSave.imageId);
+      }
+      setDishImages((prev) => new Map(prev).set(dishToSave.id, editingDishPreviewUrl));
+    } else if (!dishToSave.imageId) {
+      loadedDishImageIdsRef.current.delete(dishToSave.id);
+      setDishImages((prev) => {
+        const next = new Map(prev);
+        next.delete(dishToSave.id);
+        return next;
+      });
+    }
     setIsDishModalOpen(false);
     setEditingDish(null);
+    setEditingDishPreviewUrl(null);
+    setEditingDishImageSizeKb(null);
+    setImageUploadError(null);
     loadData();
   };
 
@@ -465,6 +509,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             <button
               onClick={() => {
                 manualEnKeysRef.current.clear();
+                setEditingDishPreviewUrl(null);
+                setEditingDishImageSizeKb(null);
+                setImageUploadError(null);
                 setEditingDish({
                   name: '',
                   nameTh: '',
@@ -646,6 +693,23 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                       <button
                         onClick={() => {
                           manualEnKeysRef.current.clear();
+                          setImageUploadError(null);
+                          setEditingDishImageSizeKb(null);
+                          const existingImg = dishImages.get(dish.id) || null;
+                          setEditingDishPreviewUrl(existingImg);
+                          if (dish.imageId) {
+                            getImageDoc(dish.imageId)
+                              .then((imgDoc) => {
+                                if (imgDoc?.dataUrl) {
+                                  setEditingDishPreviewUrl(imgDoc.dataUrl);
+                                  setDishImages((prev) => new Map(prev).set(dish.id, imgDoc.dataUrl));
+                                  if (imgDoc.sizeBytes) {
+                                    setEditingDishImageSizeKb(Math.max(1, Math.round(imgDoc.sizeBytes / 1024)));
+                                  }
+                                }
+                              })
+                              .catch(() => {});
+                          }
                           setEditingDish({
                             ...dish,
                             variants: (dish.variants || []).map((v) => ({
@@ -1432,27 +1496,93 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                   </select>
                 </div>
 
-                {/* Photo Upload (compressed to max 600px < 150KB) */}
+                {/* Photo Upload with Live Visual Preview */}
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
                     {t.menuCost.dishImage}
                   </label>
-                  <div className="flex items-center gap-2">
-                    <label className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer flex items-center gap-1.5">
-                      <Upload className="w-3.5 h-3.5 text-orange-600" />
-                      <span>{isUploadingImage ? 'Compressing...' : t.menuCost.uploadPhoto}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePhotoUpload}
-                        className="hidden"
-                      />
-                    </label>
-                    {editingDish.imageId && (
-                      <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Uploaded
-                      </span>
-                    )}
+                  <div className="p-2.5 bg-neutral-50 border border-neutral-200 rounded-2xl flex items-center gap-3">
+                    {/* Visible Preview Frame */}
+                    <div className="w-20 h-20 rounded-xl bg-white border border-neutral-200 shadow-xs overflow-hidden shrink-0 flex items-center justify-center">
+                      {editingDishPreviewUrl || (editingDish.id ? dishImages.get(editingDish.id) : null) ? (
+                        <img
+                          src={
+                            editingDishPreviewUrl ||
+                            (editingDish.id ? dishImages.get(editingDish.id) : '') ||
+                            ''
+                          }
+                          alt={editingDish.nameTh || editingDish.name || 'Dish preview'}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center text-neutral-300 gap-1">
+                          <Utensils className="w-6 h-6" />
+                          <span className="text-[9px] font-bold text-neutral-400">
+                            {lang === 'th' ? 'ไม่มีรูป' : 'No Photo'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Upload Controls + Status */}
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <label className="px-3 py-1.5 bg-white hover:bg-orange-50 text-neutral-800 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer flex items-center gap-1.5 shadow-2xs">
+                          <Upload className="w-3.5 h-3.5 text-orange-600" />
+                          <span>
+                            {isUploadingImage
+                              ? lang === 'th'
+                                ? 'กำลังบีบอัดรูป...'
+                                : 'Compressing...'
+                              : editingDish.imageId || editingDishPreviewUrl
+                              ? lang === 'th'
+                                ? 'เปลี่ยนรูปภาพ'
+                                : 'Change Photo'
+                              : t.menuCost.uploadPhoto}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handlePhotoUpload}
+                            className="hidden"
+                          />
+                        </label>
+
+                        {(editingDish.imageId || editingDishPreviewUrl) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDish({ ...editingDish, imageId: undefined });
+                              setEditingDishPreviewUrl(null);
+                              setEditingDishImageSizeKb(null);
+                              setImageUploadError(null);
+                            }}
+                            className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>{t.menuCost.removePhoto}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {imageUploadError ? (
+                        <p className="text-[11px] font-bold text-rose-600">{imageUploadError}</p>
+                      ) : editingDish.imageId || editingDishPreviewUrl ? (
+                        <p className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>
+                            {lang === 'th' ? 'โหลดรูปภาพพร้อมแสดงผลแล้ว' : 'Photo ready'}
+                            {editingDishImageSizeKb ? ` (${editingDishImageSizeKb} KB)` : ''}
+                          </span>
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-neutral-400">
+                          {lang === 'th'
+                            ? 'รองรับ JPG/PNG ระบบย่อขนาดให้อัตโนมัติ'
+                            : 'Auto-compressed under 150KB'}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2402,17 +2532,6 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
           const nextVariants = hasOnlyBlankPlaceholder ? [newVariant] : [...currentVars, newVariant];
           setEditingDish({ ...editingDish, variants: nextVariants });
           setActiveDishVariantIndex(nextVariants.length - 1);
-
-          // Reload POS ingredients/subRecipes/packaging so cost calculations stay current
-          const [ings, subs, pkgs] = await Promise.all([
-            fetchCollection<IngredientDoc>('ingredients'),
-            fetchCollection<SubRecipeDoc>('subRecipes'),
-            fetchCollection<PackagingDoc>('packaging'),
-          ]);
-          setIngredients(ings);
-          setSubRecipes(subs);
-          setPackagings(pkgs);
-
           setIsPrimaryOptionPickerOpen(false);
         };
 

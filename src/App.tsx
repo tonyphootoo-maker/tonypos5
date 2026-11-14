@@ -9,8 +9,8 @@ import { translations } from './i18n/translations';
 import {
   subscribeAuth,
   signInWithGoogle,
-  getSettings,
-  fetchCollection,
+  subscribeSettings,
+  subscribeCollection,
   firebaseInitError,
 } from './data/db';
 import { Navigation, AppPage } from './components/Navigation';
@@ -49,9 +49,22 @@ export default function App() {
 
   const t = translations[lang];
 
-  // Subscribe to Auth state changes with safety timeout against infinite loading
+  // Subscribe to Auth state changes and wire real-time Settings & Shifts listeners
   useEffect(() => {
     let isMounted = true;
+    let unsubSettings: (() => void) | null = null;
+    let unsubShifts: (() => void) | null = null;
+
+    const cleanupDataSubs = () => {
+      if (unsubSettings) {
+        unsubSettings();
+        unsubSettings = null;
+      }
+      if (unsubShifts) {
+        unsubShifts();
+        unsubShifts = null;
+      }
+    };
 
     // Safety timeout: Never stay stuck on loading screen
     const timer = setTimeout(() => {
@@ -60,49 +73,62 @@ export default function App() {
       }
     }, 3500);
 
-    const unsubscribe = subscribeAuth(async (currentUser) => {
+    const unsubscribe = subscribeAuth((currentUser) => {
       if (!isMounted) return;
+      cleanupDataSubs();
       setUser(currentUser);
-      if (currentUser) {
-        try {
-          const loadedSettings = await getSettings();
-          if (isMounted) setSettings(loadedSettings);
 
-          // Check active shift
-          const shifts = await fetchCollection<ShiftDoc>('shifts');
-          const openOne = shifts.find((s) => s.status === 'open');
-          if (isMounted) setActiveShift(openOne || null);
-        } catch (err) {
-          console.error('Error loading initial data:', err);
-          // Set emergency fallback settings if loading failed
-          if (isMounted) {
-            setSettings({
-              id: 'main',
-              shopName: 'KinPOS Restaurant',
-              shopAddress: 'Bangkok, Thailand',
-              shopPhone: '02-123-4567',
-              taxId: '0105558000000',
-              receiptHeader: 'Welcome to KinPOS',
-              receiptFooter: 'Thank you for your visit!',
-              targetFoodCostPercent: 30,
-              vatPercent: 7,
-              serviceChargePercent: 10,
-              dailyClosingTime: '04:00',
-              pointsEarnUnitThb: 100,
-              pointsRedeemValueThb: 1,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              version: 1,
-            });
+      if (currentUser) {
+        unsubSettings = subscribeSettings(
+          (loadedSettings) => {
+            if (!isMounted) return;
+            setSettings(loadedSettings);
+            clearTimeout(timer);
+            setAuthLoading(false);
+          },
+          (err) => {
+            console.error('Error subscribing settings:', err);
+            if (isMounted) {
+              setSettings((prev) =>
+                prev || {
+                  id: 'main',
+                  shopName: 'KinPOS Restaurant',
+                  shopAddress: 'Bangkok, Thailand',
+                  shopPhone: '02-123-4567',
+                  taxId: '0105558000000',
+                  receiptHeader: 'Welcome to KinPOS',
+                  receiptFooter: 'Thank you for your visit!',
+                  targetFoodCostPercent: 30,
+                  vatPercent: 7,
+                  serviceChargePercent: 10,
+                  dailyClosingTime: '04:00',
+                  pointsEarnUnitThb: 100,
+                  pointsRedeemValueThb: 1,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                  version: 1,
+                }
+              );
+              clearTimeout(timer);
+              setAuthLoading(false);
+            }
           }
-        }
+        );
+
+        unsubShifts = subscribeCollection<ShiftDoc>(
+          'shifts',
+          (shifts) => {
+            if (!isMounted) return;
+            const openOne = shifts.find((s) => s.status === 'open');
+            setActiveShift(openOne || null);
+          },
+          (err) => {
+            console.error('Error subscribing shifts:', err);
+          }
+        );
       } else {
-        if (isMounted) {
-          setSettings(null);
-          setActiveShift(null);
-        }
-      }
-      if (isMounted) {
+        setSettings(null);
+        setActiveShift(null);
         clearTimeout(timer);
         setAuthLoading(false);
       }
@@ -111,6 +137,7 @@ export default function App() {
     return () => {
       isMounted = false;
       clearTimeout(timer);
+      cleanupDataSubs();
       unsubscribe();
     };
   }, []);
@@ -147,12 +174,12 @@ export default function App() {
   // 1. Initial Loading Screen
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-500 via-orange-500 to-red-600 flex flex-col items-center justify-center p-4 text-white select-none">
-        <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-2xl border border-white/30 animate-bounce mb-4">
+      <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_#ffffff_0%,_#eef2f7_65%,_#e2e8f0_100%)] flex flex-col items-center justify-center p-4 text-slate-900 select-none">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_5px_0_#c2410c,0_16px_30px_rgba(234,88,12,0.28)] border border-orange-300/60 mb-4">
           <UtensilsCrossed className="w-8 h-8 text-white" />
         </div>
-        <h1 className="text-2xl font-black tracking-tight">KinPOS</h1>
-        <p className="text-xs text-orange-100 font-semibold mt-1">
+        <h1 className="text-2xl font-black tracking-tight text-slate-900">KinPOS</h1>
+        <p className="text-xs text-orange-600 font-bold mt-1">
           {t.common.loading}
         </p>
       </div>
@@ -162,66 +189,66 @@ export default function App() {
   // 2. Login Screen (Shown ONLY when signed out)
   if (!user) {
     return (
-      <div className="min-h-screen bg-neutral-900 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-orange-950 via-neutral-900 to-neutral-950 flex flex-col justify-between p-4 sm:p-6 select-none text-white">
+      <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_#ffffff_0%,_#eef2f7_60%,_#e2e8f0_100%)] flex flex-col justify-between p-4 sm:p-6 select-none text-slate-900">
         {/* Top Bar with PWA Install & Language Switcher */}
         <div className="flex justify-end items-center gap-2">
           <PWAInstallButton lang={lang} variant="button" />
           <button
             onClick={handleToggleLanguage}
-            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md"
+            className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_2px_0_#e2e8f0]"
           >
-            <Globe className="w-3.5 h-3.5 text-orange-400" />
+            <Globe className="w-3.5 h-3.5 text-orange-600" />
             <span>{lang === 'th' ? 'Switch to English' : 'เปลี่ยนเป็นภาษาไทย'}</span>
           </button>
         </div>
 
-        {/* Center Login Card */}
-        <div className="max-w-md w-full mx-auto my-auto bg-neutral-900/90 backdrop-blur-xl p-6 sm:p-8 rounded-3xl border border-orange-500/30 shadow-2xl space-y-6">
+        {/* Center Clean 3D Login Card */}
+        <div className="max-w-md w-full mx-auto my-auto bg-white p-7 sm:p-8 rounded-3xl border border-slate-200 shadow-[inset_0_1px_0_#ffffff,0_6px_0_0_#dce3ee,0_24px_50px_-12px_rgba(15,23,42,0.16)] space-y-6">
           <div className="text-center space-y-2">
-            <div className="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-lg shadow-orange-500/30 border border-orange-400/40">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_5px_0_#c2410c,0_14px_26px_rgba(234,88,12,0.28)] border border-orange-300/60">
               <UtensilsCrossed className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-2xl font-black tracking-tight text-white pt-2">
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 pt-2">
               KinPOS
             </h1>
-            <p className="text-xs text-orange-200 font-medium">
+            <p className="text-xs text-slate-500 font-medium">
               {t.tagline}
             </p>
           </div>
 
-          <div className="p-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl text-xs space-y-1.5">
-            <div className="font-bold text-orange-300 flex items-center gap-1.5">
-              <Lock className="w-4 h-4 text-orange-400" />
+          <div className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl text-xs space-y-1.5 shadow-[inset_0_1px_3px_rgba(15,23,42,0.04)]">
+            <div className="font-bold text-slate-800 flex items-center gap-1.5">
+              <Lock className="w-4 h-4 text-orange-600" />
               <span>{t.auth.title}</span>
             </div>
-            <p className="text-neutral-300 text-[11px] leading-relaxed">
+            <p className="text-slate-600 text-[11px] leading-relaxed">
               {t.auth.subtitle}
             </p>
-            <p className="text-neutral-400 text-[10px]">
+            <p className="text-slate-400 text-[10px]">
               {t.auth.keepSignedInNote}
             </p>
           </div>
 
           {firebaseInitError && (
-            <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-xs text-rose-300 font-semibold space-y-1">
-              <div className="font-bold flex items-center gap-1.5 text-rose-400">
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-semibold space-y-1">
+              <div className="font-bold flex items-center gap-1.5 text-rose-800">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>Firebase Initialization Error / ข้อผิดพลาดการเชื่อมต่อ</span>
               </div>
-              <div className="text-[11px] text-neutral-300 break-all">{firebaseInitError}</div>
+              <div className="text-[11px] text-rose-600 break-all">{firebaseInitError}</div>
             </div>
           )}
 
           {loginError && (
-            <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-xs text-rose-300 font-semibold">
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-semibold">
               {loginError}
             </div>
           )}
 
-          {/* Google Sign-in Button */}
+          {/* Google Sign-in Tactile 3D Button */}
           <button
             onClick={handleGoogleSignIn}
-            className="w-full py-3.5 px-4 bg-white hover:bg-neutral-100 text-neutral-900 font-extrabold text-sm rounded-2xl shadow-lg flex items-center justify-center gap-3 active:scale-98 transition-all cursor-pointer"
+            className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 text-slate-900 font-extrabold text-sm rounded-2xl border border-slate-300 shadow-[inset_0_1px_0_#ffffff,0_4px_0_#cbd5e1,0_10px_20px_-6px_rgba(15,23,42,0.12)] flex items-center justify-center gap-3 active:translate-y-[2px] transition-all cursor-pointer"
           >
             {/* Google SVG Icon */}
             <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -247,8 +274,8 @@ export default function App() {
         </div>
 
         {/* Footer */}
-        <div className="text-center text-[11px] text-neutral-500">
-          Powered by Firestore Multi-Tab Offline Engine • KinPOS
+        <div className="text-center text-[11px] text-slate-400">
+          KinPOS • Multi-Tab Offline &amp; Real-Time Sync Engine
         </div>
       </div>
     );
@@ -257,7 +284,7 @@ export default function App() {
   // 3. Authenticated App Layout
   if (!settings) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-100 text-neutral-600 text-xs">
+      <div className="min-h-screen flex items-center justify-center p-4 bg-transparent text-slate-600 text-xs">
         <Loader2 className="w-5 h-5 animate-spin text-orange-600 mr-2" />
         <span>Initializing store configuration...</span>
       </div>
@@ -265,7 +292,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-100 flex flex-col font-sans">
+    <div className="min-h-screen flex flex-col font-sans">
       {/* Universal Top Navigation & Hamburger Menu */}
       <Navigation
         currentPage={currentPage}

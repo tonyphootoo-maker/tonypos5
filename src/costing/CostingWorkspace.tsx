@@ -31,6 +31,8 @@ import {
 } from './types/domain';
 import { StorageService } from './services/storageService';
 import { FirebaseSyncService, COST_COLLECTIONS } from './services/firebaseSyncService';
+import { subscribeCollection } from '../data/db';
+import { DailySummaryDoc } from '../types';
 import { calculateIngredientCost } from './services/calculationEngine';
 import { upsertDailySalesRecord } from './engine/calculations';
 import { syncCostingMenuToPOS } from './services/posBridge';
@@ -155,10 +157,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.INGREDIENTS,
           (items) => {
-            if (items.length > 0) {
-              setIngredients(items);
-              StorageService.saveIngredients(items);
-            }
+            setIngredients(items);
+            StorageService.saveIngredients(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -166,10 +166,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.SAUCES,
           (items) => {
-            if (items.length > 0) {
-              setSauces(items);
-              StorageService.saveSauces(items);
-            }
+            setSauces(items);
+            StorageService.saveSauces(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -177,10 +175,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.MENUS,
           (items) => {
-            if (items.length > 0) {
-              setMenus(items);
-              StorageService.saveMenus(items);
-            }
+            setMenus(items);
+            StorageService.saveMenus(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -188,9 +184,22 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.DAILY_SALES,
           (items) => {
-            if (items.length > 0) {
-              setDailySales(items);
-              StorageService.saveDailySales(items);
+            setDailySales(items);
+            StorageService.saveDailySales(items);
+          },
+          (err) => setCloudError(err.message)
+        ),
+        // Auto-sync live POS sales summaries into Costing P&L & Executive Dashboard in real time
+        subscribeCollection<DailySummaryDoc>(
+          'dailySummaries',
+          async () => {
+            try {
+              const res = await FirebaseSyncService.pullDailySales(user.uid);
+              if (res.success && isMounted) {
+                setDailySales(res.data);
+              }
+            } catch (err) {
+              console.warn('Live POS dailySummaries bridge sync warning:', err);
             }
           },
           (err) => setCloudError(err.message)
@@ -199,10 +208,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.EXPENSES,
           (items) => {
-            if (items.length > 0) {
-              setExpenses(items);
-              StorageService.saveExpenses(items);
-            }
+            setExpenses(items);
+            StorageService.saveExpenses(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -210,10 +217,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.EMPLOYEES,
           (items) => {
-            if (items.length > 0) {
-              setEmployees(items);
-              StorageService.saveEmployees(items);
-            }
+            setEmployees(items);
+            StorageService.saveEmployees(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -221,10 +226,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.PURCHASES,
           (items) => {
-            if (items.length > 0) {
-              setPurchases(items);
-              StorageService.savePurchases(items);
-            }
+            setPurchases(items);
+            StorageService.savePurchases(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -232,10 +235,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.INVENTORY,
           (items) => {
-            if (items.length > 0) {
-              setInventory(items);
-              StorageService.saveInventory(items);
-            }
+            setInventory(items);
+            StorageService.saveInventory(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -243,10 +244,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.WASTE_LOG,
           (items) => {
-            if (items.length > 0) {
-              setWasteLog(items);
-              StorageService.saveWasteLog(items);
-            }
+            setWasteLog(items);
+            StorageService.saveWasteLog(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -254,10 +253,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.SUPPLIERS,
           (items) => {
-            if (items.length > 0) {
-              setSuppliers(items);
-              StorageService.saveSuppliers(items);
-            }
+            setSuppliers(items);
+            StorageService.saveSuppliers(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -265,10 +262,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.PRICE_HISTORY,
           (items) => {
-            if (items.length > 0) {
-              setPriceHistory(items);
-              StorageService.savePriceHistory(items);
-            }
+            setPriceHistory(items);
+            StorageService.savePriceHistory(items);
           },
           (err) => setCloudError(err.message)
         ),
@@ -276,10 +271,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.SALES_ORDERS,
           (items) => {
-            if (items.length > 0) {
-              setSalesOrders(items);
-              StorageService.saveSalesOrders(items);
-            }
+            setSalesOrders(items);
+            StorageService.saveSalesOrders(items);
           },
           (err) => setCloudError(err.message)
         )

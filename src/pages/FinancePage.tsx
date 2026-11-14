@@ -18,7 +18,12 @@ import {
   roundTo2,
   formatPercent,
 } from '../engine/calculations';
-import { fetchCollection, fetchDailySummariesInRange, saveDocument, deleteDocument } from '../data/db';
+import {
+  subscribeCollection,
+  subscribeDailySummariesInRange,
+  saveDocument,
+  deleteDocument,
+} from '../data/db';
 import {
   CircleDollarSign,
   Users,
@@ -64,23 +69,26 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
   const todayStr = getBusinessWorkDate(new Date(), settings.dailyClosingTime);
 
   const loadData = async () => {
+    // Handled continuously in real time by Firestore onSnapshot listeners
+  };
+
+  useEffect(() => {
     const past30Date = new Date();
     past30Date.setDate(past30Date.getDate() - 30);
     const start30Str = getBusinessWorkDate(past30Date, settings.dailyClosingTime);
 
-    const [exps, emps, sums30] = await Promise.all([
-      fetchCollection<ExpenseDoc>('expenses'),
-      fetchCollection<EmployeeDoc>('employees'),
-      fetchDailySummariesInRange(start30Str, todayStr).catch(() => [] as DailySummaryDoc[]),
-    ]);
-    setExpenses(exps);
-    setEmployees(emps);
-    setLast30Summaries(sums30);
-  };
+    const unsubExps = subscribeCollection<ExpenseDoc>('expenses', (exps) => setExpenses(exps));
+    const unsubEmps = subscribeCollection<EmployeeDoc>('employees', (emps) => setEmployees(emps));
+    const unsubSums = subscribeDailySummariesInRange(start30Str, todayStr, (sums30) =>
+      setLast30Summaries(sums30)
+    );
 
-  useEffect(() => {
-    loadData();
-  }, [todayStr]);
+    return () => {
+      unsubExps();
+      unsubEmps();
+      unsubSums();
+    };
+  }, [todayStr, settings.dailyClosingTime]);
 
   // Compute current month fixed expenses & labor via centralized engine
   const currentMonth = todayStr.substring(0, 7);
