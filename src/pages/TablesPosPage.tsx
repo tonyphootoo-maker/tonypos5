@@ -105,6 +105,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
   const [receiptBillToView, setReceiptBillToView] = useState<BillDoc | null>(null);
   const [isCheckReceipt, setIsCheckReceipt] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [orderSavedNotice, setOrderSavedNotice] = useState<string | null>(null);
+  const savedNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Bottom Food Category Drag-and-Drop Reorder State
   const [draggingCatId, setDraggingCatId] = useState<string | null>(null);
@@ -215,11 +218,13 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     return () => {
       unsubs.forEach((u) => u());
       if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
+      if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
     };
   }, []);
 
   // When a table is tapped, load existing bill or prepare fresh order and enter food ordering immediately
   const handleSelectTable = (table: TableDoc) => {
+    setOrderSavedNotice(null);
     if (table.currentBillId) {
       const existing = openBills.find((b) => b.id === table.currentBillId);
       if (existing) {
@@ -378,26 +383,24 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
   );
 
-  // Confirm Order -> Open Save Order Modal to select or confirm table
-  const handleInitiateConfirmOrder = () => {
-    if (cartItems.length === 0) return;
-    setTargetTableIdForSave(activeBill?.tableId || null);
-    setIsSaveOrderModalOpen(true);
-  };
-
-  // Save order to selected table atomically
-  const handleSaveOrderToTable = async () => {
-    if (!targetTableIdForSave) return;
-    const targetTable = tables.find((t) => t.id === targetTableIdForSave);
+  // Save order directly to a specific table atomically
+  const saveOrderToTable = async (tableId: string): Promise<BillDoc | null> => {
+    if (!tableId || cartItems.length === 0 || isSavingOrder) return null;
+    setIsSavingOrder(true);
+    const targetTable = tables.find((t) => t.id === tableId);
 
     const workDate = getBusinessWorkDate(new Date(), settings.dailyClosingTime);
+    const latestServerBill = activeBill?.id ? openBills.find((b) => b.id === activeBill.id) : undefined;
+    const resolvedVersion = latestServerBill?.version ?? activeBill?.version ?? 1;
+    const resolvedBillNumber = latestServerBill?.billNumber || activeBill?.billNumber || '';
+
     const completeBill: BillDoc = {
       id: activeBill?.id || `bill_${Date.now()}`,
-      billNumber: activeBill?.billNumber || '',
+      billNumber: resolvedBillNumber,
       status: 'saved',
       workDate,
-      tableId: targetTableIdForSave,
-      tableName: targetTable?.name,
+      tableId,
+      tableName: targetTable?.name || activeBill?.tableName,
       channelId: selectedChannelId,
       channelName: currentChannel?.name || 'Dine-In',
       orderType: currentChannel?.type || 'dine_in',
@@ -416,24 +419,60 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       payments: [],
       createdAt: activeBill?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      version: activeBill?.version || 1,
+      version: resolvedVersion,
     };
 
     try {
-      const saved = await saveOrderToTableAtomic(completeBill, targetTableIdForSave);
+      const saved = await saveOrderToTableAtomic(completeBill, tableId);
       setActiveBill(saved);
       setIsSaveOrderModalOpen(false);
+      if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
+      const tblLabel = saved.tableName || targetTable?.name || '';
+      setOrderSavedNotice(
+        lang === 'th'
+          ? `บันทึกออเดอร์ ${tblLabel} เรียบร้อยแล้ว`
+          : `Saved order to ${tblLabel || 'table'}`
+      );
+      savedNoticeTimerRef.current = setTimeout(() => {
+        setOrderSavedNotice(null);
+      }, 3000);
+      return saved;
     } catch (err) {
       console.error('Save order error:', err);
+      return null;
+    } finally {
+      setIsSavingOrder(false);
     }
   };
 
-  // Proceed to payment (BLOCKED if not saved to a table!)
-  const handleProceedToPayment = () => {
-    if (!activeBill?.tableId || !activeBill?.billNumber) {
-      // Must save to table first!
+  // Confirm Order -> Save directly if table already selected; otherwise open Save Order Modal
+  const handleInitiateConfirmOrder = async () => {
+    if (cartItems.length === 0 || isSavingOrder) return;
+    if (activeBill?.tableId) {
+      await saveOrderToTable(activeBill.tableId);
+      return;
+    }
+    setTargetTableIdForSave(null);
+    setIsSaveOrderModalOpen(true);
+  };
+
+  // Save order from modal table picker
+  const handleSaveOrderToTable = async () => {
+    if (!targetTableIdForSave) return;
+    await saveOrderToTable(targetTableIdForSave);
+  };
+
+  // Proceed to payment (save automatically if table already selected, otherwise prompt table picker)
+  const handleProceedToPayment = async () => {
+    if (cartItems.length === 0 || isSavingOrder) return;
+    if (!activeBill?.tableId) {
+      setTargetTableIdForSave(null);
       setIsSaveOrderModalOpen(true);
       return;
+    }
+    if (!activeBill?.billNumber) {
+      const saved = await saveOrderToTable(activeBill.tableId);
+      if (!saved) return;
     }
     setIsPaymentModalOpen(true);
   };
@@ -627,17 +666,17 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 </button>
               </div>
 
-              {/* Dish Cards: Shows ONLY Photo and Name below it (no price) */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+              {/* Dish Cards (~30% smaller): Shows ONLY Photo and Name below it (no price) */}
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 gap-2">
                 {displayedDishes.map((dish) => {
                   const imgDataUrl = dishImages.get(dish.id);
                   return (
                     <div
                       key={dish.id}
                       onClick={() => handleOpenDishOptions(dish)}
-                      className="group bg-white rounded-2xl border border-slate-200 hover:border-orange-400 p-2.5 shadow-[inset_0_1px_0_#ffffff,0_3px_0_#e2e8f0,0_10px_20px_-8px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 hover:shadow-[0_4px_0_#fdba74,0_14px_24px_-8px_rgba(234,88,12,0.18)] transition-all duration-150 cursor-pointer flex flex-col items-center text-center select-none active:translate-y-[2px]"
+                      className="group bg-white rounded-xl border border-slate-200 hover:border-orange-400 p-1.5 shadow-[inset_0_1px_0_#ffffff,0_2px_0_#e2e8f0,0_6px_12px_-6px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 hover:shadow-[0_3px_0_#fdba74,0_10px_16px_-6px_rgba(234,88,12,0.18)] transition-all duration-150 cursor-pointer flex flex-col items-center text-center select-none active:translate-y-[1px]"
                     >
-                      <div className="w-full aspect-square rounded-xl bg-slate-100 overflow-hidden mb-2 relative flex items-center justify-center shadow-[inset_0_1px_3px_rgba(15,23,42,0.06)]">
+                      <div className="w-full aspect-square rounded-lg bg-slate-100 overflow-hidden mb-1 relative flex items-center justify-center shadow-[inset_0_1px_3px_rgba(15,23,42,0.06)]">
                         {imgDataUrl ? (
                           <img
                             src={imgDataUrl}
@@ -646,10 +685,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
                           />
                         ) : (
-                          <Utensils className="w-10 h-10 text-slate-300" />
+                          <Utensils className="w-7 h-7 text-slate-300" />
                         )}
                       </div>
-                      <span className="font-extrabold text-sm text-slate-900 group-hover:text-orange-600 transition-colors line-clamp-2">
+                      <span className="font-extrabold text-[11px] sm:text-xs leading-tight text-slate-900 group-hover:text-orange-600 transition-colors line-clamp-2">
                         {lang === 'th' && dish.nameTh ? dish.nameTh : dish.name}
                       </span>
                     </div>
@@ -845,6 +884,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
             {/* POS Primary Action Buttons */}
             <div className="space-y-1.5 pt-1">
+              {orderSavedNotice && (
+                <div className="px-2.5 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-extrabold flex items-center justify-center gap-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span className="truncate">{orderSavedNotice}</span>
+                </div>
+              )}
               <div className="flex gap-1.5">
                 {/* Print Check Receipt for unpaid saved bill */}
                 <button
@@ -861,12 +906,18 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 {/* Confirm / Save Order to Table */}
                 <button
                   type="button"
-                  disabled={cartItems.length === 0}
+                  disabled={cartItems.length === 0 || isSavingOrder}
                   onClick={handleInitiateConfirmOrder}
                   className="flex-1 py-2 px-2 bg-orange-100 hover:bg-orange-200 text-orange-900 border border-orange-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer disabled:opacity-40"
                 >
                   <Check className="w-3.5 h-3.5 text-orange-600" />
-                  <span className="truncate">{t.pos.confirmOrder}</span>
+                  <span className="truncate">
+                    {isSavingOrder
+                      ? lang === 'th'
+                        ? 'กำลังบันทึก...'
+                        : 'Saving...'
+                      : t.pos.confirmOrder}
+                  </span>
                 </button>
               </div>
 

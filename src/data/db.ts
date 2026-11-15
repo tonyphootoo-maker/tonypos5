@@ -969,6 +969,7 @@ export async function saveOrderToTableAtomic(
   const billId = billData.id || `bill_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const billRef = doc(db, `users/${uid}/bills/${billId}`);
 
+  let writtenVersion = 1;
   try {
     await runTransaction(db, async (txn) => {
       // 1. Check existing bill version if updating
@@ -1000,13 +1001,15 @@ export async function saveOrderToTableAtomic(
       }
 
       // 3. Write bill document
+      const metadata = isNew ? createMetadata(0) : updateMetadata(existingVersion);
+      writtenVersion = metadata.version;
       const completeBill: BillDoc = stripUndefined({
         ...billData,
         id: billId,
         billNumber,
         status: 'saved',
         tableId: tableId || null,
-        ...(isNew ? createMetadata(0) : updateMetadata(existingVersion)),
+        ...metadata,
       });
       txn.set(billRef, completeBill);
     });
@@ -1017,7 +1020,7 @@ export async function saveOrderToTableAtomic(
       billNumber,
       status: 'saved',
       tableId: tableId || null,
-      version: (billData.version || 0) + 1,
+      version: writtenVersion,
     };
   } catch (error) {
     if (error instanceof Error && error.message === 'VERSION_CONFLICT') {
