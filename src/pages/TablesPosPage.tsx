@@ -384,7 +384,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   );
 
   // Save order directly to a specific table atomically
-  const saveOrderToTable = async (tableId: string): Promise<BillDoc | null> => {
+  const saveOrderToTable = async (
+    tableId: string,
+    returnToCurrentBills: boolean = false
+  ): Promise<BillDoc | null> => {
     if (!tableId || cartItems.length === 0 || isSavingOrder) return null;
     setIsSavingOrder(true);
     const targetTable = tables.find((t) => t.id === tableId);
@@ -424,8 +427,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
     try {
       const saved = await saveOrderToTableAtomic(completeBill, tableId);
-      setActiveBill(saved);
       setIsSaveOrderModalOpen(false);
+      if (returnToCurrentBills) {
+        setActiveBill(null);
+        setCartItems([]);
+        setOrderDiscount(0);
+        setTargetTableIdForSave(null);
+        setSelectedCategoryId(null);
+      } else {
+        setActiveBill(saved);
+      }
       if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
       const tblLabel = saved.tableName || targetTable?.name || '';
       setOrderSavedNotice(
@@ -445,21 +456,21 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
   };
 
-  // Confirm Order -> Save directly if table already selected; otherwise open Save Order Modal
+  // Confirm Order -> Save directly if table already selected and return to Current Bills; otherwise open Save Order Modal
   const handleInitiateConfirmOrder = async () => {
     if (cartItems.length === 0 || isSavingOrder) return;
     if (activeBill?.tableId) {
-      await saveOrderToTable(activeBill.tableId);
+      await saveOrderToTable(activeBill.tableId, true);
       return;
     }
     setTargetTableIdForSave(null);
     setIsSaveOrderModalOpen(true);
   };
 
-  // Save order from modal table picker
+  // Save order from modal table picker and return to Current Bills
   const handleSaveOrderToTable = async () => {
     if (!targetTableIdForSave) return;
-    await saveOrderToTable(targetTableIdForSave);
+    await saveOrderToTable(targetTableIdForSave, true);
   };
 
   // Proceed to payment (save automatically if table already selected, otherwise prompt table picker)
@@ -700,8 +711,14 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             // Specific Zone Floor Plan (Strictly Read-Only, auto-fitted to device viewport)
             <div
               ref={floorViewportRef}
-              className="flex-1 min-h-0 overflow-auto bg-slate-100/60 p-2 flex items-start sm:items-center justify-center"
+              className="relative flex-1 min-h-0 overflow-auto bg-slate-100/60 p-2 flex items-start sm:items-center justify-center"
             >
+              {orderSavedNotice && (
+                <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-extrabold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 pointer-events-none">
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>{orderSavedNotice}</span>
+                </div>
+              )}
               <div
                 className="shrink-0"
                 style={{
