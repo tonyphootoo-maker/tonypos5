@@ -194,6 +194,7 @@ export interface OrderItem {
 
 export interface PaymentSplit {
   method: PaymentMethod;
+  subMethod?: string;
   amount: number;
   tendered?: number; // Cash tendered
   change?: number; // Cash change

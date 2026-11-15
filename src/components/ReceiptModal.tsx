@@ -216,7 +216,7 @@ export const ReceiptModal: React.FC<Props> = ({
                 <span className="font-bold">Payment Methods:</span>
                 {bill.payments.map((p, idx) => (
                   <div key={idx} className="flex justify-between pl-1">
-                    <span className="capitalize">{p.method}:</span>
+                    <span className="capitalize">{p.subMethod || p.method}:</span>
                     <span>฿{formatMoney(p.amount)}</span>
                   </div>
                 ))}

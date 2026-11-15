@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BillDoc,
   SettingsDoc,
@@ -23,14 +23,17 @@ import {
   QrCode,
   CreditCard,
   ArrowRightLeft,
-  CheckCircle2,
   Plus,
   Trash2,
   Star,
   Printer,
+  FileText,
   AlertTriangle,
+  Delete,
+  Check,
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
+import { ReceiptModal } from './ReceiptModal';
 
 interface Props {
   bill: BillDoc;
@@ -39,6 +42,81 @@ interface Props {
   onClose: () => void;
   onPaymentSuccess: (finalBill: BillDoc) => void;
 }
+
+type PaymentTabId = 'cash' | 'qr' | 'visa' | 'master' | 'transfer' | 'other';
+
+interface PaymentTabConfig {
+  id: PaymentTabId;
+  method: PaymentMethod;
+  subMethod?: string;
+  labelTh: string;
+  labelEn: string;
+}
+
+const PAYMENT_TABS: PaymentTabConfig[] = [
+  { id: 'cash', method: 'cash', labelTh: 'เงินสด', labelEn: 'Cash' },
+  { id: 'qr', method: 'qr', labelTh: 'QR Payment', labelEn: 'QR Payment' },
+  { id: 'visa', method: 'card', subMethod: 'VISA', labelTh: 'VISA', labelEn: 'VISA' },
+  { id: 'master', method: 'card', subMethod: 'Master', labelTh: 'Master', labelEn: 'Master' },
+  { id: 'transfer', method: 'transfer', labelTh: 'โอน', labelEn: 'Transfer' },
+  { id: 'other', method: 'card', subMethod: 'อื่นๆ', labelTh: 'อื่นๆ', labelEn: 'Other' },
+];
+
+function getSmartQuickCashAmounts(due: number): number[] {
+  if (!Number.isFinite(due) || due <= 0) return [20, 50, 100];
+  const bases = [20, 50, 100, 500, 1000];
+  const set = new Set<number>();
+  for (const step of bases) {
+    const val = Math.ceil((due + 0.01) / step) * step;
+    if (val > due) set.add(val);
+  }
+  const sorted = Array.from(set).sort((a, b) => a - b);
+  while (sorted.length < 3) {
+    const last = sorted[sorted.length - 1] ?? Math.ceil(due);
+    sorted.push(Math.ceil((last + 1) / 100) * 100);
+  }
+  return sorted.slice(0, 3);
+}
+
+const TabIcon: React.FC<{ tabId: PaymentTabId; active: boolean }> = ({ tabId, active }) => {
+  const strokeClass = active ? 'text-neutral-700' : 'text-neutral-400';
+
+  if (tabId === 'cash') {
+    return <Banknote className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
+  }
+  if (tabId === 'qr') {
+    return <QrCode className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
+  }
+  if (tabId === 'visa') {
+    return (
+      <span
+        className={`inline-flex items-center justify-center w-6 h-4 rounded-[3px] border text-[7px] font-black tracking-tighter shrink-0 ${
+          active
+            ? 'border-neutral-600 bg-neutral-700 text-white'
+            : 'border-neutral-400 bg-neutral-200/70 text-neutral-500'
+        }`}
+      >
+        VISA
+      </span>
+    );
+  }
+  if (tabId === 'master') {
+    return (
+      <span
+        className={`inline-flex items-center justify-center w-6 h-4 rounded-[3px] border shrink-0 relative ${
+          active ? 'border-neutral-600 bg-neutral-700' : 'border-neutral-400 bg-neutral-200/70'
+        }`}
+      >
+        <span className="w-2 h-2 rounded-full bg-current opacity-85 -mr-0.5" />
+        <span className="w-2 h-2 rounded-full bg-current opacity-60" />
+      </span>
+    );
+  }
+  if (tabId === 'transfer') {
+    return <ArrowRightLeft className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
+  }
+  return <CreditCard className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
+};
 
 export const PaymentModal: React.FC<Props> = ({
   bill,
@@ -52,14 +130,19 @@ export const PaymentModal: React.FC<Props> = ({
   // QR Code Image state
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
-  // Split payments state
+  // Active tab & split payments
+  const [activeTabId, setActiveTabId] = useState<PaymentTabId>('cash');
   const [payments, setPayments] = useState<PaymentSplit[]>([
     { method: 'cash', amount: bill.grandTotal, tendered: bill.grandTotal, change: 0 },
   ]);
 
-  // Active method being configured
-  const [activeMethod, setActiveMethod] = useState<PaymentMethod>('cash');
-  const [cashTendered, setCashTendered] = useState<number>(bill.grandTotal);
+  // Cash keypad state
+  const [cashInputStr, setCashInputStr] = useState<string>(bill.grandTotal.toFixed(2));
+  const [isFreshCashEntry, setIsFreshCashEntry] = useState<boolean>(true);
+
+  // Header utility modals/drawers
+  const [showDetailsDrawer, setShowDetailsDrawer] = useState<boolean>(false);
+  const [showCheckReceipt, setShowCheckReceipt] = useState<boolean>(false);
 
   // Membership state
   const [members, setMembers] = useState<MemberDoc[]>([]);
@@ -73,6 +156,11 @@ export const PaymentModal: React.FC<Props> = ({
   // Processing state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const activeTab = useMemo(
+    () => PAYMENT_TABS.find((tab) => tab.id === activeTabId) || PAYMENT_TABS[0],
+    [activeTabId]
+  );
 
   // Load QR Image & subscribe to Members and Channel in real time
   useEffect(() => {
@@ -144,34 +232,93 @@ export const PaymentModal: React.FC<Props> = ({
     ? recalculatedFinancials.netSales
     : bill.netSales;
 
-  // Update payment amounts when total changes
+  // Reset single payment when effective total changes (e.g. points redeemed)
   useEffect(() => {
-    setPayments([{ method: activeMethod, amount: effectiveGrandTotal, tendered: effectiveGrandTotal, change: 0 }]);
-    setCashTendered(effectiveGrandTotal);
-  }, [effectiveGrandTotal, activeMethod]);
+    setPayments((prev) => {
+      if (prev.length === 1) {
+        return [
+          {
+            ...prev[0],
+            amount: effectiveGrandTotal,
+            tendered: effectiveGrandTotal,
+            change: 0,
+          },
+        ];
+      }
+      return prev;
+    });
+    setCashInputStr(effectiveGrandTotal.toFixed(2));
+    setIsFreshCashEntry(true);
+  }, [effectiveGrandTotal]);
 
-  // Calculate total paid across splits
+  const cashTendered = useMemo(() => {
+    const parsed = parseFloat(cashInputStr);
+    return Number.isFinite(parsed) ? roundTo2(Math.max(0, parsed)) : 0;
+  }, [cashInputStr]);
+
   const totalAllocated = roundTo2(payments.reduce((sum, p) => sum + p.amount, 0));
   const remainingDue = roundTo2(effectiveGrandTotal - totalAllocated);
 
-  // Cash change calculation for the cash split
   const cashSplit = payments.find((p) => p.method === 'cash');
+  const cashDueAmount = cashSplit ? cashSplit.amount : effectiveGrandTotal;
+
   const calculatedChange =
     cashSplit && cashTendered >= cashSplit.amount
       ? calculateChangeDue(cashTendered, cashSplit.amount)
       : 0;
 
-  // Points earned
   const estimatedPointsEarned = calculatePointsEarned(effectiveNetSales, settings.pointsEarnUnitThb);
 
-  const handleSelectSingleMethod = (method: PaymentMethod) => {
-    setActiveMethod(method);
-    setPayments([{ method, amount: effectiveGrandTotal, tendered: effectiveGrandTotal, change: 0 }]);
+  const quickCashSuggestions = useMemo(
+    () => getSmartQuickCashAmounts(cashDueAmount),
+    [cashDueAmount]
+  );
+
+  // Display values for top summary cards
+  const isCashMode = activeTab.method === 'cash';
+  const receivedDisplayAmount = isCashMode ? cashTendered : effectiveGrandTotal;
+  const amountDueDisplay = isCashMode && payments.length > 1 ? cashDueAmount : effectiveGrandTotal;
+  const changeDisplayAmount = isCashMode ? calculatedChange : 0;
+
+  // Validation
+  const isCashShort =
+    Boolean(cashSplit) && cashTendered < (cashSplit?.amount ?? 0) - 0.01;
+  const isSplitMismatch = Math.abs(remainingDue) > 0.05;
+  const canConfirm = !isSubmitting && !isCashShort && !isSplitMismatch;
+
+  const handleSelectTab = (tab: PaymentTabConfig) => {
+    setActiveTabId(tab.id);
+    setErrorMsg(null);
+    // In single-payment mode (standard 1-tap flow), switch the payment method directly
+    if (payments.length <= 1) {
+      setPayments([
+        {
+          method: tab.method,
+          ...(tab.subMethod ? { subMethod: tab.subMethod } : {}),
+          amount: effectiveGrandTotal,
+          tendered: effectiveGrandTotal,
+          change: 0,
+        },
+      ]);
+      if (tab.method === 'cash') {
+        setCashInputStr(effectiveGrandTotal.toFixed(2));
+        setIsFreshCashEntry(true);
+      }
+    }
   };
 
-  const handleAddSplitMethod = (method: PaymentMethod) => {
+  const handleAddSplitMethod = (tab: PaymentTabConfig) => {
     if (remainingDue <= 0) return;
-    setPayments([...payments, { method, amount: remainingDue, tendered: remainingDue, change: 0 }]);
+    setPayments([
+      ...payments,
+      {
+        method: tab.method,
+        ...(tab.subMethod ? { subMethod: tab.subMethod } : {}),
+        amount: remainingDue,
+        tendered: remainingDue,
+        change: 0,
+      },
+    ]);
   };
 
   const handleRemoveSplit = (index: number) => {
@@ -183,13 +330,141 @@ export const PaymentModal: React.FC<Props> = ({
 
   const handleUpdateSplitAmount = (index: number, newAmount: number) => {
     const next = [...payments];
-    next[index].amount = Math.max(0, newAmount);
+    next[index] = {
+      ...next[index],
+      amount: Math.max(0, newAmount),
+    };
     setPayments(next);
   };
 
+  // Keypad handlers
+  const handleKeypadKey = useCallback(
+    (key: string) => {
+      setErrorMsg(null);
+      if (key === 'C') {
+        setCashInputStr('0');
+        setIsFreshCashEntry(false);
+        return;
+      }
+
+      if (key === 'BACK') {
+        if (isFreshCashEntry) {
+          setCashInputStr('0');
+          setIsFreshCashEntry(false);
+          return;
+        }
+        setCashInputStr((prev) => {
+          if (prev.length <= 1) return '0';
+          const next = prev.slice(0, -1);
+          return next === '' ? '0' : next;
+        });
+        return;
+      }
+
+      if (key === '.') {
+        if (isFreshCashEntry) {
+          setCashInputStr('0.');
+          setIsFreshCashEntry(false);
+          return;
+        }
+        setCashInputStr((prev) => (prev.includes('.') ? prev : `${prev}.`));
+        return;
+      }
+
+      if (key === '00') {
+        if (isFreshCashEntry) {
+          setCashInputStr('0');
+          setIsFreshCashEntry(false);
+          return;
+        }
+        setCashInputStr((prev) => {
+          if (prev === '0') return '0';
+          if (prev.includes('.')) {
+            const [, decimals] = prev.split('.');
+            if (decimals.length >= 2) return prev;
+            if (decimals.length === 1) return `${prev}0`;
+          }
+          if (prev.length >= 9) return prev;
+          return `${prev}00`;
+        });
+        return;
+      }
+
+      // Single digit '0'-'9'
+      if (isFreshCashEntry) {
+        setCashInputStr(key);
+        setIsFreshCashEntry(false);
+        return;
+      }
+
+      setCashInputStr((prev) => {
+        if (prev === '0') return key;
+        if (prev.includes('.')) {
+          const [, decimals] = prev.split('.');
+          if (decimals.length >= 2) return prev;
+        }
+        if (prev.length >= 10) return prev;
+        return `${prev}${key}`;
+      });
+    },
+    [isFreshCashEntry]
+  );
+
+  const handleQuickCash = (amount: number) => {
+    setErrorMsg(null);
+    setCashInputStr(amount.toFixed(2));
+    setIsFreshCashEntry(true);
+  };
+
+  // Physical keyboard numeric input when drawer/receipt modal aren't open
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (showDetailsDrawer || showCheckReceipt) {
+        if (e.key === 'Escape') {
+          setShowDetailsDrawer(false);
+          setShowCheckReceipt(false);
+        }
+        return;
+      }
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      if (isCashMode) {
+        if (/^[0-9]$/.test(e.key)) {
+          e.preventDefault();
+          handleKeypadKey(e.key);
+        } else if (e.key === '.') {
+          e.preventDefault();
+          handleKeypadKey('.');
+        } else if (e.key === 'Backspace') {
+          e.preventDefault();
+          handleKeypadKey('BACK');
+        } else if (e.key === 'Delete') {
+          e.preventDefault();
+          handleKeypadKey('C');
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isCashMode, showDetailsDrawer, showCheckReceipt, handleKeypadKey]);
+
   const handleProcessPayment = async () => {
-    if (Math.abs(remainingDue) > 0.05) {
-      setErrorMsg(`Payment amount does not match grand total. Remaining: ฿${formatMoney(remainingDue)}`);
+    if (isSplitMismatch) {
+      setErrorMsg(
+        lang === 'th'
+          ? `ยอดชำระไม่ตรงกับยอดสุทธิ (คงเหลือ ฿${formatMoney(remainingDue)})`
+          : `Payment amount does not match grand total. Remaining: ฿${formatMoney(remainingDue)}`
+      );
+      return;
+    }
+
+    if (isCashShort) {
+      setErrorMsg(
+        lang === 'th'
+          ? `จำนวนเงินสดที่ได้รับน้อยกว่ายอดที่ต้องชำระ (฿${formatMoney(cashDueAmount)})`
+          : `Cash tendered is less than amount due (฿${formatMoney(cashDueAmount)})`
+      );
       return;
     }
 
@@ -197,7 +472,6 @@ export const PaymentModal: React.FC<Props> = ({
     setErrorMsg(null);
 
     try {
-      // Attach change to cash split
       const finalizedPayments = payments.map((p) => {
         if (p.method === 'cash') {
           return {
@@ -242,316 +516,537 @@ export const PaymentModal: React.FC<Props> = ({
     }
   };
 
+  const billDisplayName = [bill.channelName, bill.tableName].filter(Boolean).join(' - ') || bill.billNumber;
+  const headerTitle =
+    lang === 'th'
+      ? `ชำระเงิน ${billDisplayName} - ฿${formatMoney(effectiveGrandTotal)}`
+      : `Payment ${billDisplayName} - ฿${formatMoney(effectiveGrandTotal)}`;
+
+  const hasCustomOptionsActive = Boolean(matchedMember || pointsToRedeem > 0 || payments.length > 1);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden">
-        {/* Top Header */}
-        <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between shadow-xs">
-          <div>
-            <h3 className="font-extrabold text-lg flex items-center gap-2">
-              <Banknote className="w-6 h-6 text-yellow-200" />
-              <span>{t.pos.payNow}</span>
-            </h3>
-            <p className="text-xs text-orange-100 font-mono">
-              {bill.billNumber} • {bill.tableName || bill.channelName}
-            </p>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-950/60 backdrop-blur-xs">
+      <div className="bg-[#f3f4f6] w-full max-w-4xl max-h-[94vh] rounded-xl sm:rounded-2xl shadow-2xl border border-neutral-300/90 flex flex-col overflow-hidden">
+        {/* Top Bar matching reference */}
+        <div className="bg-[#f1f3f5] border-b border-neutral-200 px-2 sm:px-4 h-13 sm:h-14 flex items-center justify-between shrink-0">
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
+            aria-label={t.common.close}
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-neutral-500 hover:text-neutral-800 hover:bg-neutral-200/70 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
+
+          <h3 className="flex-1 text-center text-sm sm:text-base font-bold text-neutral-800 truncate px-2 tabular-nums">
+            {headerTitle}
+          </h3>
+
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowCheckReceipt(true)}
+              title={t.pos.printCheckReceipt}
+              aria-label={t.pos.printCheckReceipt}
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-800 hover:bg-neutral-200/70 transition-colors cursor-pointer"
+            >
+              <Printer className="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowDetailsDrawer((prev) => !prev)}
+              title={lang === 'th' ? 'รายละเอียดบิล / สมาชิก / แยกจ่าย' : 'Bill Details / Member / Split'}
+              aria-label="Bill Details"
+              className={`relative min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-colors cursor-pointer ${
+                showDetailsDrawer
+                  ? 'bg-neutral-200 text-neutral-900'
+                  : 'text-neutral-400 hover:text-neutral-800 hover:bg-neutral-200/70'
+              }`}
+            >
+              <FileText className="w-5 h-5" />
+              {hasCustomOptionsActive && (
+                <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-emerald-500" />
+              )}
+            </button>
+          </div>
         </div>
 
-        {/* Modal Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {errorMsg && (
-            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 text-xs font-semibold flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-
-          {/* Amount Summary Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-            <div className="p-3 bg-orange-50 border border-orange-200 rounded-2xl shadow-2xs">
-              <div className="text-[11px] text-orange-800 font-semibold">{t.pos.subtotal}</div>
-              <div className="text-base font-extrabold text-neutral-900">฿{formatMoney(bill.subtotal)}</div>
-            </div>
-            <div className="p-3 bg-red-50 border border-red-200 rounded-2xl shadow-2xs">
-              <div className="text-[11px] text-red-800 font-semibold">{t.pos.discount}</div>
-              <div className="text-base font-extrabold text-red-600">
-                -฿{formatMoney(bill.discountAmount + pointsDiscountValue)}
-              </div>
-            </div>
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl shadow-2xs">
-              <div className="text-[11px] text-amber-800 font-semibold">VAT / SC</div>
-              <div className="text-base font-extrabold text-neutral-900">
-                ฿{formatMoney(bill.vatAmount + bill.serviceChargeAmount)}
-              </div>
-            </div>
-            <div className="p-3 bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-2xl shadow-md shadow-orange-500/20">
-              <div className="text-[11px] text-orange-100 font-semibold">{t.pos.grandTotal}</div>
-              <div className="text-xl font-black text-white">฿{formatMoney(effectiveGrandTotal)}</div>
-            </div>
+        {/* Main 2-Column Body */}
+        <div className="relative flex-1 min-h-0 flex flex-col md:flex-row bg-[#f3f4f6] overflow-hidden">
+          {/* Left Sidebar: Payment Method List */}
+          <div className="md:w-48 lg:w-52 shrink-0 p-2 md:py-3 md:pl-3 md:pr-1.5 grid grid-cols-3 sm:grid-cols-6 md:flex md:flex-col gap-1 border-b md:border-b-0 border-neutral-200 overflow-y-auto">
+            {PAYMENT_TABS.map((tab) => {
+              const isActive = activeTabId === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => handleSelectTab(tab)}
+                  className={`min-h-[44px] px-2.5 md:px-4 py-2.5 md:py-3.5 rounded-md flex items-center justify-center md:justify-start gap-2 md:gap-3 text-xs sm:text-sm transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-white text-neutral-900 font-semibold shadow-xs border border-neutral-200/80'
+                      : 'bg-transparent text-neutral-500 hover:text-neutral-800 hover:bg-white/60 font-medium border border-transparent'
+                  }`}
+                >
+                  <TabIcon tabId={tab.id} active={isActive} />
+                  <span className="truncate">{lang === 'th' ? tab.labelTh : tab.labelEn}</span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Member Points Section */}
-          <div className="p-3.5 bg-neutral-50 border border-neutral-200 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-bold text-neutral-800">
-                <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
-                <span>{t.pos.memberPoints}</span>
+          {/* Right Main Workspace */}
+          <div className="flex-1 min-h-0 p-3 sm:p-4 md:pl-2.5 flex flex-col gap-2.5 sm:gap-3 overflow-y-auto">
+            {errorMsg && (
+              <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-md text-rose-800 text-xs font-semibold flex items-center gap-2 shrink-0">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{errorMsg}</span>
               </div>
-              {matchedMember && (
-                <span className="text-xs font-extrabold text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full">
-                  {matchedMember.name} ({matchedMember.points} pts)
+            )}
+
+            {/* Split indicator banner if multiple payments configured */}
+            {payments.length > 1 && (
+              <div className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-sm flex items-center justify-between text-xs text-amber-900 shrink-0">
+                <span className="font-semibold">
+                  {t.pos.splitPayment} ({payments.length}{' '}
+                  {lang === 'th' ? 'รายการ' : 'methods'})
                 </span>
-              )}
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setShowDetailsDrawer(true)}
+                  className="font-bold underline cursor-pointer hover:text-amber-700"
+                >
+                  {lang === 'th' ? 'แก้ไขการแยกจ่าย' : 'Edit Split'}
+                </button>
+              </div>
+            )}
 
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder={t.pos.enterMemberPhone}
-                value={memberPhone}
-                onChange={(e) => setMemberPhone(e.target.value)}
-                className="flex-1 px-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-orange-500"
-              />
-              {matchedMember && matchedMember.points > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <NumericInput
-                    max={matchedMember.points}
-                    min={0}
-                    value={pointsToRedeem}
-                    onValueChange={(val) =>
-                      setPointsToRedeem(Math.min(matchedMember.points, Math.max(0, Math.round(val))))
-                    }
-                    className="w-20 px-2 py-1.5 text-xs text-center font-bold bg-white border border-amber-300 rounded-xl focus:ring-2 focus:ring-amber-500"
-                    placeholder="Points"
-                  />
-                  <span className="text-xs text-amber-900 font-bold">
-                    =-฿{formatMoney(pointsDiscountValue)}
-                  </span>
+            {/* Top Amount Summary Row (Received / Amount Due | Change) */}
+            <div className="flex flex-col sm:flex-row gap-2.5 shrink-0">
+              <div className="flex-1 bg-white border border-neutral-200 rounded-sm px-4 py-2.5 flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-[11px] sm:text-xs text-neutral-400 font-medium mb-0.5">
+                    {lang === 'th' ? 'ได้รับแล้ว' : 'Received'}
+                  </div>
+                  <div
+                    className={`text-lg sm:text-xl font-bold tabular-nums ${
+                      isCashMode && isCashShort ? 'text-rose-600' : 'text-neutral-900'
+                    }`}
+                  >
+                    ฿{formatMoney(receivedDisplayAmount)}
+                  </div>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* Payment Method Quick Selectors */}
-          <div className="space-y-2">
-            <div className="text-xs font-bold text-neutral-700">{t.pos.payNow}:</div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <button
-                type="button"
-                onClick={() => handleSelectSingleMethod('cash')}
-                className={`p-3 rounded-2xl border font-bold text-xs flex flex-col items-center gap-2 cursor-pointer transition-all shadow-xs ${
-                  activeMethod === 'cash'
-                    ? 'bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-emerald-600 shadow-md scale-[1.02]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50'
-                }`}
-              >
-                <Banknote className="w-5 h-5" />
-                <span>{t.pos.cash}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectSingleMethod('qr')}
-                className={`p-3 rounded-2xl border font-bold text-xs flex flex-col items-center gap-2 cursor-pointer transition-all shadow-xs ${
-                  activeMethod === 'qr'
-                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white border-blue-600 shadow-md scale-[1.02]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50'
-                }`}
-              >
-                <QrCode className="w-5 h-5" />
-                <span>{t.pos.qrPromptPay}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectSingleMethod('card')}
-                className={`p-3 rounded-2xl border font-bold text-xs flex flex-col items-center gap-2 cursor-pointer transition-all shadow-xs ${
-                  activeMethod === 'card'
-                    ? 'bg-gradient-to-br from-purple-500 to-violet-600 text-white border-purple-600 shadow-md scale-[1.02]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50'
-                }`}
-              >
-                <CreditCard className="w-5 h-5" />
-                <span>{t.pos.creditCard}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectSingleMethod('transfer')}
-                className={`p-3 rounded-2xl border font-bold text-xs flex flex-col items-center gap-2 cursor-pointer transition-all shadow-xs ${
-                  activeMethod === 'transfer'
-                    ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white border-amber-600 shadow-md scale-[1.02]'
-                    : 'bg-white text-neutral-700 border-neutral-300 hover:bg-neutral-50'
-                }`}
-              >
-                <ArrowRightLeft className="w-5 h-5" />
-                <span>{t.pos.bankTransfer}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Cash Tendered & Change Area */}
-          {payments.some((p) => p.method === 'cash') && (
-            <div className="p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-xs font-bold text-emerald-900">{t.pos.tenderedCash}:</label>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-emerald-950">฿</span>
-                  <NumericInput
-                    min={0}
-                    step={10}
-                    value={cashTendered}
-                    onValueChange={(val) => setCashTendered(val)}
-                    className="w-36 px-3 py-1.5 text-right font-black text-lg bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
-                  />
+                <div className="text-right">
+                  <div className="text-[11px] sm:text-xs text-neutral-400 font-medium mb-0.5">
+                    {lang === 'th' ? 'ยอดชำระ' : 'Amount Due'}
+                  </div>
+                  <div className="text-lg sm:text-xl font-semibold text-neutral-600 tabular-nums">
+                    ฿{formatMoney(amountDueDisplay)}
+                  </div>
                 </div>
               </div>
 
-              {/* Quick Cash Presets */}
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  effectiveGrandTotal,
-                  Math.ceil(effectiveGrandTotal / 100) * 100,
-                  500,
-                  1000,
-                ]
-                  .filter((val, idx, arr) => val >= effectiveGrandTotal && arr.indexOf(val) === idx)
-                  .map((preset) => (
+              <div className="sm:w-44 md:w-48 bg-white border border-neutral-200 rounded-sm px-4 py-2.5 flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-center">
+                <div className="text-[11px] sm:text-xs text-neutral-400 font-medium sm:mb-0.5">
+                  {lang === 'th' ? 'เงินทอน' : 'Change'}
+                </div>
+                <div
+                  className={`text-lg sm:text-xl font-bold tabular-nums ${
+                    changeDisplayAmount > 0 ? 'text-emerald-600' : 'text-neutral-900'
+                  }`}
+                >
+                  ฿{formatMoney(changeDisplayAmount)}
+                </div>
+              </div>
+            </div>
+
+            {/* Center Panel: Cash Keypad vs QR/Transfer vs Card */}
+            {isCashMode ? (
+              <>
+                {/* 3 Quick Cash Banknote Suggestions */}
+                <div className="grid grid-cols-3 bg-neutral-200 gap-px border border-neutral-200 rounded-sm overflow-hidden shrink-0">
+                  {quickCashSuggestions.map((preset) => (
                     <button
                       key={preset}
                       type="button"
-                      onClick={() => setCashTendered(preset)}
-                      className="px-2.5 py-1 bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-lg text-xs font-bold shadow-2xs cursor-pointer active:scale-95"
+                      onClick={() => handleQuickCash(preset)}
+                      className="min-h-[44px] py-2.5 bg-white hover:bg-emerald-50/70 active:bg-emerald-100 text-[#2ea44f] font-semibold text-sm sm:text-base tabular-nums transition-colors cursor-pointer"
                     >
-                      ฿{formatMoney(preset)}
+                      ฿{preset.toLocaleString('en-US')}
                     </button>
                   ))}
-              </div>
-
-              {/* Change Display */}
-              <div className="pt-2 border-t border-emerald-200 flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-900">{t.pos.changeDue}:</span>
-                <span className="text-xl font-black text-emerald-700">
-                  ฿{formatMoney(calculatedChange)}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* QR Code Presentation if QR is chosen */}
-          {payments.some((p) => p.method === 'qr' || p.method === 'transfer') && (
-            <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-2xl flex flex-col items-center text-center space-y-2">
-              <div className="text-xs font-bold text-blue-900">{t.pos.scanQrToPay}</div>
-              {qrDataUrl ? (
-                <div className="p-3 bg-white rounded-2xl shadow-md border border-blue-200">
-                  <img
-                    src={qrDataUrl}
-                    alt="PromptPay QR"
-                    className="w-48 h-48 object-contain rounded-lg"
-                  />
                 </div>
-              ) : (
-                <div className="p-6 bg-white rounded-xl border border-dashed border-blue-300 text-xs text-neutral-500 max-w-sm">
-                  {t.pos.noQrUploaded}
-                </div>
-              )}
-              <div className="text-sm font-black text-blue-950">
-                Amount to Transfer: ฿{formatMoney(effectiveGrandTotal)}
-              </div>
-            </div>
-          )}
 
-          {/* Split Payment Manager */}
-          <div className="pt-2 border-t border-neutral-200 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-neutral-700">{t.pos.splitPayment}</span>
-              {remainingDue > 0 && (
-                <span className="text-xs font-bold text-amber-700">
-                  Remaining: ฿{formatMoney(remainingDue)}
-                </span>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              {payments.map((p, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center gap-2 p-2 bg-neutral-100 rounded-xl border border-neutral-300 text-xs"
-                >
-                  <span className="w-24 font-bold capitalize text-neutral-800">{p.method}</span>
-                  <NumericInput
-                    min={0}
-                    step={1}
-                    value={p.amount}
-                    onValueChange={(val) => handleUpdateSplitAmount(idx, val)}
-                    className="flex-1 px-2.5 py-1 bg-white border border-neutral-300 rounded-lg font-bold text-right"
-                  />
-                  {payments.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveSplit(idx)}
-                      className="p-1 text-rose-600 hover:text-rose-800 cursor-pointer"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Add split button if remaining */}
-            {remainingDue > 0 && (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {(['cash', 'qr', 'card', 'transfer'] as PaymentMethod[]).map((m) => (
+                {/* 4x4 POS Numeric Keypad Grid */}
+                <div className="flex-1 min-h-[220px] sm:min-h-[250px] bg-neutral-200 gap-px border border-neutral-200 rounded-sm overflow-hidden grid grid-cols-4 grid-rows-4 select-none">
+                  {/* Row 1 */}
                   <button
-                    key={m}
                     type="button"
-                    onClick={() => handleAddSplitMethod(m)}
-                    className="px-2.5 py-1 bg-white hover:bg-neutral-100 border border-neutral-300 text-neutral-700 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                    onClick={() => handleKeypadKey('7')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
                   >
-                    <Plus className="w-3 h-3 text-orange-500" />
-                    <span className="capitalize">{m}</span>
+                    7
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('8')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    8
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('9')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    9
+                  </button>
+                  {/* Backspace spanning rows 1-2 */}
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('BACK')}
+                    aria-label="Backspace"
+                    className="row-span-2 bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-500 flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    <Delete className="w-6 h-6 stroke-[1.75]" />
+                  </button>
+
+                  {/* Row 2 */}
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('4')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    4
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('5')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    5
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('6')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    6
+                  </button>
+
+                  {/* Row 3 */}
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('1')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('2')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    2
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('3')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    3
+                  </button>
+                  {/* Clear spanning rows 3-4 */}
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('C')}
+                    aria-label="Clear"
+                    className="row-span-2 bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-600 text-lg sm:text-xl font-semibold flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    C
+                  </button>
+
+                  {/* Row 4 */}
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('0')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    0
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('00')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    00
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleKeypadKey('.')}
+                    className="bg-white hover:bg-neutral-50 active:bg-neutral-100 text-neutral-800 text-lg sm:text-xl font-medium flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    .
+                  </button>
+                </div>
+              </>
+            ) : activeTab.method === 'qr' || activeTab.method === 'transfer' ? (
+              <div className="flex-1 min-h-[240px] bg-white border border-neutral-200 rounded-sm p-4 sm:p-6 flex flex-col items-center justify-center text-center gap-3">
+                <div className="text-sm font-bold text-neutral-800">
+                  {activeTab.method === 'qr'
+                    ? t.pos.scanQrToPay
+                    : lang === 'th'
+                      ? 'โอนเงินเข้าบัญชีร้าน'
+                      : t.pos.bankTransfer}
+                </div>
+                {qrDataUrl ? (
+                  <div className="p-2.5 bg-white rounded-lg border border-neutral-200 shadow-xs">
+                    <img
+                      src={qrDataUrl}
+                      alt="PromptPay QR"
+                      className="w-44 h-44 sm:w-48 sm:h-48 object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="p-6 bg-neutral-50 rounded-lg border border-dashed border-neutral-300 text-xs text-neutral-500 max-w-xs">
+                    {t.pos.noQrUploaded}
+                  </div>
+                )}
+                <div className="text-base font-bold text-neutral-900 tabular-nums">
+                  {lang === 'th' ? 'ยอดโอน:' : 'Transfer Amount:'} ฿
+                  {formatMoney(effectiveGrandTotal)}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 min-h-[240px] bg-white border border-neutral-200 rounded-sm p-6 flex flex-col items-center justify-center text-center gap-3">
+                <div className="w-14 h-14 rounded-full bg-neutral-100 border border-neutral-200 flex items-center justify-center text-neutral-700">
+                  <CreditCard className="w-7 h-7" />
+                </div>
+                <div className="space-y-1">
+                  <div className="text-base font-bold text-neutral-900">
+                    {lang === 'th'
+                      ? `รับชำระผ่าน ${activeTab.labelTh}`
+                      : `Pay with ${activeTab.labelEn}`}
+                  </div>
+                  <p className="text-xs text-neutral-500">
+                    {lang === 'th'
+                      ? 'ตรวจสอบยอดบนเครื่องรูดบัตร แล้วกดยืนยันการชำระเงิน'
+                      : 'Verify the charge on your payment terminal and tap Confirm Payment'}
+                  </p>
+                </div>
+                <div className="mt-1 px-5 py-2 bg-neutral-50 border border-neutral-200 rounded-md text-xl font-bold text-neutral-900 tabular-nums">
+                  ฿{formatMoney(effectiveGrandTotal)}
+                </div>
               </div>
             )}
+
+            {/* Full-Width Green Confirm CTA matching reference */}
+            <button
+              type="button"
+              disabled={!canConfirm}
+              onClick={handleProcessPayment}
+              className="w-full min-h-[48px] py-3 sm:py-3.5 px-6 bg-[#31b237] hover:bg-[#2aa02f] active:scale-[0.99] text-white rounded-sm font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              {isSubmitting ? (
+                <span>{t.common.loading}</span>
+              ) : (
+                <span>{lang === 'th' ? 'ยืนยันการชำระเงิน' : 'Confirm Payment'}</span>
+              )}
+            </button>
           </div>
-        </div>
 
-        {/* Modal Bottom Final Confirm */}
-        <div className="p-4 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2.5 bg-white hover:bg-neutral-200 text-neutral-800 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer transition-colors"
-          >
-            {t.common.cancel}
-          </button>
+          {/* Inline Slide-Over Panel for Bill Breakdown, Member Points & Split Payment */}
+          {showDetailsDrawer && (
+            <div className="absolute inset-0 z-20 bg-neutral-950/35 flex justify-end">
+              <div className="w-full max-w-md bg-white h-full shadow-2xl border-l border-neutral-200 flex flex-col overflow-hidden">
+                <div className="px-4 py-3 bg-[#f1f3f5] border-b border-neutral-200 flex items-center justify-between">
+                  <div className="font-bold text-sm text-neutral-900">
+                    {lang === 'th'
+                      ? 'รายละเอียดบิล / สมาชิก / แยกจ่าย'
+                      : 'Bill Details / Member / Split'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDetailsDrawer(false)}
+                    className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-md text-neutral-500 hover:text-neutral-800 hover:bg-neutral-200/70 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
 
-          <button
-            type="button"
-            disabled={isSubmitting || Math.abs(remainingDue) > 0.05}
-            onClick={handleProcessPayment}
-            className="flex-1 py-3 px-6 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 active:scale-98 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:brightness-105"
-          >
-            {isSubmitting ? (
-              <span>{t.common.loading}</span>
-            ) : (
-              <>
-                <CheckCircle2 className="w-5 h-5 text-emerald-200" />
-                <span>{t.pos.confirmOrder} (฿{formatMoney(effectiveGrandTotal)})</span>
-              </>
-            )}
-          </button>
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {/* Bill Summary Grid */}
+                  <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg space-y-1.5 text-xs">
+                    <div className="flex justify-between text-neutral-600">
+                      <span>{t.pos.subtotal}</span>
+                      <span className="font-semibold tabular-nums">฿{formatMoney(bill.subtotal)}</span>
+                    </div>
+                    <div className="flex justify-between text-rose-600">
+                      <span>{t.pos.discount}</span>
+                      <span className="font-semibold tabular-nums">
+                        -฿{formatMoney(bill.discountAmount + pointsDiscountValue)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-neutral-600">
+                      <span>VAT / SC</span>
+                      <span className="font-semibold tabular-nums">
+                        ฿{formatMoney(bill.vatAmount + bill.serviceChargeAmount)}
+                      </span>
+                    </div>
+                    <div className="pt-1.5 border-t border-neutral-200 flex justify-between text-sm font-bold text-neutral-900">
+                      <span>{t.pos.grandTotal}</span>
+                      <span className="tabular-nums">฿{formatMoney(effectiveGrandTotal)}</span>
+                    </div>
+                  </div>
+
+                  {/* Member Points */}
+                  <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800">
+                        <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                        <span>{t.pos.memberPoints}</span>
+                      </div>
+                      {matchedMember && (
+                        <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                          {matchedMember.name} ({matchedMember.points} pts)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder={t.pos.enterMemberPhone}
+                        value={memberPhone}
+                        onChange={(e) => setMemberPhone(e.target.value)}
+                        className="flex-1 px-3 py-2 text-xs bg-white border border-neutral-300 rounded-md focus:outline-hidden focus:ring-2 focus:ring-emerald-500"
+                      />
+                      {matchedMember && matchedMember.points > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <NumericInput
+                            max={matchedMember.points}
+                            min={0}
+                            value={pointsToRedeem}
+                            onValueChange={(val) =>
+                              setPointsToRedeem(
+                                Math.min(matchedMember.points, Math.max(0, Math.round(val)))
+                              )
+                            }
+                            className="w-20 px-2 py-2 text-xs text-center font-bold bg-white border border-amber-300 rounded-md focus:ring-2 focus:ring-amber-500"
+                            placeholder="Pts"
+                          />
+                          <span className="text-xs text-amber-800 font-bold tabular-nums">
+                            -฿{formatMoney(pointsDiscountValue)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Split Payment Manager */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-neutral-800">{t.pos.splitPayment}</span>
+                      {remainingDue > 0 && (
+                        <span className="text-xs font-bold text-amber-700 tabular-nums">
+                          {lang === 'th' ? 'คงเหลือ:' : 'Remaining:'} ฿{formatMoney(remainingDue)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {payments.map((p, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 p-2 bg-neutral-50 rounded-md border border-neutral-200 text-xs"
+                        >
+                          <span className="w-24 font-bold text-neutral-800 truncate">
+                            {p.subMethod ||
+                              (lang === 'th'
+                                ? PAYMENT_TABS.find((tItem) => tItem.method === p.method)?.labelTh ||
+                                  p.method
+                                : p.method)}
+                          </span>
+                          <NumericInput
+                            min={0}
+                            step={1}
+                            value={p.amount}
+                            onValueChange={(val) => handleUpdateSplitAmount(idx, val)}
+                            className="flex-1 px-2.5 py-1.5 bg-white border border-neutral-300 rounded-md font-bold text-right tabular-nums"
+                          />
+                          {payments.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveSplit(idx)}
+                              className="p-1.5 text-rose-600 hover:text-rose-800 cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {remainingDue > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {PAYMENT_TABS.map((tab) => (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => handleAddSplitMethod(tab)}
+                            className="px-2.5 py-1.5 bg-white hover:bg-neutral-100 border border-neutral-300 text-neutral-700 rounded-md text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Plus className="w-3 h-3 text-emerald-600" />
+                            <span>{lang === 'th' ? tab.labelTh : tab.labelEn}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-3 border-t border-neutral-200 bg-neutral-50">
+                  <button
+                    type="button"
+                    onClick={() => setShowDetailsDrawer(false)}
+                    className="w-full py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-md text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{t.common.confirm}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Check Receipt Preview Modal triggered by Printer button */}
+      {showCheckReceipt && (
+        <ReceiptModal
+          bill={{
+            ...bill,
+            discountAmount: recalculatedFinancials
+              ? recalculatedFinancials.discountAmount
+              : bill.discountAmount,
+            serviceChargeAmount: recalculatedFinancials
+              ? recalculatedFinancials.serviceChargeAmount
+              : bill.serviceChargeAmount,
+            vatAmount: recalculatedFinancials
+              ? recalculatedFinancials.vatAmount
+              : bill.vatAmount,
+            grandTotal: effectiveGrandTotal,
+            netSales: effectiveNetSales,
+            ...(matchedMember?.name ? { memberName: matchedMember.name } : {}),
+          }}
+          settings={settings}
+          lang={lang}
+          isCheckReceipt={true}
+          onClose={() => setShowCheckReceipt(false)}
+        />
+      )}
     </div>
   );
 };
