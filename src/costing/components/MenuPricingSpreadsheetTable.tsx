@@ -8,6 +8,7 @@ import {
   RecipeCostBreakdown,
 } from '../types';
 import { Plus, SlidersHorizontal, Store, Bike, Smartphone, Flame, LayoutGrid, UtensilsCrossed, Edit2, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
+import { NumericInput } from './common/NumericInput';
 
 export type PricingChannelTab = 'DINE_IN' | 'GRAB' | 'LINEMAN' | 'ROBINHOOD' | 'ALL';
 export type ServingDishMode = 'ON_RICE' | 'A_LA_CARTE';
@@ -980,12 +981,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         <span className="text-[9px] font-black text-amber-900 bg-amber-100 px-1 py-0.2 rounded border border-amber-300">
                           กุ้ง
                         </span>
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={shrimpQty}
-                          onChange={(e) =>
-                            handleSeafoodChange(v.id, 'shrimp', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleSeafoodChange(v.id, 'shrimp', val)
                           }
                           className={`${compact ? 'w-10' : 'w-12'} px-1 py-0.5 text-center font-bold text-stone-900 bg-white border border-amber-400 rounded focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs font-mono`}
                           title="จำนวนกุ้ง (ตัว)"
@@ -996,12 +996,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         <span className="text-[9px] font-black text-sky-900 bg-sky-100 px-1 py-0.2 rounded border border-sky-300">
                           หมึก
                         </span>
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={squidQty}
-                          onChange={(e) =>
-                            handleSeafoodChange(v.id, 'squid', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleSeafoodChange(v.id, 'squid', val)
                           }
                           className={`${compact ? 'w-10' : 'w-12'} px-1 py-0.5 text-center font-bold text-stone-900 bg-white border border-sky-400 rounded focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs font-mono`}
                           title="น้ำหนักปลาหมึก (กรัม)"
@@ -1013,12 +1012,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 }
 
                 return (
-                  <input
-                    type="number"
+                  <NumericInput
                     min="0"
                     value={proteinWeight}
-                    onChange={(e) =>
-                      handleCellChange(v.id, 'proteinWeight', parseFloat(e.target.value) || 0)
+                    onValueChange={(val) =>
+                      handleCellChange(v.id, 'proteinWeight', val)
                     }
                     className={`${compact ? 'w-14 px-1 py-0.5' : 'w-16 px-1.5 py-1'} text-center font-bold text-stone-900 bg-white border border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-600 text-xs font-mono`}
                     title="น้ำหนักเนื้อที่ใช้ (กรัม / ตัว)"
@@ -1187,12 +1185,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                     <>
                       {/* ราคาตั้งขายที่ร้าน (EDITABLE) */}
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={sellingPrice}
-                          onChange={(e) =>
-                            handleCellChange(v.id, 'sellingPrice', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'sellingPrice', val)
                           }
                           className="w-16 px-1.5 py-1 text-center font-bold text-stone-900 bg-white border border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-600 text-xs font-mono"
                         />
@@ -1254,12 +1251,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
 
                       {/* Grab ราคาตั้งเอง (EDITABLE) */}
                       <td className="p-1 bg-white border-r border-black">
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={grabPrice}
-                          onChange={(e) =>
-                            handleCellChange(v.id, 'grabPrice', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'grabPrice', val)
                           }
                           className="w-16 px-1.5 py-1 text-center font-bold text-stone-900 bg-[#E8F5E9] border border-green-400 rounded focus:outline-none focus:ring-2 focus:ring-green-600 text-xs font-mono"
                         />
@@ -1298,12 +1294,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
 
                       {/* Line Man ราคาตั้งเอง (EDITABLE) */}
                       <td className="p-1 bg-white border-r border-black">
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={linemanPrice}
-                          onChange={(e) =>
-                            handleCellChange(v.id, 'linemanPrice', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'linemanPrice', val)
                           }
                           className="w-16 px-1.5 py-1 text-center font-bold text-stone-900 bg-[#FFF9C4] border border-amber-400 rounded focus:outline-none focus:ring-2 focus:ring-amber-600 text-xs font-mono"
                         />
@@ -1342,12 +1337,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
 
                       {/* Robinhood ราคาตั้งเอง (EDITABLE) */}
                       <td className="p-1 bg-white border-r border-black">
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={robinhoodPrice}
-                          onChange={(e) =>
-                            handleCellChange(v.id, 'robinhoodPrice', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'robinhoodPrice', val)
                           }
                           className="w-16 px-1.5 py-1 text-center font-bold text-stone-900 bg-[#EDE9FE] border border-purple-400 rounded focus:outline-none focus:ring-2 focus:ring-purple-600 text-xs font-mono"
                         />
@@ -1376,12 +1370,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   {currentChannel === 'ALL' && (
                     <>
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={sellingPrice}
-                          onChange={(e) =>
-                            handleCellChange(v.id, 'sellingPrice', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'sellingPrice', val)
                           }
                           className="w-14 px-1 py-0.5 text-center font-bold text-stone-900 bg-white border border-blue-400 rounded text-xs font-mono"
                         />
@@ -1406,12 +1399,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       <td className="py-2 px-1.5 bg-[#C8E6C9] text-stone-900 font-bold border-r-2 border-black">{takeawayProfit}</td>
                       <td className="py-2 px-1.5 bg-white text-stone-900 font-bold border-r border-black">{grabSuggestedPrice}</td>
                       <td className="p-1 bg-white border-r border-black">
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={grabPrice}
-                          onChange={(e) =>
-                            handleCellChange(v.id, 'grabPrice', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'grabPrice', val)
                           }
                           className="w-14 px-1 py-0.5 text-center font-bold text-stone-900 bg-[#E8F5E9] border border-green-400 rounded text-xs font-mono"
                         />
@@ -1421,12 +1413,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       <td className={`py-2 px-1.5 font-black border-r-2 border-black ${grabProfit < 0 ? 'bg-[#E53935] text-white' : 'bg-[#C8E6C9]'}`}>{grabProfit}</td>
                       <td className="py-2 px-1.5 bg-white text-stone-900 font-bold border-r border-black">{linemanSuggestedPrice}</td>
                       <td className="p-1 bg-white border-r border-black">
-                        <input
-                          type="number"
+                        <NumericInput
                           min="0"
                           value={linemanPrice}
-                          onChange={(e) =>
-                            handleCellChange(v.id, 'linemanPrice', parseFloat(e.target.value) || 0)
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'linemanPrice', val)
                           }
                           className="w-14 px-1 py-0.5 text-center font-bold text-stone-900 bg-[#FFF9C4] border border-amber-400 rounded text-xs font-mono"
                         />

@@ -107,6 +107,8 @@ export interface DishVariant {
   name: string;
   nameTh?: string;
   price: number;
+  costMenuId?: string;
+  costVariantId?: string;
   ingredients: RecipeIngredientItem[];
   subRecipes: RecipeSubRecipeItem[];
   packaging: RecipePackagingItem[];
@@ -118,6 +120,7 @@ export interface DishDoc extends BaseDoc {
   categoryId: string;
   imageId?: string;
   description?: string;
+  costMenuId?: string;
   variants: DishVariant[]; // At least 1 default variant
   optionGroupIds: string[]; // Attached option groups
   order: number;

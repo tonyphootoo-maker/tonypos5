@@ -126,6 +126,34 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const optionGroupsMap = new Map<string, OptionGroupDoc>(optionGroups.map((g) => [g.id, g]));
 
   const loadedDishImageIdsRef = useRef<Map<string, string>>(new Map());
+  const floorViewportRef = useRef<HTMLDivElement>(null);
+  const [floorScale, setFloorScale] = useState<number>(1);
+
+  // Auto-fit floor plan canvas proportionally to device viewport (Mobile, Tablet, POS, Desktop)
+  useEffect(() => {
+    const el = floorViewportRef.current;
+    if (!el || selectedCategoryId !== null) return;
+
+    const updateScale = () => {
+      const availW = Math.max(240, el.clientWidth - 16);
+      const availH = Math.max(200, el.clientHeight - 16);
+      const scaleW = availW / FLOOR_CANVAS_MIN_WIDTH;
+      const scaleH = availH / FLOOR_CANVAS_MIN_HEIGHT;
+      const next = Math.min(1, Math.max(0.32, Math.min(scaleW, Math.max(scaleW, scaleH))));
+      // Fit width on narrow devices; also fit height when screen is shorter than scaled canvas
+      const fitBoth = Math.min(1, Math.max(0.32, Math.min(scaleW, scaleH)));
+      setFloorScale(availW < FLOOR_CANVAS_MIN_WIDTH || availH < FLOOR_CANVAS_MIN_HEIGHT ? fitBoth : next);
+    };
+
+    updateScale();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateScale);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, [selectedCategoryId]);
 
   // Setup Realtime Listeners across ALL POS tables, bills, menus, options & ingredients
   useEffect(() => {
@@ -527,7 +555,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     : orderTables;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-62px)] bg-transparent overflow-hidden select-none">
+    <div className="flex flex-col flex-1 min-h-0 bg-transparent overflow-hidden select-none">
       {/* Top Zone Chip Bar: Only visible when NOT full screen in a category */}
       {!selectedCategoryId && (
         <div className="px-3 sm:px-4 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-2 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.08)]">
@@ -568,9 +596,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
         {/* Left Side: Tables Floor Plan or Dishes Grid */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-transparent">
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden bg-transparent">
           {selectedCategoryId ? (
             // Full Screen Category Menu View
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -630,44 +658,57 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               </div>
             </div>
           ) : (
-            // Specific Zone Floor Plan (Strictly Read-Only: no drag, no resize, no edit, tables only)
-            <div className="flex-1 overflow-auto bg-slate-100/60">
+            // Specific Zone Floor Plan (Strictly Read-Only, auto-fitted to device viewport)
+            <div
+              ref={floorViewportRef}
+              className="flex-1 min-h-0 overflow-auto bg-slate-100/60 p-2 flex items-start sm:items-center justify-center"
+            >
               <div
+                className="shrink-0"
                 style={{
-                  minWidth: `${FLOOR_CANVAS_MIN_WIDTH}px`,
-                  minHeight: `${FLOOR_CANVAS_MIN_HEIGHT}px`,
+                  width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * floorScale)}px`,
+                  height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * floorScale)}px`,
                 }}
-                className="kin-3d-floorplan relative w-full h-full overflow-hidden cursor-default"
               >
-                {zoneTables.map((tbl) => {
-                  const isOccupied = !!tbl.currentBillId;
-                  const isSelected = activeBill?.tableId === tbl.id;
+                <div
+                  style={{
+                    width: `${FLOOR_CANVAS_MIN_WIDTH}px`,
+                    height: `${FLOOR_CANVAS_MIN_HEIGHT}px`,
+                    transform: `scale(${floorScale})`,
+                    transformOrigin: 'top left',
+                  }}
+                  className="kin-3d-floorplan relative overflow-hidden cursor-default rounded-2xl border border-slate-200/90"
+                >
+                  {zoneTables.map((tbl) => {
+                    const isOccupied = !!tbl.currentBillId;
+                    const isSelected = activeBill?.tableId === tbl.id;
 
-                  return (
-                    <div
-                      key={tbl.id}
-                      onClick={() => handleSelectTable(tbl)}
-                      style={{ left: `${tbl.x}px`, top: `${tbl.y}px` }}
-                      className={`absolute cursor-pointer select-none ${
-                        isSelected ? 'z-20' : 'z-10'
-                      }`}
-                    >
-                      <TableVisual
-                        table={tbl}
-                        isSelected={isSelected}
-                        isOccupied={isOccupied}
-                      />
-                    </div>
-                  );
-                })}
+                    return (
+                      <div
+                        key={tbl.id}
+                        onClick={() => handleSelectTable(tbl)}
+                        style={{ left: `${tbl.x}px`, top: `${tbl.y}px` }}
+                        className={`absolute cursor-pointer select-none ${
+                          isSelected ? 'z-20' : 'z-10'
+                        }`}
+                      >
+                        <TableVisual
+                          table={tbl}
+                          isSelected={isSelected}
+                          isOccupied={isOccupied}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
         </div>
 
-        {/* Right Side: Active Order Sidebar / Elevated 3D Bill Card (Hidden in Floor Plan / Current Bill view) */}
+        {/* Right/Bottom Side: Active Order Sidebar / Elevated 3D Bill Card */}
         {selectedCategoryId !== null && (
-        <div className="w-80 sm:w-96 bg-white border-l border-slate-200 flex flex-col shadow-[-8px_0_28px_-12px_rgba(15,23,42,0.12)] z-10">
+        <div className="w-full md:w-80 lg:w-96 max-h-[42dvh] md:max-h-none bg-white border-t md:border-t-0 md:border-l border-slate-200 flex flex-col shadow-[0_-6px_24px_-10px_rgba(15,23,42,0.12)] md:shadow-[-8px_0_28px_-12px_rgba(15,23,42,0.12)] z-10 shrink-0">
           {/* Order Header */}
           <div className="p-3.5 bg-slate-50/90 border-b border-slate-200 space-y-2">
             <div className="flex items-center justify-between">
@@ -846,7 +887,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       </div>
 
       {/* Always-Visible Bottom Bar: Permanent "Bill" card + Sculpted 3D Category Cards */}
-      <div className="h-[68px] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 flex items-center gap-2 overflow-x-auto shadow-[0_-6px_20px_-10px_rgba(15,23,42,0.1)] z-30">
+      <div className="min-h-[64px] pb-[env(safe-area-inset-bottom)] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 flex items-center gap-2 overflow-x-auto shadow-[0_-6px_20px_-10px_rgba(15,23,42,0.1)] z-30 shrink-0">
         {/* Permanent Bill Card (reduced ~40% in size, no bill number) */}
         <button
           onClick={() => setSelectedCategoryId(null)}
@@ -985,16 +1026,20 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                             : 'border-neutral-200 bg-white hover:bg-neutral-50'
                         }`}
                       >
-                        <div className="font-extrabold text-xs text-neutral-900 flex items-center justify-between">
-                          <span>{lang === 'th' && v.nameTh ? v.nameTh : v.name}</span>
-                          {hasMarkup && (
-                            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200">
-                              +{currentChannel.priceMarkupPercent}%
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-extrabold text-xs text-neutral-900 truncate">
+                            {lang === 'th' && v.nameTh ? v.nameTh : v.name}
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {hasMarkup && (
+                              <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200">
+                                +{currentChannel.priceMarkupPercent}%
+                              </span>
+                            )}
+                            <span className="text-sm font-black text-orange-600">
+                              ฿{formatMoney(effectivePrice)}
                             </span>
-                          )}
-                        </div>
-                        <div className="text-sm font-black text-orange-600 mt-1">
-                          ฿{formatMoney(effectivePrice)}
+                          </div>
                         </div>
                         {vCost.hasRecipe && (() => {
                           const netEffectivePrice = extractNetPriceFromMenuPrice(

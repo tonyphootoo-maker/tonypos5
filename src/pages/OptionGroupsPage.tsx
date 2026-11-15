@@ -10,6 +10,7 @@ import { translations } from '../i18n/translations';
 import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
 import { subscribeCollection, saveDocument, deleteDocument } from '../data/db';
 import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
+import { NumericInput } from '../costing/components/common/NumericInput';
 import {
   Sliders,
   Plus,
@@ -135,7 +136,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               name: '',
               nameTh: '',
               minSelect: 0,
-              maxSelect: 1,
+              maxSelect: 0,
               choices: [
                 { id: `c_${Date.now()}_1`, nameTh: '', name: '', price: 0 },
                 { id: `c_${Date.now()}_2`, nameTh: '', name: '', price: 0 },
@@ -254,7 +255,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    ชื่อกลุ่มตัวเลือก (ภาษาไทย) *
+                    ชื่อกลุ่มไทย *
                   </label>
                   <input
                     type="text"
@@ -277,7 +278,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-xs font-bold text-neutral-700">
-                      Group Name (English — แปลอัตโนมัติ)
+                      Group Name EN
                     </label>
                     {editingGroup.nameTh && (
                       <button
@@ -318,12 +319,11 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
                     {t.menuCost.minSelect}
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     max={10}
-                    value={editingGroup.minSelect || 0}
-                    onChange={(e) => setEditingGroup({ ...editingGroup, minSelect: parseInt(e.target.value, 10) || 0 })}
+                    value={editingGroup.minSelect}
+                    onValueChange={(val) => setEditingGroup({ ...editingGroup, minSelect: Math.round(val) })}
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                   />
                 </div>
@@ -331,12 +331,11 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
                     {t.menuCost.maxSelect}
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={1}
                     max={20}
-                    value={editingGroup.maxSelect || 1}
-                    onChange={(e) => setEditingGroup({ ...editingGroup, maxSelect: parseInt(e.target.value, 10) || 1 })}
+                    value={editingGroup.maxSelect}
+                    onValueChange={(val) => setEditingGroup({ ...editingGroup, maxSelect: Math.round(val) })}
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                   />
                 </div>
@@ -435,14 +434,13 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
                       <div className="flex items-center gap-1 shrink-0">
                         <span className="text-[11px] font-bold text-neutral-500">+฿</span>
-                        <input
-                          type="number"
+                        <NumericInput
                           min={0}
                           step={1}
                           value={choice.price}
-                          onChange={(e) => {
+                          onValueChange={(val) => {
                             const updated = [...(editingGroup.choices || [])];
-                            updated[idx] = { ...updated[idx], price: parseFloat(e.target.value) || 0 };
+                            updated[idx] = { ...updated[idx], price: val };
                             setEditingGroup({ ...editingGroup, choices: updated });
                           }}
                           className="w-16 px-1.5 py-1 text-right bg-white border border-neutral-300 rounded-lg text-xs font-bold"

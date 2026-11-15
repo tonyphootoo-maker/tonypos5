@@ -4,6 +4,7 @@ import { translations } from '../i18n/translations';
 import { formatMoney, getBusinessWorkDate, roundTo2 } from '../engine/calculations';
 import { saveDocument } from '../data/db';
 import { X, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { NumericInput } from '../costing/components/common/NumericInput';
 
 interface Props {
   activeShift: ShiftDoc | null;
@@ -21,8 +22,8 @@ export const ShiftModal: React.FC<Props> = ({
   onShiftUpdated,
 }) => {
   const t = translations[lang];
-  const [startingCash, setStartingCash] = useState<number>(2000);
-  const [countedCash, setCountedCash] = useState<number>(activeShift?.startingCash || 0);
+  const [startingCash, setStartingCash] = useState<number>(0);
+  const [countedCash, setCountedCash] = useState<number>(0);
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -112,12 +113,11 @@ export const ShiftModal: React.FC<Props> = ({
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-2.5 text-sm font-bold text-neutral-500">฿</span>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   step={50}
                   value={startingCash}
-                  onChange={(e) => setStartingCash(parseFloat(e.target.value) || 0)}
+                  onValueChange={(val) => setStartingCash(val)}
                   className="w-full pl-8 pr-4 py-2 font-black text-lg bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                 />
               </div>
@@ -148,12 +148,11 @@ export const ShiftModal: React.FC<Props> = ({
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-sm font-bold text-neutral-500">฿</span>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     step={10}
                     value={countedCash}
-                    onChange={(e) => setCountedCash(parseFloat(e.target.value) || 0)}
+                    onValueChange={(val) => setCountedCash(val)}
                     className="w-full pl-8 pr-4 py-2 font-black text-lg bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                   />
                 </div>

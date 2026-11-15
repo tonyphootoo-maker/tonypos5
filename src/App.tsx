@@ -292,8 +292,14 @@ export default function App() {
     );
   }
 
+  const isFullViewportPage = currentPage === 'pos' || currentPage === 'floor_plan';
+
   return (
-    <div className="min-h-screen flex flex-col font-sans">
+    <div
+      className={`${
+        isFullViewportPage ? 'h-[100dvh] overflow-hidden' : 'min-h-[100dvh]'
+      } flex flex-col font-sans`}
+    >
       {/* Universal Top Navigation & Hamburger Menu */}
       <Navigation
         currentPage={currentPage}
@@ -306,7 +312,13 @@ export default function App() {
       />
 
       {/* Main Active Page Content */}
-      <main className="flex-1 overflow-x-hidden">
+      <main
+        className={
+          isFullViewportPage
+            ? 'flex-1 min-h-0 flex flex-col overflow-hidden'
+            : 'flex-1 min-w-0 overflow-x-hidden'
+        }
+      >
         {currentPage === 'pos' && (
           <TablesPosPage
             settings={settings}

@@ -17,7 +17,6 @@ import {
   Globe,
   Sparkles,
   Calculator,
-  Soup,
   BookOpen,
   FlaskConical,
   Beef,
@@ -136,8 +135,8 @@ export const Navigation: React.FC<Props> = ({
           id: 'menu_cost',
           label: t.nav.menuCost,
           desc: {
-            th: 'เมนูขาย POS สูตรอาหาร & ต้นทุน',
-            en: 'POS dishes, recipes & food costing',
+            th: 'เพิ่ม ลบ แก้ไข เมนู หมวดหมู่ และช่องทางขายหน้าร้าน',
+            en: 'Add, edit & delete POS dishes, categories & channels',
           },
           icon: <UtensilsCrossed className="w-5 h-5 text-red-600" />,
         },
@@ -175,21 +174,12 @@ export const Navigation: React.FC<Props> = ({
         },
         {
           id: 'cost_food_cost',
-          label: lang === 'th' ? 'ต้นทุนอาหาร ราดข้าว' : 'Food Cost (On Rice)',
+          label: lang === 'th' ? 'ต้นทุนอาหาร' : 'Food Cost',
           desc: {
-            th: 'วิเคราะห์ต้นทุนเมนูราดข้าว & ตารางราคา',
-            en: 'On-rice menu cost & channel pricing sheet',
+            th: 'วิเคราะห์ต้นทุนอาหาร & ตารางราคาขาย',
+            en: 'Menu food cost & channel pricing sheet',
           },
           icon: <UtensilsCrossed className="w-5 h-5 text-amber-600" />,
-        },
-        {
-          id: 'cost_food_cost_alacarte',
-          label: lang === 'th' ? 'ต้นทุนอาหาร กับข้าว' : 'Food Cost (A La Carte)',
-          desc: {
-            th: 'วิเคราะห์ต้นทุนเมนูกินคู่ / กับข้าว',
-            en: 'A la carte menu cost & channel pricing',
-          },
-          icon: <Soup className="w-5 h-5 text-red-600" />,
         },
         {
           id: 'cost_recipes',

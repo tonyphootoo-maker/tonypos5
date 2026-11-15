@@ -27,6 +27,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
+import { NumericInput } from '../costing/components/common/NumericInput';
 
 interface Props {
   settings: SettingsDoc;
@@ -263,14 +264,12 @@ export const SettingsPage: React.FC<Props> = ({
                 {t.settings.targetFoodCostPercent}
               </label>
               <div className="relative">
-                <input
-                  type="number"
+                <NumericInput
                   min={1}
                   max={100}
-                  required
-                  value={form.targetFoodCostPercent || 30}
-                  onChange={(e) =>
-                    setForm({ ...form, targetFoodCostPercent: parseFloat(e.target.value) || 30 })
+                  value={form.targetFoodCostPercent}
+                  onValueChange={(val) =>
+                    setForm({ ...form, targetFoodCostPercent: val })
                   }
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
                 />
@@ -283,15 +282,13 @@ export const SettingsPage: React.FC<Props> = ({
                 {t.settings.vatPercent}
               </label>
               <div className="relative">
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   max={30}
                   step={0.5}
-                  required
-                  value={form.vatPercent ?? 7}
-                  onChange={(e) =>
-                    setForm({ ...form, vatPercent: parseFloat(e.target.value) || 0 })
+                  value={form.vatPercent}
+                  onValueChange={(val) =>
+                    setForm({ ...form, vatPercent: val })
                   }
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
                 />
@@ -304,15 +301,13 @@ export const SettingsPage: React.FC<Props> = ({
                 {t.settings.serviceChargePercent}
               </label>
               <div className="relative">
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   max={30}
                   step={0.5}
-                  required
-                  value={form.serviceChargePercent ?? 10}
-                  onChange={(e) =>
-                    setForm({ ...form, serviceChargePercent: parseFloat(e.target.value) || 0 })
+                  value={form.serviceChargePercent}
+                  onValueChange={(val) =>
+                    setForm({ ...form, serviceChargePercent: val })
                   }
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
                 />
@@ -342,15 +337,14 @@ export const SettingsPage: React.FC<Props> = ({
               <label className="block text-xs font-bold text-neutral-700 mb-1">
                 {t.settings.operatingDaysPerMonth}
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min={1}
                 max={31}
-                value={form.operatingDaysPerMonth ?? 30}
-                onChange={(e) =>
+                value={form.operatingDaysPerMonth}
+                onValueChange={(val) =>
                   setForm({
                     ...form,
-                    operatingDaysPerMonth: Math.min(31, Math.max(1, parseInt(e.target.value, 10) || 30)),
+                    operatingDaysPerMonth: val <= 0 ? 0 : Math.min(31, Math.round(val)),
                   })
                 }
                 className="w-32 px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
@@ -516,14 +510,12 @@ export const SettingsPage: React.FC<Props> = ({
               <label className="block text-xs font-bold text-neutral-700 mb-1">
                 {t.settings.pointsEarnUnitThb}
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min={1}
                 step={10}
-                required
-                value={form.pointsEarnUnitThb || 100}
-                onChange={(e) =>
-                  setForm({ ...form, pointsEarnUnitThb: parseFloat(e.target.value) || 100 })
+                value={form.pointsEarnUnitThb}
+                onValueChange={(val) =>
+                  setForm({ ...form, pointsEarnUnitThb: val })
                 }
                 className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
               />
@@ -533,14 +525,12 @@ export const SettingsPage: React.FC<Props> = ({
               <label className="block text-xs font-bold text-neutral-700 mb-1">
                 {t.settings.pointsRedeemValueThb}
               </label>
-              <input
-                type="number"
+              <NumericInput
                 min={0.1}
                 step={0.5}
-                required
-                value={form.pointsRedeemValueThb || 1}
-                onChange={(e) =>
-                  setForm({ ...form, pointsRedeemValueThb: parseFloat(e.target.value) || 1 })
+                value={form.pointsRedeemValueThb}
+                onValueChange={(val) =>
+                  setForm({ ...form, pointsRedeemValueThb: val })
                 }
                 className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
               />

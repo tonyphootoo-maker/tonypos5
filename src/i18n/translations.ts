@@ -6,7 +6,7 @@ export const translations = {
     nav: {
       tablesPos: 'Tables / POS',
       floorPlan: 'Floor Plan Studio',
-      menuCost: 'Menu & Food Cost',
+      menuCost: 'Menu Management',
       optionGroups: 'Option Groups',
       billsHistory: 'Bills & History',
       finance: 'Finance & Labor',
@@ -140,13 +140,13 @@ export const translations = {
       noQrUploaded: 'No QR payment image uploaded yet in Settings.',
       tableSavedSuccess: 'Order saved to table.',
     },
-    // Menu & Food Cost
+    // Menu Management
     menuCost: {
-      title: 'Menu & Food Cost Engineering',
+      title: 'Menu Management',
       tabIngredients: 'Ingredients',
       tabSubRecipes: 'Sub-Recipes',
       tabPackaging: 'Packaging',
-      tabDishes: 'Dishes & Recipes',
+      tabDishes: 'Menu Items',
       tabOptionGroups: 'Option Groups',
       tabCategories: 'Menu Categories',
       tabChannels: 'Sales Channels',
@@ -417,7 +417,7 @@ export const translations = {
     nav: {
       tablesPos: 'โต๊ะ / จุดขาย (POS)',
       floorPlan: 'จัดการผังโต๊ะ (Floor Plan)',
-      menuCost: 'เมนูและคำนวณต้นทุน',
+      menuCost: 'จัดการเมนู',
       optionGroups: 'กลุ่มตัวเลือกเสริม',
       billsHistory: 'ประวัติบิลและการขาย',
       finance: 'การเงินและค่าแรง',
@@ -548,11 +548,11 @@ export const translations = {
       tableSavedSuccess: 'บันทึกออเดอร์ลงโต๊ะเรียบร้อยแล้ว',
     },
     menuCost: {
-      title: 'จัดการเมนูอาหารและวิเคราะห์ต้นทุน',
+      title: 'จัดการเมนู',
       tabIngredients: 'วัตถุดิบหลัก',
       tabSubRecipes: 'สูตรกึ่งสำเร็จรูป',
       tabPackaging: 'บรรจุภัณฑ์',
-      tabDishes: 'เมนูอาหารและสูตร',
+      tabDishes: 'รายการเมนูอาหาร',
       tabOptionGroups: 'กลุ่มตัวเลือกเสริม',
       tabCategories: 'หมวดหมู่อาหาร',
       tabChannels: 'ช่องทางการขาย',

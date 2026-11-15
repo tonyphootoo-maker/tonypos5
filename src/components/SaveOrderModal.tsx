@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TableDoc, ZoneDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { TableVisual } from './TableVisual';
@@ -25,6 +25,8 @@ export const SaveOrderModal: React.FC<Props> = ({
   lang,
 }) => {
   const [activeZoneId, setActiveZoneId] = useState<string>(() => zones[0]?.id || '');
+  const [modalFloorScale, setModalFloorScale] = useState<number>(0.65);
+  const floorBoxRef = useRef<HTMLDivElement>(null);
   const t = translations[lang];
 
   useEffect(() => {
@@ -32,6 +34,23 @@ export const SaveOrderModal: React.FC<Props> = ({
       setActiveZoneId(zones[0].id);
     }
   }, [zones, activeZoneId]);
+
+  useEffect(() => {
+    const el = floorBoxRef.current;
+    if (!el) return;
+    const updateScale = () => {
+      const availW = Math.max(240, el.clientWidth - 8);
+      setModalFloorScale(Math.min(0.68, Math.max(0.3, availW / FLOOR_CANVAS_MIN_WIDTH)));
+    };
+    updateScale();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateScale);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', updateScale);
+    return () => window.removeEventListener('resize', updateScale);
+  }, []);
 
   // Filter dining tables (exclude standalone chairs) according to zone
   const orderTables = tables.filter((tbl) => tbl.itemKind !== 'chair');
@@ -41,7 +60,7 @@ export const SaveOrderModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col border border-orange-200 overflow-hidden">
+      <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90dvh] flex flex-col border border-orange-200 overflow-hidden">
         {/* Header */}
         <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between shadow-xs">
           <div>
@@ -75,13 +94,16 @@ export const SaveOrderModal: React.FC<Props> = ({
         </div>
 
         {/* Tables Floor Plan View */}
-        <div className="flex-1 overflow-y-auto p-4 bg-neutral-50/50">
-          <div className="relative w-full h-[380px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-neutral-50/50">
+          <div
+            ref={floorBoxRef}
+            className="relative w-full h-[360px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto flex items-start justify-center"
+          >
             <div
-              className="kin-3d-floorplan relative"
+              className="kin-3d-floorplan relative shrink-0"
               style={{
-                width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * 0.65)}px`,
-                height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * 0.65)}px`,
+                width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * modalFloorScale)}px`,
+                height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * modalFloorScale)}px`,
               }}
             >
               <div className="text-[11px] font-bold text-neutral-400 absolute top-2 left-3 select-none pointer-events-none">
@@ -96,8 +118,8 @@ export const SaveOrderModal: React.FC<Props> = ({
                     key={tbl.id}
                     onClick={() => onSelectTable(tbl.id)}
                     style={{
-                      left: `${Math.round(tbl.x * 0.65)}px`,
-                      top: `${Math.round(tbl.y * 0.65)}px`,
+                      left: `${Math.round(tbl.x * modalFloorScale)}px`,
+                      top: `${Math.round(tbl.y * modalFloorScale)}px`,
                     }}
                     className={`absolute cursor-pointer select-none ${
                       isSelected ? 'z-20' : 'z-10'
@@ -108,7 +130,7 @@ export const SaveOrderModal: React.FC<Props> = ({
                       isSelected={isSelected}
                       isOccupied={isOccupied}
                       showOccupiedBadge={false}
-                      scaleFactor={0.65}
+                      scaleFactor={modalFloorScale}
                     />
                   </div>
                 );

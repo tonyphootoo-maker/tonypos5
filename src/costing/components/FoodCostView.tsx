@@ -2532,16 +2532,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             🦐 กุ้งสด (XL):
                           </label>
                           <div className="flex items-center gap-1.5">
-                            <input
-                              type="number"
+                            <NumericInput
                               min="0"
                               step="any"
-                              required
-                              value={variantModalState.seafoodShrimpQty ?? 4}
-                              onChange={(e) =>
+                              value={variantModalState.seafoodShrimpQty}
+                              onValueChange={(val) =>
                                 setVariantModalState((prev) => ({
                                   ...prev,
-                                  seafoodShrimpQty: parseFloat(e.target.value) || 0,
+                                  seafoodShrimpQty: val,
                                 }))
                               }
                               className="w-24 p-2 bg-amber-50/50 border border-amber-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-amber-600"
@@ -2557,16 +2555,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             🦑 ปลาหมึกกล้วยสด:
                           </label>
                           <div className="flex items-center gap-1.5">
-                            <input
-                              type="number"
+                            <NumericInput
                               min="0"
                               step="any"
-                              required
-                              value={variantModalState.seafoodSquidQty ?? 40}
-                              onChange={(e) =>
+                              value={variantModalState.seafoodSquidQty}
+                              onValueChange={(val) =>
                                 setVariantModalState((prev) => ({
                                   ...prev,
-                                  seafoodSquidQty: parseFloat(e.target.value) || 0,
+                                  seafoodSquidQty: val,
                                 }))
                               }
                               className="w-24 p-2 bg-sky-50/50 border border-sky-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-sky-600"
@@ -2591,16 +2587,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       </span>
                     </label>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="number"
+                      <NumericInput
                         min="0"
                         step="any"
-                        required
                         value={variantModalState.meatQuantity}
-                        onChange={(e) =>
+                        onValueChange={(val) =>
                           setVariantModalState((prev) => ({
                             ...prev,
-                            meatQuantity: parseFloat(e.target.value) || 0,
+                            meatQuantity: val,
                           }))
                         }
                         className="w-32 p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
@@ -2640,13 +2634,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
                       ราคาหน้าร้าน (Dine-in) <span className="text-rose-500">*</span>
                     </label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min="0"
-                      required
-                      value={variantModalState.variant.sellingPrice || ''}
-                      onChange={(e) => {
-                        const price = parseFloat(e.target.value) || 0;
+                      value={variantModalState.variant.sellingPrice}
+                      onValueChange={(price) => {
                         setVariantModalState((prev) => ({
                           ...prev,
                           variant: {
@@ -2667,14 +2658,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
                       ราคาใส่กล่อง (Takeaway)
                     </label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min="0"
-                      value={variantModalState.variant.takeawayPrice || ''}
-                      onChange={(e) =>
+                      value={variantModalState.variant.takeawayPrice}
+                      onValueChange={(val) =>
                         setVariantModalState((prev) => ({
                           ...prev,
-                          variant: { ...prev.variant, takeawayPrice: parseFloat(e.target.value) || 0 },
+                          variant: { ...prev.variant, takeawayPrice: val },
                         }))
                       }
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"
@@ -2685,14 +2675,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
                       ราคา Grab Food
                     </label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min="0"
-                      value={variantModalState.variant.grabPrice || ''}
-                      onChange={(e) =>
+                      value={variantModalState.variant.grabPrice}
+                      onValueChange={(val) =>
                         setVariantModalState((prev) => ({
                           ...prev,
-                          variant: { ...prev.variant, grabPrice: parseFloat(e.target.value) || 0 },
+                          variant: { ...prev.variant, grabPrice: val },
                         }))
                       }
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"
@@ -2703,14 +2692,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
                       ราคา Line Man
                     </label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min="0"
-                      value={variantModalState.variant.linemanPrice || ''}
-                      onChange={(e) =>
+                      value={variantModalState.variant.linemanPrice}
+                      onValueChange={(val) =>
                         setVariantModalState((prev) => ({
                           ...prev,
-                          variant: { ...prev.variant, linemanPrice: parseFloat(e.target.value) || 0 },
+                          variant: { ...prev.variant, linemanPrice: val },
                         }))
                       }
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"
@@ -2721,14 +2709,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
                       ราคา Robinhood
                     </label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min="0"
-                      value={variantModalState.variant.robinhoodPrice || ''}
-                      onChange={(e) =>
+                      value={variantModalState.variant.robinhoodPrice}
+                      onValueChange={(val) =>
                         setVariantModalState((prev) => ({
                           ...prev,
-                          variant: { ...prev.variant, robinhoodPrice: parseFloat(e.target.value) || 0 },
+                          variant: { ...prev.variant, robinhoodPrice: val },
                         }))
                       }
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"
@@ -2739,14 +2726,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
                       ค่ากล่อง/แพ็กเกจจิ้ง (บาท)
                     </label>
-                    <input
-                      type="number"
+                    <NumericInput
                       min="0"
-                      value={variantModalState.variant.packagingCost ?? 9}
-                      onChange={(e) =>
+                      value={variantModalState.variant.packagingCost}
+                      onValueChange={(val) =>
                         setVariantModalState((prev) => ({
                           ...prev,
-                          variant: { ...prev.variant, packagingCost: parseFloat(e.target.value) || 0 },
+                          variant: { ...prev.variant, packagingCost: val },
                         }))
                       }
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"

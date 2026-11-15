@@ -30,6 +30,7 @@ import {
   Printer,
   AlertTriangle,
 } from 'lucide-react';
+import { NumericInput } from '../costing/components/common/NumericInput';
 
 interface Props {
   bill: BillDoc;
@@ -320,13 +321,12 @@ export const PaymentModal: React.FC<Props> = ({
               />
               {matchedMember && matchedMember.points > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <input
-                    type="number"
+                  <NumericInput
                     max={matchedMember.points}
                     min={0}
                     value={pointsToRedeem}
-                    onChange={(e) =>
-                      setPointsToRedeem(Math.min(matchedMember.points, Math.max(0, parseInt(e.target.value, 10) || 0)))
+                    onValueChange={(val) =>
+                      setPointsToRedeem(Math.min(matchedMember.points, Math.max(0, Math.round(val))))
                     }
                     className="w-20 px-2 py-1.5 text-xs text-center font-bold bg-white border border-amber-300 rounded-xl focus:ring-2 focus:ring-amber-500"
                     placeholder="Points"
@@ -404,12 +404,11 @@ export const PaymentModal: React.FC<Props> = ({
                 <label className="text-xs font-bold text-emerald-900">{t.pos.tenderedCash}:</label>
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-bold text-emerald-950">฿</span>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     step={10}
-                    value={cashTendered || ''}
-                    onChange={(e) => setCashTendered(parseFloat(e.target.value) || 0)}
+                    value={cashTendered}
+                    onValueChange={(val) => setCashTendered(val)}
                     className="w-36 px-3 py-1.5 text-right font-black text-lg bg-white border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
@@ -487,12 +486,11 @@ export const PaymentModal: React.FC<Props> = ({
                   className="flex items-center gap-2 p-2 bg-neutral-100 rounded-xl border border-neutral-300 text-xs"
                 >
                   <span className="w-24 font-bold capitalize text-neutral-800">{p.method}</span>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     step={1}
                     value={p.amount}
-                    onChange={(e) => handleUpdateSplitAmount(idx, parseFloat(e.target.value) || 0)}
+                    onValueChange={(val) => handleUpdateSplitAmount(idx, val)}
                     className="flex-1 px-2.5 py-1 bg-white border border-neutral-300 rounded-lg font-bold text-right"
                   />
                   {payments.length > 1 && (

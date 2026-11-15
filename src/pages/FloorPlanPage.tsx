@@ -105,6 +105,34 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const canvasViewportRef = useRef<HTMLDivElement>(null);
+  const hasManualZoomRef = useRef<boolean>(false);
+
+  // Auto-fit floor canvas zoom to viewport width on mobile, tablet & POS devices
+  useEffect(() => {
+    const el = canvasViewportRef.current;
+    if (!el) return;
+
+    const updateAutoZoom = () => {
+      if (hasManualZoomRef.current) return;
+      const availW = Math.max(240, el.clientWidth - 24);
+      if (availW < FLOOR_CANVAS_MIN_WIDTH) {
+        const fitted = clampNumber(Number((availW / FLOOR_CANVAS_MIN_WIDTH).toFixed(2)), 0.35, 1);
+        setZoom(fitted);
+      } else {
+        setZoom(1);
+      }
+    };
+
+    updateAutoZoom();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(updateAutoZoom);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', updateAutoZoom);
+    return () => window.removeEventListener('resize', updateAutoZoom);
+  }, []);
 
   useEffect(() => {
     const unsubTables = subscribeTables((tbls) => {
@@ -705,7 +733,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
   }, [editingTable]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-62px)] overflow-hidden select-none">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden select-none">
       {/* Top Workspace Control Bar */}
       <div className="px-3 sm:px-5 py-2.5 bg-white/95 backdrop-blur-md border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.08)] z-20">
         {/* Left: Back to POS + Title + Zone Chips */}
@@ -786,7 +814,10 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-[0_2px_0_#e2e8f0] overflow-hidden">
             <button
               type="button"
-              onClick={() => setZoom((z) => clampNumber(Number((z - 0.15).toFixed(2)), 0.65, 1.45))}
+              onClick={() => {
+                hasManualZoomRef.current = true;
+                setZoom((z) => clampNumber(Number((z - 0.15).toFixed(2)), 0.35, 1.45));
+              }}
               className="p-1.5 hover:bg-slate-50 text-slate-700 cursor-pointer"
               title={isTh ? 'ซูมออก' : 'Zoom Out'}
             >
@@ -794,15 +825,26 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             </button>
             <button
               type="button"
-              onClick={() => setZoom(1)}
+              onClick={() => {
+                hasManualZoomRef.current = false;
+                const el = canvasViewportRef.current;
+                if (el && el.clientWidth - 24 < FLOOR_CANVAS_MIN_WIDTH) {
+                  setZoom(clampNumber(Number(((el.clientWidth - 24) / FLOOR_CANVAS_MIN_WIDTH).toFixed(2)), 0.35, 1));
+                } else {
+                  setZoom(1);
+                }
+              }}
               className="px-2 py-1 text-[11px] font-black text-slate-700 border-x border-slate-200 hover:bg-slate-50 cursor-pointer tabular-nums"
-              title={isTh ? 'รีเซ็ตซูม 100%' : 'Reset Zoom'}
+              title={isTh ? 'ปรับพอดีหน้าจอ' : 'Fit to screen'}
             >
               {Math.round(zoom * 100)}%
             </button>
             <button
               type="button"
-              onClick={() => setZoom((z) => clampNumber(Number((z + 0.15).toFixed(2)), 0.65, 1.45))}
+              onClick={() => {
+                hasManualZoomRef.current = true;
+                setZoom((z) => clampNumber(Number((z + 0.15).toFixed(2)), 0.35, 1.45));
+              }}
               className="p-1.5 hover:bg-slate-50 text-slate-700 cursor-pointer"
               title={isTh ? 'ซูมเข้า' : 'Zoom In'}
             >
@@ -977,9 +1019,9 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       )}
 
       {/* Main Split Workspace: Left Table & Chair Presets + Right Interactive Floor Canvas */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         {/* Left Palette: Separated Table Templates & Standalone Chair Templates */}
-        <aside className="lg:w-72 xl:w-80 bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col shrink-0 z-10 shadow-[4px_0_20px_-10px_rgba(15,23,42,0.08)] overflow-hidden">
+        <aside className="lg:w-72 xl:w-80 max-h-[30dvh] lg:max-h-none bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col shrink-0 z-10 shadow-[4px_0_20px_-10px_rgba(15,23,42,0.08)] overflow-hidden">
           <div className="px-4 py-2.5 border-b border-slate-200/80 bg-slate-50/70">
             <h2 className="text-xs sm:text-sm font-black text-slate-900">
               {isTh ? 'เลือกวางผังโต๊ะและเก้าอี้' : 'Table & Chair Palette'}
@@ -1202,8 +1244,9 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
 
           {/* Scrollable Floor Canvas Viewport */}
           <div
+            ref={canvasViewportRef}
             onClick={() => setSelectedTableId(null)}
-            className="flex-1 overflow-auto p-4 sm:p-6"
+            className="flex-1 min-h-0 overflow-auto p-3 sm:p-6"
           >
             <div
               className="mx-auto origin-top-left transition-transform duration-150"

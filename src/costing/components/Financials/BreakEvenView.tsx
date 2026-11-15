@@ -271,7 +271,7 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               type="number"
               min="1"
               value={averageTicket}
-              onChange={(e) => setAverageTicket(parseFloat(e.target.value) || 120)}
+              onValueChange={(val) => setAverageTicket(val)}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold"
             />
             <p className="text-[10px] text-slate-400 mt-1">Average Ticket Size (ex-VAT)</p>
@@ -286,7 +286,7 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               min="1"
               max="31"
               value={operatingDays}
-              onChange={(e) => setOperatingDays(parseInt(e.target.value) || 26)}
+              onValueChange={(val) => setOperatingDays(Math.round(val))}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold"
             />
             <p className="text-[10px] text-slate-400 mt-1">Operating Days / Month</p>

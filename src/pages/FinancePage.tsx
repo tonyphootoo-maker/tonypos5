@@ -39,6 +39,7 @@ import {
   Wrench,
   ShoppingBag,
 } from 'lucide-react';
+import { NumericInput } from '../costing/components/common/NumericInput';
 
 interface Props {
   settings: SettingsDoc;
@@ -560,13 +561,11 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
                   {t.finance.expenseAmount}
                 </label>
-                <input
-                  type="number"
+                <NumericInput
                   min={0}
                   step={10}
-                  required
-                  value={editingExpense.amount || 0}
-                  onChange={(e) => setEditingExpense({ ...editingExpense, amount: parseFloat(e.target.value) || 0 })}
+                  value={editingExpense.amount}
+                  onValueChange={(val) => setEditingExpense({ ...editingExpense, amount: val })}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
                 />
               </div>
@@ -671,14 +670,12 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
                     {t.finance.wageAmount}
                   </label>
-                  <input
-                    type="number"
+                  <NumericInput
                     min={0}
                     step={10}
-                    required
-                    value={editingEmployee.wageAmount || 0}
-                    onChange={(e) =>
-                      setEditingEmployee({ ...editingEmployee, wageAmount: parseFloat(e.target.value) || 0 })
+                    value={editingEmployee.wageAmount}
+                    onValueChange={(val) =>
+                      setEditingEmployee({ ...editingEmployee, wageAmount: val })
                     }
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
                   />

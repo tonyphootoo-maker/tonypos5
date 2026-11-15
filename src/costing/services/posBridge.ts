@@ -256,6 +256,8 @@ export async function syncCostingMenuToPOS(
       name: v.name,
       nameTh: v.name,
       price: Number(v.sellingPrice) || 0,
+      costMenuId: costMenu.id,
+      costVariantId: v.id,
       ingredients: vIngs,
       subRecipes: vSubs,
       packaging: vPkgs,
@@ -276,6 +278,7 @@ export async function syncCostingMenuToPOS(
     name: costMenu.name,
     nameTh: costMenu.name,
     categoryId: matchedCat.id,
+    costMenuId: costMenu.id,
     ...(costMenu.description ? { description: costMenu.description } : {}),
     variants: posVariants.length > 0 ? posVariants : [
       {
@@ -283,6 +286,7 @@ export async function syncCostingMenuToPOS(
         name: 'Standard',
         nameTh: 'มาตรฐาน',
         price: 0,
+        costMenuId: costMenu.id,
         ingredients: [],
         subRecipes: [],
         packaging: [],
@@ -305,11 +309,12 @@ export async function syncCostingMenuToPOS(
 
 export async function importCostingVariantToDishVariant(params: {
   variant: CostMenuVariant;
+  costMenuId?: string;
   costIngredients: CostIngredient[];
   costSauces: CostSauce[];
   preferredNameTh?: string;
 }): Promise<DishVariant> {
-  const { variant: v, costIngredients, costSauces, preferredNameTh } = params;
+  const { variant: v, costMenuId, costIngredients, costSauces, preferredNameTh } = params;
   const [existingIngredients, existingSubRecipes, existingPackaging] = await Promise.all([
     fetchCollection<IngredientDoc>('ingredients'),
     fetchCollection<SubRecipeDoc>('subRecipes'),
@@ -480,6 +485,8 @@ export async function importCostingVariantToDishVariant(params: {
     name: labelEn,
     nameTh: labelTh,
     price: Number(v.sellingPrice) || 0,
+    ...(costMenuId ? { costMenuId } : v.menuId ? { costMenuId: v.menuId } : {}),
+    costVariantId: v.id,
     ingredients: vIngs,
     subRecipes: vSubs,
     packaging: vPkgs,

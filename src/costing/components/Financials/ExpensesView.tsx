@@ -533,7 +533,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                             min="1"
                             max="50"
                             value={formData.usefulLifeYears}
-                            onChange={(e) => setFormData({ ...formData, usefulLifeYears: parseInt(e.target.value) || 1 })}
+                            onValueChange={(val) => setFormData({ ...formData, usefulLifeYears: Math.round(val) })}
                             className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-mono"
                           />
                         </div>

@@ -9,6 +9,17 @@ export interface NumericInputProps
   commitOnBlurOnly?: boolean;
 }
 
+function toDisplayString(
+  val: number | string | undefined | null,
+  allowZero: boolean
+): string {
+  if (val === undefined || val === null || val === '') return '';
+  const num = Number(val);
+  if (Number.isNaN(num)) return '';
+  if (num === 0 && !allowZero) return '';
+  return String(val);
+}
+
 export const NumericInput: React.FC<NumericInputProps> = ({
   value,
   onChange,
@@ -19,47 +30,76 @@ export const NumericInput: React.FC<NumericInputProps> = ({
   fallbackValue = 0,
   commitOnBlurOnly = false,
   type = 'number',
+  inputMode = 'decimal',
   className = '',
   ...props
 }) => {
-  const [text, setText] = useState<string>(() => {
-    if (value === undefined || value === null || value === '') return '';
-    return String(value);
-  });
+  const userTypedZeroRef = useRef(false);
   const isFocusedRef = useRef(false);
+
+  const [text, setText] = useState<string>(() => toDisplayString(value, false));
 
   // Synchronize when value changes externally and input is NOT currently being edited by user
   useEffect(() => {
     if (!isFocusedRef.current) {
-      if (value === undefined || value === null || value === '') {
-        setText('');
-      } else {
-        setText(String(value));
+      const nextNum = Number(value);
+      if (value !== undefined && value !== null && value !== '' && !Number.isNaN(nextNum) && nextNum !== 0) {
+        userTypedZeroRef.current = false;
       }
+      setText(toDisplayString(value, userTypedZeroRef.current));
     }
   }, [value]);
+
+  const emitParentChange = (
+    rawEvent: React.SyntheticEvent<HTMLInputElement>,
+    rawValueString: string,
+    numericVal: number
+  ) => {
+    if (onChange) {
+      const targetEl = rawEvent.target as HTMLInputElement;
+      const syntheticEvent = {
+        ...rawEvent,
+        target: {
+          ...targetEl,
+          value: rawValueString,
+          valueAsNumber: numericVal,
+        },
+        currentTarget: {
+          ...rawEvent.currentTarget,
+          value: rawValueString,
+          valueAsNumber: numericVal,
+        },
+      } as unknown as React.ChangeEvent<HTMLInputElement>;
+      onChange(syntheticEvent);
+    }
+    if (onValueChange) {
+      onValueChange(numericVal);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
     setText(raw);
 
     const trimmed = raw.trim();
+    if (trimmed === '') {
+      userTypedZeroRef.current = false;
+      if (!commitOnBlurOnly) {
+        emitParentChange(e, '', fallbackValue);
+      }
+      return;
+    }
+
     const isPartial =
-      trimmed === '' ||
       trimmed === '-' ||
       trimmed === '+' ||
       trimmed.endsWith('.') ||
-      isNaN(Number(trimmed));
+      Number.isNaN(Number(trimmed));
 
-    // Only update parent if not empty or partial (per user requirement)
     if (!commitOnBlurOnly && !isPartial) {
       const parsed = parseFloat(trimmed);
-      if (onChange) {
-        onChange(e);
-      }
-      if (onValueChange) {
-        onValueChange(parsed);
-      }
+      userTypedZeroRef.current = parsed === 0;
+      emitParentChange(e, raw, parsed);
     }
   };
 
@@ -73,36 +113,30 @@ export const NumericInput: React.FC<NumericInputProps> = ({
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     isFocusedRef.current = false;
     const trimmed = text.trim();
+
+    if (trimmed === '') {
+      userTypedZeroRef.current = false;
+      setText('');
+      emitParentChange(e, '', fallbackValue);
+      if (onBlur) onBlur(e);
+      return;
+    }
+
     const isPartial =
-      trimmed === '' ||
       trimmed === '-' ||
       trimmed === '+' ||
       trimmed.endsWith('.') ||
-      isNaN(Number(trimmed));
+      Number.isNaN(Number(trimmed));
 
-    let finalNum: number = fallbackValue;
-    if (!isPartial) {
-      finalNum = parseFloat(trimmed);
-    }
+    const finalNum = isPartial ? fallbackValue : parseFloat(trimmed);
+    userTypedZeroRef.current = !isPartial && finalNum === 0;
 
-    // Set text representation on blur
-    if (trimmed === '') {
-      setText(fallbackValue !== undefined && fallbackValue !== null ? String(fallbackValue) : '');
+    if (isPartial && finalNum === 0) {
+      setText('');
+      emitParentChange(e, '', fallbackValue);
     } else {
       setText(String(finalNum));
-    }
-
-    // Trigger parent callbacks
-    if (onChange) {
-      const syntheticEvent = {
-        ...e,
-        target: { ...e.target, value: String(finalNum), valueAsNumber: finalNum },
-        currentTarget: { ...e.currentTarget, value: String(finalNum), valueAsNumber: finalNum },
-      } as unknown as React.ChangeEvent<HTMLInputElement>;
-      onChange(syntheticEvent);
-    }
-    if (onValueChange) {
-      onValueChange(finalNum);
+      emitParentChange(e, String(finalNum), finalNum);
     }
 
     if (onBlur) {
@@ -123,6 +157,7 @@ export const NumericInput: React.FC<NumericInputProps> = ({
     <input
       {...props}
       type={type}
+      inputMode={inputMode}
       value={text}
       onChange={handleChange}
       onFocus={handleFocus}

@@ -330,7 +330,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                       min="0"
                       max="20"
                       value={formData.vatRatePercent}
-                      onChange={(e) => setFormData({ ...formData, vatRatePercent: parseFloat(e.target.value) || 7 })}
+                      onValueChange={(val) => setFormData({ ...formData, vatRatePercent: val })}
                       className="w-16 rounded border border-slate-300 px-2 py-0.5 text-xs font-mono"
                     />
                     <span>% (จะหารด้วย {1 + (formData.vatRatePercent / 100)} เพื่อหายอด ex-VAT)</span>
