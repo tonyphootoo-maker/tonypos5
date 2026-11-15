@@ -17,6 +17,7 @@ import {
   RestaurantSettings,
 } from '../types';
 import { StorageService } from '../services/storageService';
+import { ConfirmModal } from '../../components/ConfirmModal';
 
 interface ReportsViewProps {
   ingredients: Ingredient[];
@@ -48,6 +49,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     count?: number;
     warnings?: string[];
   } | null>(null);
+
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -272,11 +275,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </div>
             <button
               type="button"
-              onClick={() => {
-                if (confirm('คุณแน่ใจหรือไม่ที่จะรีเซ็ตข้อมูลทั้งหมดกลับสู่ค่าเริ่มต้น?')) {
-                  onResetDefaults();
-                }
-              }}
+              onClick={() => setIsResetConfirmOpen(true)}
               className="px-3.5 py-2 bg-white/10 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 text-white/80 border border-white/10 rounded-xl font-bold transition-colors cursor-pointer self-start sm:self-auto"
             >
               รีเซ็ตค่าเริ่มต้น (Factory Reset)
@@ -360,6 +359,19 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
         </div>
       )}
+      <ConfirmModal
+        isOpen={isResetConfirmOpen}
+        title="รีเซ็ตค่าเริ่มต้น (Factory Reset)"
+        message="คุณแน่ใจหรือไม่ที่จะรีเซ็ตข้อมูลทั้งหมดกลับสู่ค่าเริ่มต้น?"
+        confirmLabel="ยืนยันรีเซ็ต"
+        cancelLabel="ยกเลิก"
+        variant="danger"
+        onCancel={() => setIsResetConfirmOpen(false)}
+        onConfirm={() => {
+          setIsResetConfirmOpen(false);
+          onResetDefaults();
+        }}
+      />
     </div>
   );
 };

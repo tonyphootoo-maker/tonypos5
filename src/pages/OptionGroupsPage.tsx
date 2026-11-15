@@ -11,6 +11,7 @@ import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
 import { subscribeCollection, saveDocument, deleteDocument } from '../data/db';
 import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
 import { NumericInput } from '../costing/components/common/NumericInput';
+import { ConfirmModal } from '../components/ConfirmModal';
 import {
   Sliders,
   Plus,
@@ -36,6 +37,8 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<Partial<OptionGroupDoc> | null>(null);
+  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<OptionGroupDoc | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const manualEnKeysRef = useRef<Set<string>>(new Set());
 
   const loadData = async () => {
@@ -216,13 +219,10 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                 <Edit2 className="w-4 h-4" />
               </button>
               <button
-                onClick={async () => {
-                  if (confirm(`Delete group ${group.name}?`)) {
-                    await deleteDocument('optionGroups', group.id);
-                    loadData();
-                  }
-                }}
+                type="button"
+                onClick={() => setPendingDeleteGroup(group)}
                 className="p-1.5 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
+                title={t.common.delete}
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -482,6 +482,32 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
           </form>
         </div>
       )}
+      <ConfirmModal
+        isOpen={Boolean(pendingDeleteGroup)}
+        title={lang === 'th' ? 'ยืนยันการลบกลุ่มตัวเลือก' : 'Delete Option Group'}
+        message={
+          lang === 'th'
+            ? `ต้องการลบกลุ่ม "${pendingDeleteGroup?.nameTh || pendingDeleteGroup?.name || ''}" ใช่หรือไม่?`
+            : `Delete group "${pendingDeleteGroup?.name || ''}"?`
+        }
+        confirmLabel={t.common.delete}
+        cancelLabel={t.common.cancel}
+        isLoading={isDeleting}
+        onCancel={() => {
+          if (!isDeleting) setPendingDeleteGroup(null);
+        }}
+        onConfirm={async () => {
+          if (!pendingDeleteGroup) return;
+          setIsDeleting(true);
+          try {
+            await deleteDocument('optionGroups', pendingDeleteGroup.id);
+            setPendingDeleteGroup(null);
+            loadData();
+          } finally {
+            setIsDeleting(false);
+          }
+        }}
+      />
     </div>
   );
 };

@@ -40,6 +40,7 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 interface Props {
   settings: SettingsDoc;
@@ -62,6 +63,12 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
 
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Partial<EmployeeDoc> | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    collection: 'expenses' | 'employees';
+    id: string;
+    label: string;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Break-even optional custom override (derived automatically from real 30-day data by default)
   const [useCustomOverride, setUseCustomOverride] = useState<boolean>(false);
@@ -283,13 +290,16 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={async () => {
-                        if (confirm(`Delete expense ${exp.title}?`)) {
-                          await deleteDocument('expenses', exp.id);
-                          loadData();
-                        }
-                      }}
+                      type="button"
+                      onClick={() =>
+                        setPendingDelete({
+                          collection: 'expenses',
+                          id: exp.id,
+                          label: lang === 'th' && exp.titleTh ? exp.titleTh : exp.title,
+                        })
+                      }
                       className="p-1 text-neutral-400 hover:text-rose-600 cursor-pointer"
+                      title={t.common.delete}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -370,13 +380,16 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={async () => {
-                        if (confirm(`Delete employee ${emp.name}?`)) {
-                          await deleteDocument('employees', emp.id);
-                          loadData();
-                        }
-                      }}
+                      type="button"
+                      onClick={() =>
+                        setPendingDelete({
+                          collection: 'employees',
+                          id: emp.id,
+                          label: emp.name,
+                        })
+                      }
                       className="p-1.5 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
+                      title={t.common.delete}
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -701,6 +714,40 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
           </form>
         </div>
       )}
+      <ConfirmModal
+        isOpen={Boolean(pendingDelete)}
+        title={
+          pendingDelete?.collection === 'expenses'
+            ? lang === 'th'
+              ? 'ยืนยันการลบรายการค่าใช้จ่าย'
+              : 'Delete Expense'
+            : lang === 'th'
+            ? 'ยืนยันการลบข้อมูลพนักงาน'
+            : 'Delete Employee'
+        }
+        message={
+          lang === 'th'
+            ? `ต้องการลบ "${pendingDelete?.label || ''}" ใช่หรือไม่?`
+            : `Delete "${pendingDelete?.label || ''}"?`
+        }
+        confirmLabel={t.common.delete}
+        cancelLabel={t.common.cancel}
+        isLoading={isDeleting}
+        onCancel={() => {
+          if (!isDeleting) setPendingDelete(null);
+        }}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          setIsDeleting(true);
+          try {
+            await deleteDocument(pendingDelete.collection, pendingDelete.id);
+            setPendingDelete(null);
+            loadData();
+          } finally {
+            setIsDeleting(false);
+          }
+        }}
+      />
     </div>
   );
 };

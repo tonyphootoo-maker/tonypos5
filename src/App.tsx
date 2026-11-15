@@ -292,7 +292,8 @@ export default function App() {
     );
   }
 
-  const isFullViewportPage = currentPage === 'pos' || currentPage === 'floor_plan';
+  const isFullViewportPage =
+    currentPage === 'pos' || currentPage === 'floor_plan' || currentPage === 'menu_cost';
 
   return (
     <div

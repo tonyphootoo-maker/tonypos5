@@ -28,6 +28,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 interface Props {
   settings: SettingsDoc;
@@ -54,6 +55,7 @@ export const SettingsPage: React.FC<Props> = ({
   const [auditResult, setAuditResult] = useState<{ isMatch: boolean; discrepantDates: string[] } | null>(null);
   const [isRebuilding, setIsRebuilding] = useState(false);
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
+  const [isRebuildConfirmOpen, setIsRebuildConfirmOpen] = useState(false);
 
   useEffect(() => {
     setForm({ ...settings });
@@ -121,8 +123,8 @@ export const SettingsPage: React.FC<Props> = ({
     }
   };
 
-  const handleRebuildSummaries = async () => {
-    if (!confirm('Rebuild and synchronize all daily summaries from real bills?')) return;
+  const handleConfirmRebuildSummaries = async () => {
+    setIsRebuildConfirmOpen(false);
     setIsRebuilding(true);
     setAuditResult(null);
     try {
@@ -606,7 +608,7 @@ export const SettingsPage: React.FC<Props> = ({
           <button
             type="button"
             disabled={isRebuilding}
-            onClick={handleRebuildSummaries}
+            onClick={() => setIsRebuildConfirmOpen(true)}
             className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-orange-500/20 hover:brightness-105 cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRebuilding ? 'animate-spin' : ''}`} />
@@ -762,6 +764,21 @@ export const SettingsPage: React.FC<Props> = ({
           </div>
         )}
       </div>
+      <ConfirmModal
+        isOpen={isRebuildConfirmOpen}
+        title={t.settings.rebuildSummariesTitle}
+        message={
+          lang === 'th'
+            ? 'ต้องการประมวลผลและซิงค์ยอดสรุปรายวันทั้งหมดจากบิลจริงใหม่ใช่หรือไม่?'
+            : 'Rebuild and synchronize all daily summaries from real bills?'
+        }
+        confirmLabel={t.settings.rebuildSummariesBtn}
+        cancelLabel={t.common.cancel}
+        variant="warning"
+        isLoading={isRebuilding}
+        onCancel={() => setIsRebuildConfirmOpen(false)}
+        onConfirm={handleConfirmRebuildSummaries}
+      />
     </div>
   );
 };

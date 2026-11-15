@@ -11,6 +11,7 @@ import {
   FileJson,
   Loader2,
 } from 'lucide-react';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 interface Props {
   settings: SettingsDoc;
@@ -25,6 +26,7 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
   const [exportSuccess, setExportSuccess] = useState(false);
   const [importSuccess, setImportSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
 
   const handleExport = async () => {
     setIsExporting(true);
@@ -56,15 +58,17 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
     }
   };
 
-  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+    setPendingImportFile(file);
+  };
 
-    if (!confirm(t.backup.restoreWarning)) {
-      e.target.value = '';
-      return;
-    }
-
+  const handleConfirmRestore = () => {
+    const file = pendingImportFile;
+    if (!file) return;
+    setPendingImportFile(null);
     setIsImporting(true);
     setImportSuccess(false);
     setErrorMessage(null);
@@ -85,7 +89,6 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
         setErrorMessage(err instanceof Error ? err.message : 'Invalid JSON backup format');
       } finally {
         setIsImporting(false);
-        e.target.value = '';
       }
     };
     reader.readAsText(file);
@@ -196,6 +199,17 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
           </div>
         </div>
       </div>
+      <ConfirmModal
+        isOpen={Boolean(pendingImportFile)}
+        title={t.backup.importTitle}
+        message={`${t.backup.restoreWarning} (${pendingImportFile?.name || ''})`}
+        confirmLabel={lang === 'th' ? 'ยืนยันกู้คืนข้อมูล' : 'Restore Backup'}
+        cancelLabel={t.common.cancel}
+        variant="warning"
+        isLoading={isImporting}
+        onCancel={() => setPendingImportFile(null)}
+        onConfirm={handleConfirmRestore}
+      />
     </div>
   );
 };
