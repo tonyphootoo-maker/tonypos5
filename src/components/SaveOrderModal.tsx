@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TableDoc, ZoneDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { TableVisual } from './TableVisual';
 import { FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT } from '../utils/tablePresets';
-import { X, CheckCircle } from 'lucide-react';
+import { X } from 'lucide-react';
 
 interface Props {
   tables: TableDoc[];
@@ -24,15 +24,20 @@ export const SaveOrderModal: React.FC<Props> = ({
   onClose,
   lang,
 }) => {
-  const [activeZoneId, setActiveZoneId] = useState<string>('all');
+  const [activeZoneId, setActiveZoneId] = useState<string>(() => zones[0]?.id || '');
   const t = translations[lang];
+
+  useEffect(() => {
+    if (zones.length > 0 && !zones.some((z) => z.id === activeZoneId)) {
+      setActiveZoneId(zones[0].id);
+    }
+  }, [zones, activeZoneId]);
 
   // Filter dining tables (exclude standalone chairs) according to zone
   const orderTables = tables.filter((tbl) => tbl.itemKind !== 'chair');
-  const visibleTables =
-    activeZoneId === 'all'
-      ? orderTables
-      : orderTables.filter((tbl) => tbl.zoneId === activeZoneId);
+  const visibleTables = activeZoneId
+    ? orderTables.filter((tbl) => tbl.zoneId === activeZoneId)
+    : orderTables;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
@@ -51,19 +56,8 @@ export const SaveOrderModal: React.FC<Props> = ({
           </button>
         </div>
 
-        {/* Zone Chip Bar at top (All zones + each zone) */}
+        {/* Zone Chip Bar at top */}
         <div className="p-3 bg-neutral-100 border-b border-neutral-200 flex items-center gap-2 overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => setActiveZoneId('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap cursor-pointer transition-all shadow-2xs ${
-              activeZoneId === 'all'
-                ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-xs'
-                : 'bg-white text-neutral-700 hover:bg-neutral-50 border border-neutral-300'
-            }`}
-          >
-            {t.pos.allZones}
-          </button>
           {zones.map((z) => (
             <button
               key={z.id}
@@ -80,11 +74,19 @@ export const SaveOrderModal: React.FC<Props> = ({
           ))}
         </div>
 
-        {/* Tables Content View */}
+        {/* Tables Floor Plan View */}
         <div className="flex-1 overflow-y-auto p-4 bg-neutral-50/50">
-          {activeZoneId === 'all' ? (
-            // Cards view
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          <div className="relative w-full h-[380px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto">
+            <div
+              className="kin-3d-floorplan relative"
+              style={{
+                width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * 0.65)}px`,
+                height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * 0.65)}px`,
+              }}
+            >
+              <div className="text-[11px] font-bold text-neutral-400 absolute top-2 left-3 select-none pointer-events-none">
+                Floor Plan View
+              </div>
               {visibleTables.map((tbl) => {
                 const isOccupied = !!tbl.currentBillId;
                 const isSelected = selectedTableId === tbl.id;
@@ -93,76 +95,26 @@ export const SaveOrderModal: React.FC<Props> = ({
                   <div
                     key={tbl.id}
                     onClick={() => onSelectTable(tbl.id)}
-                    className={`p-3.5 rounded-2xl cursor-pointer transition-all duration-150 flex flex-col justify-between h-28 relative select-none ${
-                      isSelected
-                        ? 'ring-4 ring-orange-500 bg-orange-50 shadow-md'
-                        : isOccupied
-                        ? 'border-2 border-red-600 bg-red-50/40 hover:bg-red-50'
-                        : 'border-2 border-emerald-800 bg-white hover:bg-emerald-50/30 shadow-2xs'
+                    style={{
+                      left: `${Math.round(tbl.x * 0.65)}px`,
+                      top: `${Math.round(tbl.y * 0.65)}px`,
+                    }}
+                    className={`absolute cursor-pointer select-none ${
+                      isSelected ? 'z-20' : 'z-10'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-black text-lg text-neutral-900">{tbl.name}</span>
-                      <span
-                        className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
-                          isOccupied
-                            ? 'bg-red-600 text-white'
-                            : 'bg-emerald-800 text-white'
-                        }`}
-                      >
-                        {isOccupied ? t.pos.occupiedTable : t.pos.freeTable}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-end text-xs text-neutral-500 font-semibold min-h-[20px]">
-                      {isSelected && <CheckCircle className="w-5 h-5 text-orange-600" />}
-                    </div>
+                    <TableVisual
+                      table={tbl}
+                      isSelected={isSelected}
+                      isOccupied={isOccupied}
+                      showOccupiedBadge={false}
+                      scaleFactor={0.65}
+                    />
                   </div>
                 );
               })}
             </div>
-          ) : (
-            // Specific Zone Floor Plan
-            <div className="relative w-full h-[380px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto">
-              <div
-                className="kin-3d-floorplan relative"
-                style={{
-                  width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * 0.65)}px`,
-                  height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * 0.65)}px`,
-                }}
-              >
-                <div className="text-[11px] font-bold text-neutral-400 absolute top-2 left-3 select-none pointer-events-none">
-                  Floor Plan View
-                </div>
-                {visibleTables.map((tbl) => {
-                  const isOccupied = !!tbl.currentBillId;
-                  const isSelected = selectedTableId === tbl.id;
-
-                  return (
-                    <div
-                      key={tbl.id}
-                      onClick={() => onSelectTable(tbl.id)}
-                      style={{
-                        left: `${Math.round(tbl.x * 0.65)}px`,
-                        top: `${Math.round(tbl.y * 0.65)}px`,
-                      }}
-                      className={`absolute cursor-pointer select-none ${
-                        isSelected ? 'z-20' : 'z-10'
-                      }`}
-                    >
-                      <TableVisual
-                        table={tbl}
-                        isSelected={isSelected}
-                        isOccupied={isOccupied}
-                        showOccupiedBadge={false}
-                        scaleFactor={0.65}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Footer Actions */}

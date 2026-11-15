@@ -54,6 +54,26 @@ import {
 } from '../types';
 import { getBusinessWorkDate, roundTo2 } from '../engine/calculations';
 
+// Guard against harmless IndexedDB multi-tab clock-skew diagnostics from @firebase/firestore
+// (e.g. when Date.now() lags another tab/process timestamp by a few milliseconds) without
+// suppressing any real Firestore, Auth, or application errors.
+if (typeof globalThis !== 'undefined' && !(globalThis as any).__kinposFirestoreLogGuard) {
+  (globalThis as any).__kinposFirestoreLogGuard = true;
+  const origConsoleError = console.error.bind(console);
+  console.error = (...args: unknown[]) => {
+    const text = args
+      .map((a) => (typeof a === 'string' ? a : a instanceof Error ? a.message : ''))
+      .join(' ');
+    if (
+      text.includes('@firebase/firestore') &&
+      text.includes('Detected an update time that is in the future')
+    ) {
+      return;
+    }
+    origConsoleError(...args);
+  };
+}
+
 // Initialize Firebase App safely so it can never throw at import time
 let appInstance: any = null;
 let dbInstance: any = null;

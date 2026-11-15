@@ -613,6 +613,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       x: pos.x,
       y: pos.y,
     };
+    if (savedDoc.itemKind === 'chair') {
+      delete savedDoc.tableStyle;
+    } else {
+      delete savedDoc.chairStyle;
+    }
 
     setTables((prev) => {
       const exists = prev.some((t) => t.id === savedDoc.id);
@@ -1356,7 +1361,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           <form
             onSubmit={handleSaveEditModal}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
+            className="bg-white rounded-3xl shadow-2xl max-w-xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
           >
             {/* Modal Header */}
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between shrink-0">
@@ -1450,80 +1455,155 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
                 </div>
               </div>
 
-              {/* Quick Switch Template Style */}
-              {editingTable.itemKind === 'chair' ? (
+              {/* Visual Table & Chair Templates (matching Floor Plan palette) */}
+              <div className="space-y-3.5 p-3 bg-slate-50/70 rounded-2xl border border-slate-200">
+                {/* Table Templates Section */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    {isTh ? 'เปลี่ยนรูปแบบเก้าอี้จากตัวอย่าง' : 'Apply Chair Template'}
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {CHAIR_PRESETS.map((preset) => {
-                      const isCurrent = editingTable.presetId === preset.id;
-                      return (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() =>
-                            setEditingTable({
-                              ...editingTable,
-                              shape: preset.shape,
-                              chairStyle: preset.chairStyle,
-                              presetId: preset.id,
-                              width: preset.width,
-                              height: preset.height,
-                            })
-                          }
-                          className={`px-2.5 py-2 rounded-xl border text-left transition-all cursor-pointer ${
-                            isCurrent
-                              ? 'bg-orange-50 border-orange-500 text-orange-900 ring-1 ring-orange-400'
-                              : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
-                          }`}
-                        >
-                          <div className="text-[11px] font-extrabold truncate">
-                            {isTh ? preset.nameTh : preset.nameEn}
-                          </div>
-                        </button>
-                      );
-                    })}
+                  <div className="flex items-center justify-between mb-2 px-0.5">
+                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                      {isTh ? 'ตัวอย่างโต๊ะ' : 'Table Templates'}
+                    </h4>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-orange-100 text-orange-700 border border-orange-200">
+                      {TABLE_ONLY_PRESETS.length}
+                    </span>
                   </div>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    {isTh ? 'เปลี่ยนรูปแบบโต๊ะจากตัวอย่าง' : 'Apply Table Template'}
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {TABLE_ONLY_PRESETS.map((preset) => {
-                      const isCurrent = editingTable.presetId === preset.id;
+                      const isCurrent =
+                        editingTable.itemKind !== 'chair' && editingTable.presetId === preset.id;
                       return (
                         <button
                           key={preset.id}
                           type="button"
-                          onClick={() =>
-                            setEditingTable({
+                          onClick={() => {
+                            const updated: TableDoc = {
                               ...editingTable,
+                              itemKind: 'table',
                               shape: preset.shape,
                               tableStyle: preset.tableStyle,
                               presetId: preset.id,
                               width: preset.width,
                               height: preset.height,
-                            })
-                          }
-                          className={`px-2 py-2 rounded-xl border text-left transition-all cursor-pointer ${
+                              chairs: 0,
+                            };
+                            delete updated.chairStyle;
+                            setEditingTable(updated);
+                          }}
+                          className={`group rounded-2xl p-2 flex flex-col items-center justify-between gap-1.5 transition-all cursor-pointer active:translate-y-[1px] border ${
                             isCurrent
-                              ? 'bg-orange-50 border-orange-500 text-orange-900 ring-1 ring-orange-400'
-                              : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                              ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-400/70 shadow-[0_3px_0_#fdba74,0_8px_16px_-6px_rgba(234,88,12,0.25)]'
+                              : 'bg-white hover:bg-orange-50/60 border-slate-200 hover:border-orange-400 shadow-[inset_0_1px_0_#fff,0_2px_0_#e2e8f0] hover:-translate-y-0.5'
                           }`}
                         >
-                          <div className="text-[11px] font-extrabold truncate">
-                            {isTh ? preset.nameTh : preset.nameEn}
+                          <div className="h-[52px] w-full flex items-center justify-center pointer-events-none overflow-hidden">
+                            <TableVisual
+                              table={{
+                                id: preset.id,
+                                name: 'T',
+                                itemKind: 'table',
+                                shape: preset.shape,
+                                width: preset.width,
+                                height: preset.height,
+                                tableStyle: preset.tableStyle,
+                              }}
+                              compact
+                              showOccupiedBadge={false}
+                              scaleFactor={0.42}
+                            />
+                          </div>
+                          <div className="text-center w-full">
+                            <div
+                              className={`text-[11px] font-extrabold truncate ${
+                                isCurrent
+                                  ? 'text-orange-800'
+                                  : 'text-slate-800 group-hover:text-orange-700'
+                              }`}
+                            >
+                              {isTh ? preset.nameTh : preset.nameEn}
+                            </div>
                           </div>
                         </button>
                       );
                     })}
                   </div>
                 </div>
-              )}
+
+                {/* Chair Templates Section */}
+                <div className="pt-3 border-t border-slate-200/80">
+                  <div className="flex items-center justify-between mb-2 px-0.5">
+                    <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                      {isTh ? 'ตัวอย่างเก้าอี้' : 'Chair Templates'}
+                    </h4>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
+                      {CHAIR_PRESETS.length}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {CHAIR_PRESETS.map((preset) => {
+                      const isCurrent =
+                        editingTable.itemKind === 'chair' && editingTable.presetId === preset.id;
+                      const isOccupiedTable = !!editingTable.currentBillId;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          disabled={isOccupiedTable}
+                          onClick={() => {
+                            if (isOccupiedTable) return;
+                            const updated: TableDoc = {
+                              ...editingTable,
+                              itemKind: 'chair',
+                              shape: preset.shape,
+                              chairStyle: preset.chairStyle,
+                              presetId: preset.id,
+                              width: preset.width,
+                              height: preset.height,
+                              chairs: 1,
+                            };
+                            delete updated.tableStyle;
+                            setEditingTable(updated);
+                          }}
+                          className={`group rounded-2xl p-2 flex flex-col items-center justify-between gap-1.5 transition-all border ${
+                            isOccupiedTable
+                              ? 'opacity-45 cursor-not-allowed bg-slate-100 border-slate-200'
+                              : isCurrent
+                              ? 'bg-orange-50 border-orange-500 ring-2 ring-orange-400/70 shadow-[0_3px_0_#fdba74,0_8px_16px_-6px_rgba(234,88,12,0.25)] cursor-pointer active:translate-y-[1px]'
+                              : 'bg-white hover:bg-orange-50/60 border-slate-200 hover:border-orange-400 shadow-[inset_0_1px_0_#fff,0_2px_0_#e2e8f0] hover:-translate-y-0.5 cursor-pointer active:translate-y-[1px]'
+                          }`}
+                        >
+                          <div className="h-[44px] w-full flex items-center justify-center pointer-events-none overflow-hidden">
+                            <TableVisual
+                              table={{
+                                id: preset.id,
+                                name: '',
+                                itemKind: 'chair',
+                                shape: preset.shape,
+                                chairStyle: preset.chairStyle,
+                                width: preset.width,
+                                height: preset.height,
+                              }}
+                              compact
+                              showOccupiedBadge={false}
+                              scaleFactor={0.68}
+                            />
+                          </div>
+                          <div className="text-center w-full">
+                            <div
+                              className={`text-[11px] font-extrabold truncate ${
+                                isCurrent
+                                  ? 'text-orange-800'
+                                  : 'text-slate-800 group-hover:text-orange-700'
+                              }`}
+                            >
+                              {isTh ? preset.nameTh : preset.nameEn}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
 
               {/* Shape / Style / Rotation */}
               {editingTable.itemKind === 'chair' ? (
