@@ -5,6 +5,7 @@ import {
   Language,
   TableShape,
   TableStylePreset,
+  ChairStylePreset,
 } from '../types';
 import {
   subscribeTables,
@@ -15,8 +16,10 @@ import {
 } from '../data/db';
 import { TableVisual } from '../components/TableVisual';
 import {
-  TABLE_PRESETS,
+  TABLE_ONLY_PRESETS,
+  CHAIR_PRESETS,
   TablePresetDef,
+  ChairPresetDef,
   FLOOR_CANVAS_MIN_WIDTH,
   FLOOR_CANVAS_MIN_HEIGHT,
   FLOOR_GRID_SIZE,
@@ -28,6 +31,7 @@ import {
   clampTablePosition,
   findOpenTablePosition,
   getNextTableName,
+  getNextChairName,
   getTableDimensions,
   normalizeRotation,
 } from '../utils/tablePresets';
@@ -90,8 +94,9 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
   const [isRenamingZone, setIsRenamingZone] = useState(false);
   const [renameZoneText, setRenameZoneText] = useState('');
 
-  // Double-click Edit Mode modal state
+  // Double-click Edit Mode / Add Table modal state
   const [editingTable, setEditingTable] = useState<TableDoc | null>(null);
+  const [isCreatingNewItem, setIsCreatingNewItem] = useState<boolean>(false);
 
   // Drag/resize tracking ref (prevents stale closures & prevents click writes)
   const dragSessionRef = useRef<DragSession | null>(null);
@@ -179,9 +184,9 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
     [zones, activeZoneId]
   );
 
-  // Add new table from preset at explicit or open coordinates
+  // Add new table or standalone chair from preset at explicit or open coordinates
   const handleAddFromPreset = async (
-    preset: TablePresetDef,
+    preset: TablePresetDef | ChairPresetDef,
     dropPos?: { x: number; y: number }
   ) => {
     const targetZoneId = activeZoneId || zones[0]?.id || 'zone_main';
@@ -204,15 +209,18 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           FLOOR_CANVAS_MIN_HEIGHT
         );
 
+    const isChair = preset.itemKind === 'chair';
     const now = new Date().toISOString();
-    const newTable: TableDoc = {
-      id: `tbl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: getNextTableName(tablesRef.current),
+    const newItem: TableDoc = {
+      id: `${isChair ? 'chr' : 'tbl'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: isChair ? getNextChairName(tablesRef.current) : getNextTableName(tablesRef.current),
       zoneId: targetZoneId,
+      itemKind: preset.itemKind,
       shape: preset.shape,
-      tableStyle: preset.tableStyle,
+      ...(preset.itemKind === 'table'
+        ? { tableStyle: preset.tableStyle, chairs: 0 }
+        : { chairStyle: preset.chairStyle, chairs: 1 }),
       presetId: preset.id,
-      chairs: preset.chairs,
       width: preset.width,
       height: preset.height,
       scale: 1,
@@ -225,9 +233,45 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       version: 1,
     };
 
-    setTables((prev) => [...prev, newTable]);
-    setSelectedTableId(newTable.id);
-    await persistTableToCloud(newTable, true);
+    setTables((prev) => [...prev, newItem]);
+    setSelectedTableId(newItem.id);
+    await persistTableToCloud(newItem, true);
+  };
+
+  // Open Add Table modal (+ เพิ่มโต๊ะ moved from POS to Floor Plan Studio)
+  const handleOpenAddTableModal = () => {
+    const defaultPreset = TABLE_ONLY_PRESETS[1] || TABLE_ONLY_PRESETS[0];
+    const targetZoneId = activeZoneId || zones[0]?.id || 'zone_main';
+    const currentZoneTables = tablesRef.current.filter((t) => t.zoneId === targetZoneId);
+    const pos = findOpenTablePosition(
+      currentZoneTables,
+      defaultPreset.width,
+      defaultPreset.height,
+      FLOOR_CANVAS_MIN_WIDTH,
+      FLOOR_CANVAS_MIN_HEIGHT
+    );
+    const now = new Date().toISOString();
+    setIsCreatingNewItem(true);
+    setEditingTable({
+      id: `tbl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: getNextTableName(tablesRef.current),
+      zoneId: targetZoneId,
+      itemKind: 'table',
+      shape: defaultPreset.shape,
+      tableStyle: defaultPreset.tableStyle,
+      presetId: defaultPreset.id,
+      chairs: 0,
+      width: defaultPreset.width,
+      height: defaultPreset.height,
+      scale: 1,
+      rotation: 0,
+      x: pos.x,
+      y: pos.y,
+      currentBillId: null,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+    });
   };
 
   // Dragging & Resizing via Pointer Events (works smoothly on Mouse, Tablet, iOS, Android POS)
@@ -406,9 +450,15 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
 
   const handleCanvasDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const presetId = e.dataTransfer.getData('text/kinpos-table-preset');
-    const preset = TABLE_PRESETS.find((p) => p.id === presetId);
-    if (!preset || !canvasRef.current) return;
+    if (!canvasRef.current) return;
+    const tablePresetId = e.dataTransfer.getData('text/kinpos-table-preset');
+    const chairPresetId = e.dataTransfer.getData('text/kinpos-chair-preset');
+    const preset: (TablePresetDef | ChairPresetDef) | undefined = tablePresetId
+      ? TABLE_ONLY_PRESETS.find((p) => p.id === tablePresetId)
+      : chairPresetId
+      ? CHAIR_PRESETS.find((p) => p.id === chairPresetId)
+      : undefined;
+    if (!preset) return;
 
     const rect = canvasRef.current.getBoundingClientRect();
     const x = (e.clientX - rect.left) / zoom;
@@ -470,7 +520,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
     await persistTableToCloud(updated, false);
   };
 
-  // Duplicate selected table
+  // Duplicate selected table or chair
   const handleDuplicateTable = async (tbl: TableDoc) => {
     const dim = getTableDimensions(tbl);
     const pos = clampTablePosition(
@@ -483,11 +533,12 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       snapToGrid
     );
 
+    const isChair = tbl.itemKind === 'chair';
     const now = new Date().toISOString();
     const cloned: TableDoc = {
       ...tbl,
-      id: `tbl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      name: getNextTableName(tablesRef.current),
+      id: `${isChair ? 'chr' : 'tbl'}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: isChair ? getNextChairName(tablesRef.current) : getNextTableName(tablesRef.current),
       x: pos.x,
       y: pos.y,
       currentBillId: null,
@@ -527,26 +578,35 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
     }
   };
 
-  // Save Double-Click Edit Modal
+  // Save Double-Click Edit Modal or New Table Modal
   const handleSaveEditModal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTable || !editingTable.name.trim()) return;
 
+    const isNew = isCreatingNewItem || !tablesRef.current.some((t) => t.id === editingTable.id);
     const dim = getTableDimensions(editingTable);
-    const pos = clampTablePosition(
-      editingTable.x,
-      editingTable.y,
-      dim.effWidth,
-      dim.effHeight,
-      FLOOR_CANVAS_MIN_WIDTH,
-      FLOOR_CANVAS_MIN_HEIGHT,
-      false
-    );
+    const pos = isNew
+      ? findOpenTablePosition(
+          tablesRef.current.filter((t) => t.zoneId === editingTable.zoneId),
+          dim.effWidth,
+          dim.effHeight,
+          FLOOR_CANVAS_MIN_WIDTH,
+          FLOOR_CANVAS_MIN_HEIGHT
+        )
+      : clampTablePosition(
+          editingTable.x,
+          editingTable.y,
+          dim.effWidth,
+          dim.effHeight,
+          FLOOR_CANVAS_MIN_WIDTH,
+          FLOOR_CANVAS_MIN_HEIGHT,
+          false
+        );
 
-    const updated: TableDoc = {
+    const savedDoc: TableDoc = {
       ...editingTable,
       name: editingTable.name.trim(),
-      chairs: clampNumber(editingTable.chairs || 1, 0, 20),
+      chairs: editingTable.itemKind === 'chair' ? 1 : 0,
       width: dim.baseWidth,
       height: dim.baseHeight,
       scale: dim.scale,
@@ -554,9 +614,19 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       y: pos.y,
     };
 
-    setTables((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    setTables((prev) => {
+      const exists = prev.some((t) => t.id === savedDoc.id);
+      return exists ? prev.map((t) => (t.id === savedDoc.id ? savedDoc : t)) : [...prev, savedDoc];
+    });
+    if (isNew) {
+      setSelectedTableId(savedDoc.id);
+      if (savedDoc.zoneId && savedDoc.zoneId !== activeZoneId) {
+        setActiveZoneId(savedDoc.zoneId);
+      }
+    }
     setEditingTable(null);
-    await persistTableToCloud(updated, false);
+    setIsCreatingNewItem(false);
+    await persistTableToCloud(savedDoc, isNew);
   };
 
   // Zone CRUD
@@ -746,7 +816,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
 
           {zones.map((z) => {
             const isActive = activeZoneId === z.id;
-            const tableCount = tables.filter((tbl) => tbl.zoneId === z.id).length;
+            const tableCount = tables.filter((tbl) => tbl.zoneId === z.id && tbl.itemKind !== 'chair').length;
             return (
               <button
                 key={z.id}
@@ -813,6 +883,16 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
               <span>{isTh ? 'เพิ่มโซน' : 'Add Zone'}</span>
             </button>
           )}
+
+          {/* + Add Table Button (Moved from POS to Floor Plan Studio) */}
+          <button
+            type="button"
+            onClick={handleOpenAddTableModal}
+            className="px-3 py-1.5 rounded-xl text-xs font-black text-white bg-gradient-to-r from-orange-500 to-red-500 hover:brightness-105 shadow-[0_2px_0_#c2410c] whitespace-nowrap cursor-pointer flex items-center gap-1 shrink-0 active:translate-y-[1px]"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{isTh ? 'เพิ่มโต๊ะ' : 'Add Table'}</span>
+          </button>
         </div>
 
         {/* Active Zone Rename / Delete */}
@@ -893,81 +973,138 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
 
       {/* Main Split Workspace: Left Table & Chair Presets + Right Interactive Floor Canvas */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-        {/* Left Palette: Table & Chair Sample Templates */}
-        <aside className="lg:w-72 xl:w-80 bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col shrink-0 z-10 shadow-[4px_0_20px_-10px_rgba(15,23,42,0.08)]">
-          <div className="px-4 py-3 border-b border-slate-200/80 flex items-center justify-between bg-slate-50/70">
-            <div>
-              <h2 className="text-xs sm:text-sm font-black text-slate-900">
-                {isTh ? 'ตัวอย่างโต๊ะและเก้าอี้' : 'Table & Chair Templates'}
-              </h2>
-              <p className="text-[11px] text-slate-500 font-medium">
-                {isTh
-                  ? 'กดเลือกหรือลากไปวางบนผังร้าน'
-                  : 'Click or drag any template onto the floor'}
-              </p>
-            </div>
-            <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-orange-100 text-orange-700 border border-orange-200">
-              {TABLE_PRESETS.length}
-            </span>
+        {/* Left Palette: Separated Table Templates & Standalone Chair Templates */}
+        <aside className="lg:w-72 xl:w-80 bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col shrink-0 z-10 shadow-[4px_0_20px_-10px_rgba(15,23,42,0.08)] overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-slate-200/80 bg-slate-50/70">
+            <h2 className="text-xs sm:text-sm font-black text-slate-900">
+              {isTh ? 'เลือกวางผังโต๊ะและเก้าอี้' : 'Table & Chair Palette'}
+            </h2>
+            <p className="text-[11px] text-slate-500 font-medium">
+              {isTh
+                ? 'กดเลือกหรือลากไปวางบนผังร้านได้อิสระ'
+                : 'Click or drag any table or chair onto the floor'}
+            </p>
           </div>
 
-          {/* Preset Templates Grid (Horizontal scroll on small screens, 2-col grid on desktop) */}
-          <div className="p-3 flex lg:grid lg:grid-cols-2 gap-2.5 overflow-x-auto lg:overflow-y-auto flex-1">
-            {TABLE_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                draggable
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('text/kinpos-table-preset', preset.id);
-                  e.dataTransfer.effectAllowed = 'copy';
-                }}
-                onClick={() => handleAddFromPreset(preset)}
-                className="group min-w-[136px] lg:min-w-0 bg-slate-50/80 hover:bg-orange-50/60 border border-slate-200 hover:border-orange-400 rounded-2xl p-2.5 flex flex-col items-center justify-between gap-2 transition-all cursor-pointer shadow-[inset_0_1px_0_#fff,0_2px_0_#e2e8f0] hover:-translate-y-0.5 hover:shadow-[0_4px_0_#fdba74,0_10px_18px_-8px_rgba(234,88,12,0.2)] active:translate-y-[1px]"
-              >
-                <div className="h-[68px] w-full flex items-center justify-center pointer-events-none overflow-hidden">
-                  <TableVisual
-                    table={{
-                      id: preset.id,
-                      name: `${preset.chairs}`,
-                      shape: preset.shape,
-                      chairs: preset.chairs,
-                      width: preset.width,
-                      height: preset.height,
-                      tableStyle: preset.tableStyle,
+          <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            {/* Section 1: Table Templates (Tables ONLY, no surrounding chairs) */}
+            <div>
+              <div className="flex items-center justify-between mb-2 px-0.5">
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                  {isTh ? 'ตัวอย่างโต๊ะ' : 'Table Templates'}
+                </h3>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-orange-100 text-orange-700 border border-orange-200">
+                  {TABLE_ONLY_PRESETS.length}
+                </span>
+              </div>
+
+              <div className="flex lg:grid lg:grid-cols-2 gap-2 overflow-x-auto pb-1">
+                {TABLE_ONLY_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/kinpos-table-preset', preset.id);
+                      e.dataTransfer.effectAllowed = 'copy';
                     }}
-                    compact
-                    showOccupiedBadge={false}
-                    scaleFactor={0.42}
-                  />
-                </div>
-                <div className="text-center w-full">
-                  <div className="text-xs font-extrabold text-slate-800 group-hover:text-orange-700 truncate">
-                    {isTh ? preset.nameTh : preset.nameEn}
-                  </div>
-                  <div className="text-[10px] font-semibold text-slate-500">
-                    {preset.chairs} {isTh ? 'ที่นั่ง' : 'seats'}
-                  </div>
-                </div>
-              </button>
-            ))}
+                    onClick={() => handleAddFromPreset(preset)}
+                    className="group min-w-[120px] lg:min-w-0 bg-slate-50/80 hover:bg-orange-50/60 border border-slate-200 hover:border-orange-400 rounded-2xl p-2 flex flex-col items-center justify-between gap-1.5 transition-all cursor-pointer shadow-[inset_0_1px_0_#fff,0_2px_0_#e2e8f0] hover:-translate-y-0.5 hover:shadow-[0_4px_0_#fdba74,0_10px_18px_-8px_rgba(234,88,12,0.2)] active:translate-y-[1px]"
+                  >
+                    <div className="h-[52px] w-full flex items-center justify-center pointer-events-none overflow-hidden">
+                      <TableVisual
+                        table={{
+                          id: preset.id,
+                          name: 'T',
+                          itemKind: 'table',
+                          shape: preset.shape,
+                          width: preset.width,
+                          height: preset.height,
+                          tableStyle: preset.tableStyle,
+                        }}
+                        compact
+                        showOccupiedBadge={false}
+                        scaleFactor={0.42}
+                      />
+                    </div>
+                    <div className="text-center w-full">
+                      <div className="text-[11px] font-extrabold text-slate-800 group-hover:text-orange-700 truncate">
+                        {isTh ? preset.nameTh : preset.nameEn}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Section 2: Standalone Chair Templates (Separated) */}
+            <div className="pt-2 border-t border-slate-200/80">
+              <div className="flex items-center justify-between mb-2 px-0.5">
+                <h3 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                  {isTh ? 'ตัวอย่างเก้าอี้' : 'Chair Templates'}
+                </h3>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
+                  {CHAIR_PRESETS.length}
+                </span>
+              </div>
+
+              <div className="flex lg:grid lg:grid-cols-2 gap-2 overflow-x-auto pb-1">
+                {CHAIR_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/kinpos-chair-preset', preset.id);
+                      e.dataTransfer.effectAllowed = 'copy';
+                    }}
+                    onClick={() => handleAddFromPreset(preset)}
+                    className="group min-w-[120px] lg:min-w-0 bg-slate-50/80 hover:bg-orange-50/60 border border-slate-200 hover:border-orange-400 rounded-2xl p-2 flex flex-col items-center justify-between gap-1.5 transition-all cursor-pointer shadow-[inset_0_1px_0_#fff,0_2px_0_#e2e8f0] hover:-translate-y-0.5 hover:shadow-[0_4px_0_#fdba74,0_10px_18px_-8px_rgba(234,88,12,0.2)] active:translate-y-[1px]"
+                  >
+                    <div className="h-[44px] w-full flex items-center justify-center pointer-events-none overflow-hidden">
+                      <TableVisual
+                        table={{
+                          id: preset.id,
+                          name: '',
+                          itemKind: 'chair',
+                          shape: preset.shape,
+                          chairStyle: preset.chairStyle,
+                          width: preset.width,
+                          height: preset.height,
+                        }}
+                        compact
+                        showOccupiedBadge={false}
+                        scaleFactor={0.68}
+                      />
+                    </div>
+                    <div className="text-center w-full">
+                      <div className="text-[11px] font-extrabold text-slate-800 group-hover:text-orange-700 truncate">
+                        {isTh ? preset.nameTh : preset.nameEn}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </aside>
 
         {/* Center/Right: Interactive Floor Plan Canvas + Floating Control Bar */}
         <div className="flex-1 flex flex-col overflow-hidden relative bg-slate-100/60">
-          {/* Selected Table Quick Resize / Action Toolbar */}
+          {/* Selected Table / Chair Quick Resize & Action Toolbar */}
           <div className="px-3 sm:px-4 py-2 bg-white/95 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 min-h-[48px]">
             {selectedTable ? (
               <>
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="px-2.5 py-1 rounded-lg bg-orange-100 text-orange-800 border border-orange-200 text-xs font-black">
-                    {selectedTable.name}
+                    {selectedTable.itemKind === 'chair'
+                      ? `${isTh ? 'เก้าอี้' : 'Chair'} ${selectedTable.name}`
+                      : selectedTable.name}
                   </span>
                   <span className="text-xs font-bold text-slate-500 tabular-nums">
                     {(() => {
                       const d = getTableDimensions(selectedTable);
-                      return `${d.effWidth}×${d.effHeight}px • ${selectedTable.chairs} ${isTh ? 'ที่นั่ง' : 'seats'}`;
+                      return `${d.effWidth}×${d.effHeight}px`;
                     })()}
                   </span>
                 </div>
@@ -1052,7 +1189,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
                   </span>
                 </div>
                 <span className="hidden md:inline text-[11px] font-bold text-slate-400">
-                  {zoneTables.length} {isTh ? 'โต๊ะในโซนนี้' : 'tables in zone'}
+                  {zoneTables.filter((t) => t.itemKind !== 'chair').length} {isTh ? 'โต๊ะในโซนนี้' : 'tables in zone'}
                 </span>
               </div>
             )}
@@ -1207,10 +1344,13 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
         </div>
       </div>
 
-      {/* Double-Click Instant Edit Table Modal */}
+      {/* Double-Click Edit / Create Table or Chair Modal */}
       {editingTable && (
         <div
-          onClick={() => setEditingTable(null)}
+          onClick={() => {
+            setEditingTable(null);
+            setIsCreatingNewItem(false);
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs"
         >
           <form
@@ -1222,17 +1362,30 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between shrink-0">
               <div>
                 <h3 className="font-extrabold text-base">
-                  {isTh ? `แก้ไขโต๊ะ: ${editingTable.name}` : `Edit Table: ${editingTable.name}`}
+                  {isCreatingNewItem
+                    ? isTh
+                      ? 'เพิ่มโต๊ะใหม่'
+                      : 'Add New Table'
+                    : editingTable.itemKind === 'chair'
+                    ? isTh
+                      ? `แก้ไขเก้าอี้: ${editingTable.name}`
+                      : `Edit Chair: ${editingTable.name}`
+                    : isTh
+                    ? `แก้ไขโต๊ะ: ${editingTable.name}`
+                    : `Edit Table: ${editingTable.name}`}
                 </h3>
                 <p className="text-[11px] text-orange-100 font-medium">
                   {isTh
-                    ? 'ปรับแต่งรูปแบบ เก้าอี้ ขนาด และบันทึกขึ้น Cloud อัตโนมัติ'
-                    : 'Customize style, seating, size and save directly to Cloud'}
+                    ? 'ปรับแต่งรูปแบบ ขนาด การหมุน และบันทึกขึ้น Cloud อัตโนมัติ'
+                    : 'Customize style, dimensions, rotation and save directly to Cloud'}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setEditingTable(null)}
+                onClick={() => {
+                  setEditingTable(null);
+                  setIsCreatingNewItem(false);
+                }}
                 className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -1242,7 +1395,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             {/* Scrollable Modal Body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {/* Live Visual Preview */}
-              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center min-h-[156px] relative">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center min-h-[140px] relative">
                 <span className="absolute top-2 left-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
                   {isTh ? 'ตัวอย่างจริง' : 'Live Preview'}
                 </span>
@@ -1257,7 +1410,13 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
-                    {isTh ? 'ชื่อ / หมายเลขโต๊ะ' : 'Table Name / Number'}
+                    {editingTable.itemKind === 'chair'
+                      ? isTh
+                        ? 'ชื่อ / รหัสเก้าอี้'
+                        : 'Chair Label'
+                      : isTh
+                      ? 'ชื่อ / หมายเลขโต๊ะ'
+                      : 'Table Name / Number'}
                   </label>
                   <input
                     type="text"
@@ -1267,7 +1426,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
                       setEditingTable({ ...editingTable, name: e.target.value })
                     }
                     className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl focus:outline-hidden focus:border-orange-500"
-                    placeholder="T1, VIP 1..."
+                    placeholder={editingTable.itemKind === 'chair' ? 'C1, C2...' : 'T1, VIP 1...'}
                   />
                 </div>
 
@@ -1292,136 +1451,198 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
               </div>
 
               {/* Quick Switch Template Style */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  {isTh ? 'เปลี่ยนรูปแบบจากตัวอย่างสำเร็จรูป' : 'Apply Table & Chair Template'}
-                </label>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {TABLE_PRESETS.map((preset) => {
-                    const isCurrent = editingTable.presetId === preset.id;
-                    return (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() =>
-                          setEditingTable({
-                            ...editingTable,
-                            shape: preset.shape,
-                            tableStyle: preset.tableStyle,
-                            presetId: preset.id,
-                            chairs: preset.chairs,
-                            width: preset.width,
-                            height: preset.height,
-                          })
-                        }
-                        className={`px-2 py-2 rounded-xl border text-left transition-all cursor-pointer ${
-                          isCurrent
-                            ? 'bg-orange-50 border-orange-500 text-orange-900 ring-1 ring-orange-400'
-                            : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <div className="text-[11px] font-extrabold truncate">
-                          {isTh ? preset.nameTh : preset.nameEn}
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          {preset.chairs} {isTh ? 'ที่นั่ง' : 'seats'}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Shape, Style, Chairs, Rotation */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              {editingTable.itemKind === 'chair' ? (
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    {isTh ? 'รูปทรงโต๊ะ' : 'Shape'}
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    {isTh ? 'เปลี่ยนรูปแบบเก้าอี้จากตัวอย่าง' : 'Apply Chair Template'}
                   </label>
-                  <select
-                    value={editingTable.shape}
-                    onChange={(e) =>
-                      setEditingTable({
-                        ...editingTable,
-                        shape: e.target.value as TableShape,
-                        presetId: undefined,
-                      })
-                    }
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl"
-                  >
-                    <option value="square">{isTh ? 'จัตุรัส' : 'Square'}</option>
-                    <option value="round">{isTh ? 'โต๊ะกลม' : 'Round'}</option>
-                    <option value="rectangle">{isTh ? 'ผืนผ้า' : 'Rectangle'}</option>
-                  </select>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {CHAIR_PRESETS.map((preset) => {
+                      const isCurrent = editingTable.presetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() =>
+                            setEditingTable({
+                              ...editingTable,
+                              shape: preset.shape,
+                              chairStyle: preset.chairStyle,
+                              presetId: preset.id,
+                              width: preset.width,
+                              height: preset.height,
+                            })
+                          }
+                          className={`px-2.5 py-2 rounded-xl border text-left transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-orange-50 border-orange-500 text-orange-900 ring-1 ring-orange-400'
+                              : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="text-[11px] font-extrabold truncate">
+                            {isTh ? preset.nameTh : preset.nameEn}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-
+              ) : (
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    {isTh ? 'สไตล์เก้าอี้' : 'Chair Style'}
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    {isTh ? 'เปลี่ยนรูปแบบโต๊ะจากตัวอย่าง' : 'Apply Table Template'}
                   </label>
-                  <select
-                    value={editingTable.tableStyle || 'standard'}
-                    onChange={(e) =>
-                      setEditingTable({
-                        ...editingTable,
-                        tableStyle: e.target.value as TableStylePreset,
-                        presetId: undefined,
-                      })
-                    }
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl"
-                  >
-                    <option value="standard">{isTh ? 'เก้าอี้เดี่ยว' : 'Chairs'}</option>
-                    <option value="booth">{isTh ? 'โซฟาบูธ' : 'Booth Sofa'}</option>
-                    <option value="bar">{isTh ? 'เก้าอี้บาร์' : 'Bar Stools'}</option>
-                  </select>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {TABLE_ONLY_PRESETS.map((preset) => {
+                      const isCurrent = editingTable.presetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() =>
+                            setEditingTable({
+                              ...editingTable,
+                              shape: preset.shape,
+                              tableStyle: preset.tableStyle,
+                              presetId: preset.id,
+                              width: preset.width,
+                              height: preset.height,
+                            })
+                          }
+                          className={`px-2 py-2 rounded-xl border text-left transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-orange-50 border-orange-500 text-orange-900 ring-1 ring-orange-400'
+                              : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="text-[11px] font-extrabold truncate">
+                            {isTh ? preset.nameTh : preset.nameEn}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+              )}
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    {isTh ? 'จำนวนที่นั่ง' : 'Chairs'}
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={20}
-                    value={editingTable.chairs}
-                    onChange={(e) =>
-                      setEditingTable({
-                        ...editingTable,
-                        chairs: clampNumber(parseInt(e.target.value, 10) || 0, 0, 20),
-                      })
-                    }
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl tabular-nums"
-                  />
+              {/* Shape / Style / Rotation */}
+              {editingTable.itemKind === 'chair' ? (
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {isTh ? 'สไตล์เก้าอี้' : 'Chair Style'}
+                    </label>
+                    <select
+                      value={editingTable.chairStyle || 'dining'}
+                      onChange={(e) =>
+                        setEditingTable({
+                          ...editingTable,
+                          chairStyle: e.target.value as ChairStylePreset,
+                          shape: e.target.value === 'stool' ? 'round' : e.target.value === 'sofa' ? 'rectangle' : 'square',
+                          presetId: undefined,
+                        })
+                      }
+                      className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl"
+                    >
+                      <option value="dining">{isTh ? 'เก้าอี้เดี่ยว' : 'Dining Chair'}</option>
+                      <option value="stool">{isTh ? 'เก้าอี้สตูลกลม' : 'Bar Stool'}</option>
+                      <option value="armchair">{isTh ? 'อาร์มแชร์' : 'Armchair'}</option>
+                      <option value="sofa">{isTh ? 'โซฟายาว' : 'Sofa Bench'}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {isTh ? 'มุมหมุน' : 'Rotation'}
+                    </label>
+                    <select
+                      value={normalizeRotation(editingTable.rotation)}
+                      onChange={(e) =>
+                        setEditingTable({
+                          ...editingTable,
+                          rotation: parseInt(e.target.value, 10) || 0,
+                        })
+                      }
+                      className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl tabular-nums"
+                    >
+                      <option value={0}>0°</option>
+                      <option value={90}>90°</option>
+                      <option value={180}>180°</option>
+                      <option value={270}>270°</option>
+                    </select>
+                  </div>
                 </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {isTh ? 'รูปทรงโต๊ะ' : 'Shape'}
+                    </label>
+                    <select
+                      value={editingTable.shape}
+                      onChange={(e) =>
+                        setEditingTable({
+                          ...editingTable,
+                          shape: e.target.value as TableShape,
+                          presetId: undefined,
+                        })
+                      }
+                      className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl"
+                    >
+                      <option value="square">{isTh ? 'จัตุรัส' : 'Square'}</option>
+                      <option value="round">{isTh ? 'โต๊ะกลม' : 'Round'}</option>
+                      <option value="rectangle">{isTh ? 'ผืนผ้า' : 'Rectangle'}</option>
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                    {isTh ? 'มุมหมุน' : 'Rotation'}
-                  </label>
-                  <select
-                    value={normalizeRotation(editingTable.rotation)}
-                    onChange={(e) =>
-                      setEditingTable({
-                        ...editingTable,
-                        rotation: parseInt(e.target.value, 10) || 0,
-                      })
-                    }
-                    className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl tabular-nums"
-                  >
-                    <option value={0}>0°</option>
-                    <option value={90}>90°</option>
-                    <option value={180}>180°</option>
-                    <option value={270}>270°</option>
-                  </select>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {isTh ? 'สไตล์โต๊ะ' : 'Table Style'}
+                    </label>
+                    <select
+                      value={editingTable.tableStyle || 'standard'}
+                      onChange={(e) =>
+                        setEditingTable({
+                          ...editingTable,
+                          tableStyle: e.target.value as TableStylePreset,
+                          presetId: undefined,
+                        })
+                      }
+                      className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl"
+                    >
+                      <option value="standard">{isTh ? 'โต๊ะมาตรฐาน' : 'Standard'}</option>
+                      <option value="booth">{isTh ? 'โต๊ะบูธ' : 'Booth Table'}</option>
+                      <option value="bar">{isTh ? 'เคาน์เตอร์บาร์' : 'Bar Counter'}</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      {isTh ? 'มุมหมุน' : 'Rotation'}
+                    </label>
+                    <select
+                      value={normalizeRotation(editingTable.rotation)}
+                      onChange={(e) =>
+                        setEditingTable({
+                          ...editingTable,
+                          rotation: parseInt(e.target.value, 10) || 0,
+                        })
+                      }
+                      className="w-full px-2.5 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-xl tabular-nums"
+                    >
+                      <option value={0}>0°</option>
+                      <option value={90}>90°</option>
+                      <option value={180}>180°</option>
+                      <option value={270}>270°</option>
+                    </select>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Resize / Scale Fine-Tuning (ย่อ - ขยาย) */}
               <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-extrabold text-slate-800">
-                    {isTh ? 'ย่อ-ขยายขนาดโต๊ะ (Resize & Scale)' : 'Table Dimensions & Scale'}
+                    {isTh ? 'ย่อ-ขยายขนาด (Resize & Scale)' : 'Dimensions & Scale'}
                   </span>
                   <span className="text-[11px] font-black text-orange-600 tabular-nums">
                     {(() => {
@@ -1504,19 +1725,26 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
 
             {/* Footer */}
             <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => handleDeleteTable(editingTable)}
-                className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>{isTh ? 'ลบโต๊ะ' : 'Delete'}</span>
-              </button>
+              {!isCreatingNewItem ? (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteTable(editingTable)}
+                  className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isTh ? 'ลบออก' : 'Delete'}</span>
+                </button>
+              ) : (
+                <div />
+              )}
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setEditingTable(null)}
+                  onClick={() => {
+                    setEditingTable(null);
+                    setIsCreatingNewItem(false);
+                  }}
                   className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer"
                 >
                   {isTh ? 'ยกเลิก' : 'Cancel'}
@@ -1525,7 +1753,13 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
                   type="submit"
                   className="px-5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer hover:brightness-105"
                 >
-                  {isTh ? 'บันทึกการแก้ไข' : 'Save Changes'}
+                  {isCreatingNewItem
+                    ? isTh
+                      ? 'เพิ่มลงผังโต๊ะ'
+                      : 'Add Table'
+                    : isTh
+                    ? 'บันทึกการแก้ไข'
+                    : 'Save Changes'}
                 </button>
               </div>
             </div>

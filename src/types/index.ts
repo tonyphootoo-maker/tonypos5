@@ -6,6 +6,7 @@ export type OrderType = 'dine_in' | 'takeaway' | 'delivery';
 export type PaymentMethod = 'cash' | 'qr' | 'card' | 'transfer';
 export type TableShape = 'square' | 'round' | 'rectangle';
 export type TableStylePreset = 'standard' | 'booth' | 'bar';
+export type ChairStylePreset = 'dining' | 'stool' | 'armchair' | 'sofa';
 export type WageType = 'monthly' | 'daily' | 'hourly';
 export type ExpenseType = 'fixed' | 'variable';
 
@@ -149,6 +150,8 @@ export interface TableDoc extends BaseDoc {
   scale?: number; // scale multiplier (default 1)
   rotation?: number; // 0 | 90 | 180 | 270 degrees
   tableStyle?: TableStylePreset; // 'standard' | 'booth' | 'bar'
+  itemKind?: 'table' | 'chair'; // separated table vs standalone chair item
+  chairStyle?: ChairStylePreset; // 'dining' | 'stool' | 'armchair' | 'sofa'
   presetId?: string; // template preset id
   notes?: string;
   currentBillId?: string | null;

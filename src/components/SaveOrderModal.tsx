@@ -3,7 +3,7 @@ import { TableDoc, ZoneDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { TableVisual } from './TableVisual';
 import { FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT } from '../utils/tablePresets';
-import { X, CheckCircle, Users } from 'lucide-react';
+import { X, CheckCircle } from 'lucide-react';
 
 interface Props {
   tables: TableDoc[];
@@ -27,11 +27,12 @@ export const SaveOrderModal: React.FC<Props> = ({
   const [activeZoneId, setActiveZoneId] = useState<string>('all');
   const t = translations[lang];
 
-  // Filter tables according to zone
+  // Filter dining tables (exclude standalone chairs) according to zone
+  const orderTables = tables.filter((tbl) => tbl.itemKind !== 'chair');
   const visibleTables =
     activeZoneId === 'all'
-      ? tables
-      : tables.filter((tbl) => tbl.zoneId === activeZoneId);
+      ? orderTables
+      : orderTables.filter((tbl) => tbl.zoneId === activeZoneId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
@@ -113,11 +114,7 @@ export const SaveOrderModal: React.FC<Props> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs text-neutral-500 font-semibold">
-                      <span className="flex items-center gap-1">
-                        <Users className="w-3.5 h-3.5" />
-                        <span>{tbl.chairs} {t.pos.chairs}</span>
-                      </span>
+                    <div className="flex items-center justify-end text-xs text-neutral-500 font-semibold min-h-[20px]">
                       {isSelected && <CheckCircle className="w-5 h-5 text-orange-600" />}
                     </div>
                   </div>

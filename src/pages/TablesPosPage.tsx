@@ -8,14 +8,12 @@ import {
   BillDoc,
   OrderItem,
   OrderItemOption,
-  DishVariant,
   OptionGroupDoc,
   IngredientDoc,
   SubRecipeDoc,
   PackagingDoc,
   SettingsDoc,
   Language,
-  TableShape,
 } from '../types';
 import { translations } from '../i18n/translations';
 import {
@@ -34,10 +32,8 @@ import {
   subscribeTables,
   subscribeOpenBills,
   subscribeCollection,
-  saveDocument,
-  deleteDocument,
   saveOrderToTableAtomic,
-  saveTableLayoutAuto,
+  saveCategoriesOrder,
   getImageDoc,
 } from '../data/db';
 import { SaveOrderModal } from '../components/SaveOrderModal';
@@ -47,26 +43,19 @@ import { TableVisual } from '../components/TableVisual';
 import {
   FLOOR_CANVAS_MIN_WIDTH,
   FLOOR_CANVAS_MIN_HEIGHT,
-  clampTablePosition,
-  getTableDimensions,
 } from '../utils/tablePresets';
 import {
-  Users,
-  Plus,
-  Trash2,
-  Edit2,
   Utensils,
   Receipt,
   Printer,
   CreditCard,
   ShoppingBag,
-  Sparkles,
   AlertCircle,
   X,
   Check,
   ChevronRight,
-  Move,
   Layers,
+  GripVertical,
 } from 'lucide-react';
 
 interface Props {
@@ -118,26 +107,18 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const [receiptBillToView, setReceiptBillToView] = useState<BillDoc | null>(null);
   const [isCheckReceipt, setIsCheckReceipt] = useState(false);
 
-  // Table Management State
-  const [isTableEditorOpen, setIsTableEditorOpen] = useState(false);
-  const [editingTable, setEditingTable] = useState<Partial<TableDoc> | null>(null);
-  const [isAddingZone, setIsAddingZone] = useState(false);
-  const [newZoneName, setNewZoneName] = useState('');
-
-  // Dragging table state (thresholded so plain clicks never fire spurious writes)
-  const [draggingTableId, setDraggingTableId] = useState<string | null>(null);
-  const floorPlanRef = useRef<HTMLDivElement>(null);
-  const dragOriginRef = useRef<{
-    tableId: string;
-    pointerId: number;
+  // Bottom Food Category Drag-and-Drop Reorder State
+  const [draggingCatId, setDraggingCatId] = useState<string | null>(null);
+  const [dragOverCatId, setDragOverCatId] = useState<string | null>(null);
+  const touchDragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchDragRef = useRef<{
+    sourceId: string;
+    targetId: string | null;
+    active: boolean;
     startX: number;
     startY: number;
-    origX: number;
-    origY: number;
-    hasMoved: boolean;
   } | null>(null);
-  const tablesLatestRef = useRef<TableDoc[]>([]);
-  tablesLatestRef.current = tables;
+  const suppressCatClickRef = useRef<boolean>(false);
 
   // Maps for dynamic recipe cost calculation
   const ingredientsMap = new Map<string, IngredientDoc>(ingredients.map((i) => [i.id, i]));
@@ -202,10 +183,11 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
     return () => {
       unsubs.forEach((u) => u());
+      if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
     };
   }, []);
 
-  // When a table is tapped, if it has an open bill, load it; if not, prepare fresh order for that table
+  // When a table is tapped, load existing bill or prepare fresh order and enter food ordering immediately
   const handleSelectTable = (table: TableDoc) => {
     if (table.currentBillId) {
       const existing = openBills.find((b) => b.id === table.currentBillId);
@@ -214,6 +196,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         setCartItems(existing.items);
         setSelectedChannelId(existing.channelId || 'dine_in');
         setOrderDiscount(existing.discountAmount || 0);
+        setSelectedCategoryId((prev) => prev || categories[0]?.id || 'all');
         return;
       }
     }
@@ -250,6 +233,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     setActiveBill(newBill);
     setCartItems([]);
     setOrderDiscount(0);
+    setSelectedCategoryId((prev) => prev || categories[0]?.id || 'all');
   };
 
   // Dish Selection & Option Customizer
@@ -442,126 +426,104 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     setIsReceiptModalOpen(true);
   };
 
-  // Dragging table support via Pointer Events (Mouse & Touch) with 5px drag threshold
-  const handlePointerDownOnTable = (
-    e: React.PointerEvent<HTMLDivElement>,
-    tbl: TableDoc
-  ) => {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    dragOriginRef.current = {
-      tableId: tbl.id,
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      origX: tbl.x,
-      origY: tbl.y,
-      hasMoved: false,
-    };
+  // Drag-and-drop reorder bottom food category cards & sync to Cloud Firestore
+  const reorderCategoriesByIds = async (sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const sourceIdx = categories.findIndex((c) => c.id === sourceId);
+    const targetIdx = categories.findIndex((c) => c.id === targetId);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const reordered = [...categories];
+    const [moved] = reordered.splice(sourceIdx, 1);
+    reordered.splice(targetIdx, 0, moved);
+
+    const updated = reordered.map((cat, idx) => ({
+      ...cat,
+      order: idx + 1,
+    }));
+
+    setCategories(updated);
+    try {
+      await saveCategoriesOrder(updated);
+    } catch (err) {
+      console.error('Save category order error:', err);
+    }
   };
 
-  const handlePointerMoveOnFloorPlan = (e: React.PointerEvent<HTMLDivElement>) => {
-    const origin = dragOriginRef.current;
-    if (!origin || origin.pointerId !== e.pointerId) return;
+  const handleCategoryTouchStart = (e: React.TouchEvent<HTMLButtonElement>, catId: string) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
+    touchDragRef.current = {
+      sourceId: catId,
+      targetId: catId,
+      active: false,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+    touchDragTimerRef.current = setTimeout(() => {
+      if (touchDragRef.current && touchDragRef.current.sourceId === catId) {
+        touchDragRef.current.active = true;
+        setDraggingCatId(catId);
+        setDragOverCatId(catId);
+      }
+    }, 220);
+  };
 
-    const dx = e.clientX - origin.startX;
-    const dy = e.clientY - origin.startY;
-    if (!origin.hasMoved && Math.hypot(dx, dy) < 6) {
+  const handleCategoryTouchMove = (e: React.TouchEvent<HTMLButtonElement>) => {
+    const state = touchDragRef.current;
+    if (!state || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+
+    if (!state.active) {
+      if (Math.hypot(touch.clientX - state.startX, touch.clientY - state.startY) > 10) {
+        if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
+        touchDragRef.current = null;
+      }
       return;
     }
 
-    if (!origin.hasMoved) {
-      origin.hasMoved = true;
-      setDraggingTableId(origin.tableId);
+    e.preventDefault();
+    const el = document.elementFromPoint(touch.clientX, touch.clientY)?.closest('[data-cat-id]') as HTMLElement | null;
+    const hitId = el?.getAttribute('data-cat-id') || null;
+    if (hitId) {
+      state.targetId = hitId;
+      setDragOverCatId(hitId);
     }
-
-    const target = tablesLatestRef.current.find((t) => t.id === origin.tableId);
-    if (!target) return;
-
-    const dim = getTableDimensions(target);
-    const canvasW = floorPlanRef.current?.clientWidth || FLOOR_CANVAS_MIN_WIDTH;
-    const canvasH = floorPlanRef.current?.clientHeight || FLOOR_CANVAS_MIN_HEIGHT;
-    const pos = clampTablePosition(
-      origin.origX + dx,
-      origin.origY + dy,
-      dim.effWidth,
-      dim.effHeight,
-      Math.max(canvasW, FLOOR_CANVAS_MIN_WIDTH),
-      Math.max(canvasH, FLOOR_CANVAS_MIN_HEIGHT),
-      false
-    );
-
-    setTables((prev) =>
-      prev.map((t) => (t.id === origin.tableId ? { ...t, x: pos.x, y: pos.y } : t))
-    );
   };
 
-  const handlePointerUpOnFloorPlan = async () => {
-    const origin = dragOriginRef.current;
-    dragOriginRef.current = null;
-    setDraggingTableId(null);
+  const handleCategoryTouchEnd = async () => {
+    if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
+    const state = touchDragRef.current;
+    touchDragRef.current = null;
 
-    if (origin?.hasMoved) {
-      const tbl = tablesLatestRef.current.find((t) => t.id === origin.tableId);
-      if (tbl) {
-        await saveTableLayoutAuto(tbl, false);
+    if (state?.active) {
+      suppressCatClickRef.current = true;
+      setTimeout(() => {
+        suppressCatClickRef.current = false;
+      }, 160);
+      setDraggingCatId(null);
+      setDragOverCatId(null);
+      if (state.targetId && state.targetId !== state.sourceId) {
+        await reorderCategoriesByIds(state.sourceId, state.targetId);
       }
     }
   };
 
-  // Save new or edited table
-  const handleSaveTableForm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingTable || !editingTable.name) return;
-
-    const isNew = !editingTable.id;
-    const tableToSave: TableDoc = {
-      ...editingTable,
-      id: editingTable.id || `tbl_${Date.now()}`,
-      name: editingTable.name,
-      zoneId: editingTable.zoneId || zones[0]?.id || 'zone_main',
-      shape: editingTable.shape || 'square',
-      chairs: editingTable.chairs ?? 4,
-      x: editingTable.x ?? 100,
-      y: editingTable.y ?? 100,
-      createdAt: editingTable.createdAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      version: editingTable.version || 1,
-    };
-
-    await saveTableLayoutAuto(tableToSave, isNew);
-    setIsTableEditorOpen(false);
-    setEditingTable(null);
-  };
-
-  // Add new zone
-  const handleCreateZone = async () => {
-    if (!newZoneName.trim()) return;
-    const newZone: ZoneDoc = {
-      id: `zone_${Date.now()}`,
-      name: newZoneName.trim(),
-      order: zones.length + 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      version: 1,
-    };
-    await saveDocument('zones', newZone, true);
-    setZones((prev) => [...prev, newZone]);
-    setNewZoneName('');
-    setIsAddingZone(false);
-  };
-
   // Filter dishes by active category if any
-  const displayedDishes = selectedCategoryId
-    ? dishes.filter((d) => d.categoryId === selectedCategoryId)
-    : dishes;
+  const displayedDishes =
+    selectedCategoryId && selectedCategoryId !== 'all'
+      ? dishes.filter((d) => d.categoryId === selectedCategoryId)
+      : dishes;
 
-  // Tables visible on start page:
+  // Tables visible on start page (exclude standalone chairs; POS is read-only):
   // "All zones": ONLY tables that have a saved order!
-  // A specific zone: all tables in that zone with floor plan!
-  const tablesWithSavedOrder = tables.filter((t) => !!t.currentBillId);
+  // A specific zone: all dining tables in that zone!
+  const orderTables = tables.filter((t) => t.itemKind !== 'chair');
+  const tablesWithSavedOrder = orderTables.filter((t) => !!t.currentBillId);
   const zoneTables = activeZoneId === 'all'
     ? tablesWithSavedOrder
-    : tables.filter((t) => t.zoneId === activeZoneId);
+    : orderTables.filter((t) => t.zoneId === activeZoneId);
 
   return (
     <div className="flex flex-col h-[calc(100vh-62px)] bg-transparent overflow-hidden select-none">
@@ -581,7 +543,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             </button>
 
             {zones.map((z) => {
-              const countInZone = tables.filter((tbl) => tbl.zoneId === z.id && tbl.currentBillId).length;
+              const countInZone = orderTables.filter((tbl) => tbl.zoneId === z.id && tbl.currentBillId).length;
               return (
                 <button
                   key={z.id}
@@ -596,42 +558,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 </button>
               );
             })}
-
-            {/* Add Zone Trigger */}
-            {isAddingZone ? (
-              <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-orange-300 shadow-xs">
-                <input
-                  type="text"
-                  placeholder={t.pos.zoneName}
-                  value={newZoneName}
-                  onChange={(e) => setNewZoneName(e.target.value)}
-                  className="px-2 py-1 text-xs w-28 bg-slate-50 rounded-lg border border-slate-300 focus:outline-hidden"
-                />
-                <button
-                  onClick={handleCreateZone}
-                  className="p-1 bg-orange-500 text-white rounded-lg hover:bg-orange-600 cursor-pointer"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => setIsAddingZone(false)}
-                  className="p-1 text-slate-500 hover:text-slate-700 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsAddingZone(true)}
-                className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-orange-700 hover:bg-orange-50 border border-dashed border-orange-300 whitespace-nowrap cursor-pointer"
-              >
-                {t.pos.addZone}
-              </button>
-            )}
           </div>
 
-          {/* Table Management Actions */}
-          <div className="flex items-center gap-1.5">
+          {/* Link to Floor Plan Studio (+Add Zone / +Add Table live there now) */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {onOpenFloorPlan && (
               <button
                 type="button"
@@ -642,22 +572,6 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 <span>{t.nav.floorPlan}</span>
               </button>
             )}
-            <button
-              onClick={() => {
-                setEditingTable({
-                  zoneId: activeZoneId !== 'all' ? activeZoneId : zones[0]?.id || 'zone_main',
-                  shape: 'square',
-                  chairs: 4,
-                  x: 100,
-                  y: 100,
-                });
-                setIsTableEditorOpen(true);
-              }}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-orange-800 border border-slate-200 hover:bg-orange-50 shadow-[0_2px_0_#e2e8f0] cursor-pointer flex items-center gap-1 active:translate-y-[1px]"
-            >
-              <Plus className="w-3.5 h-3.5 text-orange-600" />
-              <span>{t.pos.addTable}</span>
-            </button>
           </div>
         </div>
       )}
@@ -669,16 +583,26 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           {selectedCategoryId ? (
             // Full Screen Category Menu View
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-black text-lg text-neutral-800 flex items-center gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-black text-lg text-neutral-800 flex items-center gap-2 flex-wrap">
                   <Utensils className="w-5 h-5 text-orange-600" />
                   <span>
-                    {categories.find((c) => c.id === selectedCategoryId)?.name || t.pos.allCategories}
+                    {selectedCategoryId === 'all'
+                      ? t.pos.allCategories
+                      : (() => {
+                          const cat = categories.find((c) => c.id === selectedCategoryId);
+                          return (lang === 'th' && cat?.nameTh ? cat.nameTh : cat?.name) || t.pos.allCategories;
+                        })()}
                   </span>
+                  {activeBill?.tableName && (
+                    <span className="px-2.5 py-0.5 rounded-lg bg-orange-100 text-orange-800 border border-orange-200 text-xs font-black">
+                      {activeBill.tableName}
+                    </span>
+                  )}
                 </h3>
                 <button
                   onClick={() => setSelectedCategoryId(null)}
-                  className="px-3 py-1 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 shadow-2xs cursor-pointer"
+                  className="px-3 py-1 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 shadow-2xs cursor-pointer shrink-0"
                 >
                   ← {t.pos.billCard}
                 </button>
@@ -757,11 +681,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between text-xs text-slate-500 font-semibold pt-1 border-t border-red-100">
-                          <span className="flex items-center gap-1">
-                            <Users className="w-3.5 h-3.5" />
-                            {tbl.chairs}
-                          </span>
+                        <div className="flex items-center justify-end text-xs text-slate-500 font-semibold pt-1 border-t border-red-100">
                           <span className="text-orange-600 font-bold flex items-center gap-0.5">
                             Open <ChevronRight className="w-3 h-3" />
                           </span>
@@ -773,13 +693,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               )}
             </div>
           ) : (
-            // Specific Zone Floor Plan: Raised 3D Sculpted Tables & Chairs matching Floor Plan Studio
+            // Specific Zone Floor Plan (Strictly Read-Only: no drag, no resize, no edit, tables only)
             <div className="flex-1 overflow-auto bg-slate-100/60">
               <div
-                ref={floorPlanRef}
-                onPointerMove={handlePointerMoveOnFloorPlan}
-                onPointerUp={handlePointerUpOnFloorPlan}
-                onPointerCancel={handlePointerUpOnFloorPlan}
                 style={{
                   minWidth: `${FLOOR_CANVAS_MIN_WIDTH}px`,
                   minHeight: `${FLOOR_CANVAS_MIN_HEIGHT}px`,
@@ -789,27 +705,19 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 {zoneTables.map((tbl) => {
                   const isOccupied = !!tbl.currentBillId;
                   const isSelected = activeBill?.tableId === tbl.id;
-                  const isDragging = draggingTableId === tbl.id;
 
                   return (
                     <div
                       key={tbl.id}
-                      onPointerDown={(e) => handlePointerDownOnTable(e, tbl)}
                       onClick={() => handleSelectTable(tbl)}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        setEditingTable(tbl);
-                        setIsTableEditorOpen(true);
-                      }}
                       style={{ left: `${tbl.x}px`, top: `${tbl.y}px` }}
-                      className={`absolute cursor-pointer touch-none ${
+                      className={`absolute cursor-pointer select-none ${
                         isSelected ? 'z-20' : 'z-10'
                       }`}
                     >
                       <TableVisual
                         table={tbl}
                         isSelected={isSelected}
-                        isDragging={isDragging}
                         isOccupied={isOccupied}
                       />
                     </div>
@@ -1028,22 +936,71 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         {/* Separator */}
         <div className="h-8 w-px bg-slate-200 shrink-0" />
 
-        {/* Food Category Cards */}
+        {/* Draggable Food Category Cards (Drag-and-drop to reorder, saved to Cloud) */}
         {categories.map((cat) => {
           const isSelected = selectedCategoryId === cat.id;
+          const isDraggingThis = draggingCatId === cat.id;
+          const isDropTarget = dragOverCatId === cat.id && draggingCatId !== cat.id;
           const dishCount = dishes.filter((d) => d.categoryId === cat.id).length;
 
           return (
             <button
               key={cat.id}
-              onClick={() => setSelectedCategoryId(cat.id)}
-              className={`h-12 px-4 rounded-xl flex items-center gap-2.5 font-bold text-xs cursor-pointer transition-all shrink-0 active:translate-y-[1px] ${
+              data-cat-id={cat.id}
+              type="button"
+              draggable
+              onDragStart={(e) => {
+                setDraggingCatId(cat.id);
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/kinpos-cat-id', cat.id);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (draggingCatId && draggingCatId !== cat.id) {
+                  setDragOverCatId(cat.id);
+                }
+              }}
+              onDragLeave={() => {
+                if (dragOverCatId === cat.id) setDragOverCatId(null);
+              }}
+              onDrop={async (e) => {
+                e.preventDefault();
+                const srcId = e.dataTransfer.getData('text/kinpos-cat-id') || draggingCatId;
+                setDraggingCatId(null);
+                setDragOverCatId(null);
+                if (srcId && srcId !== cat.id) {
+                  await reorderCategoriesByIds(srcId, cat.id);
+                }
+              }}
+              onDragEnd={() => {
+                setDraggingCatId(null);
+                setDragOverCatId(null);
+              }}
+              onTouchStart={(e) => handleCategoryTouchStart(e, cat.id)}
+              onTouchMove={handleCategoryTouchMove}
+              onTouchEnd={handleCategoryTouchEnd}
+              onTouchCancel={handleCategoryTouchEnd}
+              onClick={() => {
+                if (suppressCatClickRef.current) {
+                  suppressCatClickRef.current = false;
+                  return;
+                }
+                setSelectedCategoryId(cat.id);
+              }}
+              title={lang === 'th' ? 'ลากวางเพื่อสลับตำแหน่งหมวดหมู่อาหาร' : 'Drag and drop to reorder category'}
+              className={`h-12 px-3.5 rounded-xl flex items-center gap-2 font-bold text-xs cursor-grab active:cursor-grabbing transition-all shrink-0 active:translate-y-[1px] ${
+                isDraggingThis ? 'opacity-50 scale-95' : ''
+              } ${
+                isDropTarget ? 'ring-2 ring-orange-500 ring-offset-1 scale-[1.03]' : ''
+              } ${
                 isSelected
                   ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_8px_16px_-6px_rgba(234,88,12,0.32)]'
                   : 'bg-white text-slate-800 hover:bg-orange-50/70 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
               }`}
             >
-              <Utensils className={`w-4 h-4 ${isSelected ? 'text-amber-200' : 'text-orange-500'}`} />
+              <GripVertical className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-orange-100' : 'text-slate-300'}`} />
+              <Utensils className={`w-4 h-4 shrink-0 ${isSelected ? 'text-amber-200' : 'text-orange-500'}`} />
               <div className="text-left">
                 <div className="leading-tight font-extrabold">
                   {lang === 'th' && cat.nameTh ? cat.nameTh : cat.name}
@@ -1247,100 +1204,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         </div>
       )}
 
-      {/* Table Management / Add Table Modal */}
-      {isTableEditorOpen && editingTable && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-          <form
-            onSubmit={handleSaveTableForm}
-            className="bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200 overflow-hidden"
-          >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
-              <h3 className="font-extrabold text-base">
-                {editingTable.id ? t.pos.editTable : t.pos.addTable}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsTableEditorOpen(false)}
-                className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="p-4 space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  {t.pos.tableName}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editingTable.name || ''}
-                  onChange={(e) => setEditingTable({ ...editingTable, name: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. T1, Bar 1"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">{t.pos.shape}</label>
-                <select
-                  value={editingTable.shape || 'square'}
-                  onChange={(e) => setEditingTable({ ...editingTable, shape: e.target.value as TableShape })}
-                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                >
-                  <option value="square">{t.pos.square}</option>
-                  <option value="round">{t.pos.round}</option>
-                  <option value="rectangle">{t.pos.rectangle}</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">{t.pos.chairs}</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={editingTable.chairs || 4}
-                  onChange={(e) => setEditingTable({ ...editingTable, chairs: parseInt(e.target.value, 10) || 1 })}
-                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-neutral-700 mb-1">Zone</label>
-                <select
-                  value={editingTable.zoneId || zones[0]?.id || ''}
-                  onChange={(e) => setEditingTable({ ...editingTable, zoneId: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                >
-                  {zones.map((z) => (
-                    <option key={z.id} value={z.id}>
-                      {lang === 'th' && z.nameTh ? z.nameTh : z.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsTableEditorOpen(false)}
-                className="px-3 py-1.5 bg-white text-neutral-700 border border-neutral-300 rounded-xl text-xs font-bold cursor-pointer"
-              >
-                {t.common.cancel}
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
-              >
-                {t.common.save}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Save Order Modal */}
       {isSaveOrderModalOpen && (

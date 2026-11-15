@@ -1,12 +1,21 @@
 import React from 'react';
-import { Users } from 'lucide-react';
 import { TableDoc } from '../types';
-import { computeChairPositions, getTableDimensions } from '../utils/tablePresets';
+import { getTableDimensions, normalizeRotation } from '../utils/tablePresets';
 
 interface TableVisualProps {
   table: Pick<
     TableDoc,
-    'id' | 'name' | 'shape' | 'chairs' | 'width' | 'height' | 'scale' | 'rotation' | 'tableStyle' | 'currentBillId'
+    | 'id'
+    | 'name'
+    | 'shape'
+    | 'width'
+    | 'height'
+    | 'scale'
+    | 'rotation'
+    | 'tableStyle'
+    | 'itemKind'
+    | 'chairStyle'
+    | 'currentBillId'
   >;
   isSelected?: boolean;
   isDragging?: boolean;
@@ -17,8 +26,9 @@ interface TableVisualProps {
 }
 
 /**
- * Clean Daylight 3D table & chairs visual renderer.
- * Shared across Floor Plan Studio, Preset Thumbnails, and Live Cashier POS.
+ * Clean Daylight 3D table & standalone chair visual renderer.
+ * Tables render purely as tables (no surrounding chairs, no guest count).
+ * Chairs render independently when itemKind === 'chair'.
  */
 export const TableVisual: React.FC<TableVisualProps> = ({
   table,
@@ -30,38 +40,106 @@ export const TableVisual: React.FC<TableVisualProps> = ({
   scaleFactor = 1,
 }) => {
   const dim = getTableDimensions(table);
-  const w = Math.max(40, Math.round(dim.effWidth * scaleFactor));
-  const h = Math.max(40, Math.round(dim.effHeight * scaleFactor));
+  const minPx = table.itemKind === 'chair' ? 22 : 38;
+  const w = Math.max(minPx, Math.round(dim.effWidth * scaleFactor));
+  const h = Math.max(minPx, Math.round(dim.effHeight * scaleFactor));
 
-  const chairs = computeChairPositions(
-    table.shape || 'square',
-    table.tableStyle,
-    table.chairs ?? 4,
-    w,
-    h,
-    table.rotation || 0
-  );
+  // Standalone Chair Rendering
+  if (table.itemKind === 'chair') {
+    const style = table.chairStyle || 'dining';
+    const rot = normalizeRotation(table.rotation);
 
+    const baseClasses = isSelected
+      ? 'border-2 border-orange-500 bg-orange-100 ring-4 ring-orange-400/50 shadow-[0_4px_0_#fb923c,0_10px_18px_-6px_rgba(234,88,12,0.3)]'
+      : style === 'sofa'
+      ? 'border-2 border-amber-500 bg-amber-100 shadow-[0_4px_0_#f59e0b,0_8px_16px_-6px_rgba(180,83,9,0.25)]'
+      : style === 'armchair'
+      ? 'border-2 border-stone-500 bg-stone-200 shadow-[0_4px_0_#78716c,0_8px_16px_-6px_rgba(68,64,60,0.25)]'
+      : 'border-2 border-slate-400 bg-slate-100 shadow-[0_4px_0_#94a3b8,0_8px_16px_-6px_rgba(15,23,42,0.18)]';
+
+    const backClasses = isSelected
+      ? 'bg-orange-500'
+      : style === 'sofa'
+      ? 'bg-amber-700'
+      : style === 'armchair'
+      ? 'bg-stone-600'
+      : 'bg-slate-600';
+
+    if (style === 'stool') {
+      return (
+        <div
+          className={`relative select-none flex items-center justify-center transition-shadow rounded-full ${baseClasses} ${
+            isDragging ? 'scale-[1.05]' : ''
+          }`}
+          style={{ width: `${w}px`, height: `${h}px` }}
+        >
+          <div className="w-[52%] h-[52%] rounded-full border border-slate-400/70 bg-white/60" />
+        </div>
+      );
+    }
+
+    if (style === 'armchair') {
+      return (
+        <div
+          className={`relative select-none transition-shadow rounded-xl overflow-hidden ${baseClasses} ${
+            isDragging ? 'scale-[1.05]' : ''
+          }`}
+          style={{
+            width: `${w}px`,
+            height: `${h}px`,
+            transform: `rotate(${rot}deg)`,
+          }}
+        >
+          <div className={`w-full h-[22%] ${backClasses}`} />
+          <div className={`absolute left-0 top-[18%] bottom-[12%] w-[16%] rounded-r-sm ${backClasses} opacity-85`} />
+          <div className={`absolute right-0 top-[18%] bottom-[12%] w-[16%] rounded-l-sm ${backClasses} opacity-85`} />
+        </div>
+      );
+    }
+
+    if (style === 'sofa') {
+      return (
+        <div
+          className={`relative select-none transition-shadow rounded-2xl overflow-hidden ${baseClasses} ${
+            isDragging ? 'scale-[1.04]' : ''
+          }`}
+          style={{
+            width: `${w}px`,
+            height: `${h}px`,
+            transform: `rotate(${rot}deg)`,
+          }}
+        >
+          <div className={`w-full h-[26%] ${backClasses}`} />
+          <div className="w-full h-[74%] flex items-center justify-evenly px-1.5">
+            <div className="h-[68%] flex-1 mx-0.5 rounded-md bg-white/45 border border-amber-400/50" />
+            <div className="h-[68%] flex-1 mx-0.5 rounded-md bg-white/45 border border-amber-400/50" />
+          </div>
+        </div>
+      );
+    }
+
+    // Standard dining chair
+    return (
+      <div
+        className={`relative select-none transition-shadow rounded-t-xl rounded-b-lg overflow-hidden ${baseClasses} ${
+          isDragging ? 'scale-[1.05]' : ''
+        }`}
+        style={{
+          width: `${w}px`,
+          height: `${h}px`,
+          transform: `rotate(${rot}deg)`,
+        }}
+      >
+        <div className={`w-full h-[22%] ${backClasses}`} />
+        <div className="w-[74%] h-[58%] mx-auto mt-[8%] rounded-md bg-white/55 border border-slate-300/70" />
+      </div>
+    );
+  }
+
+  // Table Rendering (No surrounding chairs, no guest count)
   const isRound = table.shape === 'round';
   const isBar = table.tableStyle === 'bar';
   const isBooth = table.tableStyle === 'booth';
-
-  // Color hierarchy aligned with POS semantic colors
-  const chairSurface = isOccupied
-    ? 'bg-rose-200 border-rose-400'
-    : isSelected
-    ? 'bg-orange-200 border-orange-500'
-    : isBooth
-    ? 'bg-amber-200 border-amber-500'
-    : 'bg-slate-200 border-slate-400';
-
-  const chairBackSurface = isOccupied
-    ? 'bg-rose-500'
-    : isSelected
-    ? 'bg-orange-600'
-    : isBooth
-    ? 'bg-amber-700'
-    : 'bg-slate-500';
 
   const tabletopSurface = isSelected
     ? 'border-2 border-orange-500 bg-orange-50 text-orange-950 ring-4 ring-orange-400/50 shadow-[0_6px_0_#fb923c,0_14px_26px_-6px_rgba(234,88,12,0.3)]'
@@ -78,60 +156,6 @@ export const TableVisual: React.FC<TableVisualProps> = ({
       className={`relative select-none ${isDragging ? 'scale-[1.03]' : ''}`}
       style={{ width: `${w}px`, height: `${h}px` }}
     >
-      {/* Surrounding Chairs / Stools / Booths */}
-      {chairs.map((ch, idx) => {
-        if (ch.kind === 'stool') {
-          return (
-            <div
-              key={idx}
-              style={{
-                left: `${ch.x}px`,
-                top: `${ch.y}px`,
-                width: `${ch.w}px`,
-                height: `${ch.h}px`,
-                transform: 'translate(-50%, -50%)',
-              }}
-              className={`absolute rounded-full border shadow-[0_2px_0_rgba(15,23,42,0.2)] pointer-events-none ${chairSurface}`}
-            />
-          );
-        }
-
-        if (ch.kind === 'sofa') {
-          return (
-            <div
-              key={idx}
-              style={{
-                left: `${ch.x}px`,
-                top: `${ch.y}px`,
-                width: `${ch.w}px`,
-                height: `${ch.h}px`,
-                transform: `translate(-50%, -50%) rotate(${ch.angle}deg)`,
-              }}
-              className={`absolute rounded-xl border shadow-[0_3px_0_rgba(15,23,42,0.15)] pointer-events-none overflow-hidden ${chairSurface}`}
-            >
-              <div className={`w-full h-1.5 ${chairBackSurface}`} />
-            </div>
-          );
-        }
-
-        return (
-          <div
-            key={idx}
-            style={{
-              left: `${ch.x}px`,
-              top: `${ch.y}px`,
-              width: `${ch.w}px`,
-              height: `${ch.h}px`,
-              transform: `translate(-50%, -50%) rotate(${ch.angle}deg)`,
-            }}
-            className={`absolute rounded-t-md rounded-b-sm border shadow-[0_2px_0_rgba(15,23,42,0.12)] pointer-events-none overflow-hidden ${chairSurface}`}
-          >
-            <div className={`w-full h-[3px] ${chairBackSurface}`} />
-          </div>
-        );
-      })}
-
-      {/* Sculpted 3D Tabletop */}
       <div
         className={`w-full h-full flex flex-col items-center justify-center p-1 transition-shadow ${
           isRound ? 'rounded-full' : isBar ? 'rounded-xl' : 'rounded-2xl'
@@ -145,17 +169,6 @@ export const TableVisual: React.FC<TableVisualProps> = ({
           {table.name}
         </span>
 
-        {!compact && (
-          <span
-            className={`text-[10px] font-bold flex items-center gap-0.5 mt-0.5 ${
-              isBar && !isSelected && !isOccupied ? 'text-slate-300' : 'text-slate-500'
-            }`}
-          >
-            <Users className="w-3 h-3" />
-            <span>{table.chairs}</span>
-          </span>
-        )}
-
         {showOccupiedBadge && isOccupied && !compact && (
           <span className="text-[9px] font-black uppercase text-red-700 bg-red-100 px-1.5 py-0.5 rounded-sm mt-0.5 leading-none">
             Occupied
@@ -165,3 +178,4 @@ export const TableVisual: React.FC<TableVisualProps> = ({
     </div>
   );
 };
+

@@ -830,37 +830,97 @@ export async function getImageDoc(imageId: string): Promise<ImageDoc | null> {
 }
 
 // ==========================================
-// Atomic Bill Number Generation via Counter
+// Category Drag-and-Drop Reorder Helper
 // ==========================================
-export async function generateNextBillNumber(workDate: string): Promise<string> {
+export async function saveCategoriesOrder(
+  orderedCategories: Pick<CategoryDoc, 'id' | 'order' | 'version'>[]
+): Promise<void> {
+  if (orderedCategories.length === 0) return;
+  const uid = getCurrentUid();
+  const batch = writeBatch(db);
+  const now = new Date().toISOString();
+
+  for (const cat of orderedCategories) {
+    const ref = doc(db, `users/${uid}/categories/${cat.id}`);
+    batch.update(
+      ref,
+      stripUndefined({
+        order: cat.order,
+        updatedAt: now,
+        version: (cat.version || 0) + 1,
+      })
+    );
+  }
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `users/${uid}/categories`);
+  }
+}
+
+// ==========================================
+// Atomic Bill Number Generation via Counter
+// Format: T{TableNo}-{BE_YYMMDD} (e.g. T2-691115)
+// ==========================================
+export function formatBillTableCode(tableName?: string): string {
+  const raw = (tableName || '').trim().replace(/\s+/g, '');
+  if (!raw) return 'T0';
+  if (/^\d+$/.test(raw)) return `T${raw}`;
+  if (/^t\d+$/i.test(raw)) return `T${raw.slice(1)}`;
+  return raw;
+}
+
+export function formatBillDateBE6(workDate: string): string {
+  const parts = workDate.split('-');
+  if (parts.length !== 3) {
+    return workDate.replace(/-/g, '').slice(-6);
+  }
+  const gYear = parseInt(parts[0], 10);
+  const beYear = Number.isFinite(gYear) ? (gYear >= 2400 ? gYear : gYear + 543) : 2569;
+  const yy = String(beYear).slice(-2);
+  const mm = parts[1].padStart(2, '0');
+  const dd = parts[2].padStart(2, '0');
+  return `${yy}${mm}${dd}`;
+}
+
+export async function generateNextBillNumber(workDate: string, tableName?: string): Promise<string> {
   const uid = getCurrentUid();
   const counterRef = doc(db, `users/${uid}/counters/bills`);
-  const cleanDate = workDate.replace(/-/g, '');
+  const tableCode = formatBillTableCode(tableName);
+  const dateCode = formatBillDateBE6(workDate);
 
   try {
     return await runTransaction(db, async (txn) => {
       const snap = await txn.get(counterRef);
-      let nextCount = 1;
+      let nextGlobalCount = 1;
+      let tableCounts: Record<string, number> = {};
 
       if (snap.exists()) {
         const data = snap.data();
         if (data.workDate === workDate) {
-          nextCount = (data.count || 0) + 1;
+          nextGlobalCount = (data.count || 0) + 1;
+          tableCounts = { ...(data.tableCounts || {}) };
         }
       }
+
+      const nextTableSeq = (tableCounts[tableCode] || 0) + 1;
+      tableCounts[tableCode] = nextTableSeq;
 
       txn.set(
         counterRef,
         stripUndefined({
           id: 'bills',
           workDate,
-          count: nextCount,
+          count: nextGlobalCount,
+          tableCounts,
           ...updateMetadata(snap.exists() ? snap.data().version || 0 : 0),
         })
       );
 
-      const padded = String(nextCount).padStart(4, '0');
-      return `B-${cleanDate}-${padded}`;
+      return nextTableSeq === 1
+        ? `${tableCode}-${dateCode}`
+        : `${tableCode}-${dateCode}-${nextTableSeq}`;
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, counterRef.path);
@@ -876,7 +936,16 @@ export async function saveOrderToTableAtomic(
 ): Promise<BillDoc> {
   const uid = getCurrentUid();
   const isNew = !billData.billNumber;
-  const billNumber = isNew ? await generateNextBillNumber(billData.workDate) : billData.billNumber;
+  let resolvedTableName = billData.tableName;
+  if (isNew && !resolvedTableName && tableId) {
+    const tSnap = await getDoc(doc(db, `users/${uid}/tables/${tableId}`));
+    if (tSnap.exists()) {
+      resolvedTableName = (tSnap.data() as TableDoc).name;
+    }
+  }
+  const billNumber = isNew
+    ? await generateNextBillNumber(billData.workDate, resolvedTableName)
+    : billData.billNumber;
   const billId = billData.id || `bill_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const billRef = doc(db, `users/${uid}/bills/${billId}`);
 
