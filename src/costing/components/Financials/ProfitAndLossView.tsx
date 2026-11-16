@@ -46,11 +46,19 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
     }
   };
 
-  // Aggregate monthly revenues
-  const grossSales = sales.reduce((sum, s) => sum + s.grossSales, 0);
-  const discounts = sales.reduce((sum, s) => sum + s.discounts, 0);
-  const refunds = sales.reduce((sum, s) => sum + s.refunds, 0);
-  const netSales = grossSales - discounts - refunds;
+  // Aggregate monthly revenues (always ex-VAT Net Sales + platform fees)
+  const grossSales = sales.reduce((sum, s) => sum + (s.grossSales || 0), 0);
+  const discounts = sales.reduce((sum, s) => sum + (s.discounts || 0), 0);
+  const refunds = sales.reduce((sum, s) => sum + (s.refunds || 0), 0);
+  const netSales = sales.reduce((sum, s) => {
+    if (typeof s.netSales === 'number' && Number.isFinite(s.netSales)) {
+      return sum + Math.max(0, s.netSales);
+    }
+    const nominal = Math.max(0, (s.grossSales || 0) - (s.discounts || 0) - (s.refunds || 0));
+    const vatPct = s.vatRatePercent ?? 7;
+    return sum + (s.isVatInclusive && vatPct > 0 ? nominal / (1 + vatPct / 100) : nominal);
+  }, 0);
+  const channelFees = sales.reduce((sum, s) => sum + Math.max(0, s.platformFees || 0), 0);
 
   // Double-counting guard: exclude payroll expenses when employees exist
   const isPayrollExpense = (e: ExpenseRecord) => {
@@ -67,7 +75,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
     ? expenses.filter((e) => !isPayrollExpense(e))
     : expenses;
 
-  // Operating Expenses from general expenses
+  // Operating Expenses from general expenses (excluding labor, which is passed separately)
   const totalExpenses = effectiveExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   // Direct Kitchen Labor vs FOH / Management Labor
@@ -84,8 +92,11 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
   const salesOrdersList = useMemo(() => StorageService.getSalesOrders(), []);
   const wasteList = useMemo(() => StorageService.getWasteLog(), []);
 
-  // Check if purchase and inventory records exist
-  const hasActualStockData = purchasesList.length > 0 && inventoryList.length > 0;
+  // Only allow actual inventory COGS when explicit beginning inventory is recorded (never invent 1.05x buffer)
+  const hasExplicitBeginningStock = inventoryList.some(
+    (item: any) => typeof item.beginningValue === 'number' && Number.isFinite(item.beginningValue)
+  );
+  const hasActualStockData = purchasesList.length > 0 && inventoryList.length > 0 && hasExplicitBeginningStock;
 
   // Selector: "actual" vs "estimated" (Default to estimated % of sales as user doesn't track inventory stock)
   const [cogsMode, setCogsMode] = useState<'actual' | 'estimated'>('estimated');
@@ -97,11 +108,12 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
   const totalPurchasesCost = purchasesList.reduce((sum, p) => sum + (p.totalPrice || p.price || 0), 0);
   const totalEndingStockCost = inventoryList.reduce((sum, item) => sum + ((item.currentStock ?? 0) * (item.costPerUnit || 0)), 0);
   const totalWasteCost = wasteList.reduce((sum, w) => sum + (w.totalCost || w.cost || 0), 0);
-  // Default beginning stock assumption if not explicitly logged (or base starting inventory)
-  const estimatedBeginningStockCost = totalEndingStockCost * 1.05; // 5% buffer if single stock point
+  const totalBeginningStockCost = hasExplicitBeginningStock
+    ? inventoryList.reduce((sum, item: any) => sum + (item.beginningValue || 0), 0)
+    : 0;
 
   const actualCogsResult = calculateInventoryCOGS(
-    estimatedBeginningStockCost,
+    totalBeginningStockCost,
     totalPurchasesCost,
     totalEndingStockCost,
     totalWasteCost
@@ -116,7 +128,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
     ? settings.cogsVarianceThresholdPercent
     : 3.0; // default 3% of net sales
   const variancePointsOfNetSales = netSales > 0 ? (Math.abs(varianceResult.varianceAmount) / netSales) * 100 : 0;
-  const isVarianceExceeded = variancePointsOfNetSales > varianceThresholdPercent;
+  const isVarianceExceeded = hasActualStockData && variancePointsOfNetSales > varianceThresholdPercent;
 
   // Estimated COGS slider rates
   const [foodCostRate, setFoodCostRate] = useState<number>(31.5);
@@ -131,7 +143,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
     ? salesOrdersList.reduce((sum, o) => sum + (o.packagingCost || 0), 0) || estimatedPackagingCogs
     : estimatedPackagingCogs;
 
-  const operatingExpenses = totalExpenses + nonKitchenLabor;
+  const operatingExpenses = totalExpenses;
   const foodCostPercent = netSales > 0 ? (foodCogs / netSales) * 100 : 0;
   const packagingCostPercent = netSales > 0 ? (packagingCogs / netSales) * 100 : 0;
   const operatingExpensePercent = netSales > 0 ? (operatingExpenses / netSales) * 100 : 0;
@@ -148,7 +160,10 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
     packagingCogs,
     operatingExpenses,
     directKitchenLabor,
-    incomeTaxRate
+    incomeTaxRate,
+    nonKitchenLabor,
+    channelFees,
+    netSales
   );
 
 
@@ -307,7 +322,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
         </div>
 
         <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">Prime Cost % (COGS + Kitchen)</div>
+          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">Prime Cost % (COGS + Total Labor)</div>
           <div className="mt-3 text-2xl font-light font-mono flex items-baseline gap-1.5 text-purple-400">
             <span>{pnl.primeCostPercent.toFixed(1)}%</span>
             <span className="text-xs text-white/30 font-mono font-normal">(เป้า {settings.primeCostTargetPercent}%)</span>
@@ -407,30 +422,45 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
             </div>
           </div>
 
-          {/* 3.1 DIRECT KITCHEN LABOR DEDUCTION */}
+          {/* 3.1 CHANNEL FEES & TOTAL LABOR */}
           <div className="flex justify-between px-3 py-2 text-white/80 bg-white/[0.03] rounded-lg border border-white/5">
-            <span className="font-sans">หัก: ค่าแรงครัว (Direct Labor)</span>
+            <span className="font-sans">หัก: ค่าธรรมเนียมแพลตฟอร์ม (Channel Fees / GP)</span>
             <div className="flex items-center gap-4">
-              <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((directKitchenLabor / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
-              <span className="text-purple-300 font-mono">-฿{Math.round(directKitchenLabor).toLocaleString()}</span>
+              <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((pnl.channelFees / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
+              <span className="text-rose-300 font-mono">-฿{Math.round(pnl.channelFees).toLocaleString()}</span>
+            </div>
+          </div>
+
+          <div className="flex justify-between px-3 py-2 text-white/80 bg-white/[0.03] rounded-lg border border-white/5">
+            <span className="font-sans">หัก: ค่าแรงรวมทุกแผนก (Total Labor)</span>
+            <div className="flex items-center gap-4">
+              <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((pnl.totalLabor / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
+              <span className="text-purple-300 font-mono">-฿{Math.round(pnl.totalLabor).toLocaleString()}</span>
             </div>
           </div>
 
           {/* 4. PRIME COST HIGHLIGHT */}
           <div className="space-y-1.5 pt-2">
             <div className="text-[11px] font-bold font-sans text-purple-300 uppercase tracking-wider bg-purple-500/10 px-3 py-1.5 rounded-lg border border-purple-500/20 flex justify-between">
-              <span>การวิเคราะห์ PRIME COST (COGS + Direct Kitchen Labor)</span>
+              <span>การวิเคราะห์ PRIME COST (Total COGS + Total Labor)</span>
               <span className="font-mono font-bold text-purple-300">{pnl.primeCostPercent.toFixed(1)}% of Net Sales</span>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ค่าแรงทีมงานครัวทางตรง (Kitchen Direct Labor)</span>
+              <span className="font-sans">ค่าแรงทีมงานครัว (Kitchen Direct Labor)</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((directKitchenLabor / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
                 <span>฿{directKitchenLabor.toLocaleString()}</span>
               </div>
             </div>
-            <div className="flex justify-between px-3 py-1.5 font-bold text-purple-900 bg-purple-500/10 rounded-lg">
-              <span className="font-sans">ยอดรวม PRIME COST ทั้งหมด</span>
+            <div className="flex justify-between px-3 py-1 text-white/70">
+              <span className="font-sans">ค่าแรงหน้าร้านและบริหาร (FOH & Admin Staff)</span>
+              <div className="flex items-center gap-4">
+                <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((nonKitchenLabor / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
+                <span>฿{nonKitchenLabor.toLocaleString()}</span>
+              </div>
+            </div>
+            <div className="flex justify-between px-3 py-1.5 font-bold text-purple-200 bg-purple-500/10 rounded-lg">
+              <span className="font-sans">ยอดรวม PRIME COST ทั้งหมด (COGS + Total Labor)</span>
               <span>฿{Math.round(pnl.primeCost).toLocaleString()}</span>
             </div>
           </div>
@@ -442,19 +472,15 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
               <span className="font-sans">ค่าเช่าพื้นที่ (Rent)</span>
-              <span>฿{expenses.filter(e => e.category === 'Rent').reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
+              <span>฿{effectiveExpenses.filter(e => e.category === 'Rent').reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
               <span className="font-sans">สาธารณูปโภค (ค่าน้ำ ค่าไฟ ค่าแก๊ส)</span>
-              <span>฿{expenses.filter(e => ['Electricity', 'Water', 'Gas (LPG)'].includes(e.category)).reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ค่าแรงหน้าร้านและบริหาร (FOH & Admin Staff)</span>
-              <span>฿{nonKitchenLabor.toLocaleString()}</span>
+              <span>฿{effectiveExpenses.filter(e => ['Electricity', 'Water', 'Gas (LPG)'].includes(e.category)).reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
               <span className="font-sans">ค่าการตลาด ซอฟต์แวร์ และอื่นๆ</span>
-              <span>฿{expenses.filter(e => !['Rent', 'Electricity', 'Water', 'Gas (LPG)'].includes(e.category)).reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
+              <span>฿{effectiveExpenses.filter(e => !['Rent', 'Electricity', 'Water', 'Gas (LPG)'].includes(e.category)).reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
             </div>
             <div className="flex justify-between px-3 py-2 font-bold text-white bg-white/[0.04] rounded-lg border border-white/5">
               <span className="font-sans">รวมค่าใช้จ่ายดำเนินงาน (Total OPEX)</span>
@@ -465,9 +491,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
             </div>
           </div>
 
-          {/* 6. OPERATING PROFIT (EBITDA) */}
+          {/* 6. OPERATING PROFIT */}
           <div className="flex justify-between px-3 py-2.5 font-bold text-white bg-white/5 rounded-xl text-sm border border-white/10">
-            <span className="font-sans">กำไรจากการดำเนินงาน (Operating Profit / EBITDA)</span>
+            <span className="font-sans">กำไรจากการดำเนินงาน (Operating Profit)</span>
             <div className="flex items-center gap-4">
               <span>{pnl.operatingMarginPercent.toFixed(1)}%</span>
               <span>฿{Math.round(pnl.operatingProfit).toLocaleString()}</span>
@@ -476,7 +502,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
 
           {/* 6.5 ESTIMATED INCOME TAX */}
           <div className="flex justify-between px-3 py-2 text-white/80 bg-white/[0.03] rounded-lg border border-white/5">
-            <span className="font-sans">หัก: ประมาณการภาษีเงินได้ ({incomeTaxRate}%)</span>
+            <span className="font-sans">หัก: ประมาณการภาษีเงินได้ ({incomeTaxRate}%) — ประมาณการ — โปรดยืนยันกับนักบัญชี</span>
             <div className="flex items-center gap-4">
               <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((pnl.taxAmount / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
               <span className="text-amber-400 font-mono">-฿{Math.round(pnl.taxAmount).toLocaleString()}</span>

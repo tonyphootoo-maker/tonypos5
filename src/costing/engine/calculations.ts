@@ -329,13 +329,19 @@ export function calculateProfitAndLoss(
   packagingCogs: number,
   operatingExpenses: number,
   directLabor: number,
-  taxRatePercent: number = 20
+  taxRatePercent: number = 20,
+  nonKitchenLabor: number = 0,
+  channelFees: number = 0,
+  netSalesExVatOverride?: number
 ): {
   netSales: number;
   totalCogs: number;
   grossProfit: number;
   grossMarginPercent: number;
+  channelFees: number;
   directLabor: number;
+  nonKitchenLabor: number;
+  totalLabor: number;
   primeCost: number;
   primeCostPercent: number;
   operatingProfit: number;
@@ -344,34 +350,43 @@ export function calculateProfitAndLoss(
   netProfit: number;
   netMarginPercent: number;
 } {
-  const netSales = Math.max(0, grossSales - discounts - refunds);
-  const totalCogs = foodCogs + packagingCogs;
-  const grossProfit = netSales - totalCogs;
-  const grossMarginPercent = netSales > 0 ? (grossProfit / netSales) * 100 : 0;
+  const round2 = (v: number) => (Number.isFinite(v) ? Math.round((v + Number.EPSILON) * 100) / 100 : 0);
+  const netSalesRaw =
+    typeof netSalesExVatOverride === 'number' && Number.isFinite(netSalesExVatOverride)
+      ? Math.max(0, netSalesExVatOverride)
+      : Math.max(0, grossSales - discounts - refunds);
+  const totalCogsRaw = foodCogs + packagingCogs;
+  const grossProfitRaw = netSalesRaw - totalCogsRaw;
 
-  const primeCost = totalCogs + directLabor;
-  const primeCostPercent = netSales > 0 ? (primeCost / netSales) * 100 : 0;
+  const totalLaborRaw = directLabor + nonKitchenLabor;
+  const primeCostRaw = totalCogsRaw + totalLaborRaw;
+  const primeCostPercent = netSalesRaw > 0 ? round2((primeCostRaw / netSalesRaw) * 100) : 0;
 
-  const operatingProfit = grossProfit - directLabor - operatingExpenses;
-  const operatingMarginPercent = netSales > 0 ? (operatingProfit / netSales) * 100 : 0;
+  const operatingProfitRaw = grossProfitRaw - channelFees - totalLaborRaw - operatingExpenses;
+  const grossMarginPercent = netSalesRaw > 0 ? round2((grossProfitRaw / netSalesRaw) * 100) : 0;
+  const operatingMarginPercent = netSalesRaw > 0 ? round2((operatingProfitRaw / netSalesRaw) * 100) : 0;
 
-  // Tax on positive operating profit
-  const taxAmount = operatingProfit > 0 ? operatingProfit * (taxRatePercent / 100) : 0;
-  const netProfit = operatingProfit - taxAmount;
-  const netMarginPercent = netSales > 0 ? (netProfit / netSales) * 100 : 0;
+  // Tax on positive operating profit only
+  const effectiveTaxRate = Math.max(0, taxRatePercent || 0);
+  const taxAmountRaw = operatingProfitRaw > 0 && effectiveTaxRate > 0 ? operatingProfitRaw * (effectiveTaxRate / 100) : 0;
+  const netProfitRaw = operatingProfitRaw - taxAmountRaw;
+  const netMarginPercent = netSalesRaw > 0 ? round2((netProfitRaw / netSalesRaw) * 100) : 0;
 
   return {
-    netSales,
-    totalCogs,
-    grossProfit,
+    netSales: round2(netSalesRaw),
+    totalCogs: round2(totalCogsRaw),
+    grossProfit: round2(grossProfitRaw),
     grossMarginPercent,
-    directLabor,
-    primeCost,
+    channelFees: round2(channelFees),
+    directLabor: round2(directLabor),
+    nonKitchenLabor: round2(nonKitchenLabor),
+    totalLabor: round2(totalLaborRaw),
+    primeCost: round2(primeCostRaw),
     primeCostPercent,
-    operatingProfit,
+    operatingProfit: round2(operatingProfitRaw),
     operatingMarginPercent,
-    taxAmount,
-    netProfit,
+    taxAmount: round2(taxAmountRaw),
+    netProfit: round2(netProfitRaw),
     netMarginPercent,
   };
 }

@@ -27,6 +27,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
   const [formData, setFormData] = useState<{
     date: string;
+    endDate: string;
     category: ExpenseCategory;
     description: string;
     amount: number;
@@ -42,6 +43,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     notes: string;
   }>({
     date: new Date().toISOString().split('T')[0],
+    endDate: '',
     category: 'Electricity',
     description: '',
     amount: 1000,
@@ -104,6 +106,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     const newExpense: ExpenseRecord = {
       id: `exp-${Date.now()}`,
       date: formData.date,
+      endDate: formData.isFixed && formData.endDate ? formData.endDate : undefined,
       category: formData.category,
       description: formData.description,
       amount: finalAmount,
@@ -323,7 +326,12 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
                 return (
                   <tr key={exp.id} className={`hover:bg-slate-50/60 ${isExcluded ? 'opacity-60 bg-slate-50/40' : ''}`}>
-                    <td className="py-2.5 px-3 font-mono font-medium">{exp.date}</td>
+                    <td className="py-2.5 px-3 font-mono font-medium">
+                      <div>{exp.date}</div>
+                      {exp.endDate && (
+                        <div className="text-[10px] text-slate-400">→ {exp.endDate}</div>
+                      )}
+                    </td>
                     <td className="py-2.5 px-3 text-slate-600">{exp.category}</td>
                     <td className="py-2.5 px-3 font-semibold text-slate-900">
                       <span className={isExcluded ? 'line-through text-slate-400' : ''}>{exp.description}</span>
@@ -596,6 +604,21 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                   </label>
                 </div>
               </div>
+
+              {formData.isFixed && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {activeLanguage === 'th' ? 'วันที่สิ้นสุด (ถ้ามี)' : 'End Date (Optional)'}
+                  </label>
+                  <input
+                    type="date"
+                    value={formData.endDate}
+                    min={formData.date}
+                    onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-mono"
+                  />
+                </div>
+              )}
 
               <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
                 <button

@@ -382,6 +382,7 @@ export type ExpenseFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'y
 export interface ExpenseRecord {
   id: string;
   date: string;
+  endDate?: string;
   category: ExpenseCategory | string;
   name?: string;
   description: string;

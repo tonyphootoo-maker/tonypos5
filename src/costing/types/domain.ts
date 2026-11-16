@@ -217,6 +217,7 @@ export type ExpenseFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'y
 export interface ExpenseRecord {
   id: string;
   date: string;
+  endDate?: string;
   category: ExpenseCategory;
   description: string;
   amount: number;
@@ -272,6 +273,8 @@ export interface DailySalesRecord {
   vatRatePercent?: number;
   platformFees: number;
   actualPayout: number;
+  foodCost?: number;
+  packagingCost?: number;
   itemSales?: {
     menuItemId: string;
     portionId: string;

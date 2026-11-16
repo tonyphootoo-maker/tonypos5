@@ -466,6 +466,33 @@ export const SettingsPage: React.FC<Props> = ({
                 </select>
               </div>
             </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">
+                  {lang === 'th' ? 'อัตราภาษีเงินได้ประมาณการ (%)' : 'Estimated Income Tax Rate (%)'}
+                </label>
+                <div className="relative">
+                  <NumericInput
+                    min={0}
+                    max={50}
+                    step={0.5}
+                    value={form.incomeTaxRatePercent ?? 20}
+                    onValueChange={(val) =>
+                      setForm({
+                        ...form,
+                        incomeTaxRatePercent: Number.isFinite(val) ? Math.max(0, Math.min(50, val)) : 20,
+                      })
+                    }
+                    className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
+                  />
+                  <span className="absolute right-3 top-2 text-xs font-bold text-neutral-400">%</span>
+                </div>
+                <p className="text-[11px] text-neutral-400 mt-1">
+                  {lang === 'th' ? 'ประมาณการ — โปรดยืนยันกับนักบัญชี' : 'Estimate — please confirm with your accountant'}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 

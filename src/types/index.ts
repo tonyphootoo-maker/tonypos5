@@ -39,6 +39,7 @@ export interface SettingsDoc extends BaseDoc {
   commissionVatAsCost?: boolean; // If true, add 7% VAT on platform commission as a cost
   priceRounding?: 1 | 5 | 10; // Suggested price rounding (default 5 THB)
   operatingDaysPerMonth?: number; // Number of operating days for daily break-even (default 30)
+  incomeTaxRatePercent?: number; // Estimated income tax rate % (default 20)
 }
 
 export interface IngredientDoc extends BaseDoc {
@@ -241,6 +242,7 @@ export interface ExpenseDoc extends BaseDoc {
   category: 'rent' | 'electricity' | 'water' | 'gas' | 'marketing' | 'repairs' | 'supplies' | 'other';
   amount: number;
   date: string; // YYYY-MM-DD
+  endDate?: string; // Optional YYYY-MM-DD end date for recurring expenses
   isFixed: boolean; // Fixed vs Variable
   isRecurring: boolean; // Monthly recurring
 }
@@ -248,9 +250,14 @@ export interface ExpenseDoc extends BaseDoc {
 export interface EmployeeDoc extends BaseDoc {
   name: string;
   role: string;
+  department?: 'kitchen' | 'front_of_house' | 'management';
+  roleCategory?: 'direct_kitchen' | 'direct_service' | 'indirect_management';
   wageType: WageType;
   wageAmount: number; // e.g. 15,000 / month or 450 / day or 60 / hour
   workDaysOrHoursPerMonth?: number; // Estimated days or hours for hourly/daily
+  benefitsMonthly?: number;
+  overtimeHoursMonthly?: number;
+  overtimeRateMultiplier?: number;
   phone?: string;
   isActive: boolean;
 }

@@ -173,15 +173,15 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
       ['Total P&L Revenue', pnl.totalRevenue.toFixed(2)],
       ['Discounts', pnl.discounts.toFixed(2)],
       ['Food COGS', pnl.totalFoodCost.toFixed(2)],
+      ['Packaging Cost', pnl.packagingCost.toFixed(2)],
       ['Theoretical Food Cost %', `${pnl.theoreticalFoodCostPercent.toFixed(1)}%`],
       ['Gross Profit', pnl.grossProfit.toFixed(2)],
       ['Gross Profit Margin %', `${pnl.grossProfitMarginPercent.toFixed(1)}%`],
-      ['Packaging Cost', pnl.packagingCost.toFixed(2)],
       ['Platform Commissions', pnl.platformFees.toFixed(2)],
       ['Labor Cost', pnl.laborCost.toFixed(2)],
       ['Labor %', `${pnl.laborPercent.toFixed(1)}%`],
       ['Operating Expenses (Fixed + Variable)', pnl.operatingExpenses.toFixed(2)],
-      ['Prime Cost (Food COGS + Labor)', pnl.primeCost.toFixed(2)],
+      ['Prime Cost (Total COGS + Total Labor)', pnl.primeCost.toFixed(2)],
       ['Prime Cost %', `${pnl.primeCostPercent.toFixed(1)}%`],
       ['Net Operating Profit (NOP)', pnl.netOperatingProfit.toFixed(2)],
       ['Net Profit Margin %', `${pnl.netProfitMarginPercent.toFixed(1)}%`],
@@ -349,7 +349,7 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
           </div>
           <div className="text-xl font-black text-neutral-900 mt-1">฿{formatMoney(pnl.primeCost)}</div>
           <div className="text-[11px] text-neutral-500">
-            Food ฿{formatMoney(pnl.totalFoodCost)} + Labor ฿{formatMoney(pnl.laborCost)}
+            COGS ฿{formatMoney(pnl.totalFoodCost + pnl.packagingCost)} + Labor ฿{formatMoney(pnl.laborCost)}
           </div>
         </div>
 
@@ -413,16 +413,16 @@ export const ReportsPage: React.FC<Props> = ({ settings, lang }) => {
             <span>-฿{formatMoney(pnl.totalFoodCost)}</span>
           </div>
 
+          <div className="py-2 flex justify-between text-neutral-600 pl-3">
+            <span>- {t.reports.packagingCost}</span>
+            <span>-฿{formatMoney(pnl.packagingCost)}</span>
+          </div>
+
           <div className="py-2 flex justify-between font-bold text-neutral-900 bg-neutral-50 px-2 rounded-lg">
             <span>
               = {t.reports.grossProfit} ({formatPercent(pnl.grossProfitMarginPercent)})
             </span>
             <span>฿{formatMoney(pnl.grossProfit)}</span>
-          </div>
-
-          <div className="py-2 flex justify-between text-neutral-600 pl-3">
-            <span>- {t.reports.packagingCost}</span>
-            <span>-฿{formatMoney(pnl.packagingCost)}</span>
           </div>
           <div className="py-2 flex justify-between text-neutral-600 pl-3">
             <span>- {t.reports.platformFees}</span>

@@ -45,10 +45,9 @@ import {
   calculateDishVariantCost,
   calculateFoodCostPercent,
   extractNetPriceFromMenuPrice,
-  calculatePeriodExpensesAndLabor,
-  calculateUsaliPnl,
+  buildPeriodPnl,
+  calculateEmployeeMonthlyCost,
   deriveVariableCostPercent,
-  roundTo2,
 } from '../engine/calculations';
 import {
   subscribeCollection,
@@ -77,9 +76,7 @@ import {
 import { StorageService } from '../costing/services/storageService';
 import { FirebaseSyncService, COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
 import {
-  calculateProfitAndLoss,
   calculateBreakEven,
-  calculateInventoryCOGS,
   calculateVariance,
   convertExpenseToMonthly,
   upsertDailySalesRecord,
@@ -474,40 +471,60 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     return Array.from(empById.values());
   }, [costEmployees, posEmployees, operatingDays]);
 
-  // Normalized POS ExpenseDoc[] and EmployeeDoc[] synchronized from unified lists for USALI Period P&L
+  // Normalized POS ExpenseDoc[] and EmployeeDoc[] synchronized from unified lists
   const unifiedPosExpenses = useMemo<ExpenseDoc[]>(() => {
     return unifiedExpenses
       .filter((e) => !e.isExcluded && !(unifiedEmployees.length > 0 && isPayrollExpenseRecord(e)))
-      .map((e) => ({
-        id: e.id,
-        title: e.description,
-        titleTh: e.description,
-        category: mapCostCategoryToPos(e.category),
-        amount: roundTo2(convertExpenseToMonthly(e, operatingDays)),
-        date: e.date,
-        isFixed: Boolean(e.isFixed),
-        isRecurring: Boolean(e.recurring ?? e.isFixed),
-        createdAt: e.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        version: 1,
-      }));
+      .map((e) => {
+        const isRecurring = Boolean(e.recurring ?? e.isFixed);
+        const rawAmount = isRecurring
+          ? convertExpenseToMonthly(e, operatingDays)
+          : Number(e.amount) || 0;
+        return {
+          id: e.id,
+          title: e.description,
+          titleTh: e.description,
+          category: mapCostCategoryToPos(e.category),
+          amount: rawAmount,
+          date: e.date,
+          endDate: e.endDate,
+          isFixed: Boolean(e.isFixed),
+          isRecurring,
+          createdAt: e.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          version: 1,
+        };
+      });
   }, [unifiedExpenses, unifiedEmployees.length, operatingDays]);
 
   const unifiedPosEmployees = useMemo<EmployeeDoc[]>(() => {
     return unifiedEmployees.map((emp) => {
-      const rate = emp.wageRate ?? 0;
-      const monthly =
-        emp.monthlyCost ??
-        (emp.type === 'hourly'
-          ? rate * (emp.standardHoursPerMonth || 200)
-          : rate) + (emp.benefitsMonthly || 0);
+      const rate = emp.wageRate ?? emp.baseSalary ?? 0;
+      const usesExplicitMonthly =
+        typeof emp.monthlyCost === 'number' && Number.isFinite(emp.monthlyCost);
+      const wageType: EmployeeDoc['wageType'] = usesExplicitMonthly
+        ? 'monthly'
+        : emp.type === 'hourly'
+        ? 'hourly'
+        : emp.type === 'daily'
+        ? 'daily'
+        : 'monthly';
+      const wageAmount = usesExplicitMonthly ? emp.monthlyCost! : rate;
       return {
         id: emp.id,
         name: emp.name,
         role: emp.role || emp.position || 'Staff',
-        wageType: 'monthly',
-        wageAmount: monthly,
-        workDaysOrHoursPerMonth: operatingDays,
+        department: emp.department,
+        roleCategory: emp.roleCategory,
+        wageType,
+        wageAmount,
+        workDaysOrHoursPerMonth:
+          emp.standardHoursPerMonth ||
+          emp.hoursPerMonth ||
+          (wageType === 'hourly' ? 208 : operatingDays),
+        benefitsMonthly: usesExplicitMonthly ? 0 : emp.benefitsMonthly || 0,
+        overtimeHoursMonthly: usesExplicitMonthly ? 0 : emp.overtimeHoursMonthly || 0,
+        overtimeRateMultiplier: emp.overtimeRateMultiplier || 1.5,
         isActive: emp.active !== false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -516,54 +533,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     });
   }, [unifiedEmployees, operatingDays]);
 
-  //Period-filtered Costing sales
-  const periodCostSales = useMemo(() => {
-    return costDailySales.filter((s) => {
-      if (period === 'day') return s.date === selectedDate;
-      if (period === 'month') return s.date.startsWith(selectedMonth);
-      return s.date.startsWith(selectedYear);
-    });
-  }, [costDailySales, period, selectedDate, selectedMonth, selectedYear]);
-
-  // Managerial P&L Metrics (from Costing + synced POS sales)
-  const effectiveExpensesForPnl = useMemo(() => {
-    const active = unifiedExpenses.filter((e) => !e.isExcluded);
-    return unifiedEmployees.length > 0 ? active.filter((e) => !isPayrollExpenseRecord(e)) : active;
-  }, [unifiedExpenses, unifiedEmployees.length]);
-
-  const directKitchenLabor = useMemo(
-    () =>
-      unifiedEmployees
-        .filter((e) => e.roleCategory === 'direct_kitchen' || e.department === 'kitchen')
-        .reduce((sum, e) => {
-          const rate = e.wageRate ?? 0;
-          return (
-            sum +
-            (e.monthlyCost ??
-              (e.type === 'hourly' ? rate * (e.standardHoursPerMonth || 200) : rate) +
-                (e.benefitsMonthly || 0))
-          );
-        }, 0),
-    [unifiedEmployees]
-  );
-
-  const nonKitchenLabor = useMemo(
-    () =>
-      unifiedEmployees
-        .filter((e) => e.roleCategory !== 'direct_kitchen' && e.department !== 'kitchen')
-        .reduce((sum, e) => {
-          const rate = e.wageRate ?? 0;
-          return (
-            sum +
-            (e.monthlyCost ??
-              (e.type === 'hourly' ? rate * (e.standardHoursPerMonth || 200) : rate) +
-                (e.benefitsMonthly || 0))
-          );
-        }, 0),
-    [unifiedEmployees]
-  );
-
-  // Average Food Cost % across active menu variants
+  // Average Food Cost % across active menu variants (no silent hardcoded fallback)
   const getMenuPortions = useMemo(() => {
     const ingMap = new Map(costIngredients.map((i) => [i.id, i]));
     const sauceMap = new Map(costSauces.map((s) => [s.id, s]));
@@ -573,8 +543,8 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       if (Array.isArray(menu.variants) && menu.variants.length > 0) {
         return menu.variants.map((v: any) => {
           let directFoodCost = 0;
-          let packagingCost = (costSettings as any)?.defaultTakeawayPackagingCost || 3.5;
-          let sellingPrice = v.sellingPrice || 50;
+          let packagingCost = (costSettings as any)?.defaultTakeawayPackagingCost ?? 0;
+          let sellingPrice = v.sellingPrice || 0;
           try {
             if (v.recipeItems && v.recipeItems.length > 0) {
               const bd = calculateVariantCostBreakdown(
@@ -615,133 +585,155 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
   }, [costIngredients, costSauces, costSettings]);
 
   const allCostPortions = useMemo(() => costMenus.flatMap((m) => getMenuPortions(m)), [costMenus, getMenuPortions]);
-  const avgFoodCostPercent =
-    allCostPortions.length > 0
-      ? allCostPortions.reduce((sum, p) => sum + (p.foodCostPercent || 0), 0) / allCostPortions.length
-      : 31.5;
+  const portionsWithRecipeCost = useMemo(
+    () => allCostPortions.filter((p) => (p.foodCostPercent || 0) > 0 && (p.sellingPrice || 0) > 0),
+    [allCostPortions]
+  );
+  const avgFoodCostPercent: number | null =
+    portionsWithRecipeCost.length > 0
+      ? portionsWithRecipeCost.reduce((sum, p) => sum + (p.foodCostPercent || 0), 0) /
+        portionsWithRecipeCost.length
+      : null;
 
-  // USALI Real-Time POS Today & Period P&L
   const dateParam = period === 'day' ? selectedDate : period === 'month' ? selectedMonth : selectedYear;
-  const allocatedPosPeriodCosts = useMemo(
-    () =>
-      calculatePeriodExpensesAndLabor(
-        period,
-        dateParam,
-        unifiedPosExpenses,
-        unifiedPosEmployees,
-        periodSummaries
-      ),
-    [period, dateParam, unifiedPosExpenses, unifiedPosEmployees, periodSummaries]
-  );
 
-  const usaliPeriodPnl = useMemo(
-    () =>
-      calculateUsaliPnl(
-        periodSummaries,
-        allocatedPosPeriodCosts,
-        settings.serviceChargeTreatment || 'staff_pool'
-      ),
-    [periodSummaries, allocatedPosPeriodCosts, settings.serviceChargeTreatment]
-  );
+  const incomeTaxRate =
+    typeof (costSettings as any).incomeTaxRatePercent === 'number' &&
+    Number.isFinite((costSettings as any).incomeTaxRatePercent)
+      ? (costSettings as any).incomeTaxRatePercent
+      : typeof settings.incomeTaxRatePercent === 'number' && Number.isFinite(settings.incomeTaxRatePercent)
+      ? settings.incomeTaxRatePercent
+      : 20;
 
-  const todaySummariesArr = useMemo(() => (todaySummary ? [todaySummary] : []), [todaySummary]);
-  const todayPosCosts = useMemo(
-    () => calculatePeriodExpensesAndLabor('day', todayStr, unifiedPosExpenses, unifiedPosEmployees, todaySummariesArr),
-    [todayStr, unifiedPosExpenses, unifiedPosEmployees, todaySummariesArr]
-  );
-  const todayUsaliPnl = useMemo(
-    () =>
-      calculateUsaliPnl(
-        todaySummariesArr,
-        todayPosCosts,
-        settings.serviceChargeTreatment || 'staff_pool'
-      ),
-    [todaySummariesArr, todayPosCosts, settings.serviceChargeTreatment]
-  );
-
-  // Managerial P&L Calculation (Period-aware & synchronized with Period OPEX allocation)
-  const mgrGrossSales = periodCostSales.reduce((sum, s) => sum + s.grossSales, 0);
-  const mgrDiscounts = periodCostSales.reduce((sum, s) => sum + s.discounts, 0);
-  const mgrRefunds = periodCostSales.reduce((sum, s) => sum + s.refunds, 0);
-  const mgrNetSales = Math.max(0, mgrGrossSales - mgrDiscounts - mgrRefunds);
-
-  // Scale OPEX & Direct Labor proportionally to selected period using allocated factor
-  const monthlyNormalizedOpex = useMemo(
-    () => effectiveExpensesForPnl.reduce((sum, e) => sum + convertExpenseToMonthly(e, operatingDays), 0),
-    [effectiveExpensesForPnl, operatingDays]
-  );
-  const periodMonthFactor = allocatedPosPeriodCosts.coveredMonths || 1;
-  const periodDirectKitchenLabor = directKitchenLabor * periodMonthFactor;
-  const periodNonKitchenLabor = nonKitchenLabor * periodMonthFactor;
-  const periodMgrOpex = monthlyNormalizedOpex * periodMonthFactor + periodNonKitchenLabor;
-
+  // Actual Inventory / Purchase inputs (never fabricate beginning stock)
   const hasActualStockData = purchases.length > 0 && inventory.length > 0;
-  const effectiveCogsMode = cogsMode === 'actual' && !hasActualStockData ? 'estimated' : cogsMode;
+  const hasRecordedBeginningStock =
+    inventory.length > 0 && inventory.some((item) => typeof (item as any).beginningValue === 'number');
+  const totalBeginningStockCost = hasRecordedBeginningStock
+    ? inventory.reduce((sum, item) => sum + (Number((item as any).beginningValue) || 0), 0)
+    : null;
   const totalPurchasesCost = purchases.reduce((sum, p) => sum + ((p as any).totalPrice || (p as any).price || 0), 0);
   const totalEndingStockCost = inventory.reduce(
     (sum, item) => sum + ((item.currentStock ?? 0) * ((item as any).costPerUnit || 0)),
     0
   );
   const totalWasteCost = wasteLog.reduce((sum, w) => sum + ((w as any).totalCost || (w as any).cost || 0), 0);
-  const actualCogsResult = calculateInventoryCOGS(
-    totalEndingStockCost * 1.05,
-    totalPurchasesCost,
-    totalEndingStockCost,
-    totalWasteCost
+  const actualPackagingFromOrders = salesOrders.reduce((sum, o) => sum + (o.packagingCost || 0), 0);
+
+  // Single Source of Truth P&L for Selected Period
+  const periodPnl = useMemo(
+    () =>
+      buildPeriodPnl({
+        summaries: periodSummaries,
+        manualSales: costDailySales,
+        expenses: unifiedPosExpenses,
+        employees: unifiedPosEmployees,
+        period,
+        dateParam,
+        settings: {
+          ...settings,
+          incomeTaxRatePercent: incomeTaxRate,
+        },
+        cogsMode,
+        actualCogsInput: {
+          beginningInventory: totalBeginningStockCost,
+          purchases: totalPurchasesCost,
+          endingInventory: hasActualStockData ? totalEndingStockCost : null,
+          waste: totalWasteCost,
+          packagingFromOrders: actualPackagingFromOrders > 0 ? actualPackagingFromOrders : undefined,
+          hasActualData: hasActualStockData && hasRecordedBeginningStock,
+        },
+        manualFallbackRates: {
+          foodCostPercent: avgFoodCostPercent,
+        },
+      }),
+    [
+      periodSummaries,
+      costDailySales,
+      unifiedPosExpenses,
+      unifiedPosEmployees,
+      period,
+      dateParam,
+      settings,
+      incomeTaxRate,
+      cogsMode,
+      totalBeginningStockCost,
+      totalPurchasesCost,
+      hasActualStockData,
+      hasRecordedBeginningStock,
+      totalEndingStockCost,
+      totalWasteCost,
+      actualPackagingFromOrders,
+      avgFoodCostPercent,
+    ]
   );
+
+  // Single Source of Truth P&L for Today Live POS KPI
+  const todaySummariesArr = useMemo(() => (todaySummary ? [todaySummary] : []), [todaySummary]);
+  const todayPnl = useMemo(
+    () =>
+      buildPeriodPnl({
+        summaries: todaySummariesArr,
+        manualSales: costDailySales,
+        expenses: unifiedPosExpenses,
+        employees: unifiedPosEmployees,
+        period: 'day',
+        dateParam: todayStr,
+        settings: {
+          ...settings,
+          incomeTaxRatePercent: incomeTaxRate,
+        },
+        cogsMode: 'estimated',
+        manualFallbackRates: {
+          foodCostPercent: avgFoodCostPercent,
+        },
+      }),
+    [
+      todaySummariesArr,
+      costDailySales,
+      unifiedPosExpenses,
+      unifiedPosEmployees,
+      todayStr,
+      settings,
+      incomeTaxRate,
+      avgFoodCostPercent,
+    ]
+  );
+
   const theoreticalSalesOrdersCost = salesOrders.reduce((sum, o) => sum + (o.totalFoodCost || 0), 0);
-  const varianceResult = calculateVariance(actualCogsResult.cogs, theoreticalSalesOrdersCost);
+  const actualCogsForVariance = periodPnl.foodCogs;
+  const varianceResult = calculateVariance(actualCogsForVariance, theoreticalSalesOrdersCost);
   const varianceThresholdPercent = (costSettings as any).cogsVarianceThresholdPercent ?? 3.0;
   const variancePointsOfNetSales =
-    mgrNetSales > 0 ? (Math.abs(varianceResult.varianceAmount) / mgrNetSales) * 100 : 0;
+    periodPnl.netSalesExVat > 0 ? (Math.abs(varianceResult.varianceAmount) / periodPnl.netSalesExVat) * 100 : 0;
   const isVarianceExceeded = variancePointsOfNetSales > varianceThresholdPercent;
 
-  // Prefer POS real food/packaging cost when periodSummaries match, else formula estimate
-  const estFoodCogs =
-    usaliPeriodPnl.totalFoodCost > 0
-      ? usaliPeriodPnl.totalFoodCost
-      : mgrNetSales * (avgFoodCostPercent / 100);
-  const estPackagingCogs =
-    usaliPeriodPnl.packagingCost > 0 ? usaliPeriodPnl.packagingCost : mgrNetSales * 0.035;
-
-  const foodCogsToUse = effectiveCogsMode === 'actual' ? actualCogsResult.cogs : estFoodCogs;
-  const packagingCogsToUse =
-    effectiveCogsMode === 'actual'
-      ? salesOrders.reduce((sum, o) => sum + (o.packagingCost || 0), 0) || estPackagingCogs
-      : estPackagingCogs;
-
-  const incomeTaxRate =
-    typeof (costSettings as any).incomeTaxRatePercent === 'number'
-      ? (costSettings as any).incomeTaxRatePercent
-      : 20;
-
-  const effectiveNetSalesForMgr = Math.max(mgrNetSales, usaliPeriodPnl.netSales);
-  const mgrPnl = calculateProfitAndLoss(
-    mgrGrossSales > 0 ? mgrGrossSales : usaliPeriodPnl.grossSales,
-    mgrGrossSales > 0 ? mgrDiscounts : usaliPeriodPnl.discounts,
-    mgrRefunds,
-    foodCogsToUse,
-    packagingCogsToUse,
-    periodMgrOpex,
-    periodDirectKitchenLabor,
-    incomeTaxRate
-  );
-
-  // Real Break-Even using Monthly Fixed Overhead + 30-Day Real Derived Margin (or Menu Average CM%)
+  // Real Break-Even using Monthly Fixed Overhead (honoring endDate) + All Active Staff Payroll
+  const currentMonthKey = todayStr.substring(0, 7);
   const monthlyFixedExpensesOnly = useMemo(
     () =>
-      effectiveExpensesForPnl
-        .filter((e) => e.isFixed)
-        .reduce((sum, e) => sum + convertExpenseToMonthly(e, operatingDays), 0),
-    [effectiveExpensesForPnl, operatingDays]
+      unifiedPosExpenses
+        .filter(
+          (e) =>
+            e.isFixed &&
+            (!e.isRecurring ||
+              ((e.date || '').substring(0, 7) <= currentMonthKey &&
+                (!e.endDate || e.endDate.substring(0, 7) >= currentMonthKey)))
+        )
+        .reduce((sum, e) => sum + e.amount, 0),
+    [unifiedPosExpenses, currentMonthKey]
   );
-  const totalMonthlyStaffPayroll = directKitchenLabor + nonKitchenLabor;
+  const totalMonthlyStaffPayroll = useMemo(
+    () => unifiedPosEmployees.reduce((sum, emp) => sum + calculateEmployeeMonthlyCost(emp), 0),
+    [unifiedPosEmployees]
+  );
   const derivedMargin30d = useMemo(() => deriveVariableCostPercent(last30Summaries), [last30Summaries]);
   const liveCMPercent = derivedMargin30d.hasRealData
     ? derivedMargin30d.contributionMarginPercent
-    : Math.max(15, 100 - avgFoodCostPercent - 3.5);
-  const avgTicketForBe =
-    usaliPeriodPnl.avgOrderValue > 0 ? usaliPeriodPnl.avgOrderValue : 140;
+    : avgFoodCostPercent !== null
+    ? Math.max(0, 100 - avgFoodCostPercent)
+    : 0;
+  const avgTicketForBe = periodPnl.avgOrderValue > 0 ? periodPnl.avgOrderValue : 140;
 
   const executiveBreakEven = calculateBreakEven(
     monthlyFixedExpensesOnly + totalMonthlyStaffPayroll,
@@ -749,7 +741,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     avgTicketForBe,
     operatingDays,
     0,
-    effectiveNetSalesForMgr
+    periodPnl.netSalesExVat
   );
 
   // Recipe Audit Warnings (from POS Dishes & Ingredients)
@@ -837,7 +829,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
 
     if (executiveBreakEven.isValid && executiveBreakEven.breakEvenDailySales > 0) {
       const daysWithSales = Math.max(1, periodSummaries.length || new Set(costDailySales.map((s) => s.date)).size);
-      const actualDailyAvg = effectiveNetSalesForMgr / daysWithSales;
+      const actualDailyAvg = periodPnl.netSalesExVat / daysWithSales;
       const diffPct =
         ((actualDailyAvg - executiveBreakEven.breakEvenDailySales) /
           executiveBreakEven.breakEvenDailySales) *
@@ -872,7 +864,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     executiveBreakEven,
     periodSummaries.length,
     costDailySales,
-    effectiveNetSalesForMgr,
+    periodPnl.netSalesExVat,
   ]);
 
   // Payment, Channel, and Dish Aggregates for Period (from real POS bills)
@@ -954,15 +946,17 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         await deleteDocument('expenses', exp.id).catch(() => {});
         return;
       }
+      const isRecurring = Boolean(exp.recurring ?? exp.isFixed);
       const posDoc: ExpenseDoc = {
         id: exp.id,
         title: exp.description,
         titleTh: exp.description,
         category: mapCostCategoryToPos(exp.category),
-        amount: roundTo2(convertExpenseToMonthly(exp, operatingDays)),
+        amount: isRecurring ? convertExpenseToMonthly(exp, operatingDays) : Number(exp.amount) || 0,
         date: exp.date,
+        ...(exp.endDate ? { endDate: exp.endDate } : {}),
         isFixed: Boolean(exp.isFixed),
-        isRecurring: Boolean(exp.recurring ?? exp.isFixed),
+        isRecurring,
         createdAt: exp.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         version: 1,
@@ -1001,9 +995,14 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         id: emp.id,
         name: emp.name,
         role: emp.role || emp.position || 'Staff',
+        ...(emp.department ? { department: emp.department } : {}),
+        ...(emp.roleCategory ? { roleCategory: emp.roleCategory } : {}),
         wageType: emp.type === 'hourly' ? 'hourly' : emp.type === 'daily' ? 'daily' : 'monthly',
         wageAmount: emp.wageRate ?? emp.baseSalary ?? 0,
         workDaysOrHoursPerMonth: emp.standardHoursPerMonth || operatingDays,
+        benefitsMonthly: emp.benefitsMonthly || 0,
+        overtimeHoursMonthly: emp.overtimeHoursMonthly || 0,
+        overtimeRateMultiplier: emp.overtimeRateMultiplier || 1.5,
         isActive: emp.active !== false,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -1042,20 +1041,25 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     const rows = [
       ['Metric', 'Amount (THB)'],
       ['Period', `${period}:${dateParam}`],
-      ['USALI Net Sales (POS Real-Time)', usaliPeriodPnl.netSales.toFixed(2)],
-      ['Managerial Net Sales (Total)', mgrPnl.netSales.toFixed(2)],
-      ['Food COGS', foodCogsToUse.toFixed(2)],
-      ['Packaging COGS', packagingCogsToUse.toFixed(2)],
-      ['Gross Profit', mgrPnl.grossProfit.toFixed(2)],
-      ['Gross Margin %', `${mgrPnl.grossMarginPercent.toFixed(1)}%`],
-      ['Kitchen Direct Labor', periodDirectKitchenLabor.toFixed(2)],
-      ['Prime Cost (COGS + Kitchen Labor)', mgrPnl.primeCost.toFixed(2)],
-      ['Prime Cost %', `${mgrPnl.primeCostPercent.toFixed(1)}%`],
-      ['Operating Expenses (OPEX + Admin Labor)', periodMgrOpex.toFixed(2)],
-      ['Platform Fees (Delivery)', usaliPeriodPnl.platformFees.toFixed(2)],
-      ['Operating Profit (EBITDA)', mgrPnl.operatingProfit.toFixed(2)],
-      ['Estimated Tax', mgrPnl.taxAmount.toFixed(2)],
-      ['Net Profit', mgrPnl.netProfit.toFixed(2)],
+      ['Net Sales (ex-VAT)', periodPnl.netSalesExVat.toFixed(2)],
+      ...(periodPnl.retainedServiceCharge > 0
+        ? [['Retained Service Charge', periodPnl.retainedServiceCharge.toFixed(2)]]
+        : []),
+      ['Food COGS', periodPnl.foodCogs.toFixed(2)],
+      ['Packaging COGS', periodPnl.packagingCogs.toFixed(2)],
+      ['Gross Profit', periodPnl.grossProfit.toFixed(2)],
+      ['Gross Margin %', `${periodPnl.grossMarginPercent.toFixed(1)}%`],
+      ['Channel / Platform Fees (GP)', periodPnl.channelFees.toFixed(2)],
+      ['Kitchen Labor', periodPnl.kitchenLabor.toFixed(2)],
+      ['FOH & Management Labor', periodPnl.fohLabor.toFixed(2)],
+      ['Total Labor (All Staff)', periodPnl.totalLabor.toFixed(2)],
+      ['Prime Cost (Total COGS + Total Labor)', periodPnl.primeCost.toFixed(2)],
+      ['Prime Cost %', `${periodPnl.primeCostPercent.toFixed(1)}%`],
+      ['Operating Expenses (OPEX)', periodPnl.opex.toFixed(2)],
+      ['Operating Profit', periodPnl.operatingProfit.toFixed(2)],
+      ['Estimated Tax (Confirm with Accountant)', periodPnl.estimatedTax.toFixed(2)],
+      ['Net Profit', periodPnl.netProfit.toFixed(2)],
+      ['COGS Data Status', periodPnl.cogsStatus],
       ['Monthly Break-Even Target', executiveBreakEven.breakEvenSales.toFixed(2)],
     ];
     const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((r) => r.join(',')).join('\n');
@@ -1078,8 +1082,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
 
   const targetFoodCostPct = (costSettings as any).defaultTargetFoodCostPercent || settings.targetFoodCostPercent || 30;
   const targetPrimeCostPct = (costSettings as any).primeCostTargetPercent || 55;
-  const effectiveFoodCostPct =
-    effectiveNetSalesForMgr > 0 ? (foodCogsToUse / effectiveNetSalesForMgr) * 100 : avgFoodCostPercent;
+  const effectiveFoodCostPct = periodPnl.foodCostPercent;
 
   return (
     <div className="min-h-full bg-gradient-to-br from-[#F8FAFC] via-[#F4F6FA] to-[#FFF9F4] text-slate-900 select-none">
@@ -1231,16 +1234,16 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                     <span>{lang === 'th' ? 'ยอดขายวันนี้ (POS สด)' : "Today's Net Sales"}</span>
                   </span>
                   <span className="text-[11px] font-semibold text-emerald-700 tabular-nums">
-                    {todayUsaliPnl.orderCount} {lang === 'th' ? 'บิล' : 'orders'}
+                    {todayPnl.orderCount} {lang === 'th' ? 'บิล' : 'orders'}
                   </span>
                 </div>
                 <div className="mt-2.5 text-2xl font-bold text-slate-900 tabular-nums">
-                  ฿{formatMoney(todayUsaliPnl.netSales)}
+                  ฿{formatMoney(todayPnl.netSalesExVat)}
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
                   {lang === 'th'
-                    ? `กำไรวันนี้ (USALI): ฿${formatMoney(todayUsaliPnl.netOperatingProfit)}`
-                    : `Today Profit: ฿${formatMoney(todayUsaliPnl.netOperatingProfit)}`}
+                    ? `กำไรดำเนินงานวันนี้: ฿${formatMoney(todayPnl.operatingProfit)}`
+                    : `Today Operating Profit: ฿${formatMoney(todayPnl.operatingProfit)}`}
                 </div>
               </div>
 
@@ -1254,10 +1257,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   <span className="text-[11px] font-semibold text-sky-700 tabular-nums">{dateParam}</span>
                 </div>
                 <div className="mt-2.5 text-2xl font-bold text-slate-900 tabular-nums">
-                  ฿{formatMoney(mgrPnl.netSales)}
+                  ฿{formatMoney(periodPnl.netSalesExVat)}
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
-                  {usaliPeriodPnl.orderCount} orders · {lang === 'th' ? 'เฉลี่ย' : 'Avg'} ฿{formatMoney(usaliPeriodPnl.avgOrderValue)}
+                  {periodPnl.orderCount} orders · {lang === 'th' ? 'เฉลี่ย' : 'Avg'} ฿{formatMoney(periodPnl.avgOrderValue)}
                 </div>
               </div>
 
@@ -1270,10 +1273,18 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   </span>
                   <span
                     className={`text-[11px] font-semibold ${
-                      effectiveFoodCostPct > targetFoodCostPct ? 'text-rose-700' : 'text-emerald-700'
+                      periodPnl.cogsStatus === 'incomplete'
+                        ? 'text-amber-700'
+                        : effectiveFoodCostPct > targetFoodCostPct
+                        ? 'text-rose-700'
+                        : 'text-emerald-700'
                     }`}
                   >
-                    {effectiveFoodCostPct > targetFoodCostPct
+                    {periodPnl.cogsStatus === 'incomplete'
+                      ? lang === 'th' ? 'ข้อมูลไม่ครบ' : 'Incomplete'
+                      : periodPnl.cogsStatus === 'estimated'
+                      ? lang === 'th' ? 'ประมาณการ' : 'Estimated'
+                      : effectiveFoodCostPct > targetFoodCostPct
                       ? lang === 'th' ? 'เกินเป้า' : 'Above Target'
                       : lang === 'th' ? 'ตามเกณฑ์' : 'Healthy'}
                   </span>
@@ -1283,7 +1294,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   <span className="text-xs text-slate-400">/ {targetFoodCostPct}%</span>
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
-                  COGS: ฿{formatMoney(foodCogsToUse)}
+                  COGS: ฿{formatMoney(periodPnl.foodCogs)}
                 </div>
               </div>
 
@@ -1296,20 +1307,20 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   </span>
                   <span
                     className={`text-[11px] font-semibold ${
-                      mgrPnl.primeCostPercent > targetPrimeCostPct ? 'text-rose-700' : 'text-emerald-700'
+                      periodPnl.primeCostPercent > targetPrimeCostPct ? 'text-rose-700' : 'text-emerald-700'
                     }`}
                   >
-                    {mgrPnl.primeCostPercent > targetPrimeCostPct
+                    {periodPnl.primeCostPercent > targetPrimeCostPct
                       ? lang === 'th' ? 'ควรควบคุม' : 'High'
                       : lang === 'th' ? 'เหมาะสม' : 'Healthy'}
                   </span>
                 </div>
                 <div className="mt-2.5 flex items-baseline gap-2 tabular-nums">
-                  <span className="text-2xl font-bold text-slate-900">{mgrPnl.primeCostPercent.toFixed(1)}%</span>
-                  <span className="text-xs text-slate-400">COGS+Kitchen</span>
+                  <span className="text-2xl font-bold text-slate-900">{periodPnl.primeCostPercent.toFixed(1)}%</span>
+                  <span className="text-xs text-slate-400">COGS+Labor</span>
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
-                  {lang === 'th' ? `เป้าหมาย ≤ ${targetPrimeCostPct}%` : `Target ≤ ${targetPrimeCostPct}%`} · ฿{formatMoney(mgrPnl.primeCost)}
+                  {lang === 'th' ? `เป้าหมาย ≤ ${targetPrimeCostPct}%` : `Target ≤ ${targetPrimeCostPct}%`} · ฿{formatMoney(periodPnl.primeCost)}
                 </div>
               </div>
 
@@ -1321,11 +1332,11 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                     <span>{lang === 'th' ? 'กำไรขั้นต้น (GP)' : 'Gross Profit'}</span>
                   </span>
                   <span className="text-[11px] font-semibold text-emerald-700 tabular-nums">
-                    {mgrPnl.grossMarginPercent.toFixed(1)}%
+                    {periodPnl.grossMarginPercent.toFixed(1)}%
                   </span>
                 </div>
                 <div className="mt-2.5 text-2xl font-bold text-emerald-700 tabular-nums">
-                  ฿{formatMoney(mgrPnl.grossProfit)}
+                  ฿{formatMoney(periodPnl.grossProfit)}
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500">
                   {lang === 'th' ? 'หลังหักต้นทุนอาหาร & กล่อง' : 'After Food & Packaging COGS'}
@@ -1344,12 +1355,12 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   </span>
                 </div>
                 <div className="mt-2.5 text-2xl font-bold text-slate-900 tabular-nums">
-                  ฿{formatMoney(periodMgrOpex + periodDirectKitchenLabor)}
+                  ฿{formatMoney(periodPnl.opex + periodPnl.totalLabor)}
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
                   {lang === 'th'
-                    ? `ค่าแรง ฿${formatMoney(periodDirectKitchenLabor + periodNonKitchenLabor)}`
-                    : `Total Labor ฿${formatMoney(periodDirectKitchenLabor + periodNonKitchenLabor)}`}
+                    ? `ค่าแรง ฿${formatMoney(periodPnl.totalLabor)} · GP ช่องทาง ฿${formatMoney(periodPnl.channelFees)}`
+                    : `Total Labor ฿${formatMoney(periodPnl.totalLabor)} · Channel Fees ฿${formatMoney(periodPnl.channelFees)}`}
                 </div>
               </div>
 
@@ -1357,7 +1368,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               <div className="rounded-2xl bg-white/90 border border-slate-200/90 p-5 flex flex-col justify-between">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
-                    {mgrPnl.netProfit >= 0 ? (
+                    {periodPnl.netProfit >= 0 ? (
                       <ArrowUpRight className="w-3.5 h-3.5 text-emerald-600" />
                     ) : (
                       <ArrowDownRight className="w-3.5 h-3.5 text-rose-600" />
@@ -1366,21 +1377,23 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   </span>
                   <span
                     className={`text-[11px] font-semibold tabular-nums ${
-                      mgrPnl.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                      periodPnl.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                     }`}
                   >
-                    {mgrPnl.netMarginPercent.toFixed(1)}%
+                    {periodPnl.netMarginPercent.toFixed(1)}%
                   </span>
                 </div>
                 <div
                   className={`mt-2.5 text-2xl font-bold tabular-nums ${
-                    mgrPnl.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                    periodPnl.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                   }`}
                 >
-                  ฿{formatMoney(mgrPnl.netProfit)}
+                  ฿{formatMoney(periodPnl.netProfit)}
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
-                  {lang === 'th' ? `ภาษีประมาณ ${incomeTaxRate}%` : `Tax @ ${incomeTaxRate}%`}
+                  {lang === 'th'
+                    ? `ภาษีประมาณ ${periodPnl.taxRatePercent}%: ฿${formatMoney(periodPnl.estimatedTax)}`
+                    : `Est. Tax (${periodPnl.taxRatePercent}%): ฿${formatMoney(periodPnl.estimatedTax)}`}
                 </div>
               </div>
 
@@ -1617,7 +1630,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                     type="button"
                     onClick={() => setCogsMode('estimated')}
                     className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
-                      effectiveCogsMode === 'estimated'
+                      cogsMode === 'estimated'
                         ? 'bg-white text-slate-900 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
@@ -1628,7 +1641,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                     type="button"
                     onClick={() => setCogsMode('actual')}
                     className={`px-3 py-1 rounded-lg text-xs font-bold cursor-pointer transition-colors ${
-                      effectiveCogsMode === 'actual'
+                      cogsMode === 'actual'
                         ? 'bg-white text-slate-900 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
@@ -1640,7 +1653,20 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
 
               <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums text-slate-600">
                 <span>
-                  Actual Stock COGS: <strong className="text-slate-900">฿{Math.round(actualCogsResult.cogs).toLocaleString()}</strong>
+                  {lang === 'th' ? 'สถานะต้นทุน:' : 'COGS Status:'}{' '}
+                  <strong
+                    className={
+                      periodPnl.cogsStatus === 'complete'
+                        ? 'text-emerald-700'
+                        : 'text-amber-700'
+                    }
+                  >
+                    {periodPnl.cogsStatus === 'complete'
+                      ? lang === 'th' ? 'ข้อมูลครบ' : 'Complete'
+                      : periodPnl.cogsStatus === 'estimated'
+                      ? lang === 'th' ? 'ประมาณการ' : 'Estimated'
+                      : lang === 'th' ? 'ข้อมูลไม่ครบ' : 'Incomplete'}
+                  </strong>
                 </span>
                 <span>
                   Theoretical: <strong className="text-slate-900">฿{Math.round(theoreticalSalesOrdersCost).toLocaleString()}</strong>
@@ -1651,10 +1677,17 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               </div>
             </div>
 
-            {effectiveCogsMode === 'actual' && hasActualStockData && actualCogsResult.isNegative && (
-              <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                <span>ตัวเลขสต็อกผิดปกติ กรุณาตรวจสอบการตรวจนับสต็อก</span>
+            {periodPnl.cogsStatus !== 'complete' && periodPnl.statusReasons.length > 0 && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>
+                    {periodPnl.cogsStatus === 'incomplete'
+                      ? lang === 'th' ? 'ข้อมูลไม่ครบ: ' : 'Incomplete data: '
+                      : lang === 'th' ? 'ประมาณการ: ' : 'Estimated: '}
+                  </strong>
+                  {periodPnl.statusReasons.join(' · ')}
+                </span>
               </div>
             )}
 
@@ -1680,25 +1713,25 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   <div className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 font-bold uppercase tracking-wider">
                     1. {lang === 'th' ? 'รายได้จากการขาย (Revenue)' : 'Revenue'}
                   </div>
-                  <div className="flex justify-between px-3 py-1 text-slate-600">
-                    <span>{lang === 'th' ? 'ยอดขายรวมก่อนหักส่วนลด (Gross Sales)' : 'Gross Sales'}</span>
-                    <span>฿{formatMoney(mgrGrossSales > 0 ? mgrGrossSales : usaliPeriodPnl.grossSales)}</span>
+                  <div className="flex justify-between px-3 py-1 text-slate-500">
+                    <span>{lang === 'th' ? 'ยอดขายอ้างอิงก่อนหักส่วนลด (Gross Sales Reference)' : 'Gross Sales (Reference)'}</span>
+                    <span>฿{formatMoney(periodPnl.grossSalesRef)}</span>
                   </div>
                   <div className="flex justify-between px-3 py-1 text-amber-700">
-                    <span>{lang === 'th' ? 'หัก: ส่วนลดโปรโมชั่น & คืนเงิน' : 'Less: Discounts & Refunds'}</span>
+                    <span>{lang === 'th' ? 'ส่วนลดโปรโมชั่น & คืนเงิน (อ้างอิง)' : 'Discounts & Refunds (Reference)'}</span>
                     <span>
-                      -฿{formatMoney((mgrGrossSales > 0 ? mgrDiscounts : usaliPeriodPnl.discounts) + mgrRefunds)}
+                      -฿{formatMoney(periodPnl.discountsRef + periodPnl.refundsRef)}
                     </span>
                   </div>
-                  {settings.serviceChargeTreatment === 'retained' && usaliPeriodPnl.retainedServiceCharge > 0 && (
+                  {settings.serviceChargeTreatment === 'retained' && periodPnl.retainedServiceCharge > 0 && (
                     <div className="flex justify-between px-3 py-1 text-emerald-700">
                       <span>{lang === 'th' ? 'บวก: Service Charge ที่ร้านเก็บเอง' : 'Retained Service Charge'}</span>
-                      <span>+฿{formatMoney(usaliPeriodPnl.retainedServiceCharge)}</span>
+                      <span>+฿{formatMoney(periodPnl.retainedServiceCharge)}</span>
                     </div>
                   )}
                   <div className="flex justify-between px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 font-bold text-sm text-slate-900">
-                    <span>{lang === 'th' ? 'ยอดขายสุทธิ (Net Revenue)' : 'Net Sales'}</span>
-                    <span>฿{formatMoney(mgrPnl.netSales)}</span>
+                    <span>{lang === 'th' ? 'ยอดขายสุทธิ ex-VAT (Net Sales)' : 'Net Sales (ex-VAT)'}</span>
+                    <span>฿{formatMoney(periodPnl.totalRevenue)}</span>
                   </div>
                 </div>
 
@@ -1710,75 +1743,81 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   <div className="flex justify-between px-3 py-1 text-slate-600">
                     <span>{t.reports.foodCost}</span>
                     <span>
-                      {mgrPnl.netSales > 0 ? `${((foodCogsToUse / mgrPnl.netSales) * 100).toFixed(1)}%` : '0.0%'} · -฿{formatMoney(foodCogsToUse)}
+                      {periodPnl.totalRevenue > 0 ? `${periodPnl.foodCostPercent.toFixed(1)}%` : '0.0%'} · -฿{formatMoney(periodPnl.foodCogs)}
                     </span>
                   </div>
                   <div className="flex justify-between px-3 py-1 text-slate-600">
                     <span>{t.reports.packagingCost}</span>
                     <span>
-                      {mgrPnl.netSales > 0 ? `${((packagingCogsToUse / mgrPnl.netSales) * 100).toFixed(1)}%` : '0.0%'} · -฿{formatMoney(packagingCogsToUse)}
+                      {periodPnl.totalRevenue > 0 ? `${((periodPnl.packagingCogs / periodPnl.totalRevenue) * 100).toFixed(1)}%` : '0.0%'} · -฿{formatMoney(periodPnl.packagingCogs)}
                     </span>
                   </div>
                   <div className="flex justify-between px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 font-bold text-sm text-emerald-900">
                     <span>
-                      = {t.reports.grossProfit} ({mgrPnl.grossMarginPercent.toFixed(1)}%)
+                      = {t.reports.grossProfit} ({periodPnl.grossMarginPercent.toFixed(1)}%)
                     </span>
-                    <span>฿{formatMoney(mgrPnl.grossProfit)}</span>
+                    <span>฿{formatMoney(periodPnl.grossProfit)}</span>
                   </div>
                 </div>
 
-                {/* 3. Direct Labor & Prime Cost */}
+                {/* 3. Channel Fees & Total Labor & Prime Cost */}
                 <div className="space-y-1.5">
                   <div className="px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-900 font-bold flex justify-between">
-                    <span>3. {lang === 'th' ? 'ค่าแรงครัว & Prime Cost (COGS + Kitchen Labor)' : 'Prime Cost'}</span>
-                    <span>{mgrPnl.primeCostPercent.toFixed(1)}% (฿{formatMoney(mgrPnl.primeCost)})</span>
+                    <span>3. {lang === 'th' ? 'ค่าธรรมเนียมแพลตฟอร์ม, ค่าแรง & Prime Cost (COGS + Total Labor)' : 'Channel Fees, Total Labor & Prime Cost'}</span>
+                    <span>{periodPnl.primeCostPercent.toFixed(1)}% (฿{formatMoney(periodPnl.primeCost)})</span>
                   </div>
                   <div className="flex justify-between px-3 py-1 text-slate-700">
-                    <span>{lang === 'th' ? 'หัก: ค่าแรงฝ่ายครัว (Direct Kitchen Labor)' : 'Direct Kitchen Labor'}</span>
-                    <span className="text-indigo-700 font-semibold">-฿{formatMoney(periodDirectKitchenLabor)}</span>
+                    <span>{lang === 'th' ? `หัก: ${t.reports.platformFees} (GP)` : `Less: ${t.reports.platformFees}`}</span>
+                    <span className="text-rose-700 font-semibold">-฿{formatMoney(periodPnl.channelFees)}</span>
+                  </div>
+                  <div className="flex justify-between px-3 py-1 text-slate-700">
+                    <span>{lang === 'th' ? 'หัก: ค่าแรงรวมทุกแผนก (Total Labor)' : 'Less: Total Labor (All Departments)'}</span>
+                    <span className="text-indigo-700 font-semibold">-฿{formatMoney(periodPnl.totalLabor)}</span>
+                  </div>
+                  <div className="flex justify-between px-3 py-0.5 pl-6 text-slate-500">
+                    <span>• {lang === 'th' ? 'ค่าแรงฝ่ายครัว (Kitchen Labor)' : 'Kitchen Labor'}</span>
+                    <span>฿{formatMoney(periodPnl.kitchenLabor)}</span>
+                  </div>
+                  <div className="flex justify-between px-3 py-0.5 pl-6 text-slate-500">
+                    <span>• {lang === 'th' ? 'ค่าแรงหน้าร้าน & บริหาร (FOH & Admin)' : 'FOH & Management Labor'}</span>
+                    <span>฿{formatMoney(periodPnl.fohLabor)}</span>
                   </div>
                 </div>
 
-                {/* 4. Operating Expenses & Platform Fees */}
+                {/* 4. Operating Expenses (OPEX) */}
                 <div className="space-y-1.5">
                   <div className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 font-bold uppercase tracking-wider">
-                    4. {lang === 'th' ? 'ค่าใช้จ่ายดำเนินงาน & ค่าธรรมเนียมช่องทาง' : 'OPEX & Channel Commissions'}
+                    4. {lang === 'th' ? 'ค่าใช้จ่ายดำเนินงานอื่น (Operating Expenses)' : 'Operating Expenses (OPEX)'}
                   </div>
                   <div className="flex justify-between px-3 py-1 text-slate-600">
-                    <span>{lang === 'th' ? 'ค่าเช่าพื้นที่ สาธารณูปโภค และโสหุ้ยร้าน' : 'Rent, Utilities & Store OPEX'}</span>
-                    <span>-฿{formatMoney(monthlyNormalizedOpex * periodMonthFactor)}</span>
+                    <span>{lang === 'th' ? 'ค่าเช่าพื้นที่ สาธารณูปโภค และโสหุ้ยร้าน (OPEX)' : 'Store OPEX (Fixed & Variable)'}</span>
+                    <span>-฿{formatMoney(periodPnl.opex)}</span>
                   </div>
-                  <div className="flex justify-between px-3 py-1 text-slate-600">
-                    <span>{lang === 'th' ? 'ค่าแรงหน้าร้าน & บริหาร (FOH & Admin)' : 'FOH & Management Labor'}</span>
-                    <span>-฿{formatMoney(periodNonKitchenLabor)}</span>
-                  </div>
-                  {usaliPeriodPnl.platformFees > 0 && (
-                    <div className="flex justify-between px-3 py-1 text-slate-600">
-                      <span>{t.reports.platformFees} (POS Delivery)</span>
-                      <span>-฿{formatMoney(usaliPeriodPnl.platformFees)}</span>
-                    </div>
-                  )}
                 </div>
 
                 {/* 5. Operating & Net Profit */}
                 <div className="space-y-2 pt-2 border-t border-slate-200">
                   <div className="flex justify-between px-3 py-2 rounded-lg bg-slate-50 font-bold text-slate-900">
-                    <span>{lang === 'th' ? 'กำไรจากการดำเนินงาน (EBITDA)' : 'Operating Profit'} ({mgrPnl.operatingMarginPercent.toFixed(1)}%)</span>
-                    <span>฿{formatMoney(mgrPnl.operatingProfit)}</span>
+                    <span>{lang === 'th' ? 'กำไรจากการดำเนินงาน (Operating Profit)' : 'Operating Profit'} ({periodPnl.operatingMarginPercent.toFixed(1)}%)</span>
+                    <span>฿{formatMoney(periodPnl.operatingProfit)}</span>
                   </div>
                   <div className="flex justify-between px-3 py-1 text-amber-700">
-                    <span>{lang === 'th' ? `หัก: ประมาณการภาษี (${incomeTaxRate}%)` : `Estimated Tax (${incomeTaxRate}%)`}</span>
-                    <span>-฿{formatMoney(mgrPnl.taxAmount)}</span>
+                    <span>
+                      {lang === 'th'
+                        ? `หัก: ประมาณการภาษี (${periodPnl.taxRatePercent}%) — ประมาณการ — โปรดยืนยันกับนักบัญชี`
+                        : `Less: Estimated Tax (${periodPnl.taxRatePercent}%) — Estimate — please confirm with accountant`}
+                    </span>
+                    <span>-฿{formatMoney(periodPnl.estimatedTax)}</span>
                   </div>
                   <div
                     className={`flex justify-between px-4 py-3 rounded-xl font-extrabold text-sm sm:text-base border ${
-                      mgrPnl.netProfit >= 0
+                      periodPnl.netProfit >= 0
                         ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                         : 'bg-rose-50 border-rose-200 text-rose-900'
                     }`}
                   >
-                    <span>{lang === 'th' ? 'กำไรสุทธิ (Net Profit)' : 'Net Profit'} ({mgrPnl.netMarginPercent.toFixed(1)}%)</span>
-                    <span>฿{formatMoney(mgrPnl.netProfit)}</span>
+                    <span>{lang === 'th' ? 'กำไรสุทธิ (Net Profit)' : 'Net Profit'} ({periodPnl.netMarginPercent.toFixed(1)}%)</span>
+                    <span>฿{formatMoney(periodPnl.netProfit)}</span>
                   </div>
                 </div>
               </div>
@@ -1917,7 +1956,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           <div className="tonycost-workspace rounded-2xl bg-white/95 border border-slate-200/90 p-5 sm:p-6">
             <LaborView
               employees={unifiedEmployees}
-              monthlyNetSales={effectiveNetSalesForMgr}
+              monthlyNetSales={periodPnl.netSalesExVat}
               onAddEmployee={handleAddEmployee}
               onDeleteEmployee={handleDeleteEmployee}
               activeLanguage={lang}

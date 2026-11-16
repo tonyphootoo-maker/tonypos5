@@ -196,20 +196,31 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   const todayNetSales = todaySalesRecords.reduce((sum, s) => sum + s.netSales, 0);
   const todayOrders = todaySalesRecords.reduce((sum, s) => sum + s.orderCount, 0);
 
-  const monthlyGrossSales = sales.reduce((sum, s) => sum + s.grossSales, 0);
-  const monthlyDiscounts = sales.reduce((sum, s) => sum + s.discounts, 0);
-  const monthlyRefunds = sales.reduce((sum, s) => sum + s.refunds, 0);
-  const monthlyNetSales = monthlyGrossSales - monthlyDiscounts - monthlyRefunds;
+  const monthlyGrossSales = sales.reduce((sum, s) => sum + (s.grossSales || 0), 0);
+  const monthlyDiscounts = sales.reduce((sum, s) => sum + (s.discounts || 0), 0);
+  const monthlyRefunds = sales.reduce((sum, s) => sum + (s.refunds || 0), 0);
+  const monthlyNetSales = sales.reduce((sum, s) => {
+    if (typeof s.netSales === 'number' && Number.isFinite(s.netSales)) {
+      return sum + Math.max(0, s.netSales);
+    }
+    const nominal = Math.max(0, (s.grossSales || 0) - (s.discounts || 0) - (s.refunds || 0));
+    const vatPct = s.vatRatePercent ?? 7;
+    return sum + (s.isVatInclusive && vatPct > 0 ? nominal / (1 + vatPct / 100) : nominal);
+  }, 0);
+  const monthlyChannelFees = sales.reduce((sum, s) => sum + Math.max(0, s.platformFees || 0), 0);
 
-  // Operating Expenses (same definition as ProfitAndLossView)
-  const totalOperatingExpenses = effectiveExpenses.reduce((sum, e) => sum + e.amount, 0) + nonKitchenLabor;
+  // Operating Expenses (excluding labor, since totalLabor is deducted inside calculateProfitAndLoss)
+  const totalOperatingExpenses = effectiveExpenses.reduce((sum, e) => sum + e.amount, 0);
   const fixedExpenses = effectiveExpenses.filter((e) => e.isFixed).reduce((sum, e) => sum + e.amount, 0) + nonKitchenLabor;
 
-  // Check for actual purchases & inventory stock
+  // Check for actual purchases & explicit beginning inventory stock (never invent 1.05x buffer)
   const purchasesList = React.useMemo(() => StorageService.getPurchases(), []);
   const inventoryList = React.useMemo(() => StorageService.getInventory(), []);
   const salesOrdersList = React.useMemo(() => StorageService.getSalesOrders(), []);
-  const hasActualStock = purchasesList.length > 0 && inventoryList.length > 0;
+  const hasExplicitBeginningStock = inventoryList.some(
+    (item: any) => typeof item.beginningValue === 'number' && Number.isFinite(item.beginningValue)
+  );
+  const hasActualStock = purchasesList.length > 0 && inventoryList.length > 0 && hasExplicitBeginningStock;
 
   // Weighted operational food cost % across all active portions
   const allPortions = menuItems.flatMap((m) => getMenuPortions(m));
@@ -227,9 +238,9 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     const totalPurchasesCost = purchasesList.reduce((sum, p) => sum + (p.totalPrice || p.price || 0), 0);
     const totalEndingStockCost = inventoryList.reduce((sum, item) => sum + ((item.currentStock ?? 0) * (item.costPerUnit || 0)), 0);
     const totalWasteCost = (allWaste || []).reduce((sum, w) => sum + (w.totalCost || w.cost || 0), 0);
-    const estimatedBeginningStockCost = totalEndingStockCost * 1.05;
+    const totalBeginningStockCost = inventoryList.reduce((sum, item: any) => sum + (item.beginningValue || 0), 0);
     const actualCogsResult = calculateInventoryCOGS(
-      estimatedBeginningStockCost,
+      totalBeginningStockCost,
       totalPurchasesCost,
       totalEndingStockCost,
       totalWasteCost
@@ -250,7 +261,10 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     packagingCogsToUse,
     totalOperatingExpenses,
     directKitchenLabor,
-    incomeTaxRate
+    incomeTaxRate,
+    nonKitchenLabor,
+    monthlyChannelFees,
+    monthlyNetSales
   );
 
   const avgCMPercent = 100 - avgFoodCostPercent - 3.5;
