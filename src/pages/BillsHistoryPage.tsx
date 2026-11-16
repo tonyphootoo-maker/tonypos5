@@ -130,15 +130,10 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4 select-none">
       {/* Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
-            <Receipt className="w-6 h-6 text-orange-600" />
-            <span>{t.bills.title}</span>
-          </h2>
-          <p className="text-xs text-neutral-500">
-            Audit sales, reprint receipts, or void incorrect orders. Paged & filtered queries keep Firestore reads cheap.
-          </p>
-        </div>
+        <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
+          <Receipt className="w-6 h-6 text-orange-600" />
+          <span>{t.bills.title}</span>
+        </h2>
       </div>
 
       {/* Filter Bar */}

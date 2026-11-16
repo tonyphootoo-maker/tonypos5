@@ -155,22 +155,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-xl bg-[#151518] border border-white/10 p-6 text-white">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-full bg-[#10B981] animate-pulse"></span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#10B981]">
-              Financial Statements
-            </span>
-          </div>
-          <h1 className="mt-1 text-xl sm:text-2xl font-light tracking-tight text-white flex items-center gap-2">
-            <span>{activeLanguage === 'th' ? 'งบกำไรขาดทุนบริหาร (Managerial Profit & Loss P&L)' : 'Monthly Profit & Loss (P&L)'}</span>
-          </h1>
-          <p className="mt-1 text-xs text-white/40">
-            {activeLanguage === 'th'
-              ? 'งบการเงินมาตรฐานร้านอาหาร คำนวณยอดขายสุทธิ ต้นทุนอาหาร Prime Cost กำไรดำเนินงาน และกำไรสุทธิ'
-              : 'Standard restaurant financial statement showing Net Sales, COGS, Prime Cost, EBITDA, and Net Margin.'}
-          </p>
-        </div>
+        <h1 className="text-xl sm:text-2xl font-light tracking-tight text-white flex items-center gap-2">
+          <span>{activeLanguage === 'th' ? 'งบกำไรขาดทุนบริหาร (Managerial Profit & Loss P&L)' : 'Monthly Profit & Loss (P&L)'}</span>
+        </h1>
 
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
           {syncFeedback && (

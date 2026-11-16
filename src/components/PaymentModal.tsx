@@ -22,7 +22,6 @@ import {
   Banknote,
   QrCode,
   CreditCard,
-  ArrowRightLeft,
   Plus,
   Trash2,
   Star,
@@ -31,6 +30,7 @@ import {
   AlertTriangle,
   Delete,
   Check,
+  Wallet,
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ReceiptModal } from './ReceiptModal';
@@ -43,7 +43,7 @@ interface Props {
   onPaymentSuccess: (finalBill: BillDoc) => void;
 }
 
-type PaymentTabId = 'cash' | 'qr' | 'visa' | 'master' | 'transfer' | 'other';
+type PaymentTabId = 'cash' | 'qr' | 'master' | 'aripay';
 
 interface PaymentTabConfig {
   id: PaymentTabId;
@@ -56,10 +56,8 @@ interface PaymentTabConfig {
 const PAYMENT_TABS: PaymentTabConfig[] = [
   { id: 'cash', method: 'cash', labelTh: 'เงินสด', labelEn: 'Cash' },
   { id: 'qr', method: 'qr', labelTh: 'QR Payment', labelEn: 'QR Payment' },
-  { id: 'visa', method: 'card', subMethod: 'VISA', labelTh: 'VISA', labelEn: 'VISA' },
   { id: 'master', method: 'card', subMethod: 'Master', labelTh: 'Master', labelEn: 'Master' },
-  { id: 'transfer', method: 'transfer', labelTh: 'โอน', labelEn: 'Transfer' },
-  { id: 'other', method: 'card', subMethod: 'อื่นๆ', labelTh: 'อื่นๆ', labelEn: 'Other' },
+  { id: 'aripay', method: 'qr', subMethod: 'Aripay', labelTh: 'Aripay', labelEn: 'Aripay' },
 ];
 
 function getSmartQuickCashAmounts(due: number): number[] {
@@ -79,7 +77,7 @@ function getSmartQuickCashAmounts(due: number): number[] {
 }
 
 const TabIcon: React.FC<{ tabId: PaymentTabId; active: boolean }> = ({ tabId, active }) => {
-  const strokeClass = active ? 'text-neutral-700' : 'text-neutral-400';
+  const strokeClass = active ? 'text-orange-600' : 'text-neutral-400';
 
   if (tabId === 'cash') {
     return <Banknote className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
@@ -87,35 +85,19 @@ const TabIcon: React.FC<{ tabId: PaymentTabId; active: boolean }> = ({ tabId, ac
   if (tabId === 'qr') {
     return <QrCode className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
   }
-  if (tabId === 'visa') {
-    return (
-      <span
-        className={`inline-flex items-center justify-center w-6 h-4 rounded-[3px] border text-[7px] font-black tracking-tighter shrink-0 ${
-          active
-            ? 'border-neutral-600 bg-neutral-700 text-white'
-            : 'border-neutral-400 bg-neutral-200/70 text-neutral-500'
-        }`}
-      >
-        VISA
-      </span>
-    );
-  }
   if (tabId === 'master') {
     return (
       <span
         className={`inline-flex items-center justify-center w-6 h-4 rounded-[3px] border shrink-0 relative ${
-          active ? 'border-neutral-600 bg-neutral-700' : 'border-neutral-400 bg-neutral-200/70'
+          active ? 'border-orange-500 bg-orange-500 text-white' : 'border-neutral-400 bg-neutral-200/70 text-neutral-600'
         }`}
       >
-        <span className="w-2 h-2 rounded-full bg-current opacity-85 -mr-0.5" />
-        <span className="w-2 h-2 rounded-full bg-current opacity-60" />
+        <span className="w-2 h-2 rounded-full bg-current opacity-90 -mr-0.5" />
+        <span className="w-2 h-2 rounded-full bg-current opacity-65" />
       </span>
     );
   }
-  if (tabId === 'transfer') {
-    return <ArrowRightLeft className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
-  }
-  return <CreditCard className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
+  return <Wallet className={`w-5 h-5 shrink-0 ${strokeClass}`} />;
 };
 
 export const PaymentModal: React.FC<Props> = ({
@@ -575,7 +557,7 @@ export const PaymentModal: React.FC<Props> = ({
         {/* Main 2-Column Body */}
         <div className="relative flex-1 min-h-0 flex flex-col md:flex-row bg-[#f3f4f6] overflow-hidden">
           {/* Left Sidebar: Payment Method List */}
-          <div className="md:w-48 lg:w-52 shrink-0 p-2 md:py-3 md:pl-3 md:pr-1.5 grid grid-cols-3 sm:grid-cols-6 md:flex md:flex-col gap-1 border-b md:border-b-0 border-neutral-200 overflow-y-auto">
+          <div className="md:w-48 lg:w-52 shrink-0 p-2 md:py-3 md:pl-3 md:pr-1.5 grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-col gap-1.5 border-b md:border-b-0 border-neutral-200 overflow-y-auto">
             {PAYMENT_TABS.map((tab) => {
               const isActive = activeTabId === tab.id;
               return (
@@ -585,8 +567,8 @@ export const PaymentModal: React.FC<Props> = ({
                   onClick={() => handleSelectTab(tab)}
                   className={`min-h-[44px] px-2.5 md:px-4 py-2.5 md:py-3.5 rounded-md flex items-center justify-center md:justify-start gap-2 md:gap-3 text-xs sm:text-sm transition-all cursor-pointer ${
                     isActive
-                      ? 'bg-white text-neutral-900 font-semibold shadow-xs border border-neutral-200/80'
-                      : 'bg-transparent text-neutral-500 hover:text-neutral-800 hover:bg-white/60 font-medium border border-transparent'
+                      ? 'bg-orange-100 text-orange-900 font-bold shadow-xs border border-orange-300'
+                      : 'bg-transparent text-neutral-500 hover:text-orange-800 hover:bg-orange-50/70 font-medium border border-transparent'
                   }`}
                 >
                   <TabIcon tabId={tab.id} active={isActive} />
@@ -792,14 +774,10 @@ export const PaymentModal: React.FC<Props> = ({
                   </button>
                 </div>
               </>
-            ) : activeTab.method === 'qr' || activeTab.method === 'transfer' ? (
+            ) : activeTab.id === 'qr' ? (
               <div className="flex-1 min-h-[240px] bg-white border border-neutral-200 rounded-sm p-4 sm:p-6 flex flex-col items-center justify-center text-center gap-3">
                 <div className="text-sm font-bold text-neutral-800">
-                  {activeTab.method === 'qr'
-                    ? t.pos.scanQrToPay
-                    : lang === 'th'
-                      ? 'โอนเงินเข้าบัญชีร้าน'
-                      : t.pos.bankTransfer}
+                  {t.pos.scanQrToPay}
                 </div>
                 {qrDataUrl ? (
                   <div className="p-2.5 bg-white rounded-lg border border-neutral-200 shadow-xs">
@@ -821,8 +799,12 @@ export const PaymentModal: React.FC<Props> = ({
               </div>
             ) : (
               <div className="flex-1 min-h-[240px] bg-white border border-neutral-200 rounded-sm p-6 flex flex-col items-center justify-center text-center gap-3">
-                <div className="w-14 h-14 rounded-full bg-neutral-100 border border-neutral-200 flex items-center justify-center text-neutral-700">
-                  <CreditCard className="w-7 h-7" />
+                <div className="w-14 h-14 rounded-full bg-orange-50 border border-orange-200 flex items-center justify-center text-orange-600">
+                  {activeTab.id === 'aripay' ? (
+                    <Wallet className="w-7 h-7" />
+                  ) : (
+                    <CreditCard className="w-7 h-7" />
+                  )}
                 </div>
                 <div className="space-y-1">
                   <div className="text-base font-bold text-neutral-900">
@@ -831,9 +813,13 @@ export const PaymentModal: React.FC<Props> = ({
                       : `Pay with ${activeTab.labelEn}`}
                   </div>
                   <p className="text-xs text-neutral-500">
-                    {lang === 'th'
-                      ? 'ตรวจสอบยอดบนเครื่องรูดบัตร แล้วกดยืนยันการชำระเงิน'
-                      : 'Verify the charge on your payment terminal and tap Confirm Payment'}
+                    {activeTab.id === 'aripay'
+                      ? lang === 'th'
+                        ? 'ตรวจสอบยอดรับชำระผ่าน Aripay แล้วกดยืนยันการชำระเงิน'
+                        : 'Verify the Aripay payment and tap Confirm Payment'
+                      : lang === 'th'
+                        ? 'ตรวจสอบยอดบนเครื่องรูดบัตร แล้วกดยืนยันการชำระเงิน'
+                        : 'Verify the charge on your payment terminal and tap Confirm Payment'}
                   </p>
                 </div>
                 <div className="mt-1 px-5 py-2 bg-neutral-50 border border-neutral-200 rounded-md text-xl font-bold text-neutral-900 tabular-nums">

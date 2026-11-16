@@ -72,17 +72,10 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Scale className="h-5 w-5 text-emerald-600" />
-            <span>{activeLanguage === 'th' ? 'การวิเคราะห์จุดคุ้มทุน (Break-Even Analysis)' : 'Break-Even Analysis'}</span>
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {activeLanguage === 'th'
-              ? 'คำนวณยอดขายขั้นต่ำและเป้าหมายกำไร เพื่อให้ครอบคลุมค่าใช้จ่ายคงที่และโสหุ้ยทั้งหมดของร้าน'
-              : 'Minimum sales and target profit volume required to cover fixed overheads.'}
-          </p>
-        </div>
+        <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <Scale className="h-5 w-5 text-emerald-600" />
+          <span>{activeLanguage === 'th' ? 'การวิเคราะห์จุดคุ้มทุน (Break-Even Analysis)' : 'Break-Even Analysis'}</span>
+        </h1>
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">

@@ -91,14 +91,9 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#EA580C] to-[#F27D26] text-white flex items-center justify-center font-bold shadow-sm shadow-[#F27D26]/30">
               <Sparkles className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-stone-900 leading-tight">
-                เปลี่ยนรูปไอคอนแอป (Custom App Icon)
-              </h2>
-              <p className="text-xs text-stone-500 mt-0.5">
-                เลือกไอคอนร้านอาหารที่ชอบ หรืออัปโหลดโลโก้ร้านของตัวเองสำหรับหน้าจอมือถือและแท็บเล็ต
-              </p>
-            </div>
+            <h2 className="text-base sm:text-lg font-bold text-stone-900 leading-tight">
+              เปลี่ยนรูปไอคอนแอป (Custom App Icon)
+            </h2>
           </div>
           <button
             type="button"

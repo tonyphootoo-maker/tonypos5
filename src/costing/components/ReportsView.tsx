@@ -98,14 +98,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     <div className="space-y-4 pb-8">
       {/* Header */}
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            รายงาน การส่งออก และตรวจทานข้อมูล (Reports & Audit)
-          </h1>
-          <p className="text-xs text-white/60 mt-0.5">
-            ส่งออกไฟล์ Excel สมบูรณ์แบบ 5 แผ่นงาน, นำเข้าสมุดงาน, และตรวจสอบรายการตกหล่น
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold text-white tracking-tight">
+          รายงาน การส่งออก และตรวจทานข้อมูล (Reports & Audit)
+        </h1>
 
         <div className="flex items-center gap-2">
           <button
@@ -166,14 +161,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center">
                   <Download className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="font-bold text-white text-base">
-                    ส่งออกข้อมูลทั้งหมดเป็น Excel
-                  </h3>
-                  <span className="text-xs text-white/50">
-                    ครบ 5 แผ่นงาน (วัตถุดิบ, ซอส, เมนู, ค่าใช้จ่าย, ยอดขาย)
-                  </span>
-                </div>
+                <h3 className="font-bold text-white text-base">
+                  ส่งออกข้อมูลทั้งหมดเป็น Excel
+                </h3>
               </div>
 
               <p className="text-xs text-white/70 leading-relaxed">
@@ -197,14 +187,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <div className="w-10 h-10 rounded-2xl bg-[#F27D26]/20 border border-[#F27D26]/30 text-[#F27D26] flex items-center justify-center">
                   <Upload className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="font-bold text-white text-base">
-                    นำเข้าไฟล์ Excel ของร้าน (Excel Importer)
-                  </h3>
-                  <span className="text-xs text-white/50">
-                    รองรับสมุดงาน ทำแอปต้นทุนอาหาร(1).xlsx
-                  </span>
-                </div>
+                <h3 className="font-bold text-white text-base">
+                  นำเข้าไฟล์ Excel ของร้าน (Excel Importer)
+                </h3>
               </div>
 
               <p className="text-xs text-white/70 leading-relaxed">

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TableDoc, ZoneDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { TableVisual } from './TableVisual';
-import { FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT } from '../utils/tablePresets';
+import { FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT, getDynamicCanvasSize } from '../utils/tablePresets';
 import { X } from 'lucide-react';
 
 interface Props {
@@ -35,12 +35,19 @@ export const SaveOrderModal: React.FC<Props> = ({
     }
   }, [zones, activeZoneId]);
 
+  // Filter dining tables (exclude standalone chairs) according to zone
+  const orderTables = tables.filter((tbl) => tbl.itemKind !== 'chair');
+  const visibleTables = activeZoneId
+    ? orderTables.filter((tbl) => tbl.zoneId === activeZoneId)
+    : orderTables;
+  const modalCanvasSize = getDynamicCanvasSize(visibleTables, FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT);
+
   useEffect(() => {
     const el = floorBoxRef.current;
     if (!el) return;
     const updateScale = () => {
       const availW = Math.max(240, el.clientWidth - 8);
-      setModalFloorScale(Math.min(0.68, Math.max(0.3, availW / FLOOR_CANVAS_MIN_WIDTH)));
+      setModalFloorScale(Math.min(0.68, Math.max(0.25, availW / modalCanvasSize.width)));
     };
     updateScale();
     if (typeof ResizeObserver !== 'undefined') {
@@ -50,23 +57,14 @@ export const SaveOrderModal: React.FC<Props> = ({
     }
     window.addEventListener('resize', updateScale);
     return () => window.removeEventListener('resize', updateScale);
-  }, []);
-
-  // Filter dining tables (exclude standalone chairs) according to zone
-  const orderTables = tables.filter((tbl) => tbl.itemKind !== 'chair');
-  const visibleTables = activeZoneId
-    ? orderTables.filter((tbl) => tbl.zoneId === activeZoneId)
-    : orderTables;
+  }, [modalCanvasSize.width]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
       <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90dvh] flex flex-col border border-orange-200 overflow-hidden">
         {/* Header */}
         <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between shadow-xs">
-          <div>
-            <h3 className="font-extrabold text-base">{t.pos.saveOrderToTable}</h3>
-            <p className="text-xs text-orange-100">{t.pos.selectTargetTable}</p>
-          </div>
+          <h3 className="font-extrabold text-base">{t.pos.saveOrderToTable}</h3>
           <button
             onClick={onClose}
             className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
@@ -97,13 +95,13 @@ export const SaveOrderModal: React.FC<Props> = ({
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-neutral-50/50">
           <div
             ref={floorBoxRef}
-            className="relative w-full h-[360px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto flex items-start justify-center"
+            className="relative w-full h-[360px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto flex items-start"
           >
             <div
-              className="kin-3d-floorplan relative shrink-0"
+              className="kin-3d-floorplan relative shrink-0 mx-auto"
               style={{
-                width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * modalFloorScale)}px`,
-                height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * modalFloorScale)}px`,
+                width: `${Math.round(modalCanvasSize.width * modalFloorScale)}px`,
+                height: `${Math.round(modalCanvasSize.height * modalFloorScale)}px`,
               }}
             >
               <div className="text-[11px] font-bold text-neutral-400 absolute top-2 left-3 select-none pointer-events-none">

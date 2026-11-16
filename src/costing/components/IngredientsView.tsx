@@ -452,14 +452,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       <div className="shrink-0 z-20 space-y-3 pb-3 bg-stone-900/40 backdrop-blur-md pt-1">
         {/* Title & Actions */}
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 shadow-sm">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              ฐานข้อมูลวัตถุดิบและต้นทุน Yield
-            </h1>
-            <p className="text-xs text-white/60 mt-0.5">
-              กำหนดราคาซื้อ, ปริมาณสูญเสีย (Yield %), และต้นทุนต่อหน่วยใช้งานจริงตามสูตรบัญชี
-            </p>
-          </div>
+          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            ฐานข้อมูลวัตถุดิบและต้นทุน Yield
+          </h1>
 
           <div className="flex items-center gap-2 shrink-0">
             <button

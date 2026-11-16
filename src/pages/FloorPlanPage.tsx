@@ -34,6 +34,7 @@ import {
   getNextChairName,
   getTableDimensions,
   normalizeRotation,
+  getDynamicCanvasSize,
 } from '../utils/tablePresets';
 import {
   Plus,
@@ -201,6 +202,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
     [tables, activeZoneId]
   );
 
+  const canvasSize = useMemo(
+    () => getDynamicCanvasSize(zoneTables, FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT),
+    [zoneTables]
+  );
+
   const selectedTable = useMemo(
     () => tables.find((t) => t.id === selectedTableId) || null,
     [tables, selectedTableId]
@@ -224,9 +230,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           dropPos.y - preset.height / 2,
           preset.width,
           preset.height,
-          FLOOR_CANVAS_MIN_WIDTH,
-          FLOOR_CANVAS_MIN_HEIGHT,
-          snapToGrid
+          canvasSize.width,
+          canvasSize.height,
+          snapToGrid,
+          FLOOR_GRID_SIZE,
+          true
         )
       : findOpenTablePosition(
           currentZoneTables,
@@ -385,9 +393,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
         session.origY + dy,
         dim.effWidth,
         dim.effHeight,
-        FLOOR_CANVAS_MIN_WIDTH,
-        FLOOR_CANVAS_MIN_HEIGHT,
-        snapToGrid
+        canvasSize.width,
+        canvasSize.height,
+        snapToGrid,
+        FLOOR_GRID_SIZE,
+        true
       );
 
       setTables((prev) =>
@@ -430,9 +440,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
         target.y,
         effW,
         effH,
-        FLOOR_CANVAS_MIN_WIDTH,
-        FLOOR_CANVAS_MIN_HEIGHT,
-        false
+        canvasSize.width,
+        canvasSize.height,
+        false,
+        FLOOR_GRID_SIZE,
+        true
       );
 
       setTables((prev) =>
@@ -506,9 +518,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       tbl.y,
       dim.effWidth,
       dim.effHeight,
-      FLOOR_CANVAS_MIN_WIDTH,
-      FLOOR_CANVAS_MIN_HEIGHT,
-      false
+      canvasSize.width,
+      canvasSize.height,
+      false,
+      FLOOR_GRID_SIZE,
+      true
     );
     const updated: TableDoc = { ...preview, x: pos.x, y: pos.y };
     setTables((prev) => prev.map((t) => (t.id === tbl.id ? updated : t)));
@@ -530,9 +544,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       tbl.y,
       nextEffW,
       nextEffH,
-      FLOOR_CANVAS_MIN_WIDTH,
-      FLOOR_CANVAS_MIN_HEIGHT,
-      false
+      canvasSize.width,
+      canvasSize.height,
+      false,
+      FLOOR_GRID_SIZE,
+      true
     );
 
     const updated: TableDoc = {
@@ -555,9 +571,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       tbl.y + 36,
       dim.effWidth,
       dim.effHeight,
-      FLOOR_CANVAS_MIN_WIDTH,
-      FLOOR_CANVAS_MIN_HEIGHT,
-      snapToGrid
+      canvasSize.width,
+      canvasSize.height,
+      snapToGrid,
+      FLOOR_GRID_SIZE,
+      true
     );
 
     const isChair = tbl.itemKind === 'chair';
@@ -625,9 +643,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           editingTable.y,
           dim.effWidth,
           dim.effHeight,
-          FLOOR_CANVAS_MIN_WIDTH,
-          FLOOR_CANVAS_MIN_HEIGHT,
-          false
+          canvasSize.width,
+          canvasSize.height,
+          false,
+          FLOOR_GRID_SIZE,
+          true
         );
 
     const savedDoc: TableDoc = {
@@ -752,16 +772,9 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-orange-500 to-red-500 text-white flex items-center justify-center shadow-xs">
               <Layers className="w-4 h-4" />
             </div>
-            <div className="leading-tight">
-              <h1 className="text-sm font-black text-slate-900">
-                {isTh ? 'จัดการผังโต๊ะ (Floor Plan)' : 'Floor Plan Studio'}
-              </h1>
-              <p className="text-[10px] font-semibold text-slate-500">
-                {isTh
-                  ? 'ลากวาง ย่อ-ขยาย และดับเบิลคลิกที่โต๊ะเพื่อแก้ไข • บันทึก Cloud อัตโนมัติ'
-                  : 'Drag to move, resize handles, double-click to edit • Auto-saves to Cloud'}
-              </p>
-            </div>
+            <h1 className="text-sm font-black text-slate-900">
+              {isTh ? 'จัดการผังโต๊ะ (Floor Plan)' : 'Floor Plan Studio'}
+            </h1>
           </div>
         </div>
 
@@ -1032,11 +1045,6 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             <h2 className="text-xs sm:text-sm font-black text-slate-900">
               {isTh ? 'เลือกวางผังโต๊ะและเก้าอี้' : 'Table & Chair Palette'}
             </h2>
-            <p className="text-[11px] text-slate-500 font-medium">
-              {isTh
-                ? 'กดเลือกหรือลากไปวางบนผังร้านได้อิสระ'
-                : 'Click or drag any table or chair onto the floor'}
-            </p>
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 space-y-4">
@@ -1248,17 +1256,17 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             )}
           </div>
 
-          {/* Scrollable Floor Canvas Viewport */}
+          {/* Scrollable Auto-Expanding Floor Canvas Viewport */}
           <div
             ref={canvasViewportRef}
             onClick={() => setSelectedTableId(null)}
-            className="flex-1 min-h-0 overflow-auto p-1.5 sm:p-3 flex items-start justify-center"
+            className="flex-1 min-h-0 overflow-auto p-1.5 sm:p-3 flex items-start"
           >
             <div
-              className="mx-auto origin-top-left transition-transform duration-150"
+              className="mx-auto shrink-0 origin-top-left transition-transform duration-150"
               style={{
-                width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * zoom)}px`,
-                height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * zoom)}px`,
+                width: `${Math.round(canvasSize.width * zoom)}px`,
+                height: `${Math.round(canvasSize.height * zoom)}px`,
               }}
             >
               <div
@@ -1271,8 +1279,8 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
                   }
                 }}
                 style={{
-                  width: `${FLOOR_CANVAS_MIN_WIDTH}px`,
-                  height: `${FLOOR_CANVAS_MIN_HEIGHT}px`,
+                  width: `${canvasSize.width}px`,
+                  height: `${canvasSize.height}px`,
                   transform: `scale(${zoom})`,
                   transformOrigin: 'top left',
                 }}
@@ -1289,8 +1297,8 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
                       ? 'ผังโต๊ะร้านอาหาร'
                       : 'Floor Plan'}
                   </span>
-                  <span className="text-[11px] font-bold">
-                    ({FLOOR_CANVAS_MIN_WIDTH}×{FLOOR_CANVAS_MIN_HEIGHT})
+                  <span className="text-[11px] font-bold tabular-nums">
+                    ({canvasSize.width}×{canvasSize.height})
                   </span>
                 </div>
 
@@ -1414,26 +1422,19 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           >
             {/* Modal Header */}
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="font-extrabold text-base">
-                  {isCreatingNewItem
-                    ? isTh
-                      ? 'เพิ่มโต๊ะใหม่'
-                      : 'Add New Table'
-                    : editingTable.itemKind === 'chair'
-                    ? isTh
-                      ? `แก้ไขเก้าอี้: ${editingTable.name}`
-                      : `Edit Chair: ${editingTable.name}`
-                    : isTh
-                    ? `แก้ไขโต๊ะ: ${editingTable.name}`
-                    : `Edit Table: ${editingTable.name}`}
-                </h3>
-                <p className="text-[11px] text-orange-100 font-medium">
-                  {isTh
-                    ? 'ปรับแต่งรูปแบบ ขนาด การหมุน และบันทึกขึ้น Cloud อัตโนมัติ'
-                    : 'Customize style, dimensions, rotation and save directly to Cloud'}
-                </p>
-              </div>
+              <h3 className="font-extrabold text-base">
+                {isCreatingNewItem
+                  ? isTh
+                    ? 'เพิ่มโต๊ะใหม่'
+                    : 'Add New Table'
+                  : editingTable.itemKind === 'chair'
+                  ? isTh
+                    ? `แก้ไขเก้าอี้: ${editingTable.name}`
+                    : `Edit Chair: ${editingTable.name}`
+                  : isTh
+                  ? `แก้ไขโต๊ะ: ${editingTable.name}`
+                  : `Edit Table: ${editingTable.name}`}
+              </h3>
               <button
                 type="button"
                 onClick={() => {

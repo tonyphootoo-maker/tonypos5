@@ -919,16 +919,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     <div className="space-y-5 pb-8">
       {/* Header with 3 Tabs */}
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-[#F27D26]" />
-            <h1 className="text-2xl font-bold text-white tracking-tight">
-              สูตรอาหาร (Recipe Management)
-            </h1>
-          </div>
-          <p className="text-xs text-white/60 mt-0.5">
-            โครงสร้างสูตรอาหารแบ่งตาม 3 หมวดหมู่หลัก: เมนูอาหาร, ซอสหลัก, และข้าวและเส้น
-          </p>
+        <div className="flex items-center gap-2">
+          <BookOpen className="w-5 h-5 text-[#F27D26]" />
+          <h1 className="text-2xl font-bold text-white tracking-tight">
+            สูตรอาหาร (Recipe Management)
+          </h1>
         </div>
 
         {/* 3 Primary Tabs Navigation */}
@@ -1034,14 +1029,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               {/* Card 1: Central Recipe Ingredients & Sauces */}
               <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
-                  <div>
-                    <h3 className="font-bold text-white text-base">
-                      รายการส่วนประกอบในสูตรกลาง ({nonPackagingItems.length} รายการ)
-                    </h3>
-                    <p className="text-[11px] text-white/50">
-                      รวมวัตถุดิบกลาง และซอสปรุง
-                    </p>
-                  </div>
+                  <h3 className="font-bold text-white text-base">
+                    รายการส่วนประกอบในสูตรกลาง ({nonPackagingItems.length} รายการ)
+                  </h3>
 
                   {/* 2 Add buttons: วัตถุดิบ, ซอสปรุง */}
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -1225,14 +1215,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     <div className="w-8 h-8 rounded-xl bg-[#00B1FF]/20 text-[#00B1FF] flex items-center justify-center border border-[#00B1FF]/30">
                       <Package className="w-4 h-4" />
                     </div>
-                    <div>
-                      <h3 className="font-bold text-white text-base">
-                        ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items) ({packagingAndSideItems.length} รายการ)
-                      </h3>
-                      <p className="text-[11px] text-white/50">
-                        กำหนดกล่องอาหาร บรรจุภัณฑ์ และเครื่องเคียงสำหรับสูตรนี้ ใช้ร่วมกันทุกตัวเลือกเนื้อสัตว์
-                      </p>
-                    </div>
+                    <h3 className="font-bold text-white text-base">
+                      ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items) ({packagingAndSideItems.length} รายการ)
+                    </h3>
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-wrap shrink-0">
@@ -1393,9 +1378,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <h3 className="font-bold text-white text-base mt-0.5">
                     สูตร {currentMenu?.name}
                   </h3>
-                  <p className="text-[11px] text-white/50">
-                    ต้นทุนคงที่สำหรับวัตถุดิบ ซอส เครื่องเคียง และกล่อง
-                  </p>
                 </div>
 
                 {/* Breakdown per category */}
@@ -1589,17 +1571,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       {activeTab === 'RICE_NOODLES' && (
         <div className="space-y-4">
           <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2">
               <Wheat className="w-5 h-5 text-[#FFC107]" />
               <h2 className="text-lg font-bold text-white">
                 การจัดการต้นทุน ข้าวและเส้น (Rice & Noodle Portioning)
               </h2>
             </div>
-            <p className="text-xs text-white/60 max-w-3xl">
-              ข้าวและเส้นเป็นต้นทุนคาร์โบไฮเดรตหลักของร้านอาหารตามสั่ง มีอัตราการขยายตัว (Cooking Yield)
-              เช่น ข้าวสาร 1,000g เมื่อหุงแล้วจะได้ข้าวสุกประมาณ 2,200g (Yield 220%)
-              ระบบคิดคำนวณต้นทุนต่อหนึ่งจานมาตรฐานอย่างแม่นยำ
-            </p>
           </div>
 
           {/* Standard Portion Cards Grid */}

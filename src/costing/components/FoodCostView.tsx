@@ -85,6 +85,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   // Menu reordering (Drag & Drop + Up/Down arrows)
   const [draggedMenuId, setDraggedMenuId] = useState<string | null>(null);
   const [dragOverMenuId, setDragOverMenuId] = useState<string | null>(null);
+  const menuNameClickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (menuNameClickTimerRef.current) clearTimeout(menuNameClickTimerRef.current);
+    };
+  }, []);
 
   const handleMoveMenu = (fromId: string, direction: 'up' | 'down') => {
     const fromIndex = menus.findIndex((m) => m.id === fromId);
@@ -1108,10 +1115,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           {/* Menu names only — one per row */}
           <div className="bg-white border border-stone-200 rounded-2xl shadow-xs overflow-hidden">
             <div className="px-4 py-3 border-b border-stone-200 bg-stone-50 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-black text-stone-900">รายการเมนูอาหาร</h2>
-                <p className="text-[11px] text-stone-500 mt-0.5">คลิกเมนูเพื่อดูรายละเอียดตัวเลือกเนื้อสัตว์และตารางต้นทุน</p>
-              </div>
+              <h2 className="text-sm font-black text-stone-900">รายการเมนูอาหาร</h2>
               <span className="text-xs font-mono font-bold text-stone-600">{filteredMenus.length} เมนู</span>
             </div>
 
@@ -1185,7 +1189,29 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           <UtensilsCrossed className="w-4 h-4" />
                         </span>
                         <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-stone-900 truncate">{menu.name}</span>
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (menuNameClickTimerRef.current) clearTimeout(menuNameClickTimerRef.current);
+                              if (e.detail >= 2) return;
+                              menuNameClickTimerRef.current = setTimeout(() => {
+                                menuNameClickTimerRef.current = null;
+                                setSelectedMenuId(isSelected ? null : menu.id);
+                              }, 200);
+                            }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              if (menuNameClickTimerRef.current) {
+                                clearTimeout(menuNameClickTimerRef.current);
+                                menuNameClickTimerRef.current = null;
+                              }
+                              handleOpenEditMenu(menu);
+                            }}
+                            title="ดับเบิลคลิกที่ชื่อเมนูเพื่อแก้ไข"
+                            className="text-sm font-bold text-stone-900 hover:text-[#F27D26] transition-colors truncate cursor-pointer"
+                          >
+                            {menu.name}
+                          </span>
                           <span className="text-[11px] text-stone-500 font-medium">
                             ({menu.variants.length} ตัวเลือก)
                           </span>
@@ -1253,18 +1279,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           <div className="bg-[#FFFDF9] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917] max-h-[90vh] overflow-y-auto scrollbar-thin">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-stone-200 pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-black text-stone-900 text-lg">
-                    {selectedBreakdown.menu.name} ({selectedBreakdown.variant.name})
-                  </h3>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-stone-100 text-stone-700 border border-stone-300">
-                    {selectedBreakdown.menu.category}
-                  </span>
-                </div>
-                <p className="text-xs text-stone-600 mt-0.5">
-                  รายละเอียดการคำนวณต้นทุนต่อจานอย่างละเอียด (Deterministic Costing)
-                </p>
+              <div className="flex items-center gap-2">
+                <h3 className="font-black text-stone-900 text-lg">
+                  {selectedBreakdown.menu.name} ({selectedBreakdown.variant.name})
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-stone-100 text-stone-700 border border-stone-300">
+                  {selectedBreakdown.menu.category}
+                </span>
               </div>
               <button
                 type="button"
@@ -2069,17 +2090,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <span className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-xs shrink-0">
                   <AlertTriangle className="w-5 h-5" />
                 </span>
-                <div>
-                  <h3 className="font-black text-stone-950 text-base sm:text-lg flex items-center gap-2">
-                    <span>รายการเมนูต้นทุนสูง / ควรทบทวน</span>
-                    <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-xs font-mono font-black">
-                      {warningRows.length} รายการ
-                    </span>
-                  </h3>
-                  <p className="text-xs text-stone-600 font-medium mt-0.5">
-                    เมนูที่มี Food Cost สูงเกินเป้า ({settings.targetFoodCostPercent || 35}%), กำไรติดลบ หรือสูตรต้องตรวจสอบ
-                  </p>
-                </div>
+                <h3 className="font-black text-stone-950 text-base sm:text-lg flex items-center gap-2">
+                  <span>รายการเมนูต้นทุนสูง / ควรทบทวน</span>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-xs font-mono font-black">
+                    {warningRows.length} รายการ
+                  </span>
+                </h3>
               </div>
               <button
                 type="button"

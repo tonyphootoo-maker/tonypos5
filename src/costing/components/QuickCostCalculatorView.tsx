@@ -553,19 +553,13 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
     <div className="space-y-6 pb-12">
       {/* Page Header */}
       <div className="bg-[#FFFDF9] border border-[#EAE4D9] p-5 sm:p-6 rounded-2xl flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="w-8 h-8 rounded-xl bg-[#F27D26]/10 text-[#F27D26] flex items-center justify-center font-bold">
-              <Calculator className="w-4 h-4" />
-            </span>
-            <h1 className="text-xl sm:text-2xl font-bold text-stone-900 tracking-tight">
-              เครื่องคิดเลขคำนวณต้นทุนอาหารตามหลักสากล (Recipe Cost Calculator)
-            </h1>
-          </div>
-          <p className="text-xs text-stone-500 mt-1 max-w-3xl">
-            คำนวณต้นทุนต่อจานอย่างแม่นยำด้วยการแจกแจงรายการจริง: วัตถุดิบหลัก, เครื่องปรุงย่อย/Q-Factor และบรรจุภัณฑ์ 
-            อิงราคาซื้อ (AP), อัตราผลผลิต (Yield %) และต้นทุนเนื้อแท้ (EP) ตามหลักสากล ไร้การคาดคะเน
-          </p>
+        <div className="flex items-center gap-2">
+          <span className="w-8 h-8 rounded-xl bg-[#F27D26]/10 text-[#F27D26] flex items-center justify-center font-bold">
+            <Calculator className="w-4 h-4" />
+          </span>
+          <h1 className="text-xl sm:text-2xl font-bold text-stone-900 tracking-tight">
+            เครื่องคิดเลขคำนวณต้นทุนอาหารตามหลักสากล (Recipe Cost Calculator)
+          </h1>
         </div>
 
         {/* Quick Presets */}

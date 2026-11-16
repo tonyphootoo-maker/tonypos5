@@ -139,15 +139,10 @@ export const SettingsPage: React.FC<Props> = ({
 
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6 select-none">
-      <div>
-        <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
-          <Settings className="w-6 h-6 text-neutral-700" />
-          <span>{t.settings.title}</span>
-        </h2>
-        <p className="text-xs text-neutral-500 mt-1">
-          Configure business info, food cost warnings, tax/service rates, PromptPay QR image, and daily closing times.
-        </p>
-      </div>
+      <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
+        <Settings className="w-6 h-6 text-neutral-700" />
+        <span>{t.settings.title}</span>
+      </h2>
 
       {saveSuccess && (
         <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-800 text-xs font-bold flex items-center gap-2">
@@ -555,13 +550,10 @@ export const SettingsPage: React.FC<Props> = ({
 
       {/* Daily Summaries Integrity Audit & Rebuild Section */}
       <div className="p-5 bg-white rounded-3xl border border-neutral-200 shadow-xs space-y-3">
-        <div>
-          <h3 className="font-extrabold text-sm text-neutral-900 flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-600" />
-            <span>{t.settings.rebuildSummariesTitle}</span>
-          </h3>
-          <p className="text-xs text-neutral-500 mt-1">{t.settings.rebuildSummariesDesc}</p>
-        </div>
+        <h3 className="font-extrabold text-sm text-neutral-900 flex items-center gap-2">
+          <ShieldCheck className="w-5 h-5 text-emerald-600" />
+          <span>{t.settings.rebuildSummariesTitle}</span>
+        </h3>
 
         {auditResult && (
           <div
@@ -626,16 +618,9 @@ export const SettingsPage: React.FC<Props> = ({
         >
           <div className="flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-orange-600 shrink-0" />
-            <div>
-              <h3 className="font-extrabold text-sm text-neutral-900">
-                {t.settings.formulaGuideBtn}
-              </h3>
-              <p className="text-xs text-neutral-500">
-                {lang === 'th'
-                  ? 'คู่มืออธิบายสูตรและตัวอย่างตัวเลขจริงสำหรับตรวจสอบบัญชีด้วยตนเอง (USALI Standard)'
-                  : 'Complete reference of every costing & P&L formula with worked numeric examples'}
-              </p>
-            </div>
+            <h3 className="font-extrabold text-sm text-neutral-900">
+              {t.settings.formulaGuideBtn}
+            </h3>
           </div>
           {showFormulaGuide ? (
             <ChevronUp className="w-5 h-5 text-neutral-500 shrink-0" />

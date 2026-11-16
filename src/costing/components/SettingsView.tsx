@@ -66,14 +66,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
     <div className="space-y-4 pb-8">
       {/* Header */}
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            ตั้งค่าระบบร้าน (Restaurant System Settings)
-          </h1>
-          <p className="text-xs text-white/60 mt-0.5">
-            กำหนดค่าโสหุ้ยต่อจาน, ค่าคอมมิชชั่น GP เดลิเวอรี, เป้าหมาย Food Cost %, และสิทธิ์การใช้งาน
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold text-white tracking-tight">
+          ตั้งค่าระบบร้าน (Restaurant System Settings)
+        </h1>
 
         <button
           type="submit"
@@ -258,14 +253,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
         <div className="bg-white/5 backdrop-blur-xl p-6 rounded-3xl border border-white/10 shadow-xl space-y-4">
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <Package className="w-5 h-5 text-[#F27D26]" />
-            <div>
-              <h2 className="text-base font-bold text-white">
-                Sales Channels & ค่า GP เดลิเวอรี (Owner-Defined GP%)
-              </h2>
-              <p className="text-[11px] text-white/50">
-                กำหนดค่าคอมมิชชั่น GP % แยกตามช่องทางขาย (GrabFood และ LINE MAN)
-              </p>
-            </div>
+            <h2 className="text-base font-bold text-white">
+              Sales Channels & ค่า GP เดลิเวอรี (Owner-Defined GP%)
+            </h2>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -408,14 +398,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
               <div className="w-8 h-8 rounded-xl bg-[#F27D26] text-white flex items-center justify-center font-bold shadow-xs">
                 <Smartphone className="w-4 h-4" />
               </div>
-              <div>
-                <h2 className="text-base font-bold text-white">
-                  แอปมือถือ & แท็บเล็ต และไอคอนแอป (Mobile PWA & App Icon)
-                </h2>
-                <p className="text-[11px] text-white/60">
-                  ดาวน์โหลดติดตั้งแอปไว้บนหน้าจอโฮมของมือถือ/แท็บเล็ต และปรับแต่งรูปไอคอนแอปตามต้องการ
-                </p>
-              </div>
+              <h2 className="text-base font-bold text-white">
+                แอปมือถือ & แท็บเล็ต และไอคอนแอป (Mobile PWA & App Icon)
+              </h2>
             </div>
           </div>
 

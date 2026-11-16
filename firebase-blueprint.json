@@ -140,6 +140,7 @@
         "netSales": { "type": "number" },
         "totalAmount": { "type": "number" },
         "totalFoodCost": { "type": "number" },
+        "order": { "type": "number" },
         "version": { "type": "number" }
       }
     },

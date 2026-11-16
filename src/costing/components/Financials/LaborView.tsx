@@ -82,16 +82,9 @@ export const LaborView: React.FC<LaborViewProps> = ({
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <span>{activeLanguage === 'th' ? 'การจัดการแรงงาน & ค่าจ้าง (Labor & Payroll)' : 'Labor & Payroll'}</span>
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {activeLanguage === 'th'
-              ? 'คำนวณค่าแรงครัว (Direct Labor) และค่าแรงหน้าร้าน เพื่อควบคุม Prime Cost ไม่ให้เกินมาตรฐาน 55-60%'
-              : 'Direct kitchen labor and FOH wages to control overall Prime Cost %.'}
-          </p>
-        </div>
+        <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <span>{activeLanguage === 'th' ? 'การจัดการแรงงาน & ค่าจ้าง (Labor & Payroll)' : 'Labor & Payroll'}</span>
+        </h1>
 
         <button
           type="button"

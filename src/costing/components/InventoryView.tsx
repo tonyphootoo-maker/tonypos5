@@ -108,14 +108,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     <div className="space-y-4 pb-8">
       {/* Header */}
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            ระบบคลังสินค้าและของเสีย (Inventory & Stock Control)
-          </h1>
-          <p className="text-xs text-white/60 mt-0.5">
-            ตรวจนับสต็อกคงเหลือ, แจ้งเตือนของใกล้หมด, และบันทึกของเสียเพื่อคุมต้นทุนรั่วไหล
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold text-white tracking-tight">
+          ระบบคลังสินค้าและของเสีย (Inventory & Stock Control)
+        </h1>
 
         <button
           type="button"

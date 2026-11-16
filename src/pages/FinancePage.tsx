@@ -179,15 +179,10 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4 select-none">
       {/* Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
-            <CircleDollarSign className="w-6 h-6 text-emerald-600" />
-            <span>{t.finance.title}</span>
-          </h2>
-          <p className="text-xs text-neutral-500">
-            Track fixed overhead, recurring utilities, staff wages, and calculate restaurant break-even targets.
-          </p>
-        </div>
+        <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
+          <CircleDollarSign className="w-6 h-6 text-emerald-600" />
+          <span>{t.finance.title}</span>
+        </h2>
       </div>
 
       {/* Tabs */}
@@ -404,13 +399,10 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
       {/* TAB: BREAK-EVEN CALCULATOR */}
       {activeTab === 'breakeven' && (
         <div className="max-w-2xl bg-white p-5 rounded-3xl border border-neutral-200 shadow-xs space-y-4">
-          <div>
-            <h3 className="font-black text-base text-neutral-900 flex items-center gap-2">
-              <Calculator className="w-5 h-5 text-orange-600" />
-              <span>{t.finance.tabBreakEven}</span>
-            </h3>
-            <p className="text-xs text-neutral-500 mt-0.5">{t.finance.breakEvenFormulaNote}</p>
-          </div>
+          <h3 className="font-black text-base text-neutral-900 flex items-center gap-2">
+            <Calculator className="w-5 h-5 text-orange-600" />
+            <span>{t.finance.tabBreakEven}</span>
+          </h3>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-neutral-50 rounded-2xl text-xs">
             <div>

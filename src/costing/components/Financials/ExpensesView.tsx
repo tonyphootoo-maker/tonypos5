@@ -146,16 +146,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <span>{activeLanguage === 'th' ? 'บันทึกค่าใช้จ่ายดำเนินงาน (Operating Expenses)' : 'Operating Expenses'}</span>
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {activeLanguage === 'th'
-              ? 'แยกประเภทต้นทุนคงที่ (Fixed Costs) และต้นทุนผันแปร (Variable Costs) พร้อมคำนวณแปลงรายเดือน ค่าเสื่อมราคา และจัดการรายการยกเว้น'
-              : 'Categorize fixed overheads vs variable operational expenses, normalized monthly with depreciation and exclusions.'}
-          </p>
-        </div>
+        <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <span>{activeLanguage === 'th' ? 'บันทึกค่าใช้จ่ายดำเนินงาน (Operating Expenses)' : 'Operating Expenses'}</span>
+        </h1>
 
         <button
           type="button"

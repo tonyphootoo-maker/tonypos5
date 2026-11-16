@@ -64,13 +64,25 @@ import {
 interface Props {
   settings: SettingsDoc;
   lang: Language;
+  initialEditDishRequest?: {
+    dishId: string;
+    categoryId?: string | null;
+    nonce: number;
+  } | null;
+  onClearEditDishRequest?: () => void;
 }
 
 type TabType = 'dishes' | 'categories' | 'channels';
 
-export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
+export const MenuFoodCostPage: React.FC<Props> = ({
+  settings,
+  lang,
+  initialEditDishRequest,
+  onClearEditDishRequest,
+}) => {
   const t = translations[lang];
   const [activeTab, setActiveTab] = useState<TabType>('dishes');
+  const handledEditNonceRef = useRef<number | null>(null);
 
   // Master collections
   const [ingredients, setIngredients] = useState<IngredientDoc[]>([]);
@@ -658,6 +670,24 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
     setIsDishModalOpen(true);
   };
 
+  useEffect(() => {
+    if (!initialEditDishRequest || dishes.length === 0) return;
+    if (handledEditNonceRef.current === initialEditDishRequest.nonce) return;
+
+    const targetDish = dishes.find((d) => d.id === initialEditDishRequest.dishId);
+    if (!targetDish) return;
+
+    handledEditNonceRef.current = initialEditDishRequest.nonce;
+    setActiveTab('dishes');
+    if (initialEditDishRequest.categoryId && initialEditDishRequest.categoryId !== 'all') {
+      setSelectedCategoryId(initialEditDishRequest.categoryId);
+    } else if (targetDish.categoryId) {
+      setSelectedCategoryId(targetDish.categoryId);
+    }
+    openEditDish(targetDish);
+    onClearEditDishRequest?.();
+  }, [initialEditDishRequest, dishes]);
+
   // ==========================================
   // DISH & RECIPE HANDLERS
   // ==========================================
@@ -822,17 +852,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
       {/* Top Header & Tab Chips */}
       <div className="shrink-0 max-w-7xl w-full mx-auto px-4 sm:px-6 pt-3 sm:pt-4 pb-2 space-y-2.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div>
-            <h2 className="text-lg sm:text-xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
-              <UtensilsCrossed className="w-5 h-5 text-orange-600" />
-              <span>{t.menuCost.title}</span>
-            </h2>
-            <p className="text-[11px] text-neutral-500">
-              {lang === 'th'
-                ? 'เพิ่ม ลบ แก้ไข เมนูหน้าร้าน POS • เชื่อมโยงตัวเลือกและต้นทุนจริงจากต้นทุนอาหารอัตโนมัติ'
-                : 'Manage front-of-house POS menu items • Primary options & real costs synced live from Food Cost'}
-            </p>
-          </div>
+          <h2 className="text-lg sm:text-xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
+            <UtensilsCrossed className="w-5 h-5 text-orange-600" />
+            <span>{t.menuCost.title}</span>
+          </h2>
 
           {/* Search */}
           <div className="relative w-full sm:w-64">
@@ -967,7 +990,14 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
                         </div>
 
                         <div className="flex-1 min-w-0">
-                          <h4 className="font-black text-xs text-neutral-900 truncate leading-tight">
+                          <h4
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              openEditDish(dish);
+                            }}
+                            title={lang === 'th' ? 'ดับเบิลคลิกที่ชื่อเมนูเพื่อแก้ไข' : 'Double-click dish name to edit'}
+                            className="font-black text-xs text-neutral-900 hover:text-orange-600 transition-colors truncate leading-tight cursor-pointer"
+                          >
                             {lang === 'th' && dish.nameTh ? dish.nameTh : dish.name}
                           </h4>
                           <p className="text-[10px] text-neutral-500 truncate leading-tight mt-0.5">
@@ -1321,16 +1351,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
           >
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
-              <div>
-                <h3 className="font-extrabold text-base">
-                  {editingDish.id ? t.menuCost.editDish : t.menuCost.addDish}
-                </h3>
-                <p className="text-xs text-orange-100">
-                  {lang === 'th'
-                    ? 'จัดการข้อมูลเมนูสำหรับขายหน้าร้าน POS • เชื่อมตัวเลือกจริงจากต้นทุนอาหาร'
-                    : 'POS Menu Details & Real-Time Food Cost Options'}
-                </p>
-              </div>
+              <h3 className="font-extrabold text-base">
+                {editingDish.id ? t.menuCost.editDish : t.menuCost.addDish}
+              </h3>
               <button
                 type="button"
                 onClick={() => setIsDishModalOpen(false)}
@@ -2372,18 +2395,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
               <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ChefHat className="w-5 h-5" />
-                  <div>
-                    <h3 className="font-extrabold text-base">
-                      {selectedCostMenu
-                        ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
-                        : 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'}
-                    </h3>
-                    <p className="text-[11px] text-orange-100">
-                      {selectedCostMenu
-                        ? 'แสดงเฉพาะตัวเลือกที่มีอยู่ในรายการเมนูที่เลือกเท่านั้น'
-                        : 'ขั้นตอนที่ 1: เลือกรายการเมนูอาหารก่อน จากนั้นเลือกตัวเลือกของเมนูนั้นๆ'}
-                    </p>
-                  </div>
+                  <h3 className="font-extrabold text-base">
+                    {selectedCostMenu
+                      ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
+                      : 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'}
+                  </h3>
                 </div>
                 <button
                   type="button"
@@ -2733,12 +2749,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sliders className="w-5 h-5" />
-                <div>
-                  <h3 className="font-extrabold text-base">เลือกตัวเลือกย่อยที่ใช้งาน</h3>
-                  <p className="text-[11px] text-orange-100">
-                    เลือกกลุ่มตัวเลือกเสริมที่ต้องการนำมาใช้งานกับเมนูนี้
-                  </p>
-                </div>
+                <h3 className="font-extrabold text-base">เลือกตัวเลือกย่อยที่ใช้งาน</h3>
               </div>
               <button
                 type="button"

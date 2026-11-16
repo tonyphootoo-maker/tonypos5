@@ -879,6 +879,33 @@ export async function saveCategoriesOrder(
   }
 }
 
+export async function saveBillsOrder(
+  orderedBills: Pick<BillDoc, 'id' | 'order' | 'version'>[]
+): Promise<void> {
+  if (orderedBills.length === 0) return;
+  const uid = getCurrentUid();
+  const batch = writeBatch(db);
+  const now = new Date().toISOString();
+
+  for (const bill of orderedBills) {
+    const ref = doc(db, `users/${uid}/bills/${bill.id}`);
+    batch.update(
+      ref,
+      stripUndefined({
+        order: bill.order,
+        updatedAt: now,
+        version: (bill.version || 0) + 1,
+      })
+    );
+  }
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `users/${uid}/bills`);
+  }
+}
+
 // ==========================================
 // Atomic Bill Number Generation via Counter
 // Format: T{TableNo}-{BE_YYMMDD} (e.g. T2-691115)

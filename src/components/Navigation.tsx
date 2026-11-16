@@ -386,9 +386,6 @@ export const Navigation: React.FC<Props> = ({
                   Pro
                 </span>
               </div>
-              <p className="text-[11px] text-orange-100 font-medium truncate max-w-[180px]">
-                {t.appName}
-              </p>
             </div>
           </div>
           <button
@@ -436,13 +433,6 @@ export const Navigation: React.FC<Props> = ({
                           <Sparkles className="w-3.5 h-3.5 text-amber-200 shrink-0" />
                         )}
                       </div>
-                      <p
-                        className={`text-[11px] truncate mt-0.5 ${
-                          isActive ? 'text-orange-100' : 'text-slate-400 group-hover:text-slate-600'
-                        }`}
-                      >
-                        {item.desc[lang]}
-                      </p>
                     </div>
                   </button>
                 );
@@ -530,9 +520,6 @@ export const Navigation: React.FC<Props> = ({
                 <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700 border border-orange-200">
                   Pro
                 </span>
-              </div>
-              <div className="text-[10px] text-slate-500 font-medium truncate max-w-[150px] sm:max-w-xs">
-                {t.appName}
               </div>
             </div>
           </div>

@@ -232,6 +232,7 @@ export interface BillDoc extends BaseDoc {
   paidAt?: string;
   voidReason?: string;
   voidedAt?: string;
+  order?: number;
 }
 
 export interface ExpenseDoc extends BaseDoc {

@@ -343,344 +343,413 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     });
   }
 
-  const generatedAdvices: WhatShouldIDoAdvice[] = advices && advices.length > 0 ? advices : defaultAdvicesList;
+  const generatedAdvices: WhatShouldIDoAdvice[] =
+    advices && advices.length > 0 ? advices : defaultAdvicesList;
+
+  const targetFoodCostPct =
+    settings.defaultTargetFoodCostPercent || currentSettings.defaultTargetFoodCostPercent || 30;
+  const targetPrimeCostPct = currentSettings.primeCostTargetPercent || 55;
+  const isFoodCostHigh = avgFoodCostPercent > targetFoodCostPct;
+  const isPrimeCostHigh = pnl.primeCostPercent > targetPrimeCostPct;
 
   return (
-    <div className="space-y-6">
-      {/* Top Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-xl bg-[#151518] border border-white/10 p-6 text-white">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="inline-block h-2 w-2 rounded-full bg-[#10B981] animate-pulse"></span>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#10B981]">
-              {activeLanguage === 'th' ? 'สถานะร้านค้า: ระบบพร้อมใช้งาน' : 'Engine Live & Active'}
-            </span>
-          </div>
-          <h1 className="mt-1 text-xl sm:text-2xl font-light tracking-tight text-white">
-            {activeLanguage === 'th' ? 'แดชบอร์ดบริหารต้นทุน & กำไร' : 'Executive Cost & Profit Overview'}
-          </h1>
-          <p className="mt-1 text-xs text-white/40">
-            {activeLanguage === 'th'
-              ? 'สรุปตัวเลขทางการเงิน ความสามารถในการทำกำไรต่อจาน และจุดคุ้มทุนแบบ Real-Time'
-              : 'Holistic view of restaurant margins, portion costs, platform GP, and break-even status.'}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {syncFeedback && (
-            <span className="text-xs text-amber-300 bg-amber-950/60 px-2.5 py-1.5 rounded-lg border border-amber-500/30">
-              {syncFeedback}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={handleSyncLivePOS}
-            disabled={isSyncingSales}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 px-3.5 py-2 text-xs font-medium text-emerald-400 transition-all cursor-pointer disabled:opacity-50"
-            title="ดึงยอดขายสดล่าสุดจาก Firebase Firestore ที่ POS บันทึกเข้ามา"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isSyncingSales ? 'animate-spin' : ''}`} />
-            <span>{isSyncingSales ? 'กำลังซิงค์ POS...' : '📡 ซิงค์ยอดขายสดจาก POS'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleNavigate('scenario_calculator')}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#FF6321] hover:bg-[#FF6321]/90 px-4 py-2 text-xs font-semibold text-white transition-all shadow-sm cursor-pointer"
-          >
-            <TrendingUp className="h-4 w-4" />
-            <span>{activeLanguage === 'th' ? 'จำลองผลกระทบราคา (What-If)' : 'Scenario Simulator'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Warning banner when duplicate payroll expenses exist */}
-      {hasDuplicatePayroll && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-amber-300 text-xs flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
-          <span>พบรายจ่ายหมวดเงินเดือน ระบบไม่นับซ้ำ เพราะใช้ข้อมูลจากหน้าพนักงาน</span>
-        </div>
-      )}
-
-      {/* 8 Essential Restaurant KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 1. Today's Net Sales */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? 'ยอดขายวันนี้' : "Today's Net"}
-            </span>
-            <span className="text-[#10B981] text-[10px] bg-[#10B981]/10 px-2 py-0.5 rounded-full font-mono font-medium">
-              +{todayOrders} {activeLanguage === 'th' ? 'บิล' : 'orders'}
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-white font-mono">
-              ฿{sales.length > 0 ? todayNetSales.toLocaleString() : '0.00'}
-            </span>
-            <span className="text-xs text-white/20 font-mono">NET</span>
-          </div>
-          <div className="mt-2 text-[10px] text-white/40">
-            {sales.length > 0
-              ? `${todayOrders} ${activeLanguage === 'th' ? 'รายการคำสั่งซื้อล่าสุด' : 'recent transactions'}`
-              : (activeLanguage === 'th' ? 'ยังไม่มีข้อมูลยอดขาย' : 'No sales data yet')}
-          </div>
-        </div>
-
-        {/* 2. Monthly Net Sales */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? 'ยอดขายสุทธิเดือนนี้' : 'Monthly Net'}
-            </span>
-            <span className="text-[#00B1FF] text-[10px] bg-[#00B1FF]/10 px-2 py-0.5 rounded-full font-mono font-medium">
-              Active MTD
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-white">฿{monthlyNetSales.toLocaleString()}</span>
-            <span className="text-xs text-white/20 font-mono">NET</span>
-          </div>
-          <div className="mt-2 text-[10px] text-white/40">
-            {activeLanguage === 'th' ? 'หักส่วนลด & คืนเงินแล้ว' : 'Net of discounts & refunds'}
-          </div>
-        </div>
-
-        {/* 3. Food Cost % */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? '% ต้นทุนอาหาร' : 'Food Cost %'}
-            </span>
-            <span
-              className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium ${
-                avgFoodCostPercent > (settings.defaultTargetFoodCostPercent || currentSettings.defaultTargetFoodCostPercent || 30)
-                  ? 'text-[#F59E0B] bg-[#F59E0B]/10'
-                  : 'text-[#10B981] bg-[#10B981]/10'
-              }`}
-            >
-              {avgFoodCostPercent > (settings.defaultTargetFoodCostPercent || currentSettings.defaultTargetFoodCostPercent || 30) ? 'Above Target' : 'Healthy'}
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-white">{avgFoodCostPercent.toFixed(1)}%</span>
-            <span className="text-xs text-white/20 font-mono">TARGET {currentSettings.defaultTargetFoodCostPercent || 30}%</span>
-          </div>
-          <div className="mt-2 text-[10px] text-white/40">
-            {avgFoodCostPercent > (currentSettings.defaultTargetFoodCostPercent || 30)
-              ? `⚠️ สูงกว่าเป้า +${(avgFoodCostPercent - (currentSettings.defaultTargetFoodCostPercent || 30)).toFixed(1)}%`
-              : '✅ อยู่ในเกณฑ์มาตรฐาน'}
-          </div>
-        </div>
-
-        {/* 4. Prime Cost % */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? '% Prime Cost' : 'Prime Cost %'}
-            </span>
-            <span
-              className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-medium ${
-                pnl.primeCostPercent <= (currentSettings.primeCostTargetPercent || 55)
-                  ? 'text-[#10B981] bg-[#10B981]/10'
-                  : 'text-[#EF4444] bg-[#EF4444]/10'
-              }`}
-            >
-              {pnl.primeCostPercent <= (currentSettings.primeCostTargetPercent || 55) ? 'Healthy' : 'High'}
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-white">{pnl.primeCostPercent.toFixed(1)}%</span>
-            <span className="text-xs text-white/20 font-mono">COGS+LABOR</span>
-          </div>
-          <div className="mt-2 text-[10px] text-white/40">
-            {activeLanguage === 'th' ? `เป้าหมายไม่เกิน ${currentSettings.primeCostTargetPercent || 55}%` : `Target ≤ ${currentSettings.primeCostTargetPercent || 55}%`}
-          </div>
-        </div>
-
-        {/* 5. Gross Profit */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? 'กำไรขั้นต้น (GP)' : 'Gross Profit'}
-            </span>
-            <span className="text-[#10B981] text-[10px] bg-[#10B981]/10 px-2 py-0.5 rounded-full font-mono font-medium">
-              {pnl.grossMarginPercent.toFixed(1)}%
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-[#10B981]">฿{pnl.grossProfit.toLocaleString()}</span>
-            <span className="text-xs text-white/20 font-mono">MARGIN</span>
-          </div>
-          <div className="mt-2 text-[10px] text-white/40">
-            {activeLanguage === 'th' ? 'หลังหัก COGS อาหาร & บรรจุภัณฑ์' : 'After Food & Packaging COGS'}
-          </div>
-        </div>
-
-        {/* 6. Operating Profit */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? 'กำไรดำเนินงาน' : 'Operating Profit'}
-            </span>
-            <span className="text-white/40 text-[10px] font-mono">
-              OP {pnl.operatingMarginPercent.toFixed(1)}%
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-white">฿{pnl.operatingProfit.toLocaleString()}</span>
-            <span className="text-xs text-white/20 font-mono">EBITDA</span>
-          </div>
-          <div className="mt-2 text-[10px] text-white/40">
-            {activeLanguage === 'th' ? 'หลังหักค่าใช้จ่ายบริหารทั้งหมด' : 'After OPEX & Store Overheads'}
-          </div>
-        </div>
-
-        {/* 7. Net Profit */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? 'กำไรสุทธิ' : 'Net Profit'}
-            </span>
-            <span className="text-[#10B981] text-[10px] bg-[#10B981]/10 px-2 py-0.5 rounded-full font-mono font-medium">
-              Net {pnl.netMarginPercent.toFixed(1)}%
-            </span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-[#10B981]">฿{pnl.netProfit.toLocaleString()}</span>
-            <span className="text-xs text-white/20 font-mono">BOTTOM LINE</span>
-          </div>
-          <div className="mt-2 text-[10px] text-white/40">
-            {activeLanguage === 'th' ? `ประมาณการภาษีเงินได้ ${incomeTaxRate}%` : `Estimated income tax @ ${incomeTaxRate}%`}
-          </div>
-        </div>
-
-        {/* 8. Break-Even Target */}
-        <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] text-white/40 uppercase font-bold tracking-wider">
-              {activeLanguage === 'th' ? 'จุดคุ้มทุน' : 'Break-Even Gap'}
-            </span>
-            <span className="text-white/30 text-[10px] font-mono">DAILY EST.</span>
-          </div>
-          <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-light tracking-tight text-white">฿{Math.round(breakEven.breakEvenSales).toLocaleString()}</span>
-            <span className="text-xs text-white/20 font-mono">TARGET</span>
-          </div>
-          <div className="mt-2 text-[10px] text-[#10B981] font-mono">
-            {activeLanguage === 'th'
-              ? `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/วัน (${breakEven.breakEvenDailyOrders} จาน/วัน)`
-              : `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/day`}
-          </div>
-        </div>
-      </div>
-
-      {/* Actionable Intelligence Section (WHAT SHOULD I DO?) */}
-      <WhatShouldIDoSection
-        advices={generatedAdvices}
-        activeLanguage={activeLanguage}
-        onNavigate={handleNavigate}
+    <div className="exec-glass-dashboard relative rounded-3xl overflow-hidden border border-white/90 bg-gradient-to-br from-[#EEF2FF]/90 via-[#F8FAFC]/95 to-[#FFF7ED]/90 shadow-[0_20px_50px_-15px_rgba(15,23,42,0.09)] p-4 sm:p-6 lg:p-7">
+      {/* Subtle diffused ambient mesh lights for authentic glass refraction */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-sky-300/20 blur-3xl"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-24 -right-24 h-80 w-80 rounded-full bg-orange-300/20 blur-3xl"
       />
 
-      {/* Menu Profitability Summary Table */}
-      <div className="bg-[#151518] rounded-xl border border-white/5 p-5">
-        <div className="flex items-center justify-between mb-4">
+      <div className="relative z-10 space-y-6">
+        {/* Band 1: Glass Command Header */}
+        <header className="rounded-2xl bg-white/65 backdrop-blur-xl border border-white/85 p-5 sm:p-6 shadow-[0_8px_28px_-6px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.95)] flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <h2 className="text-xs font-bold uppercase tracking-widest text-white/60">
-              {activeLanguage === 'th' ? 'วิเคราะห์ต้นทุนและกำไรของเมนูหลัก' : 'Menu Cost & Profit Breakdown'}
-            </h2>
-            <p className="text-xs text-white/40 mt-0.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
               {activeLanguage === 'th'
-                ? 'เปรียบเทียบต้นทุนอาหารทางตรง ค่าบรรจุภัณฑ์ ราคาขาย และ % Food Cost'
-                : 'Direct food cost, packaging cost, selling price, and profit per portion.'}
-            </p>
+                ? 'แดชบอร์ดบริหาร & คำแนะนำเชิงธุรกิจ'
+                : 'Executive Cost & Profit Overview'}
+            </h1>
           </div>
 
-          <button
-            type="button"
-            onClick={() => handleNavigate('menu_costing')}
-            className="text-xs font-semibold text-[#FF6321] hover:text-[#FF6321]/80 inline-flex items-center gap-1 cursor-pointer"
-          >
-            <span>{activeLanguage === 'th' ? 'ดูเมนูทั้งหมด' : 'View All Menus'}</span>
-            <ArrowUpRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {syncFeedback && (
+              <span className="text-xs font-medium text-amber-800 bg-amber-50/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-amber-200/80">
+                {syncFeedback}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleSyncLivePOS}
+              disabled={isSyncingSales}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white/75 hover:bg-white border border-slate-200/90 px-3.5 py-2 text-xs font-semibold text-slate-700 transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              title="ดึงยอดขายสดล่าสุดจาก Firebase Firestore ที่ POS บันทึกเข้ามา"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 text-emerald-600 ${isSyncingSales ? 'animate-spin' : ''}`} />
+              <span>
+                {isSyncingSales
+                  ? activeLanguage === 'th'
+                    ? 'กำลังซิงค์...'
+                    : 'Syncing...'
+                  : activeLanguage === 'th'
+                  ? 'ซิงค์ยอดขายจาก POS'
+                  : 'Sync Live POS'}
+              </span>
+            </button>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="text-white/30 border-b border-white/5 font-normal uppercase tracking-tighter">
-                <th className="py-2.5 px-3">รหัส / ชื่อเมนู</th>
-                <th className="py-2.5 px-3">พอร์ชั่น</th>
-                <th className="py-2.5 px-3 text-right">ต้นทุนอาหาร (฿)</th>
-                <th className="py-2.5 px-3 text-right">กล่อง (฿)</th>
-                <th className="py-2.5 px-3 text-right">ต้นทุนรวม (฿)</th>
-                <th className="py-2.5 px-3 text-right">ราคาขาย (฿)</th>
-                <th className="py-2.5 px-3 text-right">% Food Cost</th>
-                <th className="py-2.5 px-3 text-right">กำไรต่อจาน (฿)</th>
-                <th className="py-2.5 px-3 text-center">สถานะ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5 font-mono text-white/80">
-              {menuItems.map((menu: any) => {
-                const portionsList = getMenuPortions(menu);
-                if (!portionsList || portionsList.length === 0) return null;
-                const targetFoodCost = (currentSettings?.defaultTargetFoodCostPercent || settings?.defaultTargetFoodCostPercent || 35);
-                return portionsList.map((portion: any, pIdx: number) => {
-                  const isHighFoodCost = (portion.foodCostPercent || 0) > targetFoodCost;
-                  return (
-                    <tr key={`${menu.id}-${portion.id}`} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-3 px-3 font-medium text-white">
-                        {pIdx === 0 ? (
-                          <div>
-                            <div className="font-semibold text-white font-sans">{menu.thaiName || menu.name || 'เมนู'}</div>
-                            <div className="text-[11px] text-white/30 font-mono">{menu.code || '-'}</div>
-                          </div>
-                        ) : (
-                          <span className="text-white/30 pl-4">↳</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 text-white/60 font-sans">{portion.name}</td>
-                      <td className="py-3 px-3 text-right">฿{(portion.directFoodCost || 0).toFixed(2)}</td>
-                      <td className="py-3 px-3 text-right text-white/40">฿{(portion.packagingCost || 0).toFixed(2)}</td>
-                      <td className="py-3 px-3 text-right font-semibold text-white">
-                        ฿{(portion.totalDirectCost || 0).toFixed(2)}
-                      </td>
-                      <td className="py-3 px-3 text-right font-bold text-white">
-                        ฿{portion.sellingPrice || 0}
-                      </td>
-                      <td className="py-3 px-3 text-right font-semibold">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded-md ${
-                            isHighFoodCost
-                              ? 'bg-[#EF4444]/10 text-[#EF4444] border border-[#EF4444]/20 font-bold'
-                              : 'bg-[#10B981]/10 text-[#10B981] border border-[#10B981]/20'
-                          }`}
-                        >
-                          {(portion.foodCostPercent || 0).toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-right font-bold text-[#10B981]">
-                        ฿{(portion.contributionProfit || 0).toFixed(2)}
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        {isHighFoodCost ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#EF4444] bg-[#EF4444]/10 px-2 py-0.5 rounded border border-[#EF4444]/20">
-                            <AlertTriangle className="h-3 w-3" /> ควรปรับราคา
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center text-[10px] font-semibold text-[#10B981] bg-[#10B981]/10 px-2 py-0.5 rounded border border-[#10B981]/20">
-                            กำไรดี
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                });
-              })}
-            </tbody>
-          </table>
-        </div>
+            <button
+              type="button"
+              onClick={() => handleNavigate('scenario_calculator')}
+              className="exec-glass-cta inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 hover:brightness-105 px-4 py-2 text-xs font-semibold text-white transition-all shadow-sm cursor-pointer"
+            >
+              <TrendingUp className="h-3.5 w-3.5" />
+              <span>{activeLanguage === 'th' ? 'จำลองผลกระทบราคา (What-If)' : 'Scenario Simulator'}</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Duplicate Payroll Guard Banner */}
+        {hasDuplicatePayroll && (
+          <div className="rounded-2xl bg-amber-50/75 backdrop-blur-md border border-amber-200/85 px-4 py-3 text-amber-900 text-xs flex items-center gap-2 shadow-2xs">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+            <span>พบรายจ่ายหมวดเงินเดือน ระบบไม่นับซ้ำ เพราะใช้ข้อมูลจากหน้าพนักงานแล้ว</span>
+          </div>
+        )}
+
+        {/* Band 2: 8 Essential Restaurant KPI Glass Tiles */}
+        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* 1. Today's Net Sales */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                <DollarSign className="h-3.5 w-3.5 text-emerald-600" />
+                {activeLanguage === 'th' ? 'ยอดขายวันนี้' : "Today's Net Sales"}
+              </span>
+              <span className="text-[11px] font-semibold text-emerald-700 tabular-nums">
+                {todayOrders} {activeLanguage === 'th' ? 'บิล' : 'orders'}
+              </span>
+            </div>
+            <div className="mt-3 text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              ฿{sales.length > 0 ? todayNetSales.toLocaleString() : '0.00'}
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500">
+              {sales.length > 0
+                ? `${todayOrders} ${activeLanguage === 'th' ? 'คำสั่งซื้อล่าสุด' : 'recent transactions'}`
+                : activeLanguage === 'th'
+                ? 'ยังไม่มีข้อมูลยอดขายวันนี้'
+                : 'No sales recorded today'}
+            </div>
+          </div>
+
+          {/* 2. Monthly Net Sales */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                <TrendingUp className="h-3.5 w-3.5 text-sky-600" />
+                {activeLanguage === 'th' ? 'ยอดขายสุทธิเดือนนี้' : 'Monthly Net Sales'}
+              </span>
+              <span className="text-[11px] font-semibold text-sky-700">MTD</span>
+            </div>
+            <div className="mt-3 text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              ฿{monthlyNetSales.toLocaleString()}
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500">
+              {activeLanguage === 'th' ? 'หลังหักส่วนลด & คืนเงิน' : 'Net of discounts & refunds'}
+            </div>
+          </div>
+
+          {/* 3. Food Cost % */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                <Percent className="h-3.5 w-3.5 text-amber-600" />
+                {activeLanguage === 'th' ? 'ต้นทุนอาหาร (%)' : 'Food Cost %'}
+              </span>
+              <span
+                className={`text-[11px] font-semibold ${
+                  isFoodCostHigh ? 'text-amber-700' : 'text-emerald-700'
+                }`}
+              >
+                {isFoodCostHigh
+                  ? activeLanguage === 'th'
+                    ? 'เกินเป้า'
+                    : 'Above Target'
+                  : activeLanguage === 'th'
+                  ? 'ตามเกณฑ์'
+                  : 'Healthy'}
+              </span>
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+                {avgFoodCostPercent.toFixed(1)}%
+              </span>
+              <span className="text-[11px] text-slate-400 font-medium tabular-nums">
+                / {targetFoodCostPct}%
+              </span>
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500 tabular-nums">
+              {isFoodCostHigh
+                ? activeLanguage === 'th'
+                  ? `สูงกว่าเป้า +${(avgFoodCostPercent - targetFoodCostPct).toFixed(1)}%`
+                  : `+${(avgFoodCostPercent - targetFoodCostPct).toFixed(1)}% above target`
+                : activeLanguage === 'th'
+                ? 'อยู่ในเกณฑ์เป้าหมาย'
+                : 'Within target benchmark'}
+            </div>
+          </div>
+
+          {/* 4. Prime Cost % */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                <Layers className="h-3.5 w-3.5 text-indigo-600" />
+                {activeLanguage === 'th' ? 'Prime Cost (%)' : 'Prime Cost %'}
+              </span>
+              <span
+                className={`text-[11px] font-semibold ${
+                  isPrimeCostHigh ? 'text-rose-700' : 'text-emerald-700'
+                }`}
+              >
+                {isPrimeCostHigh
+                  ? activeLanguage === 'th'
+                    ? 'สูง'
+                    : 'High'
+                  : activeLanguage === 'th'
+                  ? 'เหมาะสม'
+                  : 'Healthy'}
+              </span>
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+                {pnl.primeCostPercent.toFixed(1)}%
+              </span>
+              <span className="text-[11px] text-slate-400 font-medium">COGS+LABOR</span>
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500 tabular-nums">
+              {activeLanguage === 'th'
+                ? `เป้าหมายไม่เกิน ${targetPrimeCostPct}%`
+                : `Target ≤ ${targetPrimeCostPct}%`}
+            </div>
+          </div>
+
+          {/* 5. Gross Profit */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                <UtensilsCrossed className="h-3.5 w-3.5 text-emerald-600" />
+                {activeLanguage === 'th' ? 'กำไรขั้นต้น (GP)' : 'Gross Profit'}
+              </span>
+              <span className="text-[11px] font-semibold text-emerald-700 tabular-nums">
+                {pnl.grossMarginPercent.toFixed(1)}%
+              </span>
+            </div>
+            <div className="mt-3 text-2xl font-bold tracking-tight text-emerald-700 tabular-nums">
+              ฿{pnl.grossProfit.toLocaleString()}
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500">
+              {activeLanguage === 'th' ? 'หลังหักต้นทุนอาหาร & กล่อง' : 'After Food & Packaging COGS'}
+            </div>
+          </div>
+
+          {/* 6. Operating Profit */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                <FileSpreadsheet className="h-3.5 w-3.5 text-slate-600" />
+                {activeLanguage === 'th' ? 'กำไรดำเนินงาน' : 'Operating Profit'}
+              </span>
+              <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
+                {pnl.operatingMarginPercent.toFixed(1)}%
+              </span>
+            </div>
+            <div className="mt-3 text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              ฿{pnl.operatingProfit.toLocaleString()}
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500">
+              {activeLanguage === 'th' ? 'หลังหักค่าใช้จ่ายบริหาร' : 'After OPEX & Store Overheads'}
+            </div>
+          </div>
+
+          {/* 7. Net Profit */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                {pnl.netProfit >= 0 ? (
+                  <ArrowUpRight className="h-3.5 w-3.5 text-emerald-600" />
+                ) : (
+                  <ArrowDownRight className="h-3.5 w-3.5 text-rose-600" />
+                )}
+                {activeLanguage === 'th' ? 'กำไรสุทธิ' : 'Net Profit'}
+              </span>
+              <span
+                className={`text-[11px] font-semibold tabular-nums ${
+                  pnl.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                }`}
+              >
+                {pnl.netMarginPercent.toFixed(1)}%
+              </span>
+            </div>
+            <div
+              className={`mt-3 text-2xl font-bold tracking-tight tabular-nums ${
+                pnl.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
+              }`}
+            >
+              ฿{pnl.netProfit.toLocaleString()}
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500 tabular-nums">
+              {activeLanguage === 'th'
+                ? `ประมาณการภาษี ${incomeTaxRate}%`
+                : `Estimated tax @ ${incomeTaxRate}%`}
+            </div>
+          </div>
+
+          {/* 8. Break-Even Target */}
+          <div className="rounded-2xl bg-white/68 backdrop-blur-xl border border-white/85 p-4 sm:p-5 flex flex-col justify-between shadow-[0_8px_24px_-8px_rgba(15,23,42,0.05),inset_0_1px_0_rgba(255,255,255,0.95)] hover:bg-white/84 transition-all duration-200">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                <Scale className="h-3.5 w-3.5 text-orange-600" />
+                {activeLanguage === 'th' ? 'จุดคุ้มทุนต่อเดือน' : 'Break-Even Target'}
+              </span>
+              <span className="text-[11px] font-semibold text-slate-500">BEP</span>
+            </div>
+            <div className="mt-3 text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+              ฿{Math.round(breakEven.breakEvenSales).toLocaleString()}
+            </div>
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-emerald-700 font-medium tabular-nums">
+              {activeLanguage === 'th'
+                ? `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/วัน · ${breakEven.breakEvenDailyOrders} จาน/วัน`
+                : `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/day`}
+            </div>
+          </div>
+        </section>
+
+        {/* Band 3: Actionable Intelligence Section */}
+        <WhatShouldIDoSection
+          advices={generatedAdvices}
+          activeLanguage={activeLanguage}
+          onNavigate={handleNavigate}
+        />
+
+        {/* Band 4: Menu Profitability Summary Glass Table */}
+        <section className="rounded-2xl bg-white/70 backdrop-blur-xl border border-white/85 p-5 sm:p-6 shadow-[0_8px_28px_-6px_rgba(15,23,42,0.06),inset_0_1px_0_rgba(255,255,255,0.95)]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <h2 className="text-base font-bold tracking-tight text-slate-900">
+              {activeLanguage === 'th'
+                ? 'วิเคราะห์ต้นทุนและกำไรของเมนูหลัก'
+                : 'Menu Cost & Profit Breakdown'}
+            </h2>
+
+            <button
+              type="button"
+              onClick={() => handleNavigate('menu_costing')}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 hover:text-orange-700 cursor-pointer transition-colors shrink-0"
+            >
+              <span>{activeLanguage === 'th' ? 'ดูเมนูทั้งหมด' : 'View All Menus'}</span>
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200/70 bg-white/40">
+            <table className="exec-glass-table w-full text-left text-xs">
+              <thead>
+                <tr>
+                  <th className="py-2.5 px-3.5">รหัส / ชื่อเมนู</th>
+                  <th className="py-2.5 px-3.5">พอร์ชั่น</th>
+                  <th className="py-2.5 px-3.5 text-right">ต้นทุนอาหาร (฿)</th>
+                  <th className="py-2.5 px-3.5 text-right">กล่อง (฿)</th>
+                  <th className="py-2.5 px-3.5 text-right">ต้นทุนรวม (฿)</th>
+                  <th className="py-2.5 px-3.5 text-right">ราคาขาย (฿)</th>
+                  <th className="py-2.5 px-3.5 text-right">% Food Cost</th>
+                  <th className="py-2.5 px-3.5 text-right">กำไรต่อจาน (฿)</th>
+                  <th className="py-2.5 px-3.5 text-center">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody className="text-slate-700 tabular-nums">
+                {menuItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-8 text-center text-xs text-slate-500">
+                      {activeLanguage === 'th'
+                        ? 'ยังไม่มีข้อมูลเมนูในระบบต้นทุน'
+                        : 'No menu costing records available yet.'}
+                    </td>
+                  </tr>
+                ) : (
+                  menuItems.map((menu: any) => {
+                    const portionsList = getMenuPortions(menu);
+                    if (!portionsList || portionsList.length === 0) return null;
+                    const targetFoodCost =
+                      currentSettings?.defaultTargetFoodCostPercent ||
+                      settings?.defaultTargetFoodCostPercent ||
+                      35;
+                    return portionsList.map((portion: any, pIdx: number) => {
+                      const isHighFoodCost = (portion.foodCostPercent || 0) > targetFoodCost;
+                      return (
+                        <tr key={`${menu.id}-${portion.id}`} className="transition-colors">
+                          <td className="py-3 px-3.5 font-medium text-slate-900">
+                            {pIdx === 0 ? (
+                              <div>
+                                <div className="font-semibold text-slate-900">
+                                  {menu.thaiName || menu.name || 'เมนู'}
+                                </div>
+                                {menu.code && (
+                                  <div className="text-[11px] text-slate-400 font-mono">
+                                    {menu.code}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 pl-3">↳</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3.5 text-slate-600">{portion.name}</td>
+                          <td className="py-3 px-3.5 text-right">
+                            ฿{(portion.directFoodCost || 0).toFixed(2)}
+                          </td>
+                          <td className="py-3 px-3.5 text-right text-slate-500">
+                            ฿{(portion.packagingCost || 0).toFixed(2)}
+                          </td>
+                          <td className="py-3 px-3.5 text-right font-semibold text-slate-900">
+                            ฿{(portion.totalDirectCost || 0).toFixed(2)}
+                          </td>
+                          <td className="py-3 px-3.5 text-right font-bold text-slate-900">
+                            ฿{portion.sellingPrice || 0}
+                          </td>
+                          <td
+                            className={`py-3 px-3.5 text-right font-semibold ${
+                              isHighFoodCost ? 'text-rose-600' : 'text-emerald-700'
+                            }`}
+                          >
+                            {(portion.foodCostPercent || 0).toFixed(1)}%
+                          </td>
+                          <td className="py-3 px-3.5 text-right font-bold text-emerald-700">
+                            ฿{(portion.contributionProfit || 0).toFixed(2)}
+                          </td>
+                          <td className="py-3 px-3.5 text-center">
+                            {isHighFoodCost ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700">
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                <span>ควรปรับราคา</span>
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-semibold text-emerald-700">
+                                กำไรดี
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </div>
   );
 };
+

@@ -257,6 +257,29 @@ export function getTableDimensions(
   return { baseWidth, baseHeight, scale, effWidth, effHeight };
 }
 
+export function getDynamicCanvasSize(
+  tables: Pick<TableDoc, 'x' | 'y' | 'shape' | 'width' | 'height' | 'scale' | 'tableStyle' | 'itemKind' | 'chairStyle'>[],
+  minWidth: number = FLOOR_CANVAS_MIN_WIDTH,
+  minHeight: number = FLOOR_CANVAS_MIN_HEIGHT,
+  extraPadding: number = 80
+): { width: number; height: number } {
+  let maxRight = minWidth;
+  let maxBottom = minHeight;
+
+  for (const tbl of tables) {
+    const dim = getTableDimensions(tbl);
+    const right = (tbl.x || 0) + dim.effWidth + extraPadding;
+    const bottom = (tbl.y || 0) + dim.effHeight + extraPadding;
+    if (right > maxRight) maxRight = right;
+    if (bottom > maxBottom) maxBottom = bottom;
+  }
+
+  return {
+    width: Math.ceil(maxRight),
+    height: Math.ceil(maxBottom),
+  };
+}
+
 export function clampTablePosition(
   x: number,
   y: number,
@@ -265,11 +288,12 @@ export function clampTablePosition(
   canvasWidth: number,
   canvasHeight: number,
   snapToGrid: boolean = false,
-  gridSize: number = FLOOR_GRID_SIZE
+  gridSize: number = FLOOR_GRID_SIZE,
+  unboundedMax: boolean = false
 ): { x: number; y: number } {
   const pad = 18;
-  const maxX = Math.max(pad, canvasWidth - tableWidth - pad);
-  const maxY = Math.max(pad, canvasHeight - tableHeight - pad);
+  const maxX = unboundedMax ? Number.POSITIVE_INFINITY : Math.max(pad, canvasWidth - tableWidth - pad);
+  const maxY = unboundedMax ? Number.POSITIVE_INFINITY : Math.max(pad, canvasHeight - tableHeight - pad);
 
   let nextX = clampNumber(x, pad, maxX);
   let nextY = clampNumber(y, pad, maxY);
@@ -311,9 +335,13 @@ export function findOpenTablePosition(
 ): { x: number; y: number } {
   const stepX = Math.max(64, width + 32);
   const stepY = Math.max(64, height + 32);
+  const currentBounds = getDynamicCanvasSize(existingTables, canvasWidth, canvasHeight, 48);
+  const scanWidth = Math.max(canvasWidth, currentBounds.width);
+  const maxRows = Math.max(20, existingTables.length + 30);
 
-  for (let y = 36; y + height + 24 <= canvasHeight; y += stepY) {
-    for (let x = 36; x + width + 24 <= canvasWidth; x += stepX) {
+  for (let row = 0; row < maxRows; row++) {
+    const y = 36 + row * stepY;
+    for (let x = 36; x + width + 24 <= scanWidth; x += stepX) {
       const overlaps = existingTables.some((tbl) => {
         const dim = getTableDimensions(tbl);
         return (
@@ -329,8 +357,17 @@ export function findOpenTablePosition(
     }
   }
 
-  const offset = (existingTables.length % 6) * 28;
-  return clampTablePosition(60 + offset, 60 + offset, width, height, canvasWidth, canvasHeight, true);
+  return clampTablePosition(
+    36,
+    currentBounds.height,
+    width,
+    height,
+    scanWidth,
+    currentBounds.height + height + 80,
+    true,
+    FLOOR_GRID_SIZE,
+    true
+  );
 }
 
 export function computeChairPositions(

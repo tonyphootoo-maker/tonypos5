@@ -95,16 +95,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <span>{activeLanguage === 'th' ? 'บันทึกยอดขายรายวัน (Daily Sales Entry)' : 'Daily Sales Records'}</span>
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {activeLanguage === 'th'
-              ? 'บันทึกยอดขายตามช่องทาง หักส่วนลด คืนเงิน และแปลงเป็นยอดขายสุทธิ ex-VAT สำหรับคำนวณโสหุ้ยและจุดคุ้มทุน'
-              : 'Record gross sales, discounts, refunds, and order counts per channel normalized ex-VAT.'}
-          </p>
-        </div>
+        <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <span>{activeLanguage === 'th' ? 'บันทึกยอดขายรายวัน (Daily Sales Entry)' : 'Daily Sales Records'}</span>
+        </h1>
 
         <button
           type="button"

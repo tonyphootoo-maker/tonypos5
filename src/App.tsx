@@ -47,6 +47,11 @@ export default function App() {
   const [activeShift, setActiveShift] = useState<ShiftDoc | null>(null);
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [pendingEditDish, setPendingEditDish] = useState<{
+    dishId: string;
+    categoryId?: string | null;
+    nonce: number;
+  } | null>(null);
 
   const t = translations[lang];
 
@@ -325,6 +330,14 @@ export default function App() {
             settings={settings}
             lang={lang}
             onOpenFloorPlan={() => setCurrentPage('floor_plan')}
+            onEditDish={(dish, categoryId) => {
+              setPendingEditDish({
+                dishId: dish.id,
+                categoryId: categoryId ?? dish.categoryId,
+                nonce: Date.now(),
+              });
+              setCurrentPage('menu_cost');
+            }}
           />
         )}
         {currentPage === 'floor_plan' && (
@@ -334,7 +347,12 @@ export default function App() {
           />
         )}
         {currentPage === 'menu_cost' && (
-          <MenuFoodCostPage settings={settings} lang={lang} />
+          <MenuFoodCostPage
+            settings={settings}
+            lang={lang}
+            initialEditDishRequest={pendingEditDish}
+            onClearEditDishRequest={() => setPendingEditDish(null)}
+          />
         )}
         {currentPage === 'option_groups' && (
           <OptionGroupsPage settings={settings} lang={lang} />

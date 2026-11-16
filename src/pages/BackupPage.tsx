@@ -101,7 +101,6 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
           <DatabaseBackup className="w-6 h-6 text-blue-600" />
           <span>{t.backup.title}</span>
         </h2>
-        <p className="text-xs text-neutral-500 mt-1">{t.backup.description}</p>
       </div>
 
       {/* Notifications */}
@@ -136,9 +135,6 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
             <h3 className="font-extrabold text-base text-neutral-900">
               {t.backup.exportTitle}
             </h3>
-            <p className="text-xs text-neutral-500 leading-relaxed">
-              {t.backup.exportNote} Includes all 18 collections: settings, recipes, dishes, floor plans, sales history, daily summaries, images, and expenses.
-            </p>
           </div>
 
           <button
@@ -170,9 +166,6 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
             <h3 className="font-extrabold text-base text-neutral-900">
               {t.backup.importTitle}
             </h3>
-            <p className="text-xs text-neutral-500 leading-relaxed">
-              Restores a previously exported JSON backup file. All database documents and compressed images are synchronized.
-            </p>
           </div>
 
           <div>

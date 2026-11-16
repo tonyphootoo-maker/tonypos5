@@ -80,18 +80,11 @@ export const PWAInstallButton: React.FC<Props> = ({
               <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <Tablet className="w-5 h-5" />
-                  <div>
-                    <h3 className="font-extrabold text-base">
-                      {lang === 'th'
-                        ? 'ติดตั้ง KinPOS ลงเครื่อง Tablet / POS'
-                        : 'Install KinPOS on Tablet / POS'}
-                    </h3>
-                    <p className="text-[11px] text-orange-100">
-                      {lang === 'th'
-                        ? 'เปิดใช้งานแบบแอปเต็มหน้าจอ ไม่ต้องผ่านแถบเบราว์เซอร์'
-                        : 'Run full-screen like a native app on Android & iOS'}
-                    </p>
-                  </div>
+                  <h3 className="font-extrabold text-base">
+                    {lang === 'th'
+                      ? 'ติดตั้ง KinPOS ลงเครื่อง Tablet / POS'
+                      : 'Install KinPOS on Tablet / POS'}
+                  </h3>
                 </div>
                 <button
                   type="button"
@@ -252,18 +245,11 @@ export const PWAInstallButton: React.FC<Props> = ({
             <div className="p-2.5 rounded-xl bg-orange-500 text-white shadow-xs shrink-0">
               <Tablet className="w-5 h-5" />
             </div>
-            <div>
-              <h4 className="text-sm font-extrabold text-neutral-900">
-                {lang === 'th'
-                  ? 'ติดตั้งแอปลงเครื่อง Tablet และ POS (Android / iOS)'
-                  : 'Install App on Tablet & POS (Android / iOS)'}
-              </h4>
-              <p className="text-xs text-neutral-600 mt-0.5">
-                {lang === 'th'
-                  ? 'ใช้งานแบบแอปเต็มหน้าจอ (Standalone) เข้าถึงไวจากหน้าจอหลัก และรองรับแคชออฟไลน์'
-                  : 'Use full-screen standalone app mode directly from your home screen with offline caching.'}
-              </p>
-            </div>
+            <h4 className="text-sm font-extrabold text-neutral-900">
+              {lang === 'th'
+                ? 'ติดตั้งแอปลงเครื่อง Tablet และ POS (Android / iOS)'
+                : 'Install App on Tablet & POS (Android / iOS)'}
+            </h4>
           </div>
           <button
             type="button"

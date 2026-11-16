@@ -3,6 +3,7 @@ import {
   TableDoc,
   ZoneDoc,
   DishDoc,
+  DishVariant,
   CategoryDoc,
   ChannelDoc,
   BillDoc,
@@ -34,9 +35,14 @@ import {
   subscribeCollection,
   saveOrderToTableAtomic,
   saveCategoriesOrder,
+  saveBillsOrder,
   saveDocument,
+  saveImageDoc,
   getImageDoc,
 } from '../data/db';
+import { compressImage } from '../utils/imageCompressor';
+import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
+import { NumericInput } from '../costing/components/common/NumericInput';
 import { SaveOrderModal } from '../components/SaveOrderModal';
 import { PaymentModal } from '../components/PaymentModal';
 import { ReceiptModal } from '../components/ReceiptModal';
@@ -44,6 +50,7 @@ import { TableVisual } from '../components/TableVisual';
 import {
   FLOOR_CANVAS_MIN_WIDTH,
   FLOOR_CANVAS_MIN_HEIGHT,
+  getDynamicCanvasSize,
 } from '../utils/tablePresets';
 import {
   Utensils,
@@ -56,15 +63,21 @@ import {
   Check,
   Layers,
   GripVertical,
+  Upload,
+  Trash2,
+  Plus,
+  CheckCircle2,
+  Edit2,
 } from 'lucide-react';
 
 interface Props {
   settings: SettingsDoc;
   lang: Language;
   onOpenFloorPlan?: () => void;
+  onEditDish?: (dish: DishDoc, categoryId?: string | null) => void;
 }
 
-export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan }) => {
+export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan, onEditDish }) => {
   const t = translations[lang];
 
   // Firestore real-time state
@@ -84,7 +97,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
   // POS Navigation & View State
   const [activeZoneId, setActiveZoneId] = useState<string>('');
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null); // null = floor plan visible
+  const [topViewMode, setTopViewMode] = useState<'bills' | 'floor'>('bills');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null); // null = bills/floor view visible
 
   // Active Order / Bill being created or edited
   const [activeBill, setActiveBill] = useState<BillDoc | null>(null);
@@ -99,6 +113,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const [itemNotes, setItemNotes] = useState<string>('');
   const [itemQuantity, setItemQuantity] = useState<number>(1);
 
+  // Inline POS Dish Quick-Edit Modal (opened via double-click/double-tap on dish name in POS)
+  const [editingDishInPos, setEditingDishInPos] = useState<DishDoc | null>(null);
+  const [posEditPreviewUrl, setPosEditPreviewUrl] = useState<string | null>(null);
+  const [posEditImageSizeKb, setPosEditImageSizeKb] = useState<number | null>(null);
+  const [isUploadingPosImage, setIsUploadingPosImage] = useState(false);
+  const [posImageError, setPosImageError] = useState<string | null>(null);
+  const [isSavingPosDish, setIsSavingPosDish] = useState(false);
+  const posManualEnKeysRef = useRef<Set<string>>(new Set());
+  const lastDishNameTapRef = useRef<{ dishId: string; ts: number } | null>(null);
+
   // Modals state
   const [isSaveOrderModalOpen, setIsSaveOrderModalOpen] = useState(false);
   const [targetTableIdForSave, setTargetTableIdForSave] = useState<string | null>(null);
@@ -109,6 +133,20 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const [isSavingOrder, setIsSavingOrder] = useState(false);
   const [orderSavedNotice, setOrderSavedNotice] = useState<string | null>(null);
   const savedNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dishNameClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Unpaid Bill Cards Drag-and-Drop Reorder State (Mouse & Touch)
+  const [draggingBillId, setDraggingBillId] = useState<string | null>(null);
+  const [dragOverBillId, setDragOverBillId] = useState<string | null>(null);
+  const billTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const billTouchRef = useRef<{
+    sourceId: string;
+    targetId: string | null;
+    active: boolean;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const suppressBillClickRef = useRef<boolean>(false);
 
   // Bottom Food Category Drag-and-Drop Reorder State
   const [draggingCatId, setDraggingCatId] = useState<string | null>(null);
@@ -146,17 +184,23 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const floorViewportRef = useRef<HTMLDivElement>(null);
   const [floorScale, setFloorScale] = useState<number>(1);
 
+  const orderTables = tables.filter((t) => t.itemKind !== 'chair');
+  const zoneTables = activeZoneId
+    ? orderTables.filter((t) => t.zoneId === activeZoneId)
+    : orderTables;
+  const posCanvasSize = getDynamicCanvasSize(zoneTables, FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT);
+
   // Auto-fit floor plan canvas proportionally to device viewport (Mobile, Tablet, POS, Desktop)
   useEffect(() => {
     const el = floorViewportRef.current;
-    if (!el || selectedCategoryId !== null) return;
+    if (!el || selectedCategoryId !== null || topViewMode !== 'floor') return;
 
     const updateScale = () => {
       const availW = Math.max(240, el.clientWidth - 8);
       const availH = Math.max(200, el.clientHeight - 8);
-      const scaleW = availW / FLOOR_CANVAS_MIN_WIDTH;
-      const scaleH = availH / FLOOR_CANVAS_MIN_HEIGHT;
-      const fitBoth = Math.min(1.4, Math.max(0.32, Math.min(scaleW, scaleH)));
+      const scaleW = availW / posCanvasSize.width;
+      const scaleH = availH / posCanvasSize.height;
+      const fitBoth = Math.min(1.4, Math.max(0.28, Math.min(scaleW, scaleH)));
       setFloorScale(fitBoth);
     };
 
@@ -168,7 +212,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
     window.addEventListener('resize', updateScale);
     return () => window.removeEventListener('resize', updateScale);
-  }, [selectedCategoryId]);
+  }, [selectedCategoryId, topViewMode, posCanvasSize.width, posCanvasSize.height]);
 
   // Setup Realtime Listeners across ALL POS tables, bills, menus, options & ingredients
   useEffect(() => {
@@ -229,9 +273,11 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
     return () => {
       unsubs.forEach((u) => u());
+      if (billTouchTimerRef.current) clearTimeout(billTouchTimerRef.current);
       if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
       if (variantTouchTimerRef.current) clearTimeout(variantTouchTimerRef.current);
       if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
+      if (dishNameClickTimerRef.current) clearTimeout(dishNameClickTimerRef.current);
     };
   }, []);
 
@@ -436,6 +482,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       createdAt: activeBill?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       version: resolvedVersion,
+      order: latestServerBill?.order ?? activeBill?.order ?? openBills.length + 1,
     };
 
     try {
@@ -447,6 +494,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         setOrderDiscount(0);
         setTargetTableIdForSave(null);
         setSelectedCategoryId(null);
+        setTopViewMode('bills');
       } else {
         setActiveBill(saved);
       }
@@ -695,34 +743,304 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
   };
 
+  // Inline POS Dish Quick-Edit handlers (triggered via onDoubleClick or double-tap on dish name in POS)
+  const handleOpenPosEditDish = (dish: DishDoc) => {
+    if (dishNameClickTimerRef.current) {
+      clearTimeout(dishNameClickTimerRef.current);
+      dishNameClickTimerRef.current = null;
+    }
+    setSelectedDishForOptions(null);
+    posManualEnKeysRef.current.clear();
+    setPosImageError(null);
+    setPosEditImageSizeKb(null);
+    setPosEditPreviewUrl(dishImages.get(dish.id) || null);
+    if (dish.imageId) {
+      getImageDoc(dish.imageId)
+        .then((imgDoc) => {
+          if (imgDoc?.dataUrl) {
+            setPosEditPreviewUrl(imgDoc.dataUrl);
+            setDishImages((prev) => new Map(prev).set(dish.id, imgDoc.dataUrl));
+            if (imgDoc.sizeBytes) {
+              setPosEditImageSizeKb(Math.max(1, Math.round(imgDoc.sizeBytes / 1024)));
+            }
+          }
+        })
+        .catch(() => {});
+    }
+    setEditingDishInPos({
+      ...dish,
+      variants: (dish.variants || []).map((v) => ({
+        ...v,
+        ingredients: [...(v.ingredients || [])],
+        subRecipes: [...(v.subRecipes || [])],
+        packaging: [...(v.packaging || [])],
+      })),
+      optionGroupIds: [...(dish.optionGroupIds || [])],
+    });
+  };
+
+  const handlePosDishPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    if (!file || !editingDishInPos) return;
+
+    setIsUploadingPosImage(true);
+    setPosImageError(null);
+    try {
+      const { dataUrl, sizeBytes } = await compressImage(file);
+      const imageId = `img_${Date.now()}`;
+      await saveImageDoc(imageId, dataUrl, sizeBytes);
+
+      setEditingDishInPos((prev) => (prev ? { ...prev, imageId } : prev));
+      setPosEditPreviewUrl(dataUrl);
+      setPosEditImageSizeKb(Math.max(1, Math.round(sizeBytes / 1024)));
+      loadedDishImageIdsRef.current.set(editingDishInPos.id, imageId);
+      setDishImages((prev) => new Map(prev).set(editingDishInPos.id, dataUrl));
+    } catch (err) {
+      console.error('POS dish image upload error:', err);
+      setPosImageError(
+        lang === 'th'
+          ? 'อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองไฟล์อื่น'
+          : 'Failed to upload image. Please try another file.'
+      );
+    } finally {
+      setIsUploadingPosImage(false);
+      input.value = '';
+    }
+  };
+
+  const handleSavePosDish = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDishInPos || isSavingPosDish) return;
+
+    const finalDishTh = (editingDishInPos.nameTh || '').trim();
+    const finalDishEn =
+      (editingDishInPos.name || '').trim() ||
+      (finalDishTh ? translateThaiToEnglish(finalDishTh) : '');
+    if (!finalDishEn && !finalDishTh) return;
+
+    setIsSavingPosDish(true);
+    try {
+      const normalizedVariants: DishVariant[] = (editingDishInPos.variants || []).map((v) => {
+        const vTh = (v.nameTh || '').trim();
+        const vEn =
+          (v.name || '').trim() ||
+          (vTh ? translateThaiToEnglish(vTh) : '') ||
+          'Standard';
+        return {
+          ...v,
+          name: vEn,
+          ...(vTh ? { nameTh: vTh } : {}),
+          price: Number(v.price) || 0,
+          ingredients: v.ingredients || [],
+          subRecipes: v.subRecipes || [],
+          packaging: v.packaging || [],
+        };
+      });
+
+      const dishToSave: DishDoc = {
+        ...editingDishInPos,
+        name: finalDishEn || finalDishTh,
+        ...(finalDishTh ? { nameTh: finalDishTh } : {}),
+        categoryId: editingDishInPos.categoryId || categories[0]?.id || 'cat_main',
+        variants: normalizedVariants.length
+          ? normalizedVariants
+          : [
+              {
+                id: `var_std_${Date.now()}`,
+                name: 'Standard',
+                nameTh: 'มาตรฐาน',
+                price: 100,
+                ingredients: [],
+                subRecipes: [],
+                packaging: [],
+              },
+            ],
+        optionGroupIds: editingDishInPos.optionGroupIds || [],
+        updatedAt: new Date().toISOString(),
+        version: (editingDishInPos.version || 0) + 1,
+      };
+      if (!editingDishInPos.imageId) {
+        delete dishToSave.imageId;
+      }
+
+      await saveDocument('dishes', dishToSave, false);
+      setDishes((prev) => prev.map((d) => (d.id === dishToSave.id ? dishToSave : d)));
+      if (posEditPreviewUrl && dishToSave.imageId) {
+        loadedDishImageIdsRef.current.set(dishToSave.id, dishToSave.imageId);
+        setDishImages((prev) => new Map(prev).set(dishToSave.id, posEditPreviewUrl));
+      } else if (!dishToSave.imageId) {
+        loadedDishImageIdsRef.current.delete(dishToSave.id);
+        setDishImages((prev) => {
+          const next = new Map(prev);
+          next.delete(dishToSave.id);
+          return next;
+        });
+      }
+      setEditingDishInPos(null);
+      setPosEditPreviewUrl(null);
+    } catch (err) {
+      console.error('POS save dish error:', err);
+    } finally {
+      setIsSavingPosDish(false);
+    }
+  };
+
+  // Unpaid ordered bills sorted by persisted card order
+  const unpaidOrderedBills = [...openBills]
+    .filter((b) => b.status === 'saved' && Array.isArray(b.items) && b.items.length > 0)
+    .sort((a, b) => {
+      const ordA = typeof a.order === 'number' ? a.order : Number.MAX_SAFE_INTEGER;
+      const ordB = typeof b.order === 'number' ? b.order : Number.MAX_SAFE_INTEGER;
+      if (ordA !== ordB) return ordA - ordB;
+      return (a.createdAt || '').localeCompare(b.createdAt || '');
+    });
+
+  // Drag-and-drop reorder unpaid bill cards & sync to Cloud Firestore
+  const reorderBillsByIds = async (sourceId: string, targetId: string) => {
+    if (!sourceId || !targetId || sourceId === targetId) return;
+    const sourceIdx = unpaidOrderedBills.findIndex((b) => b.id === sourceId);
+    const targetIdx = unpaidOrderedBills.findIndex((b) => b.id === targetId);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const reordered = [...unpaidOrderedBills];
+    const [moved] = reordered.splice(sourceIdx, 1);
+    reordered.splice(targetIdx, 0, moved);
+
+    const updatedSubset = reordered.map((b, idx) => ({
+      ...b,
+      order: idx + 1,
+    }));
+    const updatedMap = new Map(updatedSubset.map((b) => [b.id, b.order]));
+
+    setOpenBills((prev) =>
+      prev.map((b) => (updatedMap.has(b.id) ? { ...b, order: updatedMap.get(b.id) } : b))
+    );
+
+    try {
+      await saveBillsOrder(
+        updatedSubset.map((b) => ({
+          id: b.id,
+          order: b.order,
+          version: b.version,
+        }))
+      );
+    } catch (err) {
+      console.error('Save bills order error:', err);
+    }
+  };
+
+  const handleBillTouchStart = (e: React.TouchEvent<HTMLDivElement>, billId: string) => {
+    if (e.touches.length !== 1) return;
+    const targetTag = (e.target as HTMLElement | null)?.closest('button[data-bill-pay-btn]');
+    if (targetTag) return;
+
+    const touch = e.touches[0];
+    if (billTouchTimerRef.current) clearTimeout(billTouchTimerRef.current);
+    billTouchRef.current = {
+      sourceId: billId,
+      targetId: billId,
+      active: false,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+    billTouchTimerRef.current = setTimeout(() => {
+      if (billTouchRef.current && billTouchRef.current.sourceId === billId) {
+        billTouchRef.current.active = true;
+        setDraggingBillId(billId);
+        setDragOverBillId(billId);
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(15);
+        }
+      }
+    }, 180);
+  };
+
+  const handleBillTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const state = billTouchRef.current;
+    if (!state || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+
+    if (!state.active) {
+      if (Math.hypot(touch.clientX - state.startX, touch.clientY - state.startY) > 10) {
+        if (billTouchTimerRef.current) clearTimeout(billTouchTimerRef.current);
+        billTouchRef.current = null;
+      }
+      return;
+    }
+
+    e.preventDefault();
+    const el = document
+      .elementFromPoint(touch.clientX, touch.clientY)
+      ?.closest('[data-bill-id]') as HTMLElement | null;
+    const hitId = el?.getAttribute('data-bill-id') || null;
+    if (hitId) {
+      state.targetId = hitId;
+      setDragOverBillId(hitId);
+    }
+  };
+
+  const handleBillTouchEnd = async () => {
+    if (billTouchTimerRef.current) clearTimeout(billTouchTimerRef.current);
+    const state = billTouchRef.current;
+    billTouchRef.current = null;
+
+    if (state?.active) {
+      suppressBillClickRef.current = true;
+      setTimeout(() => {
+        suppressBillClickRef.current = false;
+      }, 180);
+      setDraggingBillId(null);
+      setDragOverBillId(null);
+      if (state.targetId && state.targetId !== state.sourceId) {
+        await reorderBillsByIds(state.sourceId, state.targetId);
+      }
+    }
+  };
+
+  const handleOpenSavedBill = (bill: BillDoc) => {
+    setOrderSavedNotice(null);
+    setActiveBill(bill);
+    setCartItems(bill.items || []);
+    setSelectedChannelId(bill.channelId || 'dine_in');
+    setOrderDiscount(bill.discountAmount || 0);
+    setSelectedCategoryId((prev) => prev || categories[0]?.id || 'all');
+  };
+
+  const handleQuickPaySavedBill = (bill: BillDoc) => {
+    setOrderSavedNotice(null);
+    setActiveBill(bill);
+    setCartItems(bill.items || []);
+    setSelectedChannelId(bill.channelId || 'dine_in');
+    setOrderDiscount(bill.discountAmount || 0);
+    setIsPaymentModalOpen(true);
+  };
+
   // Filter dishes by active category if any
   const displayedDishes =
     selectedCategoryId && selectedCategoryId !== 'all'
       ? dishes.filter((d) => d.categoryId === selectedCategoryId)
       : dishes;
 
-  // Tables visible on start page (exclude standalone chairs; POS is read-only):
-  // Dining tables in the selected zone (exclude standalone chairs)
-  const orderTables = tables.filter((t) => t.itemKind !== 'chair');
-  const zoneTables = activeZoneId
-    ? orderTables.filter((t) => t.zoneId === activeZoneId)
-    : orderTables;
-
   return (
     <div className="flex flex-col flex-1 min-h-0 bg-transparent overflow-hidden select-none">
-      {/* Top Zone Chip Bar: Only visible when NOT full screen in a category */}
+      {/* Top Zone Chip Bar: Table Zones (Only visible when NOT inside a category) */}
       {!selectedCategoryId && (
         <div className="px-3 py-1.5 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-2 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.08)]">
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none flex-1 py-0.5">
-
             {zones.map((z) => {
               const countInZone = orderTables.filter((tbl) => tbl.zoneId === z.id && tbl.currentBillId).length;
+              const isZoneActive = topViewMode === 'floor' && activeZoneId === z.id;
               return (
                 <button
                   key={z.id}
-                  onClick={() => setActiveZoneId(z.id)}
+                  type="button"
+                  onClick={() => {
+                    setActiveZoneId(z.id);
+                    setTopViewMode('floor');
+                  }}
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap active:translate-y-[1px] ${
-                    activeZoneId === z.id
+                    isZoneActive
                       ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_6px_14px_-4px_rgba(234,88,12,0.3)]'
                       : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
                   }`}
@@ -774,7 +1092,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                   )}
                 </h3>
                 <button
-                  onClick={() => setSelectedCategoryId(null)}
+                  onClick={() => {
+                    setSelectedCategoryId(null);
+                    setTopViewMode('bills');
+                  }}
                   className="px-3 py-1 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 shadow-2xs cursor-pointer shrink-0"
                 >
                   ← {t.pos.billCard}
@@ -803,19 +1124,165 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                           <Utensils className="w-7 h-7 text-slate-300" />
                         )}
                       </div>
-                      <span className="font-extrabold text-[11px] sm:text-xs leading-tight text-slate-900 group-hover:text-orange-600 transition-colors line-clamp-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const now = Date.now();
+                          const prevTap = lastDishNameTapRef.current;
+                          if (
+                            e.detail >= 2 ||
+                            (prevTap && prevTap.dishId === dish.id && now - prevTap.ts < 340)
+                          ) {
+                            lastDishNameTapRef.current = null;
+                            handleOpenPosEditDish(dish);
+                            return;
+                          }
+                          lastDishNameTapRef.current = { dishId: dish.id, ts: now };
+                          if (dishNameClickTimerRef.current) clearTimeout(dishNameClickTimerRef.current);
+                          dishNameClickTimerRef.current = setTimeout(() => {
+                            dishNameClickTimerRef.current = null;
+                            handleOpenDishOptions(dish);
+                          }, 240);
+                        }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          lastDishNameTapRef.current = null;
+                          handleOpenPosEditDish(dish);
+                        }}
+                        title={
+                          lang === 'th'
+                            ? 'ดับเบิลคลิกที่ชื่อเมนูเพื่อเปิดโหมดแก้ไขทันที'
+                            : 'Double-click dish name to edit immediately'
+                        }
+                        className="w-full block text-center font-extrabold text-[11px] sm:text-xs leading-tight text-slate-900 group-hover:text-orange-600 hover:underline decoration-orange-400/70 underline-offset-2 transition-colors line-clamp-2 px-1 py-1 rounded cursor-pointer"
+                      >
                         {lang === 'th' && dish.nameTh ? dish.nameTh : dish.name}
-                      </span>
+                      </button>
                     </div>
                   );
                 })}
               </div>
             </div>
+          ) : topViewMode === 'bills' ? (
+            // Unpaid Ordered Bills View ("บิล"): Displays ONLY ordered bills awaiting payment, draggable on desktop & touch
+            <div className="relative flex-1 min-h-0 overflow-y-auto bg-slate-100/60 p-3 sm:p-4">
+              {orderSavedNotice && (
+                <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-extrabold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 pointer-events-none">
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>{orderSavedNotice}</span>
+                </div>
+              )}
+
+              {unpaidOrderedBills.length === 0 ? (
+                <div className="h-full min-h-[260px] flex flex-col items-center justify-center text-center p-6">
+                  <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 shadow-xs flex items-center justify-center mb-3">
+                    <Receipt className="w-7 h-7 text-slate-300" />
+                  </div>
+                  <div className="font-black text-sm text-slate-700">
+                    {lang === 'th' ? 'ไม่มีบิลรอชำระเงิน' : 'No unpaid ordered bills'}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+                  {unpaidOrderedBills.map((bill) => {
+                    const isSelected = activeBill?.id === bill.id;
+                    const isDraggingThis = draggingBillId === bill.id;
+                    const isDropTarget = dragOverBillId === bill.id && draggingBillId !== bill.id;
+
+                    return (
+                      <div
+                        key={bill.id}
+                        data-bill-id={bill.id}
+                        draggable
+                        onDragStart={(e) => {
+                          setDraggingBillId(bill.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/kinpos-bill-id', bill.id);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (draggingBillId && draggingBillId !== bill.id) {
+                            setDragOverBillId(bill.id);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverBillId === bill.id) setDragOverBillId(null);
+                        }}
+                        onDrop={async (e) => {
+                          e.preventDefault();
+                          const srcId = e.dataTransfer.getData('text/kinpos-bill-id') || draggingBillId;
+                          setDraggingBillId(null);
+                          setDragOverBillId(null);
+                          if (srcId && srcId !== bill.id) {
+                            await reorderBillsByIds(srcId, bill.id);
+                          }
+                        }}
+                        onDragEnd={() => {
+                          setDraggingBillId(null);
+                          setDragOverBillId(null);
+                        }}
+                        onTouchStart={(e) => handleBillTouchStart(e, bill.id)}
+                        onTouchMove={handleBillTouchMove}
+                        onTouchEnd={handleBillTouchEnd}
+                        onTouchCancel={handleBillTouchEnd}
+                        onClick={() => {
+                          if (suppressBillClickRef.current) {
+                            suppressBillClickRef.current = false;
+                            return;
+                          }
+                          handleOpenSavedBill(bill);
+                        }}
+                        style={{ touchAction: draggingBillId ? 'none' : 'pan-y' }}
+                        className={`bg-white rounded-xl border p-2 transition-all select-none flex flex-col justify-between gap-1.5 cursor-grab active:cursor-grabbing shadow-[0_2px_0_#e2e8f0,0_4px_10px_-6px_rgba(15,23,42,0.1)] ${
+                          isDraggingThis ? 'opacity-55 scale-95' : ''
+                        } ${
+                          isDropTarget ? 'ring-2 ring-orange-500 ring-offset-1 scale-[1.02]' : ''
+                        } ${
+                          isSelected
+                            ? 'border-orange-500 ring-2 ring-orange-300'
+                            : 'border-slate-200 hover:border-orange-300'
+                        }`}
+                      >
+                        {/* Table Name */}
+                        <div className="flex items-center gap-1 min-w-0">
+                          <GripVertical className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                          <div className="font-black text-xs text-slate-900 truncate">
+                            {bill.tableName || (lang === 'th' ? 'ไม่ระบุโต๊ะ' : 'Walk-In')}
+                          </div>
+                        </div>
+
+                        {/* Grand Total + Pay Button */}
+                        <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-100">
+                          <div className="text-xs sm:text-sm font-black text-orange-600 tabular-nums truncate">
+                            ฿{formatMoney(bill.grandTotal)}
+                          </div>
+
+                          <button
+                            type="button"
+                            data-bill-pay-btn="true"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQuickPaySavedBill(bill);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-gradient-to-r from-orange-500 to-red-500 hover:brightness-105 text-white text-[11px] font-black flex items-center gap-1 shadow-xs cursor-pointer active:scale-95 shrink-0"
+                          >
+                            <CreditCard className="w-3 h-3 text-amber-200" />
+                            <span>{lang === 'th' ? 'ชำระเงิน' : 'Pay'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           ) : (
-            // Specific Zone Floor Plan (Strictly Read-Only, auto-fitted to device viewport)
+            // Specific Zone Floor Plan (Strictly Read-Only, dynamically sized & auto-fitted to viewport)
             <div
               ref={floorViewportRef}
-              className="relative flex-1 min-h-0 overflow-auto bg-slate-100/60 p-1 flex items-start sm:items-center justify-center"
+              className="relative flex-1 min-h-0 overflow-auto bg-slate-100/60 p-1 flex items-start sm:items-center"
             >
               {orderSavedNotice && (
                 <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-extrabold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 pointer-events-none">
@@ -824,16 +1291,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 </div>
               )}
               <div
-                className="shrink-0"
+                className="shrink-0 mx-auto"
                 style={{
-                  width: `${Math.round(FLOOR_CANVAS_MIN_WIDTH * floorScale)}px`,
-                  height: `${Math.round(FLOOR_CANVAS_MIN_HEIGHT * floorScale)}px`,
+                  width: `${Math.round(posCanvasSize.width * floorScale)}px`,
+                  height: `${Math.round(posCanvasSize.height * floorScale)}px`,
                 }}
               >
                 <div
                   style={{
-                    width: `${FLOOR_CANVAS_MIN_WIDTH}px`,
-                    height: `${FLOOR_CANVAS_MIN_HEIGHT}px`,
+                    width: `${posCanvasSize.width}px`,
+                    height: `${posCanvasSize.height}px`,
                     transform: `scale(${floorScale})`,
                     transformOrigin: 'top left',
                   }}
@@ -876,7 +1343,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 <h4 className="font-black text-sm text-neutral-900 flex items-center gap-1.5">
                   <Receipt className="w-4 h-4 text-orange-600" />
                   <span>
-                    {activeBill?.tableName ? `${activeBill.tableName}` : t.pos.billCard}
+                    {activeBill?.tableName ? `${activeBill.tableName}` : lang === 'th' ? 'บิลปัจจุบัน' : 'Current Bill'}
                   </span>
                 </h4>
               </div>
@@ -1058,11 +1525,14 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         )}
       </div>
 
-      {/* Always-Visible Bottom Bar: Permanent "Bill" card + Sculpted 3D Category Cards */}
+      {/* Always-Visible Bottom Bar: Permanent "บิล / โซน" card + Sculpted 3D Category Cards */}
       <div className="min-h-[54px] pb-[env(safe-area-inset-bottom)] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-1.5 flex items-center gap-2 overflow-x-auto shadow-[0_-6px_20px_-10px_rgba(15,23,42,0.1)] z-30 shrink-0">
-        {/* Permanent Bill Card (reduced ~40% in size, no bill number) */}
+        {/* Permanent "บิล / โซน" Card (starts on Bills main view) */}
         <button
-          onClick={() => setSelectedCategoryId(null)}
+          onClick={() => {
+            setSelectedCategoryId(null);
+            setTopViewMode('bills');
+          }}
           className={`h-7 px-2.5 rounded-lg flex items-center gap-1.5 font-black text-[11px] cursor-pointer transition-all shrink-0 active:translate-y-[1px] ${
             selectedCategoryId === null
               ? 'bg-slate-900 text-white shadow-[0_2px_0_#0f172a,0_6px_12px_-5px_rgba(15,23,42,0.35)] ring-2 ring-orange-500'
@@ -1071,6 +1541,17 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         >
           <Receipt className="w-3.5 h-3.5 text-orange-400 shrink-0" />
           <span className="leading-none whitespace-nowrap">{t.pos.billCard}</span>
+          {unpaidOrderedBills.length > 0 && (
+            <span
+              className={`px-1.5 py-0.5 rounded-md text-[10px] leading-none font-black tabular-nums ${
+                selectedCategoryId === null
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-orange-100 text-orange-700'
+              }`}
+            >
+              {unpaidOrderedBills.length}
+            </span>
+          )}
         </button>
 
         {/* Separator */}
@@ -1160,12 +1641,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-orange-200 overflow-hidden">
             {/* Header */}
             <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between">
-              <div>
-                <h3 className="font-extrabold text-base">
-                  {lang === 'th' && selectedDishForOptions.nameTh ? selectedDishForOptions.nameTh : selectedDishForOptions.name}
-                </h3>
-                <p className="text-xs text-orange-100">{t.pos.optionsVariants}</p>
-              </div>
+              <h3 className="font-extrabold text-base">
+                {lang === 'th' && selectedDishForOptions.nameTh ? selectedDishForOptions.nameTh : selectedDishForOptions.name}
+              </h3>
               <button
                 onClick={() => setSelectedDishForOptions(null)}
                 className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
@@ -1432,34 +1910,40 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       )}
 
       {/* Payment Settlement Modal */}
-      {isPaymentModalOpen && activeBill && (
-        <PaymentModal
-          bill={{
-            ...activeBill,
-            items: cartItems,
-            subtotal: financials.subtotal,
-            discountAmount: financials.discountAmount,
-            serviceChargeAmount: financials.serviceChargeAmount,
-            vatAmount: financials.vatAmount,
-            grandTotal: financials.grandTotal,
-            netSales: financials.netSales,
-            totalFoodCost: financials.totalFoodCost,
-            packagingCost: financials.packagingCost,
-            platformFee: financials.platformFee,
-          }}
-          settings={settings}
-          lang={lang}
-          onClose={() => setIsPaymentModalOpen(false)}
-          onPaymentSuccess={(paidBill) => {
-            setIsPaymentModalOpen(false);
-            setReceiptBillToView(paidBill);
-            setIsCheckReceipt(false);
-            setIsReceiptModalOpen(true);
-            setActiveBill(null);
-            setCartItems([]);
-          }}
-        />
-      )}
+      {isPaymentModalOpen && activeBill && (() => {
+        const latestServerBill = openBills.find((b) => b.id === activeBill.id);
+        return (
+          <PaymentModal
+            bill={{
+              ...activeBill,
+              version: latestServerBill?.version ?? activeBill.version,
+              items: cartItems,
+              subtotal: financials.subtotal,
+              discountAmount: financials.discountAmount,
+              serviceChargeAmount: financials.serviceChargeAmount,
+              vatAmount: financials.vatAmount,
+              grandTotal: financials.grandTotal,
+              netSales: financials.netSales,
+              totalFoodCost: financials.totalFoodCost,
+              packagingCost: financials.packagingCost,
+              platformFee: financials.platformFee,
+            }}
+            settings={settings}
+            lang={lang}
+            onClose={() => setIsPaymentModalOpen(false)}
+            onPaymentSuccess={(paidBill) => {
+              setIsPaymentModalOpen(false);
+              setOpenBills((prev) => prev.filter((b) => b.id !== paidBill.id));
+              setReceiptBillToView(paidBill);
+              setIsCheckReceipt(false);
+              setIsReceiptModalOpen(true);
+              setActiveBill(null);
+              setCartItems([]);
+              setOrderDiscount(0);
+            }}
+          />
+        );
+      })()}
 
       {/* Receipt Modal */}
       {isReceiptModalOpen && receiptBillToView && (
@@ -1473,6 +1957,351 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             setReceiptBillToView(null);
           }}
         />
+      )}
+
+      {/* Inline Quick Edit Dish Modal directly inside POS */}
+      {editingDishInPos && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
+          <form
+            onSubmit={handleSavePosDish}
+            className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
+          >
+            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-4 h-4" />
+                <h3 className="font-extrabold text-base">{t.menuCost.editDish}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingDishInPos(null)}
+                className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Names TH / EN */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    ชื่อเมนู (ภาษาไทย) *
+                  </label>
+                  <input
+                    type="text"
+                    required={!editingDishInPos.name}
+                    value={editingDishInPos.nameTh || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      const nextEn = computeAutoEnglishName({
+                        previousThai: editingDishInPos.nameTh || '',
+                        nextThai: nextTh,
+                        currentEnglish: editingDishInPos.name || '',
+                        isManuallyEdited: posManualEnKeysRef.current.has('dish'),
+                      });
+                      setEditingDishInPos({ ...editingDishInPos, nameTh: nextTh, name: nextEn });
+                    }}
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-neutral-700">
+                      {t.menuCost.dishName} (EN)
+                    </label>
+                    {editingDishInPos.nameTh && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          posManualEnKeysRef.current.delete('dish');
+                          setEditingDishInPos({
+                            ...editingDishInPos,
+                            name: translateThaiToEnglish(editingDishInPos.nameTh || ''),
+                          });
+                        }}
+                        className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                      >
+                        แปลใหม่
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={editingDishInPos.name || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.trim()) posManualEnKeysRef.current.add('dish');
+                      else posManualEnKeysRef.current.delete('dish');
+                      setEditingDishInPos({ ...editingDishInPos, name: val });
+                    }}
+                    className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              {/* Category + Photo */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    {t.menuCost.dishCategory}
+                  </label>
+                  <select
+                    value={editingDishInPos.categoryId || categories[0]?.id || ''}
+                    onChange={(e) =>
+                      setEditingDishInPos({ ...editingDishInPos, categoryId: e.target.value })
+                    }
+                    className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {lang === 'th' && c.nameTh ? c.nameTh : c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    {t.menuCost.dishImage}
+                  </label>
+                  <div className="p-2 bg-neutral-50 border border-neutral-200 rounded-2xl flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-xl bg-white border border-neutral-200 overflow-hidden shrink-0 flex items-center justify-center">
+                      {posEditPreviewUrl || dishImages.get(editingDishInPos.id) ? (
+                        <img
+                          src={posEditPreviewUrl || dishImages.get(editingDishInPos.id) || ''}
+                          alt={editingDishInPos.nameTh || editingDishInPos.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Utensils className="w-5 h-5 text-neutral-300" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <label className="px-2.5 py-1 bg-white hover:bg-orange-50 text-neutral-800 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer flex items-center gap-1">
+                          <Upload className="w-3.5 h-3.5 text-orange-600" />
+                          <span>
+                            {isUploadingPosImage
+                              ? lang === 'th'
+                                ? 'กำลังย่อรูป...'
+                                : 'Uploading...'
+                              : editingDishInPos.imageId || posEditPreviewUrl
+                              ? lang === 'th'
+                                ? 'เปลี่ยนรูป'
+                                : 'Change'
+                              : t.menuCost.uploadPhoto}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handlePosDishPhotoUpload}
+                            className="hidden"
+                          />
+                        </label>
+                        {(editingDishInPos.imageId || posEditPreviewUrl) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingDishInPos({ ...editingDishInPos, imageId: undefined });
+                              setPosEditPreviewUrl(null);
+                              setPosEditImageSizeKb(null);
+                            }}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>{t.menuCost.removePhoto}</span>
+                          </button>
+                        )}
+                      </div>
+                      {posImageError ? (
+                        <div className="text-[11px] font-bold text-rose-600">{posImageError}</div>
+                      ) : (editingDishInPos.imageId || posEditPreviewUrl) && posEditImageSizeKb ? (
+                        <div className="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>{posEditImageSizeKb} KB</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Primary Variants & Prices */}
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-black text-neutral-800">{t.menuCost.variants}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextVar: DishVariant = {
+                        id: `var_${Date.now()}`,
+                        nameTh: '',
+                        name: '',
+                        price: editingDishInPos.variants?.[0]?.price || 100,
+                        ingredients: [],
+                        subRecipes: [],
+                        packaging: [],
+                      };
+                      setEditingDishInPos({
+                        ...editingDishInPos,
+                        variants: [...(editingDishInPos.variants || []), nextVar],
+                      });
+                    }}
+                    className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-neutral-300 text-neutral-700 rounded-lg text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3 text-orange-600" />
+                    <span>{lang === 'th' ? 'เพิ่มตัวเลือก' : 'Add Option'}</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {editingDishInPos.variants.map((v, vIdx) => (
+                    <div
+                      key={v.id}
+                      className="grid grid-cols-12 gap-2 items-center bg-white p-2 rounded-xl border border-neutral-200"
+                    >
+                      <div className="col-span-5">
+                        <input
+                          type="text"
+                          required={!v.name}
+                          value={v.nameTh || ''}
+                          onChange={(e) => {
+                            const nextTh = e.target.value;
+                            const updated = [...editingDishInPos.variants];
+                            const prev = updated[vIdx];
+                            const nextEn = computeAutoEnglishName({
+                              previousThai: prev.nameTh || '',
+                              nextThai: nextTh,
+                              currentEnglish: prev.name || '',
+                              isManuallyEdited: posManualEnKeysRef.current.has(`var_${v.id}`),
+                            });
+                            updated[vIdx] = { ...prev, nameTh: nextTh, name: nextEn };
+                            setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                          }}
+                          placeholder="ชื่อตัวเลือก (TH)"
+                          className="w-full px-2 py-1 text-xs border border-neutral-300 rounded-lg"
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <input
+                          type="text"
+                          value={v.name || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const key = `var_${v.id}`;
+                            if (val.trim()) posManualEnKeysRef.current.add(key);
+                            else posManualEnKeysRef.current.delete(key);
+                            const updated = [...editingDishInPos.variants];
+                            updated[vIdx] = { ...updated[vIdx], name: val };
+                            setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                          }}
+                          placeholder="EN"
+                          className="w-full px-2 py-1 text-xs bg-neutral-50 border border-neutral-300 rounded-lg"
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <NumericInput
+                          min={0}
+                          step={1}
+                          value={v.price}
+                          onValueChange={(val) => {
+                            const updated = [...editingDishInPos.variants];
+                            updated[vIdx] = { ...updated[vIdx], price: val };
+                            setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                          }}
+                          className="w-full px-2 py-1 text-xs text-right font-black border border-orange-300 rounded-lg text-orange-700"
+                        />
+                      </div>
+                      <div className="col-span-1 flex justify-end">
+                        {editingDishInPos.variants.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = editingDishInPos.variants.filter((_, i) => i !== vIdx);
+                              setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                            }}
+                            className="p-1 text-neutral-400 hover:text-rose-600 cursor-pointer"
+                            title={t.common.delete}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Option Groups Attached */}
+              {optionGroups.length > 0 && (
+                <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
+                  <div className="text-xs font-black text-neutral-800">
+                    {t.menuCost.attachedOptionGroups}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {optionGroups.map((grp) => {
+                      const active = (editingDishInPos.optionGroupIds || []).includes(grp.id);
+                      return (
+                        <button
+                          key={grp.id}
+                          type="button"
+                          onClick={() => {
+                            const prevIds = editingDishInPos.optionGroupIds || [];
+                            const nextIds = active
+                              ? prevIds.filter((id) => id !== grp.id)
+                              : [...prevIds, grp.id];
+                            setEditingDishInPos({ ...editingDishInPos, optionGroupIds: nextIds });
+                          }}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold border cursor-pointer transition-all ${
+                            active
+                              ? 'bg-orange-500 text-white border-orange-600'
+                              : 'bg-white text-neutral-700 border-neutral-300 hover:bg-orange-50'
+                          }`}
+                        >
+                          {lang === 'th' && grp.nameTh ? grp.nameTh : grp.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 shrink-0">
+              <div>
+                {onEditDish && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = editingDishInPos;
+                      setEditingDishInPos(null);
+                      onEditDish(target, selectedCategoryId);
+                    }}
+                    className="px-3 py-2 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
+                  >
+                    {lang === 'th' ? 'จัดการเมนู & ต้นทุนเต็ม' : 'Full Menu Editor'}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingDishInPos(null)}
+                  className="px-4 py-2 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
+                >
+                  {t.common.cancel}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPosDish}
+                  className="px-5 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md shadow-orange-500/20 cursor-pointer hover:brightness-105 disabled:opacity-50"
+                >
+                  {isSavingPosDish ? t.common.loading : t.common.save}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );
