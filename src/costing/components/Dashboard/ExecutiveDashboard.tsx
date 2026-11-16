@@ -24,7 +24,18 @@ import {
   BusinessSettings,
   WhatShouldIDoAdvice,
 } from '../../types/domain';
-import { calculateProfitAndLoss, calculateBreakEven, calculateInventoryCOGS } from '../../engine/calculations';
+import { calculateProfitAndLoss, calculateBreakEven, calculateInventoryCOGS, convertExpenseToMonthly } from '../../engine/calculations';
+import { StockCountSnapshot, PurchaseRecord, SaleOrder } from '../../types';
+import {
+  getPeriodDateBounds,
+  resolveStockCountSnapshotsForPeriod,
+  filterPeriodPurchases,
+  filterPeriodWaste,
+  getEmployeeMonthlyCost,
+  isExplicitPayrollExpense,
+  deriveVariableCostPercent,
+  formatPeriodCalculationLabel,
+} from '../../../engine/calculations';
 import { StorageService } from '../../services/storageService';
 import { FirebaseSyncService } from '../../services/firebaseSyncService';
 import { calculateVariantCostBreakdown } from '../../services/calculationEngine';
@@ -43,6 +54,9 @@ interface ExecutiveDashboardProps {
   wasteRecords?: WasteRecord[];
   inventory?: any[];
   allWaste?: any[];
+  purchases?: PurchaseRecord[];
+  stockCounts?: StockCountSnapshot[];
+  salesOrders?: SaleOrder[];
   settings?: BusinessSettings;
   currentSettings?: any;
   advices?: WhatShouldIDoAdvice[];
@@ -63,6 +77,9 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   wasteRecords = [],
   inventory = [],
   allWaste: rawAllWaste = [],
+  purchases,
+  stockCounts,
+  salesOrders,
   settings = INITIAL_SETTINGS,
   currentSettings: rawCurrentSettings,
   advices,
@@ -73,6 +90,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
 }) => {
   const [isSyncingSales, setIsSyncingSales] = React.useState(false);
   const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
+  const [excludePayrollDuplicates, setExcludePayrollDuplicates] = React.useState(true);
 
   const handleNavigate = (view: string) => {
     if (onNavigate) {
@@ -163,64 +181,84 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     [ingredients, currentSettings]
   );
 
-  // Double-counting guard: exclude payroll expenses when employees exist
-  const isPayrollExpense = (e: ExpenseRecord) => {
-    const text = `${e.category || ''} ${(e as any).title || (e as any).name || (e as any).description || ''} ${e.notes || ''}`.toLowerCase();
-    const keywords = ['labor', 'salary', 'wage', 'ค่าแรง', 'เงินเดือน'];
-    return (
-      e.category === 'Labor (Salary & Wages)' ||
-      keywords.some((kw) => text.includes(kw))
-    );
+  // Double-counting guard: explicit isPayroll check with user toggle (no keyword matching)
+  const activeEmployees = employees.filter((e) => e.active !== false);
+  const payrollFlaggedExpenses = expenses.filter(
+    (e) => !e.isExcluded && isExplicitPayrollExpense(e)
+  );
+  const hasDuplicatePayroll = activeEmployees.length > 0 && payrollFlaggedExpenses.length > 0;
+  const effectiveExpenses = expenses.filter(
+    (e) =>
+      !e.isExcluded &&
+      !(hasDuplicatePayroll && excludePayrollDuplicates && isExplicitPayrollExpense(e))
+  );
+
+  const operatingDays = currentSettings.operatingDaysPerMonth || 26;
+  const laborOptions = {
+    socialSecurityEnabled: currentSettings.socialSecurityEnabled ?? false,
+    socialSecurityRatePercent: currentSettings.socialSecurityRatePercent ?? 5,
+    socialSecurityCapWage: currentSettings.socialSecurityCapWage ?? 15000,
+    defaultOperatingDays: operatingDays,
   };
 
-  const hasDuplicatePayroll = employees.length > 0 && expenses.some(isPayrollExpense);
-  const effectiveExpenses = employees.length > 0
-    ? expenses.filter((e) => !isPayrollExpense(e))
-    : expenses;
+  // Real Labor from ALL active employees (handles hourly * hours + OT + benefits + optional SSO)
+  const directKitchenLabor = activeEmployees
+    .filter((e) => e.roleCategory === 'direct_kitchen' || e.department === 'kitchen')
+    .reduce((sum, e) => sum + getEmployeeMonthlyCost(e, laborOptions), 0);
 
-  // Real Labor from employees
-  const directKitchenLabor = employees
-    .filter((e) => e.roleCategory === 'direct_kitchen')
-    .reduce((sum, e) => sum + (e.wageRate + (e.benefitsMonthly || 0)), 0);
-
-  const nonKitchenLabor = employees
-    .filter((e) => e.roleCategory !== 'direct_kitchen')
-    .reduce((sum, e) => sum + (e.wageRate + (e.benefitsMonthly || 0)), 0);
+  const nonKitchenLabor = activeEmployees
+    .filter((e) => e.roleCategory !== 'direct_kitchen' && e.department !== 'kitchen')
+    .reduce((sum, e) => sum + getEmployeeMonthlyCost(e, laborOptions), 0);
 
   // Dynamic date logic: use latest sales record date or today's date
   const latestSalesDate = sales.length > 0
     ? [...sales].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
     : null;
   const todayDate = latestSalesDate || new Date().toISOString().split('T')[0];
-  const todaySalesRecords = sales.filter((s) => s.date === todayDate);
-  const todayNetSales = todaySalesRecords.reduce((sum, s) => sum + s.netSales, 0);
-  const todayOrders = todaySalesRecords.reduce((sum, s) => sum + s.orderCount, 0);
+  const targetMonth = todayDate.slice(0, 7);
+  const monthSales = sales.filter((s) => s.date && s.date.startsWith(targetMonth));
 
-  const monthlyGrossSales = sales.reduce((sum, s) => sum + (s.grossSales || 0), 0);
-  const monthlyDiscounts = sales.reduce((sum, s) => sum + (s.discounts || 0), 0);
-  const monthlyRefunds = sales.reduce((sum, s) => sum + (s.refunds || 0), 0);
-  const monthlyNetSales = sales.reduce((sum, s) => {
+  const todaySalesRecords = sales.filter((s) => s.date === todayDate);
+  const resolveRecordNet = (s: DailySalesRecord) => {
     if (typeof s.netSales === 'number' && Number.isFinite(s.netSales)) {
-      return sum + Math.max(0, s.netSales);
+      return Math.max(0, s.netSales);
     }
     const nominal = Math.max(0, (s.grossSales || 0) - (s.discounts || 0) - (s.refunds || 0));
     const vatPct = s.vatRatePercent ?? 7;
-    return sum + (s.isVatInclusive && vatPct > 0 ? nominal / (1 + vatPct / 100) : nominal);
-  }, 0);
-  const monthlyChannelFees = sales.reduce((sum, s) => sum + Math.max(0, s.platformFees || 0), 0);
+    return s.isVatInclusive && vatPct > 0 ? nominal / (1 + vatPct / 100) : nominal;
+  };
+  const todayNetSales = todaySalesRecords.reduce((sum, s) => sum + resolveRecordNet(s), 0);
+  const todayOrders = todaySalesRecords.reduce((sum, s) => sum + s.orderCount, 0);
 
-  // Operating Expenses (excluding labor, since totalLabor is deducted inside calculateProfitAndLoss)
-  const totalOperatingExpenses = effectiveExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const fixedExpenses = effectiveExpenses.filter((e) => e.isFixed).reduce((sum, e) => sum + e.amount, 0) + nonKitchenLabor;
+  const monthlyGrossSales = monthSales.reduce((sum, s) => sum + (s.grossSales || 0), 0);
+  const monthlyDiscounts = monthSales.reduce((sum, s) => sum + (s.discounts || 0), 0);
+  const monthlyRefunds = monthSales.reduce((sum, s) => sum + (s.refunds || 0), 0);
+  const monthlyNetSales = monthSales.reduce((sum, s) => sum + resolveRecordNet(s), 0);
+  const monthlyChannelFees = monthSales.reduce((sum, s) => sum + Math.max(0, s.platformFees || 0), 0);
 
-  // Check for actual purchases & explicit beginning inventory stock (never invent 1.05x buffer)
-  const purchasesList = React.useMemo(() => StorageService.getPurchases(), []);
-  const inventoryList = React.useMemo(() => StorageService.getInventory(), []);
-  const salesOrdersList = React.useMemo(() => StorageService.getSalesOrders(), []);
-  const hasExplicitBeginningStock = inventoryList.some(
-    (item: any) => typeof item.beginningValue === 'number' && Number.isFinite(item.beginningValue)
+  // Operating Expenses (monthly-converted, excluding payroll duplicates when chosen)
+  const totalOperatingExpenses = effectiveExpenses.reduce(
+    (sum, e) => sum + convertExpenseToMonthly(e, operatingDays),
+    0
   );
-  const hasActualStock = purchasesList.length > 0 && inventoryList.length > 0 && hasExplicitBeginningStock;
+  const fixedExpensesMonthly = effectiveExpenses
+    .filter((e) => e.isFixed !== false)
+    .reduce((sum, e) => sum + convertExpenseToMonthly(e, operatingDays), 0);
+  const variableExpensesMonthly = effectiveExpenses
+    .filter((e) => e.isFixed === false)
+    .reduce((sum, e) => sum + convertExpenseToMonthly(e, operatingDays), 0);
+  const fixedExpenses = fixedExpensesMonthly + nonKitchenLabor;
+
+  // Check for date-scoped StockCountSnapshot pair & period-filtered purchases (never fabricate beginning stock or subtract waste)
+  const purchasesList = React.useMemo(() => purchases ?? StorageService.getPurchases(), [purchases]);
+  const stockCountsList = React.useMemo(() => stockCounts ?? StorageService.getStockCounts(), [stockCounts]);
+  const salesOrdersList = React.useMemo(() => salesOrders ?? StorageService.getSalesOrders(), [salesOrders]);
+  const { periodStart, periodEnd } = getPeriodDateBounds('month', targetMonth);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const snapshotPair = resolveStockCountSnapshotsForPeriod(stockCountsList, periodStart, periodEnd, todayIso);
+  const periodPurchasesRes = filterPeriodPurchases(purchasesList, periodStart, periodEnd, ingredients);
+  const periodWasteRes = filterPeriodWaste(allWaste || [], periodStart, periodEnd);
+  const hasActualStock = snapshotPair.hasCompletePair;
 
   // Weighted operational food cost % across all active portions
   const allPortions = menuItems.flatMap((m) => getMenuPortions(m));
@@ -231,22 +269,37 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   const estimatedFoodCogs = monthlyNetSales * (avgFoodCostPercent / 100);
   const estimatedPackagingCogs = monthlyNetSales * 0.035;
 
-  let foodCogsToUse = estimatedFoodCogs;
-  let packagingCogsToUse = estimatedPackagingCogs;
+  const explicitSalesFoodCost = monthSales.reduce(
+    (sum, s) => sum + (typeof s.foodCost === 'number' ? Math.max(0, s.foodCost) : 0),
+    0
+  );
+  const explicitSalesPackagingCost = monthSales.reduce(
+    (sum, s) => sum + (typeof s.packagingCost === 'number' ? Math.max(0, s.packagingCost) : 0),
+    0
+  );
+  const orderDatesCovered = new Set(monthSales.filter((s) => typeof s.foodCost === 'number').map((s) => s.date));
+  const unmatchedOrderFoodCost = salesOrdersList
+    .filter((o) => o.date >= periodStart && o.date <= periodEnd && o.orderStatus !== 'CANCELLED' && !orderDatesCovered.has(o.date))
+    .reduce((sum, o) => sum + (o.totalFoodCost || 0), 0);
+  const unmatchedOrderPkgCost = salesOrdersList
+    .filter((o) => o.date >= periodStart && o.date <= periodEnd && o.orderStatus !== 'CANCELLED' && !orderDatesCovered.has(o.date))
+    .reduce((sum, o) => sum + (o.packagingCost || 0), 0);
+  const theoreticalFoodCostTotal = explicitSalesFoodCost + unmatchedOrderFoodCost;
 
-  if (hasActualStock) {
-    const totalPurchasesCost = purchasesList.reduce((sum, p) => sum + (p.totalPrice || p.price || 0), 0);
-    const totalEndingStockCost = inventoryList.reduce((sum, item) => sum + ((item.currentStock ?? 0) * (item.costPerUnit || 0)), 0);
-    const totalWasteCost = (allWaste || []).reduce((sum, w) => sum + (w.totalCost || w.cost || 0), 0);
-    const totalBeginningStockCost = inventoryList.reduce((sum, item: any) => sum + (item.beginningValue || 0), 0);
+  let foodCogsToUse = theoreticalFoodCostTotal > 0 ? theoreticalFoodCostTotal : estimatedFoodCogs;
+  let packagingCogsToUse =
+    explicitSalesPackagingCost + unmatchedOrderPkgCost > 0
+      ? explicitSalesPackagingCost + unmatchedOrderPkgCost
+      : estimatedPackagingCogs;
+
+  if (hasActualStock && snapshotPair.beginningSnapshot && snapshotPair.endingSnapshot) {
     const actualCogsResult = calculateInventoryCOGS(
-      totalBeginningStockCost,
-      totalPurchasesCost,
-      totalEndingStockCost,
-      totalWasteCost
+      snapshotPair.beginningSnapshot.totalValue,
+      periodPurchasesRes.totalFoodPurchases,
+      snapshotPair.endingSnapshot.totalValue,
+      periodWasteRes.totalWasteCost
     );
     foodCogsToUse = actualCogsResult.cogs;
-    packagingCogsToUse = salesOrdersList.reduce((sum, o) => sum + (o.packagingCost || 0), 0) || estimatedPackagingCogs;
   }
 
   const incomeTaxRate = typeof currentSettings.incomeTaxRatePercent === 'number' && Number.isFinite(currentSettings.incomeTaxRatePercent)
@@ -267,18 +320,47 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     monthlyNetSales
   );
 
-  const avgCMPercent = 100 - avgFoodCostPercent - 3.5;
+  const syntheticSummariesForCM = monthSales.map((s) => ({
+    date: s.date,
+    grossSales: s.grossSales || 0,
+    discounts: s.discounts || 0,
+    serviceCharge: 0,
+    vat: 0,
+    netSales: resolveRecordNet(s),
+    totalFoodCost: s.foodCost || 0,
+    packagingCost: s.packagingCost || 0,
+    platformFees: s.platformFees || 0,
+    grossProfit: 0,
+    orderCount: s.orderCount || 0,
+    paymentTotals: {},
+    channelTotals: {},
+    dishStats: {},
+    updatedAt: '',
+    version: 1,
+  }));
+  const derivedMargin = deriveVariableCostPercent(syntheticSummariesForCM, {
+    otherVariableCostAmount: variableExpensesMonthly,
+    otherVariablePeriodNetSales: monthlyNetSales > 0 ? monthlyNetSales : undefined,
+  });
+  const effectiveCMPercent = derivedMargin.hasRealData
+    ? derivedMargin.contributionMarginPercent
+    : allPortions.length > 0
+    ? Math.max(0, 100 - avgFoodCostPercent)
+    : 0;
+
   const breakEven = calculateBreakEven(
     fixedExpenses + directKitchenLabor,
-    avgCMPercent,
+    effectiveCMPercent,
     110,
-    currentSettings.operatingDaysPerMonth || 30
+    operatingDays,
+    0,
+    monthlyNetSales
   );
 
-  // Real average daily net sales calculation from distinct logged days
-  const loggedDates = Array.from(new Set(sales.map((s) => s.date).filter(Boolean)));
+  // Real average daily net sales calculation from distinct logged days in targetMonth
+  const loggedDates = Array.from(new Set(monthSales.map((s) => s.date).filter(Boolean)));
   const loggedDaysCount = loggedDates.length;
-  const totalLoggedNetSales = sales.reduce((sum, s) => sum + s.netSales, 0);
+  const totalLoggedNetSales = monthlyNetSales;
   const avgDailyNetSales = loggedDaysCount > 0 ? totalLoggedNetSales / loggedDaysCount : 0;
 
   // Build real dynamic actionable advices if not explicitly provided
@@ -425,11 +507,25 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
           </div>
         </header>
 
-        {/* Duplicate Payroll Guard Banner */}
+        {/* Duplicate Payroll Guard Banner (Explicit Flag + User Toggle) */}
         {hasDuplicatePayroll && (
-          <div className="rounded-2xl bg-amber-50/75 backdrop-blur-md border border-amber-200/85 px-4 py-3 text-amber-900 text-xs flex items-center gap-2 shadow-2xs">
-            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-            <span>พบรายจ่ายหมวดเงินเดือน ระบบไม่นับซ้ำ เพราะใช้ข้อมูลจากหน้าพนักงานแล้ว</span>
+          <div className="rounded-2xl bg-amber-50/85 backdrop-blur-md border border-amber-200/90 px-4 py-3 text-amber-950 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                พบรายจ่ายเงินเดือน/ค่าแรง ({payrollFlaggedExpenses.length} รายการ) ซ้อนกับข้อมูลพนักงาน ({activeEmployees.length} คน) —{' '}
+                {excludePayrollDuplicates
+                  ? 'งดนับซ้ำใน P&L และจุดคุ้มทุน (ใช้ยอดจากหน้าพนักงาน)'
+                  : 'กำลังนับรวมทั้งสองแหล่ง'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExcludePayrollDuplicates(!excludePayrollDuplicates)}
+              className="px-3 py-1 rounded-lg border border-amber-400 bg-white hover:bg-amber-100 text-xs font-bold text-amber-900 shrink-0 cursor-pointer"
+            >
+              {excludePayrollDuplicates ? 'เปลี่ยนเป็นนับรวมด้วย' : 'งดนับซ้ำกับพนักงาน'}
+            </button>
           </div>
         )}
 

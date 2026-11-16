@@ -222,6 +222,7 @@ export interface ExpenseRecord {
   description: string;
   amount: number;
   isFixed: boolean; // Fixed vs Variable
+  isPayroll?: boolean; // Explicit flag replacing keyword matching
   paymentMethod: 'Cash' | 'Bank Transfer' | 'Credit Card' | 'PromptPay' | string;
   recurring: boolean;
   frequency?: ExpenseFrequency;
@@ -326,6 +327,25 @@ export interface InventoryRecord {
   calculatedCOGS: number; // Beginning + Purchases - Ending
 }
 
+export interface StockCountItem {
+  ingredientId: string;
+  ingredientName: string;
+  countedQty: number;
+  unit: UnitType;
+  costPerUnit: number;
+  totalValue: number;
+}
+
+export interface StockCountSnapshot {
+  id: string;
+  date: string; // YYYY-MM-DD
+  totalValue: number; // Σ countedQty × costPerUnit
+  items?: StockCountItem[];
+  notes?: string;
+  countedBy?: string;
+  createdAt?: string;
+}
+
 export interface BusinessSettings {
   restaurantName: string;
   currency: string; // '฿' or 'THB'
@@ -342,6 +362,9 @@ export interface BusinessSettings {
   primeCostTargetPercent: number; // e.g. 55%
   operatingDaysPerMonth: number; // e.g. 26 or 30
   cogsVarianceThresholdPercent?: number; // e.g. 3.0 percentage points of net sales
+  socialSecurityEnabled?: boolean;
+  socialSecurityRatePercent?: number;
+  socialSecurityCapWage?: number;
   primaryLanguage?: 'th' | 'en';
 }
 

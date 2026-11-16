@@ -39,6 +39,7 @@ export interface TransactionProcessResult {
   consumedIngredients: ConsumedIngredientDetail[];
   totalFoodCost: number;
   grossProfit: number;
+  warnings?: string[];
   error?: string;
   insufficientIngredients?: InsufficientIngredientDetail[];
 }
@@ -63,10 +64,24 @@ export interface TransactionVoidResult {
 export interface ExplodedIngredientRequirement {
   ingredientId: string;
   ingredientName: string;
-  quantity: number;
+  quantity: number; // AP quantity (raw stock to deduct)
+  epQuantity: number; // Edible Portion quantity from recipe
+  apQuantity: number; // As Purchased quantity = epQuantity / (yieldPercent / 100)
+  yieldPercent: number;
+  warning?: string;
   unit: UnitType;
   sourceVariantId?: string;
   sourceMenuName?: string;
+}
+
+export interface AggregatedIngredientRequirement {
+  ingredientId: string;
+  ingredientName: string;
+  totalQuantity: number; // total AP quantity (raw stock to deduct)
+  totalApQuantity: number;
+  totalEpQuantity: number;
+  unit: UnitType;
+  warnings: string[];
 }
 
 export interface ProcessTransactionOptions {
@@ -97,9 +112,27 @@ export function convertUnitQuantity(
   return quantity;
 }
 
+export function resolveEffectiveYield(ing?: Ingredient): {
+  yieldPercent: number;
+  warning?: string;
+} {
+  if (!ing) {
+    return { yieldPercent: 100 };
+  }
+  const raw = Number(ing.yieldPercent);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return {
+      yieldPercent: 100,
+      warning: `วัตถุดิบ "${ing.name}" ไม่มีค่า Yield หรือ Yield <= 0 ระบบใช้ Yield 100% ชั่วคราว`,
+    };
+  }
+  return { yieldPercent: raw };
+}
+
 /**
  * Explodes SaleOrder items into raw ingredient requirements (BOM explosion).
  * Resolves MenuVariant -> RecipeItems -> SubRecipes/Sauces -> Raw Ingredients.
+ * Converts EP recipe quantities to AP stock quantities via EP / (yieldPercent / 100).
  */
 export function explodeRecipeItems(
   items: SaleOrderItem[],
@@ -123,24 +156,51 @@ export function explodeRecipeItems(
     });
   });
 
+  const pushRawRequirement = (
+    ingredientId: string,
+    fallbackName: string,
+    epQuantity: number,
+    unit: UnitType,
+    sourceVariantId?: string,
+    sourceMenuName?: string
+  ) => {
+    const ing = ingredientsMap.get(ingredientId);
+    const { yieldPercent, warning } = resolveEffectiveYield(ing);
+    const apQuantity = epQuantity / (yieldPercent / 100);
+    requirements.push({
+      ingredientId,
+      ingredientName: ing?.name || fallbackName,
+      quantity: apQuantity,
+      epQuantity,
+      apQuantity,
+      yieldPercent,
+      warning,
+      unit,
+      sourceVariantId,
+      sourceMenuName,
+    });
+  };
+
   for (const item of items) {
     const dishCount = Number(item.quantity) || 0;
     if (dishCount <= 0) continue;
 
     const variantEntry = variantsMap.get(item.variantId);
-    let recipeItems = variantEntry?.variant?.recipeItems;
+    const recipeItems = variantEntry?.variant?.recipeItems;
 
     // Fallback: Check if item already carries a recipeSnapshot
     if ((!recipeItems || recipeItems.length === 0) && item.recipeSnapshot && item.recipeSnapshot.length > 0) {
       for (const snap of item.recipeSnapshot) {
-        requirements.push({
-          ingredientId: snap.ingredientId,
-          ingredientName: snap.name,
-          quantity: snap.quantity * dishCount,
-          unit: snap.unit as UnitType,
-          sourceVariantId: item.variantId,
-          sourceMenuName: item.menuName,
-        });
+        const epQty = snap.quantity * dishCount;
+        if (epQty <= 0) continue;
+        pushRawRequirement(
+          snap.ingredientId,
+          snap.name,
+          epQty,
+          snap.unit as UnitType,
+          item.variantId,
+          item.menuName
+        );
       }
       continue;
     }
@@ -165,11 +225,9 @@ export function explodeRecipeItems(
 
         if (sauce && sauce.items && sauce.items.length > 0) {
           // Explode sauce sub-recipe into raw ingredients
-          // Batch produced yield quantity
           const batchYield = Number(sauce.actualQuantity) || Number(sauce.productionQuantity) || 1;
           const sauceBatchUnit = sauce.productionUnit || 'g';
-          
-          // Convert recipe sauce consumption to sauce batch unit
+
           const normalizedSauceNeeded = convertUnitQuantity(
             totalDishItemQty,
             rItem.unit,
@@ -178,42 +236,38 @@ export function explodeRecipeItems(
           const batchProportion = normalizedSauceNeeded / batchYield;
 
           for (const sItem of sauce.items) {
-            const rawIngredientNeeded = (Number(sItem.quantity) || 0) * batchProportion;
-            const rawIng = ingredientsMap.get(sItem.ingredientId);
-            const ingredientName = rawIng?.name || sItem.ingredientName || sItem.ingredientId;
-
-            requirements.push({
-              ingredientId: sItem.ingredientId,
-              ingredientName,
-              quantity: rawIngredientNeeded,
-              unit: sItem.unit,
-              sourceVariantId: item.variantId,
-              sourceMenuName: item.menuName,
-            });
+            const rawEpNeeded = (Number(sItem.quantity) || 0) * batchProportion;
+            if (rawEpNeeded <= 0) continue;
+            pushRawRequirement(
+              sItem.ingredientId,
+              sItem.ingredientName || sItem.ingredientId,
+              rawEpNeeded,
+              sItem.unit,
+              item.variantId,
+              item.menuName
+            );
           }
         } else {
           // Sauce tracked directly as an ingredient / inventory item
-          const ing = ingredientsMap.get(rItem.ingredientId);
-          requirements.push({
-            ingredientId: rItem.ingredientId,
-            ingredientName: ing?.name || rItem.name,
-            quantity: totalDishItemQty,
-            unit: rItem.unit,
-            sourceVariantId: item.variantId,
-            sourceMenuName: item.menuName,
-          });
+          pushRawRequirement(
+            rItem.ingredientId,
+            rItem.name,
+            totalDishItemQty,
+            rItem.unit,
+            item.variantId,
+            item.menuName
+          );
         }
       } else {
         // Direct INGREDIENT or PREPARED_ITEM
-        const ing = ingredientsMap.get(rItem.ingredientId);
-        requirements.push({
-          ingredientId: rItem.ingredientId,
-          ingredientName: ing?.name || rItem.name,
-          quantity: totalDishItemQty,
-          unit: rItem.unit,
-          sourceVariantId: item.variantId,
-          sourceMenuName: item.menuName,
-        });
+        pushRawRequirement(
+          rItem.ingredientId,
+          rItem.name,
+          totalDishItemQty,
+          rItem.unit,
+          item.variantId,
+          item.menuName
+        );
       }
     }
   }
@@ -227,29 +281,37 @@ export function explodeRecipeItems(
 export function aggregateIngredientRequirements(
   requirements: ExplodedIngredientRequirement[],
   inventory: InventoryItem[]
-): Map<string, { ingredientId: string; ingredientName: string; totalQuantity: number; unit: UnitType }> {
+): Map<string, AggregatedIngredientRequirement> {
   const inventoryMap = new Map<string, InventoryItem>();
   inventory.forEach((inv) => inventoryMap.set(inv.ingredientId, inv));
 
-  const aggregated = new Map<
-    string,
-    { ingredientId: string; ingredientName: string; totalQuantity: number; unit: UnitType }
-  >();
+  const aggregated = new Map<string, AggregatedIngredientRequirement>();
 
   for (const req of requirements) {
     const inv = inventoryMap.get(req.ingredientId);
     const targetUnit = inv?.unit || req.unit;
-    const normalizedQuantity = convertUnitQuantity(req.quantity, req.unit, targetUnit);
+    const rawAp = typeof req.apQuantity === 'number' ? req.apQuantity : req.quantity;
+    const rawEp = typeof req.epQuantity === 'number' ? req.epQuantity : req.quantity;
+    const normalizedAp = convertUnitQuantity(rawAp, req.unit, targetUnit);
+    const normalizedEp = convertUnitQuantity(rawEp, req.unit, targetUnit);
 
     const existing = aggregated.get(req.ingredientId);
     if (existing) {
-      existing.totalQuantity += normalizedQuantity;
+      existing.totalQuantity += normalizedAp;
+      existing.totalApQuantity += normalizedAp;
+      existing.totalEpQuantity += normalizedEp;
+      if (req.warning && !existing.warnings.includes(req.warning)) {
+        existing.warnings.push(req.warning);
+      }
     } else {
       aggregated.set(req.ingredientId, {
         ingredientId: req.ingredientId,
         ingredientName: inv?.ingredientName || req.ingredientName,
-        totalQuantity: normalizedQuantity,
+        totalQuantity: normalizedAp,
+        totalApQuantity: normalizedAp,
+        totalEpQuantity: normalizedEp,
         unit: targetUnit,
+        warnings: req.warning ? [req.warning] : [],
       });
     }
   }
@@ -390,14 +452,24 @@ export const TransactionService = {
     const txnUser = options?.user || 'POS System';
 
     let calculatedBatchFoodCost = 0;
+    const collectedWarnings: string[] = [];
 
     for (const [ingredientId, req] of aggregated.entries()) {
+      for (const w of req.warnings) {
+        if (!collectedWarnings.includes(w)) {
+          collectedWarnings.push(w);
+        }
+      }
+
       const invIndex = updatedInventory.findIndex((i) => i.ingredientId === ingredientId);
       const ing = ingredientsMap.get(ingredientId);
 
-      // Determine unit cost: from ingredient master or inventory costPerUnit
+      // Food cost snapshot uses EP quantity * EP unit cost (costPerBaseUnit), NEVER divided by yield twice
       const unitCost = ing?.costPerBaseUnit || updatedInventory[invIndex]?.costPerUnit || 0;
-      const lineCost = req.totalQuantity * unitCost;
+      const epInUsageUnit = ing
+        ? convertUnitQuantity(req.totalEpQuantity, req.unit, ing.usageUnit || req.unit)
+        : req.totalEpQuantity;
+      const lineCost = epInUsageUnit * unitCost;
       calculatedBatchFoodCost += lineCost;
 
       let currentStock = 0;
@@ -535,6 +607,7 @@ export const TransactionService = {
       consumedIngredients: consumedDetails,
       totalFoodCost: effectiveFoodCost,
       grossProfit,
+      ...(collectedWarnings.length > 0 ? { warnings: collectedWarnings } : {}),
     };
   },
 

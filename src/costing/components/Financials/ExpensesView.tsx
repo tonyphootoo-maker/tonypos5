@@ -3,6 +3,7 @@ import { Plus, Receipt, Trash2, Calendar, DollarSign, Filter, EyeOff, Eye, Check
 import { ExpenseRecord, ExpenseCategory, ExpenseFrequency } from '../../types/domain';
 import { NumericInput } from '../common/NumericInput';
 import { convertExpenseToMonthly, calculateTotalMonthlyExpenses, validateExpenseInput } from '../../engine/calculations';
+import { isExplicitPayrollExpense } from '../../../engine/calculations';
 
 interface ExpensesViewProps {
   expenses: ExpenseRecord[];
@@ -11,6 +12,9 @@ interface ExpensesViewProps {
   onUpdateExpense?: (expense: ExpenseRecord) => void;
   operatingDays?: number;
   activeLanguage: 'th' | 'en';
+  employeesCount?: number;
+  excludePayrollDuplicates?: boolean;
+  onToggleExcludePayrollDuplicates?: (exclude: boolean) => void;
 }
 
 export const ExpensesView: React.FC<ExpensesViewProps> = ({
@@ -20,6 +24,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   onUpdateExpense,
   operatingDays = 26,
   activeLanguage,
+  employeesCount = 0,
+  excludePayrollDuplicates = true,
+  onToggleExcludePayrollDuplicates,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -33,6 +40,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     amount: number;
     frequency: ExpenseFrequency;
     isFixed: boolean;
+    isPayroll: boolean;
     isExcluded: boolean;
     paymentMethod: 'Cash' | 'Bank Transfer' | 'Credit Card' | 'PromptPay' | string;
     isAsset: boolean;
@@ -49,6 +57,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     amount: 1000,
     frequency: 'monthly',
     isFixed: true,
+    isPayroll: false,
     isExcluded: false,
     paymentMethod: 'Bank Transfer',
     isAsset: false,
@@ -112,6 +121,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
       amount: finalAmount,
       frequency: formData.isAsset ? 'monthly' : formData.frequency,
       isFixed: formData.isFixed,
+      isPayroll: formData.isPayroll,
       isExcluded: formData.isExcluded,
       paymentMethod: formData.paymentMethod,
       recurring: formData.isFixed,
@@ -139,6 +149,11 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
     ? expenses
     : expenses.filter((e) => e.category === selectedCategory);
 
+  const payrollFlaggedExpenses = expenses.filter(
+    (e) => !e.isExcluded && isExplicitPayrollExpense(e)
+  );
+  const hasPayrollConflict = employeesCount > 0 && payrollFlaggedExpenses.length > 0;
+
   const hasOwnerSalary = expenses.some((e) => {
     if (e.isExcluded) return false;
     const desc = (e.description || '').toLowerCase();
@@ -162,6 +177,46 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
           <span>{activeLanguage === 'th' ? 'เพิ่มค่าใช้จ่าย' : 'Add Expense'}</span>
         </button>
       </div>
+
+      {/* Warning: Explicit Payroll Overlap with Employees (No silent keyword removal) */}
+      {hasPayrollConflict && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5 text-xs">
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">
+                {activeLanguage === 'th'
+                  ? `พบรายจ่ายที่ตั้งค่าเป็นเงินเดือน/ค่าแรง (${payrollFlaggedExpenses.length} รายการ) ซ้อนกับข้อมูลพนักงาน (${employeesCount} คน)`
+                  : `Detected ${payrollFlaggedExpenses.length} payroll expense(s) alongside Staff payroll (${employeesCount} staff)`}
+              </div>
+              <p className="text-amber-800 mt-0.5">
+                {excludePayrollDuplicates
+                  ? activeLanguage === 'th'
+                    ? 'สถานะปัจจุบัน: งดนับรายจ่ายกลุ่มนี้ใน P&L และจุดคุ้มทุน เพื่อป้องกันการนับซ้ำ (เลือกเปลี่ยนได้)'
+                    : 'Current mode: Excluding these payroll expense lines from P&L/Break-Even to avoid double counting.'
+                  : activeLanguage === 'th'
+                  ? 'สถานะปัจจุบัน: กำลังนับรวมรายจ่ายกลุ่มนี้เพิ่มจากค่าแรงพนักงาน (อาจเกิดการนับซ้ำ)'
+                  : 'Current mode: Including both payroll expense lines and employee salaries.'}
+              </p>
+            </div>
+          </div>
+          {onToggleExcludePayrollDuplicates && (
+            <button
+              type="button"
+              onClick={() => onToggleExcludePayrollDuplicates(!excludePayrollDuplicates)}
+              className="px-3 py-1.5 rounded-lg border border-amber-400 bg-white hover:bg-amber-100 text-xs font-bold text-amber-900 shrink-0 cursor-pointer"
+            >
+              {excludePayrollDuplicates
+                ? activeLanguage === 'th'
+                  ? 'เปลี่ยนเป็นนับรวมด้วย'
+                  : 'Include in Calculations'
+                : activeLanguage === 'th'
+                ? 'งดนับซ้ำกับเงินเดือนพนักงาน'
+                : 'Exclude Duplicate Payroll'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Warning: Owner Salary Check (O15) */}
       {!hasOwnerSalary && (
@@ -335,6 +390,11 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     <td className="py-2.5 px-3 text-slate-600">{exp.category}</td>
                     <td className="py-2.5 px-3 font-semibold text-slate-900">
                       <span className={isExcluded ? 'line-through text-slate-400' : ''}>{exp.description}</span>
+                      {isExplicitPayrollExpense(exp) && (
+                        <span className="ml-1.5 text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-semibold">
+                          Payroll
+                        </span>
+                      )}
                       {exp.isInstallment && (
                         <span className="ml-1.5 text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded font-medium">ผ่อนชำระ</span>
                       )}
@@ -440,7 +500,14 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">หมวดหมู่</label>
                   <select
                     value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
+                    onChange={(e) => {
+                      const nextCat = e.target.value as ExpenseCategory;
+                      setFormData({
+                        ...formData,
+                        category: nextCat,
+                        isPayroll: nextCat === 'Labor (Salary & Wages)',
+                      });
+                    }}
                     className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs bg-white"
                   >
                     {categories.map((c) => (
@@ -603,6 +670,22 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     <span className="text-xs text-slate-700 font-medium">ยกเว้นไม่นำมาคิดต้นทุน</span>
                   </label>
                 </div>
+              </div>
+
+              <div className="p-2.5 bg-indigo-50/70 rounded-xl border border-indigo-200/80">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.isPayroll}
+                    onChange={(e) => setFormData({ ...formData, isPayroll: e.target.checked })}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-xs text-indigo-950 font-semibold">
+                    {activeLanguage === 'th'
+                      ? 'เป็นรายการเงินเดือน/ค่าแรงพนักงาน (Payroll) — ไม่รวมค่าแรงช่างซ่อมหรือจ้างเหมาภายนอก'
+                      : 'Staff Payroll / Wages item (uncheck for external contractor fees)'}
+                  </span>
+                </label>
               </div>
 
               {formData.isFixed && (

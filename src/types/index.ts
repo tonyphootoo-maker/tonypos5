@@ -40,6 +40,10 @@ export interface SettingsDoc extends BaseDoc {
   priceRounding?: 1 | 5 | 10; // Suggested price rounding (default 5 THB)
   operatingDaysPerMonth?: number; // Number of operating days for daily break-even (default 30)
   incomeTaxRatePercent?: number; // Estimated income tax rate % (default 20)
+  cogsVarianceThresholdPercent?: number; // Default 3% of net sales
+  socialSecurityEnabled?: boolean; // Employer Social Security contribution (default false)
+  socialSecurityRatePercent?: number; // Default 5%
+  socialSecurityCapWage?: number; // Default 15,000 THB/month cap (750 THB max)
 }
 
 export interface IngredientDoc extends BaseDoc {
@@ -245,6 +249,7 @@ export interface ExpenseDoc extends BaseDoc {
   endDate?: string; // Optional YYYY-MM-DD end date for recurring expenses
   isFixed: boolean; // Fixed vs Variable
   isRecurring: boolean; // Monthly recurring
+  isPayroll?: boolean; // Explicit payroll / staff wages marker (no keyword guessing)
 }
 
 export interface EmployeeDoc extends BaseDoc {

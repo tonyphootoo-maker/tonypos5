@@ -268,6 +268,9 @@ export interface RestaurantSettings {
   cogsVarianceThresholdPercent?: number; // e.g. 3.0 percentage points of net sales
   projectedMonthlySales?: number;
   salesVatInclusive?: boolean;
+  socialSecurityEnabled?: boolean;
+  socialSecurityRatePercent?: number;
+  socialSecurityCapWage?: number;
 }
 
 export interface InventoryItem {
@@ -343,7 +346,28 @@ export interface PurchaseRecord {
   yieldPercent?: number;
   actualQuantity?: number;
   costPerUnit?: number;
+  category?: string;
+  isPackaging?: boolean;
   notes?: string;
+  createdAt?: string;
+}
+
+export interface StockCountItem {
+  ingredientId: string;
+  ingredientName: string;
+  countedQty: number;
+  unit: UnitType;
+  costPerUnit: number;
+  totalValue: number;
+}
+
+export interface StockCountSnapshot {
+  id: string;
+  date: string; // YYYY-MM-DD
+  totalValue: number; // Σ countedQty × costPerUnit
+  items?: StockCountItem[];
+  notes?: string;
+  countedBy?: string;
   createdAt?: string;
 }
 
@@ -388,6 +412,7 @@ export interface ExpenseRecord {
   description: string;
   amount: number;
   isFixed?: boolean;
+  isPayroll?: boolean;
   paymentMethod: 'เงินสด' | 'โอนเงิน' | 'บัตรเครดิต' | 'CASH' | 'TRANSFER' | 'CREDIT' | string;
   frequency?: ExpenseFrequency;
   operatingDaysPerMonth?: number;
@@ -557,6 +582,7 @@ export interface AppBackupPackage {
     yieldTests?: YieldTestRecord[];
     employees?: Employee[];
     packagingItems?: PackagingItem[];
+    stockCounts?: StockCountSnapshot[];
   };
 }
 

@@ -65,6 +65,7 @@ import {
   InventoryItem,
   WasteRecord,
   PurchaseRecord,
+  StockCountSnapshot,
 } from '../costing/types';
 import {
   ExpenseRecord,
@@ -77,7 +78,6 @@ import { StorageService } from '../costing/services/storageService';
 import { FirebaseSyncService, COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
 import {
   calculateBreakEven,
-  calculateVariance,
   convertExpenseToMonthly,
   upsertDailySalesRecord,
 } from '../costing/engine/calculations';
@@ -194,6 +194,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
   const [purchases, setPurchases] = useState<PurchaseRecord[]>(() => StorageService.getPurchases());
   const [wasteLog, setWasteLog] = useState<WasteRecord[]>(() => StorageService.getWasteLog());
   const [salesOrders, setSalesOrders] = useState<SaleOrder[]>(() => StorageService.getSalesOrders());
+  const [stockCounts, setStockCounts] = useState<StockCountSnapshot[]>(() => StorageService.getStockCounts());
 
   // Sync feedback
   const [isSyncingPos, setIsSyncingPos] = useState(false);
@@ -351,6 +352,16 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
             if (isMounted) {
               setSalesOrders(items);
               StorageService.saveSalesOrders(items);
+            }
+          }
+        ),
+        FirebaseSyncService.subscribeUserCollection<StockCountSnapshot>(
+          user.uid,
+          COST_COLLECTIONS.STOCK_COUNTS,
+          (items) => {
+            if (isMounted) {
+              setStockCounts(items);
+              StorageService.saveStockCounts(items);
             }
           }
         )
@@ -605,22 +616,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       ? settings.incomeTaxRatePercent
       : 20;
 
-  // Actual Inventory / Purchase inputs (never fabricate beginning stock)
-  const hasActualStockData = purchases.length > 0 && inventory.length > 0;
-  const hasRecordedBeginningStock =
-    inventory.length > 0 && inventory.some((item) => typeof (item as any).beginningValue === 'number');
-  const totalBeginningStockCost = hasRecordedBeginningStock
-    ? inventory.reduce((sum, item) => sum + (Number((item as any).beginningValue) || 0), 0)
-    : null;
-  const totalPurchasesCost = purchases.reduce((sum, p) => sum + ((p as any).totalPrice || (p as any).price || 0), 0);
-  const totalEndingStockCost = inventory.reduce(
-    (sum, item) => sum + ((item.currentStock ?? 0) * ((item as any).costPerUnit || 0)),
-    0
-  );
-  const totalWasteCost = wasteLog.reduce((sum, w) => sum + ((w as any).totalCost || (w as any).cost || 0), 0);
-  const actualPackagingFromOrders = salesOrders.reduce((sum, o) => sum + (o.packagingCost || 0), 0);
+  // Keep inventory prop referenced cleanly
+  void inventory;
 
-  // Single Source of Truth P&L for Selected Period
+  // Single Source of Truth P&L for Selected Period (uses date-scoped StockCountSnapshot + period-filtered purchases/waste)
   const periodPnl = useMemo(
     () =>
       buildPeriodPnl({
@@ -633,16 +632,15 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         settings: {
           ...settings,
           incomeTaxRatePercent: incomeTaxRate,
+          cogsVarianceThresholdPercent: (costSettings as any).cogsVarianceThresholdPercent ?? 3.0,
         },
         cogsMode,
-        actualCogsInput: {
-          beginningInventory: totalBeginningStockCost,
-          purchases: totalPurchasesCost,
-          endingInventory: hasActualStockData ? totalEndingStockCost : null,
-          waste: totalWasteCost,
-          packagingFromOrders: actualPackagingFromOrders > 0 ? actualPackagingFromOrders : undefined,
-          hasActualData: hasActualStockData && hasRecordedBeginningStock,
-        },
+        stockCountSnapshots: stockCounts,
+        purchases,
+        wasteLog,
+        ingredients: costIngredients,
+        salesOrders,
+        todayDate: todayStr,
         manualFallbackRates: {
           foodCostPercent: avgFoodCostPercent,
         },
@@ -656,14 +654,14 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       dateParam,
       settings,
       incomeTaxRate,
+      costSettings,
       cogsMode,
-      totalBeginningStockCost,
-      totalPurchasesCost,
-      hasActualStockData,
-      hasRecordedBeginningStock,
-      totalEndingStockCost,
-      totalWasteCost,
-      actualPackagingFromOrders,
+      stockCounts,
+      purchases,
+      wasteLog,
+      costIngredients,
+      salesOrders,
+      todayStr,
       avgFoodCostPercent,
     ]
   );
@@ -682,8 +680,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         settings: {
           ...settings,
           incomeTaxRatePercent: incomeTaxRate,
+          cogsVarianceThresholdPercent: (costSettings as any).cogsVarianceThresholdPercent ?? 3.0,
         },
         cogsMode: 'estimated',
+        todayDate: todayStr,
         manualFallbackRates: {
           foodCostPercent: avgFoodCostPercent,
         },
@@ -696,17 +696,15 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       todayStr,
       settings,
       incomeTaxRate,
+      costSettings,
       avgFoodCostPercent,
     ]
   );
 
-  const theoreticalSalesOrdersCost = salesOrders.reduce((sum, o) => sum + (o.totalFoodCost || 0), 0);
-  const actualCogsForVariance = periodPnl.foodCogs;
-  const varianceResult = calculateVariance(actualCogsForVariance, theoreticalSalesOrdersCost);
+  const theoreticalSalesOrdersCost = periodPnl.theoreticalFoodCogs;
+  const varianceAmount = periodPnl.varianceAmount;
   const varianceThresholdPercent = (costSettings as any).cogsVarianceThresholdPercent ?? 3.0;
-  const variancePointsOfNetSales =
-    periodPnl.netSalesExVat > 0 ? (Math.abs(varianceResult.varianceAmount) / periodPnl.netSalesExVat) * 100 : 0;
-  const isVarianceExceeded = variancePointsOfNetSales > varianceThresholdPercent;
+  const isVarianceExceeded = periodPnl.hasCompleteStockSnapshots && periodPnl.varianceStatus !== 'ON_TRACK';
 
   // Real Break-Even using Monthly Fixed Overhead (honoring endDate) + All Active Staff Payroll
   const currentMonthKey = todayStr.substring(0, 7);
@@ -1661,21 +1659,58 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                         : 'text-amber-700'
                     }
                   >
-                    {periodPnl.cogsStatus === 'complete'
-                      ? lang === 'th' ? 'ข้อมูลครบ' : 'Complete'
-                      : periodPnl.cogsStatus === 'estimated'
-                      ? lang === 'th' ? 'ประมาณการ' : 'Estimated'
-                      : lang === 'th' ? 'ข้อมูลไม่ครบ' : 'Incomplete'}
+                    {periodPnl.hasCompleteStockSnapshots
+                      ? periodPnl.cogsStatus === 'complete'
+                        ? lang === 'th' ? 'ข้อมูลครบ' : 'Complete'
+                        : lang === 'th' ? 'ประมาณการ' : 'Estimated'
+                      : periodPnl.cogsLabel}
                   </strong>
                 </span>
                 <span>
-                  Theoretical: <strong className="text-slate-900">฿{Math.round(theoreticalSalesOrdersCost).toLocaleString()}</strong>
+                  Theoretical: <strong className="text-slate-900">฿{formatMoney(theoreticalSalesOrdersCost)}</strong>
                 </span>
-                <span className={isVarianceExceeded ? 'text-rose-700 font-bold' : 'text-emerald-700 font-semibold'}>
-                  Variance: {varianceResult.varianceAmount >= 0 ? '+' : '-'}฿{Math.round(Math.abs(varianceResult.varianceAmount)).toLocaleString()}
-                </span>
+                {periodPnl.hasCompleteStockSnapshots ? (
+                  <span className={isVarianceExceeded ? 'text-rose-700 font-bold' : 'text-emerald-700 font-semibold'}>
+                    Variance: {varianceAmount >= 0 ? '+' : '-'}฿{formatMoney(Math.abs(varianceAmount))} ({periodPnl.variancePercentOfSales.toFixed(1)}% / {varianceThresholdPercent}%)
+                  </span>
+                ) : (
+                  <span className="text-amber-700 font-semibold">
+                    Variance: ยังไม่มีผลนับสต็อกปิดงวด
+                  </span>
+                )}
+                {periodPnl.wasteMemo > 0 && (
+                  <span className="text-rose-700">
+                    Waste Memo: ฿{formatMoney(periodPnl.wasteMemo)}
+                  </span>
+                )}
               </div>
             </div>
+
+            {!periodPnl.hasCompleteStockSnapshots && (
+              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs text-sky-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-sky-600 shrink-0" />
+                  <span>
+                    <strong>ประมาณการจากสูตร ยังไม่มีการนับสต็อก</strong> — แนะนำให้ไปที่คลังสินค้าแล้วกด{' '}
+                    <button
+                      type="button"
+                      onClick={() => onNavigatePage('cost_inventory')}
+                      className="underline font-bold text-sky-700 hover:text-sky-900 cursor-pointer"
+                    >
+                      นับสต็อกใหม่หนึ่งครั้ง
+                    </button>{' '}
+                    เพื่อบันทึกสต็อกปิดงวดและเปรียบเทียบ Actual COGS
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {periodPnl.uncostedManualSalesWarning && (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="font-semibold">{periodPnl.uncostedManualSalesWarning}</span>
+              </div>
+            )}
 
             {periodPnl.cogsStatus !== 'complete' && periodPnl.statusReasons.length > 0 && (
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 flex items-center gap-2">
@@ -1741,11 +1776,20 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                     2. {lang === 'th' ? 'ต้นทุนขาย (Cost of Goods Sold)' : 'Cost of Goods Sold'}
                   </div>
                   <div className="flex justify-between px-3 py-1 text-slate-600">
-                    <span>{t.reports.foodCost}</span>
+                    <span>
+                      {t.reports.foodCost}{' '}
+                      <span className="text-[11px] text-slate-400">({periodPnl.cogsLabel})</span>
+                    </span>
                     <span>
                       {periodPnl.totalRevenue > 0 ? `${periodPnl.foodCostPercent.toFixed(1)}%` : '0.0%'} · -฿{formatMoney(periodPnl.foodCogs)}
                     </span>
                   </div>
+                  {periodPnl.wasteMemo > 0 && (
+                    <div className="flex justify-between px-3 py-0.5 pl-6 text-[11px] text-rose-600">
+                      <span>• {lang === 'th' ? 'บันทึกของเสียในงวด (Waste Memo — ไม่หักออกจาก COGS)' : 'Waste Memo (Excluded from COGS)'}</span>
+                      <span>฿{formatMoney(periodPnl.wasteMemo)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between px-3 py-1 text-slate-600">
                     <span>{t.reports.packagingCost}</span>
                     <span>

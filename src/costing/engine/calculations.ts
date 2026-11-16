@@ -268,13 +268,15 @@ export function calculateContributionMetrics(
 
 /**
  * 13. Calculate Inventory COGS (Mode B: Accounting)
- * Formula: COGS = Beginning Inventory + Purchases - Waste - Ending Inventory
- * Raw value is returned without clamping to 0; isNegative flag signals stock anomaly.
+ * Standard Formula: COGS = Beginning Inventory + Purchases - Ending Inventory
+ * Waste has already left ending stock and MUST NOT be subtracted from COGS;
+ * if passed, waste is returned only as a separate memo (`wasteMemo`).
  */
 export interface InventoryCOGSResult {
   cogs: number;
   rawCogs: number;
   isNegative: boolean;
+  wasteMemo: number;
   valueOf(): number;
 }
 
@@ -284,12 +286,14 @@ export function calculateInventoryCOGS(
   endingInventory: number,
   waste: number = 0
 ): InventoryCOGSResult {
-  const raw = beginningInventory + purchases - waste - endingInventory;
+  const raw = beginningInventory + purchases - endingInventory;
   const isNegative = raw < 0;
+  const wasteMemo = typeof waste === 'number' && Number.isFinite(waste) ? Math.max(0, waste) : 0;
   return {
     cogs: raw,
     rawCogs: raw,
     isNegative,
+    wasteMemo,
     valueOf() {
       return raw;
     },
@@ -803,22 +807,44 @@ export function calculateMenuEngineering(
 
 /**
  * 19. Calculate Variance between Actual and Theoretical COGS
+ * - varianceAmount = actualCOGS - theoreticalCOGS
+ * - variancePercent = (varianceAmount / theoreticalCOGS) * 100
+ * - threshold check: |varianceAmount| / netSales * 100 > thresholdPercent (default 3%)
  */
 export function calculateVariance(
   actualCOGS: number,
-  theoreticalCOGS: number
+  theoreticalCOGS: number,
+  netSales?: number,
+  thresholdPercent: number = 3.0
 ): {
   varianceAmount: number;
   variancePercent: number;
+  variancePercentOfSales: number;
+  thresholdPercent: number;
   varianceStatus: 'OVER_BUDGET' | 'ON_TRACK' | 'SAVINGS';
 } {
-  const varianceAmount = actualCOGS - theoreticalCOGS;
-  const variancePercent = theoreticalCOGS > 0 ? (varianceAmount / theoreticalCOGS) * 100 : 0;
-  const varianceStatus = varianceAmount > 500 ? 'OVER_BUDGET' : varianceAmount < -500 ? 'SAVINGS' : 'ON_TRACK';
+  const round2 = (v: number) => (Number.isFinite(v) ? Math.round((v + Number.EPSILON) * 100) / 100 : 0);
+  const varianceAmountRaw = actualCOGS - theoreticalCOGS;
+  const variancePercentRaw = theoreticalCOGS > 0 ? (varianceAmountRaw / theoreticalCOGS) * 100 : 0;
+  const hasNetSales = typeof netSales === 'number' && Number.isFinite(netSales) && netSales > 0;
+  const variancePercentOfSalesRaw = hasNetSales
+    ? (Math.abs(varianceAmountRaw) / netSales!) * 100
+    : Math.abs(variancePercentRaw);
+  const effectiveThreshold =
+    typeof thresholdPercent === 'number' && Number.isFinite(thresholdPercent) && thresholdPercent >= 0
+      ? thresholdPercent
+      : 3.0;
+
+  let varianceStatus: 'OVER_BUDGET' | 'ON_TRACK' | 'SAVINGS' = 'ON_TRACK';
+  if (variancePercentOfSalesRaw > effectiveThreshold) {
+    varianceStatus = varianceAmountRaw > 0 ? 'OVER_BUDGET' : 'SAVINGS';
+  }
 
   return {
-    varianceAmount,
-    variancePercent,
+    varianceAmount: round2(varianceAmountRaw),
+    variancePercent: round2(variancePercentRaw),
+    variancePercentOfSales: round2(variancePercentOfSalesRaw),
+    thresholdPercent: effectiveThreshold,
     varianceStatus,
   };
 }

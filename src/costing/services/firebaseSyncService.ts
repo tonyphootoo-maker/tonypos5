@@ -52,6 +52,7 @@ export const COST_COLLECTIONS = {
   SUPPLIERS: 'costSuppliers',
   PRICE_HISTORY: 'costPriceHistory',
   SALES_ORDERS: 'costSalesOrders',
+  STOCK_COUNTS: 'costStockCounts',
 } as const;
 
 export const COLLECTIONS = COST_COLLECTIONS;
@@ -253,6 +254,7 @@ export const FirebaseSyncService = {
       const suppliers = StorageService.getSuppliers();
       const priceHistory = StorageService.getPriceHistory();
       const salesOrders = StorageService.getSalesOrders();
+      const stockCounts = StorageService.getStockCounts();
 
       await this.saveUserDoc(userId, COST_COLLECTIONS.SETTINGS, 'default', settings);
       await Promise.all([
@@ -268,6 +270,7 @@ export const FirebaseSyncService = {
         this.batchSaveUser(userId, COST_COLLECTIONS.SUPPLIERS, suppliers),
         this.batchSaveUser(userId, COST_COLLECTIONS.PRICE_HISTORY, priceHistory),
         this.batchSaveUser(userId, COST_COLLECTIONS.SALES_ORDERS, salesOrders),
+        this.batchSaveUser(userId, COST_COLLECTIONS.STOCK_COUNTS, stockCounts),
       ]);
 
       const count =
@@ -283,7 +286,8 @@ export const FirebaseSyncService = {
         wasteLog.length +
         suppliers.length +
         priceHistory.length +
-        salesOrders.length;
+        salesOrders.length +
+        stockCounts.length;
 
       return { success: true, count };
     } catch (err: any) {

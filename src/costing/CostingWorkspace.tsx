@@ -24,7 +24,9 @@ import {
   PriceHistoryRecord,
   RecipeItem,
   Employee as CostEmployee,
+  StockCountSnapshot,
 } from './types';
+import { convertUnitQuantity } from './services/transactionService';
 import {
   DailySalesRecord,
   SalesChannel,
@@ -110,6 +112,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const [wasteLog, setWasteLog] = useState<WasteRecord[]>(() => StorageService.getWasteLog());
   const [employees, setEmployees] = useState<CostEmployee[]>(() => StorageService.getEmployees());
   const [dailySales, setDailySales] = useState<DailySalesRecord[]>(() => StorageService.getDailySales());
+  const [stockCounts, setStockCounts] = useState<StockCountSnapshot[]>(() => StorageService.getStockCounts());
 
   const [targetRecipeVariantId, setTargetRecipeVariantId] = useState<string>('');
   const [isIconModalOpen, setIsIconModalOpen] = useState<boolean>(false);
@@ -274,6 +277,15 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             StorageService.saveSalesOrders(items);
           },
           (err) => setCloudError(err.message)
+        ),
+        FirebaseSyncService.subscribeUserCollection<StockCountSnapshot>(
+          user.uid,
+          COST_COLLECTIONS.STOCK_COUNTS,
+          (items) => {
+            setStockCounts(items);
+            StorageService.saveStockCounts(items);
+          },
+          (err) => setCloudError(err.message)
         )
       );
 
@@ -309,6 +321,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   useEffect(() => { StorageService.saveWasteLog(wasteLog); }, [wasteLog]);
   useEffect(() => { StorageService.saveEmployees(employees as any); }, [employees]);
   useEffect(() => { StorageService.saveDailySales(dailySales); }, [dailySales]);
+  useEffect(() => { StorageService.saveStockCounts(stockCounts); }, [stockCounts]);
 
   const menuNamesMap = new Map<string, string>();
   menus.forEach((m) => {
@@ -439,12 +452,21 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   };
 
   const handleSavePurchase = (purchase: PurchaseRecord) => {
-    setPurchases((prev) => [purchase, ...prev]);
-    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.PURCHASES, purchase.id, purchase);
+    const ing = ingredients.find((i) => i.id === purchase.ingredientId);
+    const enrichedPurchase: PurchaseRecord = {
+      ...purchase,
+      category: purchase.category || ing?.category,
+      isPackaging:
+        purchase.isPackaging ??
+        Boolean(ing?.category && (ing.category.toLowerCase().includes('packaging') || ing.category.includes('บรรจุภัณฑ์'))),
+    };
+    setPurchases((prev) => [enrichedPurchase, ...prev]);
+    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.PURCHASES, enrichedPurchase.id, enrichedPurchase);
 
     const item = inventory.find((i) => i.ingredientId === purchase.ingredientId);
     if (item) {
-      const updatedStock = item.currentStock + purchase.quantity;
+      const convertedQty = convertUnitQuantity(purchase.quantity, purchase.unit, item.unit);
+      const updatedStock = item.currentStock + convertedQty;
       const updatedInvItem = { ...item, currentStock: updatedStock, lastUpdated: new Date().toISOString() };
       setInventory((prev) => prev.map((inv) => (inv.id === item.id ? updatedInvItem : inv)));
       FirebaseSyncService.saveUserDoc(
@@ -456,11 +478,14 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
 
       const txn: InventoryTransaction = {
         id: `txn_${Date.now()}`,
+        inventoryItemId: item.id,
         ingredientId: purchase.ingredientId,
         ingredientName: purchase.ingredientName,
         type: 'PURCHASE',
-        quantity: purchase.quantity,
-        unit: purchase.unit,
+        quantity: convertedQty,
+        quantityChange: convertedQty,
+        resultingQuantity: updatedStock,
+        unit: item.unit,
         date: purchase.date,
         reason: `บิลซื้อเลขที่ ${purchase.invoiceNumber || '-'}`,
         user: user.email || 'Owner',
@@ -526,6 +551,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     setWasteLog(StorageService.getWasteLog());
     setEmployees(StorageService.getEmployees());
     setDailySales(StorageService.getDailySales());
+    setStockCounts(StorageService.getStockCounts());
   };
 
   const handleNavigateToRecipeBuilder = (variantId: string) => {
@@ -800,6 +826,9 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             menuItems={menus as any}
             inventory={inventory as any}
             allWaste={wasteLog as any}
+            purchases={purchases}
+            stockCounts={stockCounts}
+            salesOrders={salesOrders}
             channels={DEFAULT_SALES_CHANNELS}
             currentSettings={settings}
             activeLanguage={lang}
@@ -829,6 +858,11 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             expenses={expenses as any}
             employees={employees as any}
             settings={settings as any}
+            ingredients={ingredients}
+            purchases={purchases}
+            wasteLog={wasteLog}
+            stockCounts={stockCounts}
+            salesOrders={salesOrders}
             activeLanguage={lang}
             onSalesUpdated={(updatedSales) => setDailySales(updatedSales)}
           />
@@ -850,6 +884,31 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             ingredients={ingredients}
             transactions={inventoryTransactions}
             wasteLog={wasteLog}
+            stockCounts={stockCounts}
+            onSaveStockCount={(snapshot, adjustments) => {
+              setStockCounts((prev) => [snapshot, ...prev]);
+              FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.STOCK_COUNTS, snapshot.id, snapshot);
+
+              if (snapshot.items && snapshot.items.length > 0) {
+                const byIng = new Map(snapshot.items.map((it) => [it.ingredientId, it]));
+                const nextInv = inventory.map((item) => {
+                  const counted = byIng.get(item.ingredientId);
+                  if (!counted) return item;
+                  return {
+                    ...item,
+                    currentStock: counted.countedQty,
+                    currentQuantity: counted.countedQty,
+                    costPerUnit: counted.costPerUnit > 0 ? counted.costPerUnit : item.costPerUnit,
+                    lastUpdated: new Date().toISOString(),
+                  };
+                });
+                setInventory(nextInv);
+                FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.INVENTORY, nextInv);
+              }
+              if (adjustments.length > 0) {
+                setInventoryTransactions((prev) => [...adjustments, ...prev]);
+              }
+            }}
             onSaveAdjustment={(txn, waste) => {
               setInventoryTransactions((prev) => [txn, ...prev]);
               const rawQty = txn.quantityChange ?? txn.quantity ?? 0;

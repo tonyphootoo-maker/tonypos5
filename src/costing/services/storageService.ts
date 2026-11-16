@@ -16,6 +16,7 @@ import {
   Employee,
   PackagingItem,
   AppBackupPackage,
+  StockCountSnapshot,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -53,6 +54,7 @@ const STORAGE_KEYS = {
   YIELD_TESTS: 'tonys_yield_tests_v1',
   EMPLOYEES: 'tonys_employees_v1',
   PACKAGING: 'tonys_packaging_v1',
+  STOCK_COUNTS: 'tonys_stock_counts_v1',
   LAST_BACKUP: 'tonys_last_backup_time',
   OVERHEAD_COMPAT: 'tonys-kitchen-overhead-v1',
 };
@@ -382,6 +384,13 @@ export const StorageService = {
     safeSave(STORAGE_KEYS.PACKAGING, items);
   },
 
+  getStockCounts(): StockCountSnapshot[] {
+    return safeLoad(STORAGE_KEYS.STOCK_COUNTS, []);
+  },
+  saveStockCounts(counts: StockCountSnapshot[]): void {
+    safeSave(STORAGE_KEYS.STOCK_COUNTS, counts);
+  },
+
   resetToDefaults(): void {
     // Only remove keys belonging to Tony's Restaurant System - NEVER clear entire localStorage
     Object.values(STORAGE_KEYS).forEach((key) => {
@@ -406,6 +415,7 @@ export const StorageService = {
     safeSave(STORAGE_KEYS.YIELD_TESTS, []);
     safeSave(STORAGE_KEYS.EMPLOYEES, []);
     safeSave(STORAGE_KEYS.PACKAGING, []);
+    safeSave(STORAGE_KEYS.STOCK_COUNTS, []);
   },
 
   // EXPORT TO EXCEL WORKBOOK
@@ -699,6 +709,7 @@ export const StorageService = {
         yieldTests: this.getYieldTests(),
         employees: this.getEmployees(),
         packagingItems: this.getPackagingItems(),
+        stockCounts: this.getStockCounts(),
       },
     };
     return backup;
@@ -877,6 +888,10 @@ export const StorageService = {
     if (Array.isArray(p.packagingItems)) {
       this.savePackagingItems(p.packagingItems);
       counts.packagingItems = p.packagingItems.length;
+    }
+    if (Array.isArray(p.stockCounts)) {
+      this.saveStockCounts(p.stockCounts);
+      counts.stockCounts = p.stockCounts.length;
     }
 
     this.recordBackupCompleted();

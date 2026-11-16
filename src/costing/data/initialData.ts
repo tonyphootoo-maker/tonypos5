@@ -21,6 +21,9 @@ export const INITIAL_SETTINGS: RestaurantSettings = {
   vatRatePercent: 7.0, // 7% VAT
   incomeTaxRatePercent: 20.0, // 20% estimated corporate income tax
   cogsVarianceThresholdPercent: 3.0, // 3% variance threshold
+  socialSecurityEnabled: false, // Employer SSO 5% (capped at 15,000 THB/month = max 750/mo)
+  socialSecurityRatePercent: 5.0,
+  socialSecurityCapWage: 15000,
   takeawayPackagingCost: 5.0,
   packagingCostTakeaway: 5.0,
   deliveryPackagingCost: 8.0,

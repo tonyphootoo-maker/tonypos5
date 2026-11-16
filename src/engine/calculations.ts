@@ -12,6 +12,14 @@ import {
   ExpenseDoc,
 } from '../types';
 import { DailySalesRecord } from '../costing/types/domain';
+import {
+  StockCountSnapshot,
+  PurchaseRecord,
+  WasteRecord,
+  SaleOrder,
+  Ingredient,
+} from '../costing/types';
+import { calculateVariance } from '../costing/engine/calculations';
 
 /**
  * Rounds a number strictly to 2 decimal places.
@@ -632,37 +640,203 @@ export function isKitchenEmployee(employee: EmployeeDoc): boolean {
   );
 }
 
+export interface LaborCostOptions {
+  socialSecurityEnabled?: boolean;
+  socialSecurityRatePercent?: number; // Default 5%
+  socialSecurityCapWage?: number; // Default 15,000 THB/month wage ceiling (max 750 THB/mo)
+  defaultOperatingDays?: number; // Default 26
+}
+
+export interface UnifiedEmployeeInput {
+  isActive?: boolean;
+  active?: boolean;
+  wageType?: 'monthly' | 'daily' | 'hourly';
+  type?: 'monthly' | 'daily' | 'hourly';
+  employmentType?: 'full_time' | 'part_time' | 'hourly';
+  wageAmount?: number;
+  wageRate?: number;
+  baseSalary?: number;
+  hourlyRate?: number;
+  workDaysOrHoursPerMonth?: number;
+  standardHoursPerMonth?: number;
+  hoursPerMonth?: number;
+  monthlyCost?: number;
+  overtimeHoursMonthly?: number;
+  overtimeRateMultiplier?: number;
+  benefitsMonthly?: number;
+}
+
 /**
- * Calculates monthly equivalent cost of an employee (base wage + overtime + benefits).
+ * Single Source of Truth for an employee's monthly cost across POS & Costing modules:
+ * (base monthly wage + overtime + benefitsMonthly) + employer Social Security (if enabled).
+ * Explicitly parenthesizes expressions so benefits/OT/SSO are never dropped when monthlyCost is set.
+ * Correctly handles hourly workers (hourlyRate × hours) without ever returning just ฿65.
  */
-export function calculateEmployeeMonthlyCost(employee: EmployeeDoc): number {
-  if (employee.isActive === false) return 0;
+export function getEmployeeMonthlyCost(
+  employee: UnifiedEmployeeInput,
+  options?: LaborCostOptions
+): number {
+  if (employee.isActive === false || employee.active === false) return 0;
+
+  const isHourly =
+    employee.wageType === 'hourly' ||
+    employee.type === 'hourly' ||
+    employee.employmentType === 'hourly';
+  const isDaily = employee.wageType === 'daily' || employee.type === 'daily';
+
+  const defaultDays = options?.defaultOperatingDays && options.defaultOperatingDays > 0
+    ? options.defaultOperatingDays
+    : 26;
 
   let baseMonthly = 0;
-  if (employee.wageType === 'monthly') {
-    baseMonthly = employee.wageAmount || 0;
-  } else if (employee.wageType === 'daily') {
-    const days = employee.workDaysOrHoursPerMonth || 26;
-    baseMonthly = (employee.wageAmount || 0) * days;
-  } else if (employee.wageType === 'hourly') {
-    const hours = employee.workDaysOrHoursPerMonth || 208;
-    baseMonthly = (employee.wageAmount || 0) * hours;
+  let hourlyEquivRate = 0;
+
+  if (isHourly) {
+    const hours =
+      Number(
+        employee.standardHoursPerMonth ??
+          employee.hoursPerMonth ??
+          employee.workDaysOrHoursPerMonth
+      ) || 208;
+    const rate =
+      Number(employee.wageAmount ?? employee.wageRate ?? employee.hourlyRate) || 0;
+    baseMonthly = rate > 0 ? rate * hours : Number(employee.monthlyCost) || 0;
+    hourlyEquivRate = rate > 0 ? rate : hours > 0 ? baseMonthly / hours : 0;
+  } else if (isDaily) {
+    const days =
+      Number(
+        employee.workDaysOrHoursPerMonth ??
+          employee.standardHoursPerMonth ??
+          employee.hoursPerMonth
+      ) || defaultDays;
+    const rate =
+      Number(employee.wageAmount ?? employee.wageRate ?? employee.baseSalary) || 0;
+    baseMonthly = rate > 0 ? rate * days : Number(employee.monthlyCost) || 0;
+    hourlyEquivRate = rate > 0 ? rate / 8 : days > 0 ? baseMonthly / (days * 8) : 0;
+  } else {
+    baseMonthly =
+      Number(
+        employee.monthlyCost ??
+          employee.wageAmount ??
+          employee.wageRate ??
+          employee.baseSalary
+      ) || 0;
+    hourlyEquivRate = baseMonthly / 208;
   }
 
   let overtimeMonthly = 0;
-  if (employee.overtimeHoursMonthly && employee.overtimeHoursMonthly > 0) {
-    const hourlyRate =
-      employee.wageType === 'hourly'
-        ? employee.wageAmount || 0
-        : employee.wageType === 'daily'
-        ? (employee.wageAmount || 0) / 8
-        : (employee.wageAmount || 0) / 208;
-    overtimeMonthly =
-      hourlyRate * employee.overtimeHoursMonthly * (employee.overtimeRateMultiplier || 1.5);
+  const otHours = Number(employee.overtimeHoursMonthly) || 0;
+  if (otHours > 0) {
+    const multiplier = Number(employee.overtimeRateMultiplier) || 1.5;
+    overtimeMonthly = hourlyEquivRate * otHours * multiplier;
   }
 
-  const benefits = employee.benefitsMonthly || 0;
-  return baseMonthly + overtimeMonthly + benefits;
+  const benefits = Number(employee.benefitsMonthly) || 0;
+
+  let employerSso = 0;
+  if (options?.socialSecurityEnabled) {
+    const ratePct =
+      typeof options.socialSecurityRatePercent === 'number' &&
+      Number.isFinite(options.socialSecurityRatePercent)
+        ? Math.max(0, options.socialSecurityRatePercent)
+        : 5;
+    const capWage =
+      typeof options.socialSecurityCapWage === 'number' &&
+      Number.isFinite(options.socialSecurityCapWage)
+        ? Math.max(0, options.socialSecurityCapWage)
+        : 15000;
+    const ssoWageBase = Math.min(Math.max(0, baseMonthly), capWage);
+    employerSso = ssoWageBase * (ratePct / 100);
+  }
+
+  return (baseMonthly + overtimeMonthly) + benefits + employerSso;
+}
+
+/**
+ * Calculates monthly equivalent cost of an employee (base wage + overtime + benefits + optional SSO).
+ */
+export function calculateEmployeeMonthlyCost(
+  employee: UnifiedEmployeeInput,
+  options?: LaborCostOptions
+): number {
+  return getEmployeeMonthlyCost(employee, options);
+}
+
+/**
+ * Normalizes a period monetary value (day, month, or year) to a monthly equivalent
+ * using real calendar days in that month or actual coveredMonths (never hardcoded 30 or x12).
+ */
+export function normalizeToMonthly(
+  periodValue: number,
+  period: 'day' | 'month' | 'year',
+  coveredMonths?: number,
+  dateParam?: string
+): number {
+  if (!Number.isFinite(periodValue)) return 0;
+
+  if (period === 'day') {
+    if (typeof coveredMonths === 'number' && Number.isFinite(coveredMonths) && coveredMonths > 0) {
+      return coveredMonths < 1 ? periodValue / coveredMonths : periodValue * coveredMonths;
+    }
+    const ym =
+      dateParam && dateParam.length >= 7
+        ? dateParam.substring(0, 7)
+        : new Date().toISOString().substring(0, 7);
+    const { daysInMonth } = getMonthDateRange(ym);
+    return periodValue * daysInMonth;
+  }
+
+  if (period === 'month') {
+    const months =
+      typeof coveredMonths === 'number' && Number.isFinite(coveredMonths) && coveredMonths > 0
+        ? coveredMonths
+        : 1;
+    return periodValue / months;
+  }
+
+  // period === 'year'
+  if (typeof coveredMonths === 'number' && Number.isFinite(coveredMonths) && coveredMonths > 0) {
+    return periodValue / coveredMonths;
+  }
+  const targetYearNum = dateParam ? parseInt(dateParam.substring(0, 4), 10) : NaN;
+  const now = new Date();
+  const fallbackMonths =
+    Number.isFinite(targetYearNum) && targetYearNum === now.getFullYear()
+      ? Math.max(1, now.getMonth() + 1)
+      : 12;
+  return periodValue / fallbackMonths;
+}
+
+/**
+ * Produces a clear UI subtitle showing which period's sales were used for calculation.
+ */
+export function formatPeriodCalculationLabel(
+  period: 'day' | 'month' | 'year',
+  dateParam: string,
+  lang: 'th' | 'en' = 'th'
+): string {
+  if (lang === 'th') {
+    if (period === 'day') return `คำนวณจากยอดขายวันที่ ${dateParam}`;
+    if (period === 'month') return `คำนวณจากยอดขายเดือน ${dateParam}`;
+    return `คำนวณจากยอดขายปี ${dateParam}`;
+  }
+  if (period === 'day') return `Calculated from sales on ${dateParam}`;
+  if (period === 'month') return `Calculated from sales in ${dateParam}`;
+  return `Calculated from sales in ${dateParam}`;
+}
+
+/**
+ * Identifies payroll expenses via explicit `isPayroll` boolean flag (or legacy Labor category),
+ * never via brittle keyword matching that false-positives on e.g. "ค่าแรงช่างซ่อมแอร์".
+ */
+export function isExplicitPayrollExpense(expense: {
+  isPayroll?: boolean;
+  category?: string;
+}): boolean {
+  if (typeof expense.isPayroll === 'boolean') {
+    return expense.isPayroll;
+  }
+  return expense.category === 'Labor (Salary & Wages)';
 }
 
 function isRecurringExpenseActiveInMonth(exp: ExpenseDoc, targetMonth: string): boolean {
@@ -689,7 +863,8 @@ export function allocatePeriodExpensesAndLaborRaw(
   dateParam: string, // YYYY-MM-DD for day, YYYY-MM for month, YYYY for year
   expenses: ExpenseDoc[],
   employees: EmployeeDoc[],
-  summariesInPeriod?: DailySummaryDoc[]
+  summariesInPeriod?: DailySummaryDoc[],
+  laborOptions?: LaborCostOptions
 ): {
   fixedExpenses: number;
   variableExpenses: number;
@@ -703,7 +878,7 @@ export function allocatePeriodExpensesAndLaborRaw(
   let monthlyKitchenLabor = 0;
   let monthlyFohLabor = 0;
   for (const emp of employees) {
-    const cost = calculateEmployeeMonthlyCost(emp);
+    const cost = getEmployeeMonthlyCost(emp, laborOptions);
     if (cost <= 0) continue;
     if (isKitchenEmployee(emp)) {
       monthlyKitchenLabor += cost;
@@ -904,7 +1079,8 @@ export function calculatePeriodExpensesAndLabor(
   dateParam: string,
   expenses: ExpenseDoc[],
   employees: EmployeeDoc[],
-  summariesInPeriod?: DailySummaryDoc[]
+  summariesInPeriod?: DailySummaryDoc[],
+  laborOptions?: LaborCostOptions
 ): {
   fixedExpenses: number;
   variableExpenses: number;
@@ -915,7 +1091,14 @@ export function calculatePeriodExpensesAndLabor(
   daysInPeriod: number;
   coveredMonths: number;
 } {
-  const raw = allocatePeriodExpensesAndLaborRaw(period, dateParam, expenses, employees, summariesInPeriod);
+  const raw = allocatePeriodExpensesAndLaborRaw(
+    period,
+    dateParam,
+    expenses,
+    employees,
+    summariesInPeriod,
+    laborOptions
+  );
   return {
     fixedExpenses: roundTo2(raw.fixedExpenses),
     variableExpenses: roundTo2(raw.variableExpenses),
@@ -962,6 +1145,165 @@ export interface UsaliPnlResult {
   daysInPeriod: number;
 }
 
+export function getPeriodDateBounds(
+  period: 'day' | 'month' | 'year',
+  dateParam: string
+): { periodStart: string; periodEnd: string } {
+  if (period === 'day') {
+    return { periodStart: dateParam, periodEnd: dateParam };
+  }
+  if (period === 'month') {
+    const [yStr, mStr] = dateParam.split('-');
+    const year = parseInt(yStr, 10) || new Date().getFullYear();
+    const month = parseInt(mStr, 10) || 1;
+    const days = getDaysInMonth(year, month);
+    const monthPrefix = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+    return {
+      periodStart: `${monthPrefix}-01`,
+      periodEnd: `${monthPrefix}-${String(days).padStart(2, '0')}`,
+    };
+  }
+  const yearStr = dateParam.slice(0, 4);
+  return {
+    periodStart: `${yearStr}-01-01`,
+    periodEnd: `${yearStr}-12-31`,
+  };
+}
+
+export function resolveStockCountSnapshotsForPeriod(
+  snapshots: StockCountSnapshot[],
+  periodStart: string,
+  periodEnd: string,
+  todayDate?: string
+): {
+  beginningSnapshot: StockCountSnapshot | null;
+  endingSnapshot: StockCountSnapshot | null;
+  hasCompletePair: boolean;
+} {
+  const todayStr = todayDate || new Date().toISOString().slice(0, 10);
+  const valid = (snapshots || [])
+    .filter(
+      (s) =>
+        s &&
+        typeof s.date === 'string' &&
+        s.date.length >= 10 &&
+        typeof s.totalValue === 'number' &&
+        Number.isFinite(s.totalValue)
+    )
+    .sort((a, b) => {
+      const dateCmp = a.date.localeCompare(b.date);
+      if (dateCmp !== 0) return dateCmp;
+      const createdCmp = (a.createdAt || '').localeCompare(b.createdAt || '');
+      if (createdCmp !== 0) return createdCmp;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+
+  // Beginning stock: latest snapshot strictly BEFORE periodStart
+  let beginningSnapshot: StockCountSnapshot | null = null;
+  for (const s of valid) {
+    if (s.date < periodStart) {
+      beginningSnapshot = s;
+    }
+  }
+
+  // Ending stock: latest snapshot ON OR AFTER periodEnd and NOT AFTER today
+  let endingSnapshot: StockCountSnapshot | null = null;
+  for (const s of valid) {
+    if (s.date >= periodEnd && s.date <= todayStr) {
+      endingSnapshot = s;
+    }
+  }
+
+  return {
+    beginningSnapshot,
+    endingSnapshot,
+    hasCompletePair: Boolean(beginningSnapshot && endingSnapshot),
+  };
+}
+
+export function isPackagingPurchase(
+  purchase: PurchaseRecord,
+  ingredients?: Array<Pick<Ingredient, 'id' | 'category'>>
+): boolean {
+  if (!purchase) return false;
+  if (purchase.isPackaging === true) return true;
+
+  const isPkgCategory = (cat?: string) => {
+    if (!cat) return false;
+    const c = cat.toLowerCase();
+    return c.includes('packaging') || c.includes('บรรจุภัณฑ์');
+  };
+
+  if (isPkgCategory(purchase.category)) return true;
+
+  if (ingredients && purchase.ingredientId) {
+    const ing = ingredients.find((i) => i.id === purchase.ingredientId);
+    if (ing && isPkgCategory(ing.category)) return true;
+  }
+
+  return false;
+}
+
+export function filterPeriodPurchases(
+  purchases: PurchaseRecord[],
+  periodStart: string,
+  periodEnd: string,
+  ingredients?: Array<Pick<Ingredient, 'id' | 'category'>>
+): {
+  foodPurchases: PurchaseRecord[];
+  packagingPurchases: PurchaseRecord[];
+  totalFoodPurchases: number;
+  totalPackagingPurchases: number;
+} {
+  const foodPurchases: PurchaseRecord[] = [];
+  const packagingPurchases: PurchaseRecord[] = [];
+  let totalFoodPurchases = 0;
+  let totalPackagingPurchases = 0;
+
+  for (const p of purchases || []) {
+    if (!p || !p.date || p.date < periodStart || p.date > periodEnd) continue;
+    const amount = Math.max(0, Number(p.totalPrice ?? p.price ?? 0) || 0);
+    if (isPackagingPurchase(p, ingredients)) {
+      packagingPurchases.push(p);
+      totalPackagingPurchases += amount;
+    } else {
+      foodPurchases.push(p);
+      totalFoodPurchases += amount;
+    }
+  }
+
+  return {
+    foodPurchases,
+    packagingPurchases,
+    totalFoodPurchases,
+    totalPackagingPurchases,
+  };
+}
+
+export function filterPeriodWaste(
+  wasteLog: WasteRecord[],
+  periodStart: string,
+  periodEnd: string
+): {
+  periodWaste: WasteRecord[];
+  totalWasteCost: number;
+} {
+  const periodWaste: WasteRecord[] = [];
+  let totalWasteCost = 0;
+
+  for (const w of wasteLog || []) {
+    if (!w || !w.date || w.date < periodStart || w.date > periodEnd) continue;
+    const cost = Math.max(0, Number(w.totalCost ?? w.cost ?? 0) || 0);
+    periodWaste.push(w);
+    totalWasteCost += cost;
+  }
+
+  return {
+    periodWaste,
+    totalWasteCost,
+  };
+}
+
 export interface BuildPeriodPnlInput {
   summaries: DailySummaryDoc[];
   manualSales?: DailySalesRecord[];
@@ -969,8 +1311,25 @@ export interface BuildPeriodPnlInput {
   employees: EmployeeDoc[];
   period: 'day' | 'month' | 'year';
   dateParam: string;
-  settings: Partial<Pick<SettingsDoc, 'serviceChargeTreatment' | 'vatPercent' | 'incomeTaxRatePercent'>>;
+  settings: Partial<
+    Pick<
+      SettingsDoc,
+      | 'serviceChargeTreatment'
+      | 'vatPercent'
+      | 'incomeTaxRatePercent'
+      | 'cogsVarianceThresholdPercent'
+      | 'socialSecurityEnabled'
+      | 'socialSecurityRatePercent'
+      | 'socialSecurityCapWage'
+    >
+  >;
   cogsMode: 'estimated' | 'actual';
+  stockCountSnapshots?: StockCountSnapshot[];
+  purchases?: PurchaseRecord[];
+  wasteLog?: WasteRecord[];
+  ingredients?: Array<Pick<Ingredient, 'id' | 'category'>>;
+  salesOrders?: SaleOrder[];
+  todayDate?: string;
   actualCogsInput?: {
     beginningInventory?: number | null;
     purchases?: number;
@@ -1037,6 +1396,24 @@ export interface PeriodPnlResult {
 
   foodCostPercent: number;
 
+  // Inventory / Theoretical / Variance & Advisory fields
+  theoreticalFoodCogs: number;
+  actualFoodCogs: number | null;
+  cogsSource: 'actual' | 'theoretical';
+  cogsLabel: string;
+  hasCompleteStockSnapshots: boolean;
+  beginningStockSnapshot: StockCountSnapshot | null;
+  endingStockSnapshot: StockCountSnapshot | null;
+  periodFoodPurchases: number;
+  periodPackagingPurchasesExcluded: number;
+  wasteMemo: number;
+  varianceAmount: number;
+  variancePercent: number;
+  variancePercentOfSales: number;
+  varianceStatus: 'OVER_BUDGET' | 'ON_TRACK' | 'SAVINGS';
+  uncostedManualSalesAmount: number;
+  uncostedManualSalesWarning: string | null;
+
   cogsStatus: PnlDataStatus;
   statusReasons: string[];
   sourcesUsed: {
@@ -1081,6 +1458,12 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     dateParam,
     settings,
     cogsMode,
+    stockCountSnapshots,
+    purchases,
+    wasteLog,
+    ingredients,
+    salesOrders = [],
+    todayDate,
     actualCogsInput,
     manualFallbackRates,
   } = input;
@@ -1126,6 +1509,19 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     } else if ((s.netSales || 0) > 0 || (s.orderCount || 0) > 0) {
       posWholeDateCovered.add(s.date);
     }
+  }
+
+  // Add SaleOrder food/packaging COGS ONLY for dates not already covered by POS dailySummaries (avoid double-counting)
+  let unmatchedOrderFoodCogsRaw = 0;
+  let unmatchedOrderPackagingCogsRaw = 0;
+  for (const order of salesOrders) {
+    if (!order || !isDateInPeriod(order.date, period, dateParam)) continue;
+    if (order.orderStatus === 'CANCELLED' || order.paymentStatus === 'VOID' || order.paymentStatus === 'REFUNDED') {
+      continue;
+    }
+    if (posDatesAll.has(order.date)) continue;
+    unmatchedOrderFoodCogsRaw += Math.max(0, order.totalFoodCost || 0);
+    unmatchedOrderPackagingCogsRaw += Math.max(0, order.packagingCost || 0);
   }
 
   // Fallback pos_sync_* entries in manualSales only when summaries lacked that date
@@ -1204,47 +1600,95 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
   const retainedServiceChargeRaw = scTreatment === 'retained' ? serviceChargeCollectedRaw : 0;
   const totalRevenueRaw = netSalesExVatRaw + retainedServiceChargeRaw;
 
+  // Date-scoped Stock Snapshot, Purchases (Food vs Packaging), and Waste Resolution
+  const { periodStart, periodEnd } = getPeriodDateBounds(period, dateParam);
+  const snapshotRes = resolveStockCountSnapshotsForPeriod(
+    stockCountSnapshots || [],
+    periodStart,
+    periodEnd,
+    todayDate
+  );
+  const purchaseRes = filterPeriodPurchases(purchases || [], periodStart, periodEnd, ingredients);
+  const wasteRes =
+    wasteLog !== undefined
+      ? filterPeriodWaste(wasteLog, periodStart, periodEnd)
+      : { periodWaste: [], totalWasteCost: Math.max(0, actualCogsInput?.waste || 0) };
+
+  const theoreticalFoodCogsRaw =
+    posFoodCogsRaw + unmatchedOrderFoodCogsRaw + manualExplicitFoodCogsRaw;
+  const theoreticalPackagingCogsRaw =
+    posPackagingCogsRaw + unmatchedOrderPackagingCogsRaw + manualExplicitPackagingCogsRaw;
+
+  // Actual COGS = Beginning Stock + Period Food Purchases - Ending Stock (Waste NOT subtracted!)
+  let actualFoodCogsRaw: number | null = null;
+  let periodFoodPurchasesRaw = purchaseRes.totalFoodPurchases;
+  const periodPackagingPurchasesExcludedRaw = purchaseRes.totalPackagingPurchases;
+
+  if (snapshotRes.hasCompletePair && snapshotRes.beginningSnapshot && snapshotRes.endingSnapshot) {
+    actualFoodCogsRaw =
+      snapshotRes.beginningSnapshot.totalValue +
+      periodFoodPurchasesRaw -
+      snapshotRes.endingSnapshot.totalValue;
+  } else if (
+    stockCountSnapshots === undefined &&
+    actualCogsInput &&
+    Boolean(actualCogsInput.hasActualData) &&
+    actualCogsInput.beginningInventory !== undefined &&
+    actualCogsInput.beginningInventory !== null &&
+    Number.isFinite(actualCogsInput.beginningInventory) &&
+    actualCogsInput.endingInventory !== undefined &&
+    actualCogsInput.endingInventory !== null &&
+    Number.isFinite(actualCogsInput.endingInventory)
+  ) {
+    const legacyPurch = purchases !== undefined ? periodFoodPurchasesRaw : actualCogsInput.purchases || 0;
+    periodFoodPurchasesRaw = legacyPurch;
+    actualFoodCogsRaw =
+      actualCogsInput.beginningInventory + legacyPurch - actualCogsInput.endingInventory;
+  }
+
+  // Uncosted manual sales warning
+  const uncostedManualSalesAmount = roundTo2(manualSalesWithoutCogsRaw);
+  const uncostedManualSalesWarning =
+    uncostedManualSalesAmount > 0
+      ? `มียอดขาย manual ${uncostedManualSalesAmount.toLocaleString('en-US', { maximumFractionDigits: 2 })} บาทที่ไม่มีต้นทุนอาหารคู่ อาจทำให้กำไรสูงเกินจริง`
+      : null;
+
   // COGS Resolution (strictly Rule 2: never silently invent fake cost rates)
   let foodCogsRaw = 0;
   let packagingCogsRaw = 0;
   let cogsStatus: PnlDataStatus = 'complete';
+  let cogsSource: 'actual' | 'theoretical' = 'theoretical';
+  let cogsLabel = snapshotRes.hasCompletePair
+    ? 'ต้นทุนจริงจากการนับสต็อก (Actual COGS)'
+    : 'ประมาณการจากสูตร ยังไม่มีการนับสต็อก';
   const statusReasons: string[] = [];
 
   if (cogsMode === 'actual') {
-    const hasBegin =
-      actualCogsInput?.beginningInventory !== undefined &&
-      actualCogsInput?.beginningInventory !== null &&
-      Number.isFinite(actualCogsInput.beginningInventory);
-    const hasEnd =
-      actualCogsInput?.endingInventory !== undefined &&
-      actualCogsInput?.endingInventory !== null &&
-      Number.isFinite(actualCogsInput.endingInventory);
-    const hasActual = Boolean(actualCogsInput?.hasActualData) && hasBegin && hasEnd;
-
-    if (hasActual) {
-      const beginInv = actualCogsInput!.beginningInventory || 0;
-      const purchases = actualCogsInput!.purchases || 0;
-      const waste = actualCogsInput!.waste || 0;
-      const endInv = actualCogsInput!.endingInventory || 0;
-      foodCogsRaw = beginInv + purchases - waste - endInv;
+    if (actualFoodCogsRaw !== null) {
+      foodCogsRaw = actualFoodCogsRaw;
       packagingCogsRaw =
         actualCogsInput?.packagingFromOrders !== undefined
           ? actualCogsInput.packagingFromOrders
-          : posPackagingCogsRaw + manualExplicitPackagingCogsRaw;
+          : theoreticalPackagingCogsRaw;
+      cogsSource = 'actual';
+      cogsLabel = 'ต้นทุนจริงจากการนับสต็อก (Actual COGS)';
       if (foodCogsRaw < 0) {
         cogsStatus = 'incomplete';
         statusReasons.push('ต้นทุนสต็อกติดลบ กรุณาตรวจสอบสต็อกต้นงวด/ปลายงวด');
       }
     } else {
       cogsStatus = 'incomplete';
-      statusReasons.push('ข้อมูลสต็อกต้นงวดหรือการจัดซื้อจริงไม่ครบ');
-      foodCogsRaw = posFoodCogsRaw + manualExplicitFoodCogsRaw;
-      packagingCogsRaw = posPackagingCogsRaw + manualExplicitPackagingCogsRaw;
+      cogsSource = 'theoretical';
+      cogsLabel = 'ประมาณการจากสูตร ยังไม่มีการนับสต็อก';
+      statusReasons.push('ประมาณการจากสูตร ยังไม่มีการนับสต็อก');
+      foodCogsRaw = theoreticalFoodCogsRaw;
+      packagingCogsRaw = theoreticalPackagingCogsRaw;
     }
   } else {
     // 'estimated' / operational mode: POS summary snapshots + explicit manual COGS + optional real-menu-recipe rate
-    foodCogsRaw = posFoodCogsRaw + manualExplicitFoodCogsRaw;
-    packagingCogsRaw = posPackagingCogsRaw + manualExplicitPackagingCogsRaw;
+    foodCogsRaw = theoreticalFoodCogsRaw;
+    packagingCogsRaw = theoreticalPackagingCogsRaw;
+    cogsSource = 'theoretical';
 
     if (manualSalesWithoutCogsRaw > 0) {
       const ratePct = manualFallbackRates?.foodCostPercent;
@@ -1265,13 +1709,39 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     }
   }
 
+  if (uncostedManualSalesWarning) {
+    statusReasons.push(uncostedManualSalesWarning);
+  }
+
+  // Variance against Theoretical Food COGS using % of Net Sales threshold
+  const thresholdPercent =
+    typeof settings.cogsVarianceThresholdPercent === 'number' &&
+    Number.isFinite(settings.cogsVarianceThresholdPercent)
+      ? settings.cogsVarianceThresholdPercent
+      : 3.0;
+  const varianceResult =
+    actualFoodCogsRaw !== null
+      ? calculateVariance(actualFoodCogsRaw, theoreticalFoodCogsRaw, netSalesExVatRaw, thresholdPercent)
+      : {
+          varianceAmount: 0,
+          variancePercent: 0,
+          variancePercentOfSales: 0,
+          thresholdPercent,
+          varianceStatus: 'ON_TRACK' as const,
+        };
+
   // Expenses & Labor (date-bound allocator, unrounded floats)
   const allocated = allocatePeriodExpensesAndLaborRaw(
     period,
     dateParam,
     expenses,
     employees,
-    periodSummaries
+    periodSummaries,
+    {
+      socialSecurityEnabled: settings.socialSecurityEnabled,
+      socialSecurityRatePercent: settings.socialSecurityRatePercent,
+      socialSecurityCapWage: settings.socialSecurityCapWage,
+    }
   );
 
   const totalCogsRaw = foodCogsRaw + packagingCogsRaw;
@@ -1370,6 +1840,24 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     primeCostStatus: getPrimeCostStatus(primeCostPercent),
 
     foodCostPercent,
+
+    theoreticalFoodCogs: roundTo2(theoreticalFoodCogsRaw),
+    actualFoodCogs: actualFoodCogsRaw !== null ? roundTo2(actualFoodCogsRaw) : null,
+    cogsSource,
+    cogsLabel,
+    hasCompleteStockSnapshots: snapshotRes.hasCompletePair,
+    beginningStockSnapshot: snapshotRes.beginningSnapshot,
+    endingStockSnapshot: snapshotRes.endingSnapshot,
+    periodFoodPurchases: roundTo2(periodFoodPurchasesRaw),
+    periodPackagingPurchasesExcluded: roundTo2(periodPackagingPurchasesExcludedRaw),
+    wasteMemo: roundTo2(wasteRes.totalWasteCost),
+    varianceAmount: varianceResult.varianceAmount,
+    variancePercent: varianceResult.variancePercent,
+    variancePercentOfSales: varianceResult.variancePercentOfSales,
+    varianceStatus: varianceResult.varianceStatus,
+    uncostedManualSalesAmount,
+    uncostedManualSalesWarning,
+
     cogsStatus,
     statusReasons,
     sourcesUsed: {
@@ -1483,42 +1971,99 @@ export function calculateUsaliPnl(
   };
 }
 
-/**
- * Derives variable cost % from real data of recent daily summaries:
- * variable cost % = (food + packaging + platformFees) / netSales
- * CM % = 100 - variable cost %
- */
-export function deriveVariableCostPercent(recentSummaries: DailySummaryDoc[]): {
+export interface DeriveVariableCostOptions {
+  /** Total monthly/period variable operating expenses (isFixed === false, excluding payroll duplicates) */
+  otherVariableCostAmount?: number;
+  /** Denominator net sales ex-VAT corresponding to otherVariableCostAmount (defaults to recentSummaries totalNetSales) */
+  otherVariablePeriodNetSales?: number;
+  /** Precomputed other variable expense % of sales if caller already normalized it */
+  extraVariablePercent?: number;
+}
+
+export interface DerivedVariableCostResult {
+  foodCostPercent: number;
+  packagingPercent: number;
+  platformFeePercent: number;
+  otherVariableCostPercent: number;
   variableCostPercent: number;
   contributionMarginPercent: number;
   hasRealData: boolean;
+  isAssumed: boolean;
   totalNetSales: number;
-} {
+}
+
+/**
+ * Derives variable cost % and Contribution Margin % strictly from real data:
+ *   variableCost% = foodCost% + packaging% + platformFee% + otherVariableCost%
+ *   CM% = 100 - variableCost%
+ * When no real data exists, returns hasRealData = false, isAssumed = true, CM% = 0
+ * (never silently fabricating 35% / 65%).
+ */
+export function deriveVariableCostPercent(
+  recentSummaries: DailySummaryDoc[],
+  options?: DeriveVariableCostOptions
+): DerivedVariableCostResult {
   let netSales = 0;
-  let variableCosts = 0;
+  let foodCosts = 0;
+  let packagingCosts = 0;
+  let platformFees = 0;
 
   for (const s of recentSummaries) {
-    netSales += s.netSales || 0;
-    variableCosts += (s.totalFoodCost || 0) + (s.packagingCost || 0) + (s.platformFees || 0);
+    netSales += Math.max(0, s.netSales || 0);
+    foodCosts += Math.max(0, s.totalFoodCost || 0);
+    packagingCosts += Math.max(0, s.packagingCost || 0);
+    platformFees += Math.max(0, s.platformFees || 0);
   }
 
-  if (netSales > 0 && variableCosts > 0) {
-    const vcPct = roundTo2((variableCosts / netSales) * 100);
-    const cmPct = roundTo2(Math.max(0, Math.min(100, 100 - vcPct)));
+  const baseCosts = foodCosts + packagingCosts + platformFees;
+  const otherVarAmount = Math.max(0, options?.otherVariableCostAmount || 0);
+  const otherVarDenom =
+    options?.otherVariablePeriodNetSales && options.otherVariablePeriodNetSales > 0
+      ? options.otherVariablePeriodNetSales
+      : netSales;
+
+  const extraPct =
+    typeof options?.extraVariablePercent === 'number' && Number.isFinite(options.extraVariablePercent)
+      ? Math.max(0, options.extraVariablePercent)
+      : null;
+
+  if (netSales > 0 && (baseCosts > 0 || otherVarAmount > 0 || (extraPct ?? 0) > 0)) {
+    const foodPctRaw = (foodCosts / netSales) * 100;
+    const pkgPctRaw = (packagingCosts / netSales) * 100;
+    const feePctRaw = (platformFees / netSales) * 100;
+    const otherVarPctRaw =
+      extraPct !== null
+        ? extraPct
+        : otherVarAmount > 0 && otherVarDenom > 0
+        ? (otherVarAmount / otherVarDenom) * 100
+        : 0;
+
+    const totalVarRaw = foodPctRaw + pkgPctRaw + feePctRaw + otherVarPctRaw;
+    const cmRaw = Math.max(0, Math.min(100, 100 - totalVarRaw));
+
     return {
-      variableCostPercent: vcPct,
-      contributionMarginPercent: cmPct,
+      foodCostPercent: roundTo2(foodPctRaw),
+      packagingPercent: roundTo2(pkgPctRaw),
+      platformFeePercent: roundTo2(feePctRaw),
+      otherVariableCostPercent: roundTo2(otherVarPctRaw),
+      variableCostPercent: roundTo2(totalVarRaw),
+      contributionMarginPercent: roundTo2(cmRaw),
       hasRealData: true,
+      isAssumed: false,
       totalNetSales: roundTo2(netSales),
     };
   }
 
-  // Default estimate when not enough data
   return {
-    variableCostPercent: 35,
-    contributionMarginPercent: 65,
+    foodCostPercent: 0,
+    packagingPercent: 0,
+    platformFeePercent: 0,
+    otherVariableCostPercent: 0,
+    variableCostPercent: 0,
+    contributionMarginPercent: 0,
     hasRealData: false,
-    totalNetSales: 0,
+    isAssumed: true,
+    totalNetSales: roundTo2(netSales),
   };
 }
 
