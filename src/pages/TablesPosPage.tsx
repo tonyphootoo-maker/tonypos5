@@ -34,6 +34,7 @@ import {
   subscribeCollection,
   saveOrderToTableAtomic,
   saveCategoriesOrder,
+  saveDocument,
   getImageDoc,
 } from '../data/db';
 import { SaveOrderModal } from '../components/SaveOrderModal';
@@ -122,6 +123,19 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   } | null>(null);
   const suppressCatClickRef = useRef<boolean>(false);
 
+  // Dish Options Modal: Primary Option (Variant) Drag-and-Drop Reorder State
+  const [draggingVariantId, setDraggingVariantId] = useState<string | null>(null);
+  const [dragOverVariantId, setDragOverVariantId] = useState<string | null>(null);
+  const variantTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const variantTouchRef = useRef<{
+    sourceId: string;
+    targetId: string | null;
+    active: boolean;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const suppressVariantClickRef = useRef<boolean>(false);
+
   // Maps for dynamic recipe cost calculation
   const ingredientsMap = new Map<string, IngredientDoc>(ingredients.map((i) => [i.id, i]));
   const subRecipesMap = new Map<string, SubRecipeDoc>(subRecipes.map((s) => [s.id, s]));
@@ -138,14 +152,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     if (!el || selectedCategoryId !== null) return;
 
     const updateScale = () => {
-      const availW = Math.max(240, el.clientWidth - 16);
-      const availH = Math.max(200, el.clientHeight - 16);
+      const availW = Math.max(240, el.clientWidth - 8);
+      const availH = Math.max(200, el.clientHeight - 8);
       const scaleW = availW / FLOOR_CANVAS_MIN_WIDTH;
       const scaleH = availH / FLOOR_CANVAS_MIN_HEIGHT;
-      const next = Math.min(1, Math.max(0.32, Math.min(scaleW, Math.max(scaleW, scaleH))));
-      // Fit width on narrow devices; also fit height when screen is shorter than scaled canvas
-      const fitBoth = Math.min(1, Math.max(0.32, Math.min(scaleW, scaleH)));
-      setFloorScale(availW < FLOOR_CANVAS_MIN_WIDTH || availH < FLOOR_CANVAS_MIN_HEIGHT ? fitBoth : next);
+      const fitBoth = Math.min(1.4, Math.max(0.32, Math.min(scaleW, scaleH)));
+      setFloorScale(fitBoth);
     };
 
     updateScale();
@@ -218,6 +230,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     return () => {
       unsubs.forEach((u) => u());
       if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
+      if (variantTouchTimerRef.current) clearTimeout(variantTouchTimerRef.current);
       if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
     };
   }, []);
@@ -591,6 +604,97 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
   };
 
+  // Drag-and-drop reorder Primary Options (variants) inside Dish Options Modal & save to Cloud
+  const reorderVariantsByIds = async (sourceVariantId: string, targetVariantId: string) => {
+    if (!selectedDishForOptions || !sourceVariantId || !targetVariantId || sourceVariantId === targetVariantId) {
+      return;
+    }
+    const list = [...selectedDishForOptions.variants];
+    const sourceIdx = list.findIndex((v) => v.id === sourceVariantId);
+    const targetIdx = list.findIndex((v) => v.id === targetVariantId);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const [moved] = list.splice(sourceIdx, 1);
+    list.splice(targetIdx, 0, moved);
+
+    const updatedDish: DishDoc = {
+      ...selectedDishForOptions,
+      variants: list,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setSelectedDishForOptions(updatedDish);
+    setDishes((prev) => prev.map((d) => (d.id === updatedDish.id ? updatedDish : d)));
+
+    try {
+      await saveDocument('dishes', updatedDish, false);
+    } catch (err) {
+      console.error('Save primary options order error:', err);
+    }
+  };
+
+  const handleVariantTouchStart = (e: React.TouchEvent<HTMLButtonElement>, variantId: string) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    if (variantTouchTimerRef.current) clearTimeout(variantTouchTimerRef.current);
+    variantTouchRef.current = {
+      sourceId: variantId,
+      targetId: variantId,
+      active: false,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+    variantTouchTimerRef.current = setTimeout(() => {
+      if (variantTouchRef.current && variantTouchRef.current.sourceId === variantId) {
+        variantTouchRef.current.active = true;
+        setDraggingVariantId(variantId);
+        setDragOverVariantId(variantId);
+      }
+    }, 180);
+  };
+
+  const handleVariantTouchMove = (e: React.TouchEvent<HTMLButtonElement>) => {
+    const state = variantTouchRef.current;
+    if (!state || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+
+    if (!state.active) {
+      if (Math.hypot(touch.clientX - state.startX, touch.clientY - state.startY) > 10) {
+        if (variantTouchTimerRef.current) clearTimeout(variantTouchTimerRef.current);
+        variantTouchRef.current = null;
+      }
+      return;
+    }
+
+    e.preventDefault();
+    const el = document
+      .elementFromPoint(touch.clientX, touch.clientY)
+      ?.closest('[data-variant-id]') as HTMLElement | null;
+    const hitId = el?.getAttribute('data-variant-id') || null;
+    if (hitId) {
+      state.targetId = hitId;
+      setDragOverVariantId(hitId);
+    }
+  };
+
+  const handleVariantTouchEnd = async () => {
+    if (variantTouchTimerRef.current) clearTimeout(variantTouchTimerRef.current);
+    const state = variantTouchRef.current;
+    variantTouchRef.current = null;
+
+    if (state?.active) {
+      suppressVariantClickRef.current = true;
+      setTimeout(() => {
+        suppressVariantClickRef.current = false;
+      }, 160);
+      setDraggingVariantId(null);
+      setDragOverVariantId(null);
+      if (state.targetId && state.targetId !== state.sourceId) {
+        await reorderVariantsByIds(state.sourceId, state.targetId);
+      }
+    }
+  };
+
   // Filter dishes by active category if any
   const displayedDishes =
     selectedCategoryId && selectedCategoryId !== 'all'
@@ -608,7 +712,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     <div className="flex flex-col flex-1 min-h-0 bg-transparent overflow-hidden select-none">
       {/* Top Zone Chip Bar: Only visible when NOT full screen in a category */}
       {!selectedCategoryId && (
-        <div className="px-3 sm:px-4 py-2.5 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-2 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.08)]">
+        <div className="px-3 py-1.5 bg-white/90 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-2 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.08)]">
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none flex-1 py-0.5">
 
             {zones.map((z) => {
@@ -711,7 +815,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             // Specific Zone Floor Plan (Strictly Read-Only, auto-fitted to device viewport)
             <div
               ref={floorViewportRef}
-              className="relative flex-1 min-h-0 overflow-auto bg-slate-100/60 p-2 flex items-start sm:items-center justify-center"
+              className="relative flex-1 min-h-0 overflow-auto bg-slate-100/60 p-1 flex items-start sm:items-center justify-center"
             >
               {orderSavedNotice && (
                 <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-extrabold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 pointer-events-none">
@@ -955,7 +1059,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       </div>
 
       {/* Always-Visible Bottom Bar: Permanent "Bill" card + Sculpted 3D Category Cards */}
-      <div className="min-h-[64px] pb-[env(safe-area-inset-bottom)] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-2 flex items-center gap-2 overflow-x-auto shadow-[0_-6px_20px_-10px_rgba(15,23,42,0.1)] z-30 shrink-0">
+      <div className="min-h-[54px] pb-[env(safe-area-inset-bottom)] bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-1.5 flex items-center gap-2 overflow-x-auto shadow-[0_-6px_20px_-10px_rgba(15,23,42,0.1)] z-30 shrink-0">
         {/* Permanent Bill Card (reduced ~40% in size, no bill number) */}
         <button
           onClick={() => setSelectedCategoryId(null)}
@@ -1072,32 +1176,99 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
             {/* Scrollable Body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* Variants Selector */}
+              {/* Variants Selector (Drag-and-drop to reorder positions) */}
               <div>
-                <label className="block text-xs font-bold text-neutral-800 mb-1.5">
-                  {t.pos.pickVariant}
-                </label>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className="text-xs font-bold text-neutral-800">
+                    {t.pos.pickVariant}
+                  </label>
+                  {selectedDishForOptions.variants.length > 1 && (
+                    <span className="text-[10px] font-semibold text-neutral-400">
+                      {lang === 'th' ? 'ลากวางเพื่อสลับตำแหน่ง' : 'Drag & drop to reorder'}
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {selectedDishForOptions.variants.map((v) => {
                     const isSelected = selectedVariantId === v.id;
+                    const isDraggingThis = draggingVariantId === v.id;
+                    const isDropTarget = dragOverVariantId === v.id && draggingVariantId !== v.id;
                     const vCost = calculateDishVariantCost(v, ingredientsMap, subRecipesMap, packagingMap);
                     const effectivePrice = calculateEffectiveChannelPrice(v.price, currentChannel);
                     const hasMarkup = (currentChannel?.priceMarkupPercent || 0) > 0;
                     return (
                       <button
                         key={v.id}
+                        data-variant-id={v.id}
                         type="button"
-                        onClick={() => setSelectedVariantId(v.id)}
-                        className={`p-3 rounded-2xl border text-left cursor-pointer transition-all ${
+                        draggable={selectedDishForOptions.variants.length > 1}
+                        onDragStart={(e) => {
+                          setDraggingVariantId(v.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/kinpos-variant-id', v.id);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (draggingVariantId && draggingVariantId !== v.id) {
+                            setDragOverVariantId(v.id);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverVariantId === v.id) setDragOverVariantId(null);
+                        }}
+                        onDrop={async (e) => {
+                          e.preventDefault();
+                          const srcId = e.dataTransfer.getData('text/kinpos-variant-id') || draggingVariantId;
+                          setDraggingVariantId(null);
+                          setDragOverVariantId(null);
+                          if (srcId && srcId !== v.id) {
+                            await reorderVariantsByIds(srcId, v.id);
+                          }
+                        }}
+                        onDragEnd={() => {
+                          setDraggingVariantId(null);
+                          setDragOverVariantId(null);
+                        }}
+                        onTouchStart={(e) => handleVariantTouchStart(e, v.id)}
+                        onTouchMove={handleVariantTouchMove}
+                        onTouchEnd={handleVariantTouchEnd}
+                        onTouchCancel={handleVariantTouchEnd}
+                        onClick={() => {
+                          if (suppressVariantClickRef.current) {
+                            suppressVariantClickRef.current = false;
+                            return;
+                          }
+                          setSelectedVariantId(v.id);
+                        }}
+                        title={
+                          selectedDishForOptions.variants.length > 1
+                            ? lang === 'th'
+                              ? 'ลากวางเพื่อสลับตำแหน่งตัวเลือกหลัก'
+                              : 'Drag and drop to reorder primary option'
+                            : undefined
+                        }
+                        className={`p-3 rounded-2xl border text-left transition-all select-none ${
+                          selectedDishForOptions.variants.length > 1
+                            ? 'cursor-grab active:cursor-grabbing'
+                            : 'cursor-pointer'
+                        } ${isDraggingThis ? 'opacity-50 scale-95' : ''} ${
+                          isDropTarget ? 'ring-2 ring-orange-500 ring-offset-1 scale-[1.02]' : ''
+                        } ${
                           isSelected
                             ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-400'
                             : 'border-neutral-200 bg-white hover:bg-neutral-50'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="font-extrabold text-xs text-neutral-900 truncate">
-                            {lang === 'th' && v.nameTh ? v.nameTh : v.name}
-                          </span>
+                          <div className="flex items-center gap-1 min-w-0">
+                            {selectedDishForOptions.variants.length > 1 && (
+                              <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0" />
+                            )}
+                            <span className="font-extrabold text-xs text-neutral-900 truncate">
+                              {lang === 'th' && v.nameTh ? v.nameTh : v.name}
+                            </span>
+                          </div>
                           <div className="flex items-center gap-1 shrink-0">
                             {hasMarkup && (
                               <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200">
@@ -1118,7 +1289,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                             settings.serviceChargePercent
                           );
                           return (
-                            <div className="text-[10px] text-neutral-500">
+                            <div className="text-[10px] text-neutral-500 mt-0.5">
                               Food: ฿{formatMoney(vCost.foodCost)} ({formatPercent(calculateFoodCostPercent(vCost.foodCost, netEffectivePrice))})
                             </div>
                           );
@@ -1200,45 +1371,46 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 />
               </div>
 
-              {/* Quantity */}
-              <div className="flex items-center justify-between pt-2 border-t border-neutral-200">
-                <span className="text-xs font-bold text-neutral-800">Quantity</span>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setItemQuantity(Math.max(1, itemQuantity - 1))}
-                    className="w-8 h-8 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-neutral-800 font-bold flex items-center justify-center cursor-pointer"
-                  >
-                    -
-                  </button>
-                  <span className="font-black text-sm w-6 text-center">{itemQuantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => setItemQuantity(itemQuantity + 1)}
-                    className="w-8 h-8 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-neutral-800 font-bold flex items-center justify-center cursor-pointer"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
             </div>
 
-            {/* Footer Add */}
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedDishForOptions(null)}
-                className="px-4 py-2 bg-white text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
-              >
-                {t.common.cancel}
-              </button>
-              <button
-                type="button"
-                onClick={handleAddToCart}
-                className="px-6 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md shadow-orange-500/20 cursor-pointer hover:brightness-105"
-              >
-                {t.pos.addToBill}
-              </button>
+            {/* Pinned Footer: Quantity + Cancel + Add to Bill on one compact row */}
+            <div className="p-2.5 sm:p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 bg-white border border-neutral-300 rounded-xl px-1.5 py-1 shadow-2xs shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setItemQuantity(Math.max(1, itemQuantity - 1))}
+                  aria-label="Decrease quantity"
+                  className="w-8 h-8 rounded-lg bg-neutral-100 hover:bg-neutral-200 active:bg-neutral-300 text-neutral-800 font-black flex items-center justify-center cursor-pointer"
+                >
+                  -
+                </button>
+                <span className="font-black text-sm w-6 text-center tabular-nums">{itemQuantity}</span>
+                <button
+                  type="button"
+                  onClick={() => setItemQuantity(itemQuantity + 1)}
+                  aria-label="Increase quantity"
+                  className="w-8 h-8 rounded-lg bg-neutral-100 hover:bg-neutral-200 active:bg-neutral-300 text-neutral-800 font-black flex items-center justify-center cursor-pointer"
+                >
+                  +
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setSelectedDishForOptions(null)}
+                  className="px-3 sm:px-4 py-2.5 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
+                >
+                  {t.common.cancel}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddToCart}
+                  className="px-4 sm:px-6 py-2.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md shadow-orange-500/20 cursor-pointer hover:brightness-105"
+                >
+                  {t.pos.addToBill}
+                </button>
+              </div>
             </div>
           </div>
         </div>

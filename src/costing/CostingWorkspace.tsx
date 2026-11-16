@@ -35,7 +35,7 @@ import { subscribeCollection } from '../data/db';
 import { DailySummaryDoc } from '../types';
 import { calculateIngredientCost } from './services/calculationEngine';
 import { upsertDailySalesRecord } from './engine/calculations';
-import { syncCostingMenuToPOS } from './services/posBridge';
+import { syncAllCostingToPOS } from './services/posBridge';
 import { AppIconService } from './services/appIconService';
 
 import { FoodCostView } from './components/FoodCostView';
@@ -116,7 +116,6 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const [isCloudLoading, setIsCloudLoading] = useState<boolean>(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [isSyncingPosSales, setIsSyncingPosSales] = useState<boolean>(false);
-  const [selectedSyncMenuId, setSelectedSyncMenuId] = useState<string>('');
   const [isPushingToPos, setIsPushingToPos] = useState<boolean>(false);
   const [bridgeFeedback, setBridgeFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -310,13 +309,6 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   useEffect(() => { StorageService.saveWasteLog(wasteLog); }, [wasteLog]);
   useEffect(() => { StorageService.saveEmployees(employees as any); }, [employees]);
   useEffect(() => { StorageService.saveDailySales(dailySales); }, [dailySales]);
-
-  // Keep selected menu for POS push default to first menu
-  useEffect(() => {
-    if (!selectedSyncMenuId && menus.length > 0) {
-      setSelectedSyncMenuId(menus[0].id);
-    }
-  }, [menus, selectedSyncMenuId]);
 
   const menuNamesMap = new Map<string, string>();
   menus.forEach((m) => {
@@ -576,21 +568,20 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     }
   };
 
-  // Live bridge: push selected Costing MenuItem into KinPOS active POS Dishes
-  const handlePushMenuToPOS = async (menuOverride?: MenuItem) => {
-    const targetMenu = menuOverride || menus.find((m) => m.id === selectedSyncMenuId) || menus[0];
-    if (!targetMenu) return;
+  // Live bridge: push all edited Food Cost menus, ingredients & sauces into KinPOS active POS
+  const handlePushMenuToPOS = async () => {
+    if (menus.length === 0 && ingredients.length === 0) return;
 
     setIsPushingToPos(true);
     setBridgeFeedback(null);
     try {
-      const result = await syncCostingMenuToPOS(targetMenu, ingredients, sauces);
+      const result = await syncAllCostingToPOS(menus, ingredients, sauces);
       setBridgeFeedback({
         type: 'success',
         text:
           lang === 'th'
-            ? `${result.createdDish ? 'เพิ่ม' : 'อัปเดต'}เมนู "${result.dishName}" (${result.variantCount} ตัวเลือก) เข้าหน้าขาย POS เรียบร้อย!`
-            : `${result.createdDish ? 'Added' : 'Updated'} "${result.dishName}" (${result.variantCount} variants) in POS menu!`,
+            ? `อัปเดตข้อมูลเข้า POS เรียบร้อย! (เมนู ${result.syncedMenusCount} รายการ, วัตถุดิบ ${result.updatedIngredientsCount} รายการ)`
+            : `Updated all costing data to POS! (${result.syncedMenusCount} menus, ${result.updatedIngredientsCount} ingredients)`,
       });
     } catch (err: unknown) {
       setBridgeFeedback({
@@ -631,34 +622,21 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           </button>
         </div>
 
-        {/* Push Costing Dish straight to KinPOS POS */}
-        {menus.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={selectedSyncMenuId}
-              onChange={(e) => setSelectedSyncMenuId(e.target.value)}
-              className="px-2.5 py-1.5 rounded-xl border border-[#EAE4D9] text-xs font-semibold max-w-[200px]"
-            >
-              {menus.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name} ({m.variants.length})
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => handlePushMenuToPOS()}
-              disabled={isPushingToPos}
-              className="px-3 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60 whitespace-nowrap"
-            >
-              {isPushingToPos ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <UploadCloud className="w-3.5 h-3.5" />
-              )}
-              <span>{lang === 'th' ? 'ส่งเมนูนี้เข้า POS' : 'Push Menu to POS'}</span>
-            </button>
-          </div>
+        {/* Single Push All Updated Costing & Menus straight to KinPOS POS */}
+        {(menus.length > 0 || ingredients.length > 0) && (
+          <button
+            type="button"
+            onClick={handlePushMenuToPOS}
+            disabled={isPushingToPos}
+            className="px-3.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60 whitespace-nowrap"
+          >
+            {isPushingToPos ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <UploadCloud className="w-3.5 h-3.5" />
+            )}
+            <span>{lang === 'th' ? 'ส่งเมนูนี้เข้า POS' : 'Push Menu to POS'}</span>
+          </button>
         )}
       </div>
 
@@ -743,7 +721,6 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             settings={settings}
             onSaveNewMenu={(newMenu) => {
               handleSaveMenu(newMenu);
-              setSelectedSyncMenuId(newMenu.id);
             }}
             onNavigateToTab={(tabId) => onSelectCostTab(tabId as CostingTabId)}
           />

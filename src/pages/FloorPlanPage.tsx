@@ -115,13 +115,12 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
 
     const updateAutoZoom = () => {
       if (hasManualZoomRef.current) return;
-      const availW = Math.max(240, el.clientWidth - 24);
-      if (availW < FLOOR_CANVAS_MIN_WIDTH) {
-        const fitted = clampNumber(Number((availW / FLOOR_CANVAS_MIN_WIDTH).toFixed(2)), 0.35, 1);
-        setZoom(fitted);
-      } else {
-        setZoom(1);
-      }
+      const availW = Math.max(240, el.clientWidth - 16);
+      const availH = Math.max(200, el.clientHeight - 16);
+      const scaleW = availW / FLOOR_CANVAS_MIN_WIDTH;
+      const scaleH = availH / FLOOR_CANVAS_MIN_HEIGHT;
+      const fitted = clampNumber(Number(Math.min(1.25, Math.min(scaleW, scaleH)).toFixed(2)), 0.35, 1.25);
+      setZoom(fitted);
     };
 
     updateAutoZoom();
@@ -828,8 +827,15 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
               onClick={() => {
                 hasManualZoomRef.current = false;
                 const el = canvasViewportRef.current;
-                if (el && el.clientWidth - 24 < FLOOR_CANVAS_MIN_WIDTH) {
-                  setZoom(clampNumber(Number(((el.clientWidth - 24) / FLOOR_CANVAS_MIN_WIDTH).toFixed(2)), 0.35, 1));
+                if (el) {
+                  const availW = Math.max(240, el.clientWidth - 16);
+                  const availH = Math.max(200, el.clientHeight - 16);
+                  const fitted = clampNumber(
+                    Number(Math.min(1.25, Math.min(availW / FLOOR_CANVAS_MIN_WIDTH, availH / FLOOR_CANVAS_MIN_HEIGHT)).toFixed(2)),
+                    0.35,
+                    1.25
+                  );
+                  setZoom(fitted);
                 } else {
                   setZoom(1);
                 }
@@ -1021,7 +1027,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       {/* Main Split Workspace: Left Table & Chair Presets + Right Interactive Floor Canvas */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         {/* Left Palette: Separated Table Templates & Standalone Chair Templates */}
-        <aside className="lg:w-72 xl:w-80 max-h-[30dvh] lg:max-h-none bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col shrink-0 z-10 shadow-[4px_0_20px_-10px_rgba(15,23,42,0.08)] overflow-hidden">
+        <aside className="lg:w-60 xl:w-64 max-h-[24dvh] lg:max-h-none bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col shrink-0 z-10 shadow-[4px_0_20px_-10px_rgba(15,23,42,0.08)] overflow-hidden">
           <div className="px-4 py-2.5 border-b border-slate-200/80 bg-slate-50/70">
             <h2 className="text-xs sm:text-sm font-black text-slate-900">
               {isTh ? 'เลือกวางผังโต๊ะและเก้าอี้' : 'Table & Chair Palette'}
@@ -1246,7 +1252,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           <div
             ref={canvasViewportRef}
             onClick={() => setSelectedTableId(null)}
-            className="flex-1 min-h-0 overflow-auto p-3 sm:p-6"
+            className="flex-1 min-h-0 overflow-auto p-1.5 sm:p-3 flex items-start justify-center"
           >
             <div
               className="mx-auto origin-top-left transition-transform duration-150"

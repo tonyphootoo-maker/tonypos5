@@ -36,8 +36,8 @@ export interface ChairVisualPoint {
   kind: 'chair' | 'stool' | 'sofa';
 }
 
-export const FLOOR_CANVAS_MIN_WIDTH = 960;
-export const FLOOR_CANVAS_MIN_HEIGHT = 600;
+export const FLOOR_CANVAS_MIN_WIDTH = 1200;
+export const FLOOR_CANVAS_MIN_HEIGHT = 760;
 export const TABLE_MIN_SIZE = 32;
 export const TABLE_MAX_SIZE = 340;
 export const TABLE_MIN_SCALE = 0.65;
