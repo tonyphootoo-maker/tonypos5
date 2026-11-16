@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   TableDoc,
   ZoneDoc,
@@ -33,16 +33,34 @@ import {
   subscribeTables,
   subscribeOpenBills,
   subscribeCollection,
+  subscribeDocument,
   saveOrderToTableAtomic,
   saveCategoriesOrder,
   saveBillsOrder,
+  saveDishesOrder,
   saveDocument,
+  deleteDocument,
   saveImageDoc,
   getImageDoc,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
 import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
 import { NumericInput } from '../costing/components/common/NumericInput';
+import {
+  MenuItem as CostMenuItem,
+  MenuVariant as CostMenuVariant,
+  Ingredient as CostIngredient,
+  Sauce as CostSauce,
+  RestaurantSettings as CostRestaurantSettings,
+} from '../costing/types';
+import { COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
+import { StorageService } from '../costing/services/storageService';
+import {
+  importCostingVariantToDishVariant,
+  importCostingIngredientAsDishVariant,
+} from '../costing/services/posBridge';
+import { calculateSpreadsheetRowMetrics } from '../costing/services/spreadsheetCostHelper';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { SaveOrderModal } from '../components/SaveOrderModal';
 import { PaymentModal } from '../components/PaymentModal';
 import { ReceiptModal } from '../components/ReceiptModal';
@@ -68,6 +86,12 @@ import {
   Plus,
   CheckCircle2,
   Edit2,
+  Link2,
+  ChefHat,
+  Search,
+  ArrowLeft,
+  ChevronRight,
+  Sliders,
 } from 'lucide-react';
 
 interface Props {
@@ -113,15 +137,36 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const [itemNotes, setItemNotes] = useState<string>('');
   const [itemQuantity, setItemQuantity] = useState<number>(1);
 
-  // Inline POS Dish Quick-Edit Modal (opened via double-click/double-tap on dish name in POS)
+  // Inline POS Menu Management Modal (Create / Edit / Delete directly inside POS categories)
   const [editingDishInPos, setEditingDishInPos] = useState<DishDoc | null>(null);
+  const [isCreatingDishInPos, setIsCreatingDishInPos] = useState(false);
   const [posEditPreviewUrl, setPosEditPreviewUrl] = useState<string | null>(null);
   const [posEditImageSizeKb, setPosEditImageSizeKb] = useState<number | null>(null);
   const [isUploadingPosImage, setIsUploadingPosImage] = useState(false);
   const [posImageError, setPosImageError] = useState<string | null>(null);
   const [isSavingPosDish, setIsSavingPosDish] = useState(false);
+  const [pendingDeleteDish, setPendingDeleteDish] = useState<DishDoc | null>(null);
+  const [isDeletingPosDish, setIsDeletingPosDish] = useState(false);
   const posManualEnKeysRef = useRef<Set<string>>(new Set());
   const lastDishNameTapRef = useRef<{ dishId: string; ts: number } | null>(null);
+
+  // Costing Food-Cost Primary Option Picker & Sub-Option Picker states for POS Menu Management
+  const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
+  const [costIngredients, setCostIngredients] = useState<CostIngredient[]>(() =>
+    StorageService.getIngredients()
+  );
+  const [costSauces, setCostSauces] = useState<CostSauce[]>(() => StorageService.getSauces());
+  const [costSettings, setCostSettings] = useState<CostRestaurantSettings>(() =>
+    StorageService.getSettings()
+  );
+  const [isPosPrimaryOptionPickerOpen, setIsPosPrimaryOptionPickerOpen] = useState(false);
+  const [selectedPosCostMenuId, setSelectedPosCostMenuId] = useState<string | null>(null);
+  const [posPickerSourceTab, setPosPickerSourceTab] = useState<'menus' | 'ingredients'>('menus');
+  const [posPrimaryOptionSearch, setPosPrimaryOptionSearch] = useState('');
+  const [isImportingPosCostOption, setIsImportingPosCostOption] = useState(false);
+  const [posModalPriceOverrides, setPosModalPriceOverrides] = useState<Record<string, number>>({});
+  const [isPosOptionGroupPickerOpen, setIsPosOptionGroupPickerOpen] = useState(false);
+  const [posOptionGroupSearch, setPosOptionGroupSearch] = useState('');
 
   // Modals state
   const [isSaveOrderModalOpen, setIsSaveOrderModalOpen] = useState(false);
@@ -147,6 +192,25 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     startY: number;
   } | null>(null);
   const suppressBillClickRef = useRef<boolean>(false);
+
+  // Dish Cards Drag-and-Drop Reorder State (Mouse & Touch)
+  const [draggingDishId, setDraggingDishId] = useState<string | null>(null);
+  const [dragOverDishId, setDragOverDishId] = useState<string | null>(null);
+  const dishTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dishTouchRef = useRef<{
+    sourceId: string;
+    targetId: string | null;
+    active: boolean;
+    startX: number;
+    startY: number;
+  } | null>(null);
+  const suppressDishClickRef = useRef<boolean>(false);
+  const dishEditHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dishEditHoldOriginRef = useRef<{
+    dishId: string;
+    startX: number;
+    startY: number;
+  } | null>(null);
 
   // Bottom Food Category Drag-and-Drop Reorder State
   const [draggingCatId, setDraggingCatId] = useState<string | null>(null);
@@ -269,11 +333,27 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       subscribeCollection<IngredientDoc>('ingredients', (ing) => setIngredients(ing)),
       subscribeCollection<SubRecipeDoc>('subRecipes', (sub) => setSubRecipes(sub)),
       subscribeCollection<PackagingDoc>('packaging', (pkg) => setPackagings(pkg)),
+      subscribeCollection<CostMenuItem>(COST_COLLECTIONS.MENUS, (cloudMenus) => {
+        if (cloudMenus.length > 0) {
+          setCostMenus([...cloudMenus].sort((a, b) => (a.displayOrder || 99) - (b.displayOrder || 99)));
+        }
+      }),
+      subscribeCollection<CostIngredient>(COST_COLLECTIONS.INGREDIENTS, (cloudIngs) => {
+        if (cloudIngs.length > 0) setCostIngredients(cloudIngs);
+      }),
+      subscribeCollection<CostSauce>(COST_COLLECTIONS.SAUCES, (cloudSauces) => {
+        if (cloudSauces.length > 0) setCostSauces(cloudSauces);
+      }),
+      subscribeDocument<CostRestaurantSettings>(COST_COLLECTIONS.SETTINGS, 'default', (cloudSet) => {
+        if (cloudSet) setCostSettings(cloudSet);
+      }),
     ];
 
     return () => {
       unsubs.forEach((u) => u());
       if (billTouchTimerRef.current) clearTimeout(billTouchTimerRef.current);
+      if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+      if (dishEditHoldTimerRef.current) clearTimeout(dishEditHoldTimerRef.current);
       if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
       if (variantTouchTimerRef.current) clearTimeout(variantTouchTimerRef.current);
       if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
@@ -743,14 +823,418 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
   };
 
-  // Inline POS Dish Quick-Edit handlers (triggered via onDoubleClick or double-tap on dish name in POS)
-  const handleOpenPosEditDish = (dish: DishDoc) => {
+  // Food Cost linking helpers for full Menu Management inside POS categories
+  const costIngMap = useMemo(
+    () => new Map<string, CostIngredient>(costIngredients.map((i) => [i.id, i])),
+    [costIngredients]
+  );
+
+  const getActiveCostVariants = (menu: CostMenuItem): CostMenuVariant[] => {
+    return menu.variants || [];
+  };
+
+  const getCostVariantLabel = (cv: CostMenuVariant): string => {
+    const p = (cv.proteinType || '').trim();
+    if (p && p !== 'ทั่วไป' && p !== 'Standard') {
+      return p;
+    }
+    return (cv.name || p || 'มาตรฐาน').trim();
+  };
+
+  const stripDishPrefix = (raw: string): string =>
+    raw
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/^(ข้าวผัด|ผัด|ข้าว|ต้มยำ|ต้ม|แกง|ยำ|ทอด|น้ำ|เมนู)/, '');
+
+  const findMatchingCostMenu = (dish: Partial<DishDoc>): CostMenuItem | null => {
+    const activeCostMenus = costMenus.filter((m) => m.active !== false);
+    if (activeCostMenus.length === 0) return null;
+
+    if (dish.costMenuId) {
+      const byId = activeCostMenus.find((m) => m.id === dish.costMenuId);
+      if (byId) return byId;
+    }
+
+    const varCostMenuId = dish.variants?.find((v) => v.costMenuId)?.costMenuId;
+    if (varCostMenuId) {
+      const byVarMenuId = activeCostMenus.find((m) => m.id === varCostMenuId);
+      if (byVarMenuId) return byVarMenuId;
+    }
+
+    if (dish.id?.startsWith('cost_dish_')) {
+      const normalizedCostId = dish.id.replace('cost_dish_', '');
+      const byNorm = activeCostMenus.find(
+        (m) => m.id.replace(/[^a-zA-Z0-9_-]/g, '_') === normalizedCostId
+      );
+      if (byNorm) return byNorm;
+    }
+
+    const dTh = (dish.nameTh || '').trim().toLowerCase();
+    const dEn = (dish.name || '').trim().toLowerCase();
+    if (!dTh && !dEn) return null;
+
+    const exact = activeCostMenus.find((m) => {
+      const mName = m.name.trim().toLowerCase();
+      return (dTh && mName === dTh) || (dEn && mName === dEn);
+    });
+    if (exact) return exact;
+
+    const dThNorm = stripDishPrefix(dTh);
+    if (dThNorm.length >= 2) {
+      const normMatch = activeCostMenus.find((m) => {
+        const mNorm = stripDishPrefix(m.name);
+        return mNorm.length >= 2 && mNorm === dThNorm;
+      });
+      if (normMatch) return normMatch;
+    }
+
+    if (dTh.length >= 2) {
+      const containedInDish = activeCostMenus
+        .filter((m) => {
+          const mName = m.name.trim().toLowerCase();
+          return mName.length >= 2 && dTh.includes(mName);
+        })
+        .sort((a, b) => b.name.trim().length - a.name.trim().length);
+      if (containedInDish.length > 0) return containedInDish[0];
+
+      const containingDish = activeCostMenus
+        .filter((m) => {
+          const mName = m.name.trim().toLowerCase();
+          return mName.length >= 2 && mName.includes(dTh);
+        })
+        .sort((a, b) => a.name.trim().length - b.name.trim().length);
+      if (containingDish.length > 0) return containingDish[0];
+    }
+
+    if (dEn.length >= 2) {
+      const enCandidates = activeCostMenus
+        .filter((m) => {
+          const mName = m.name.trim().toLowerCase();
+          return mName.length >= 2 && (dEn.includes(mName) || mName.includes(dEn));
+        })
+        .sort((a, b) => a.name.trim().length - b.name.trim().length);
+      if (enCandidates.length > 0) return enCandidates[0];
+    }
+
+    return null;
+  };
+
+  const findExistingPosVariantForCostVariant = (
+    cv: CostMenuVariant,
+    posVariants: DishVariant[] = []
+  ): DishVariant | undefined => {
+    const byId = posVariants.find((pv) => pv.costVariantId === cv.id || pv.id === cv.id);
+    if (byId) return byId;
+
+    const cLabel = getCostVariantLabel(cv).toLowerCase();
+    const cProt = (cv.proteinType || '').trim().toLowerCase();
+    const cName = (cv.name || '').trim().toLowerCase();
+
+    return posVariants.find((pv) => {
+      const pTh = (pv.nameTh || '').trim().toLowerCase();
+      const pEn = (pv.name || '').trim().toLowerCase();
+      if (!pTh && !pEn) return false;
+      if (pTh === 'มาตรฐาน' || pEn === 'standard') return false;
+      return (
+        (pTh && (pTh === cLabel || pTh === cProt || pTh === cName)) ||
+        (pEn && (pEn === cLabel || pEn === cProt || pEn === cName))
+      );
+    });
+  };
+
+  const resolveCostVariantSellingPrice = (
+    costMenu: CostMenuItem,
+    cv: CostMenuVariant,
+    existingMatched?: DishVariant,
+    sessionOverride?: number
+  ): number => {
+    if (sessionOverride !== undefined) return sessionOverride;
+
+    const spreadsheetBase = calculateSpreadsheetRowMetrics({
+      menu: costMenu,
+      variant: cv,
+      ingredientsMap: costIngMap,
+      servingMode: 'ON_RICE',
+    }).baseSellingPrice;
+
+    if (existingMatched && existingMatched.price > 0) {
+      const isLegacyRawKaprowSeed =
+        (costMenu.name.includes('กะเพรา') ||
+          costMenu.id === 'menu_kaprow' ||
+          cv.menuId === 'menu_kaprow') &&
+        existingMatched.price === (Number(cv.sellingPrice) || 0) &&
+        spreadsheetBase !== (Number(cv.sellingPrice) || 0);
+      if (!isLegacyRawKaprowSeed) {
+        return existingMatched.price;
+      }
+    }
+
+    return spreadsheetBase;
+  };
+
+  const computeCostVariantRealtimeBreakdown = (
+    costMenu: CostMenuItem,
+    cv: CostMenuVariant,
+    sellingPriceOverride?: number
+  ) => {
+    return calculateSpreadsheetRowMetrics({
+      menu: costMenu,
+      variant: cv,
+      ingredientsMap: costIngMap,
+      servingMode: 'ON_RICE',
+      sellingPriceOverride,
+    });
+  };
+
+  const matchedEditingPosCostMenu = useMemo(
+    () => (editingDishInPos ? findMatchingCostMenu(editingDishInPos) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingDishInPos, costMenus]
+  );
+
+  const handleUpdatePosCostVariantPrice = (
+    costMenu: CostMenuItem,
+    cv: CostMenuVariant,
+    newPrice: number
+  ) => {
+    if (!editingDishInPos) return;
+    setPosModalPriceOverrides((prev) => ({ ...prev, [cv.id]: newPrice }));
+
+    const labelTh = getCostVariantLabel(cv);
+    const currentVariants = editingDishInPos.variants || [];
+    const existingMatched = findExistingPosVariantForCostVariant(cv, currentVariants);
+
+    const strippedPlaceholder = currentVariants.filter((pv) => {
+      if (currentVariants.length > 1) return true;
+      const pTh = (pv.nameTh || '').trim().toLowerCase();
+      const pEn = (pv.name || '').trim().toLowerCase();
+      return !(
+        (pTh === 'มาตรฐาน' || pEn === 'standard') &&
+        !pv.costVariantId &&
+        (pv.ingredients?.length || 0) === 0
+      );
+    });
+
+    let updatedVariants: DishVariant[];
+    if (existingMatched) {
+      updatedVariants = strippedPlaceholder.map((pv) =>
+        pv.id === existingMatched.id
+          ? {
+              ...pv,
+              nameTh: labelTh,
+              price: newPrice,
+              costMenuId: costMenu.id,
+              costVariantId: cv.id,
+            }
+          : pv
+      );
+    } else {
+      updatedVariants = [
+        ...strippedPlaceholder,
+        {
+          id: cv.id || `var_${Date.now()}`,
+          nameTh: labelTh,
+          name: translateThaiToEnglish(labelTh) || labelTh,
+          price: newPrice,
+          costMenuId: costMenu.id,
+          costVariantId: cv.id,
+          ingredients: [],
+          subRecipes: [],
+          packaging: [],
+        },
+      ];
+    }
+
+    setEditingDishInPos({
+      ...editingDishInPos,
+      costMenuId: costMenu.id,
+      variants: updatedVariants,
+    });
+  };
+
+  const getPosLinkedFoodCostMetrics = (dish: Partial<DishDoc>, variant?: DishVariant) => {
+    const activeCostMenus = costMenus.filter((m) => m.active !== false);
+
+    const findCostMatch = (): { menu: CostMenuItem; variant: CostMenuVariant } | null => {
+      if (activeCostMenus.length === 0) return null;
+
+      if (variant?.costVariantId) {
+        if (variant.costMenuId || dish.costMenuId) {
+          const targetMenu = activeCostMenus.find(
+            (m) => m.id === (variant.costMenuId || dish.costMenuId)
+          );
+          const targetVar = targetMenu?.variants?.find((cv) => cv.id === variant.costVariantId);
+          if (targetMenu && targetVar) return { menu: targetMenu, variant: targetVar };
+        }
+        for (const cm of activeCostMenus) {
+          const cv = (cm.variants || []).find((x) => x.id === variant.costVariantId);
+          if (cv) return { menu: cm, variant: cv };
+        }
+      }
+
+      if (variant?.id) {
+        for (const cm of activeCostMenus) {
+          const cv = (cm.variants || []).find((x) => x.id === variant.id);
+          if (cv) return { menu: cm, variant: cv };
+        }
+      }
+
+      const matchedMenu = findMatchingCostMenu(dish) || undefined;
+      if (matchedMenu && (matchedMenu.variants || []).length > 0) {
+        const pool = getActiveCostVariants(matchedMenu);
+        if (!variant) return { menu: matchedMenu, variant: pool[0] };
+
+        const vTh = (variant.nameTh || '').trim().toLowerCase();
+        const vEn = (variant.name || '').trim().toLowerCase();
+
+        const exactVar = pool.find((cv) => {
+          const p = (cv.proteinType || '').trim().toLowerCase();
+          const n = (cv.name || '').trim().toLowerCase();
+          return (vTh && (p === vTh || n === vTh)) || (vEn && (p === vEn || n === vEn));
+        });
+        if (exactVar) return { menu: matchedMenu, variant: exactVar };
+
+        if (vTh === 'มาตรฐาน' || vEn === 'standard') {
+          return { menu: matchedMenu, variant: pool[0] };
+        }
+
+        const partialVar = pool.find((cv) => {
+          const p = (cv.proteinType || '').trim().toLowerCase();
+          const n = (cv.name || '').trim().toLowerCase();
+          return (
+            (vTh.length >= 2 && (n.includes(vTh) || p.includes(vTh) || (p && vTh.includes(p)))) ||
+            (vEn.length >= 2 && (n.includes(vEn) || p.includes(vEn)))
+          );
+        });
+        if (partialVar) return { menu: matchedMenu, variant: partialVar };
+        if (pool.length === 1) return { menu: matchedMenu, variant: pool[0] };
+      }
+
+      return null;
+    };
+
+    const match = findCostMatch();
+    if (match) {
+      const posPrice = resolveCostVariantSellingPrice(match.menu, match.variant, variant);
+      const breakdown = computeCostVariantRealtimeBreakdown(match.menu, match.variant, posPrice);
+      return {
+        hasData: true,
+        source: 'food_cost' as const,
+        matchedMenuName: match.menu.name,
+        matchedVariantName: getCostVariantLabel(match.variant),
+        cost: breakdown.totalCost,
+        foodCostPercent: breakdown.fcPercent,
+        dineInProfit: breakdown.dineInProfit,
+        takeawayProfit: breakdown.takeawayProfit,
+      };
+    }
+
+    if (variant) {
+      const posCalc = calculateDishVariantCost(variant, ingredientsMap, subRecipesMap, packagingMap);
+      if (posCalc.hasRecipe) {
+        const posPrice = variant.price || 0;
+        const netDineIn = extractNetPriceFromMenuPrice(
+          posPrice,
+          settings.pricesIncludeVat,
+          settings.vatPercent,
+          settings.serviceChargeIncludedInPrice,
+          settings.serviceChargePercent
+        );
+        const takeawayChannel = channels.find((c) => c.type === 'takeaway');
+        const takeawayPrice = takeawayChannel?.priceMarkupPercent
+          ? posPrice * (1 + takeawayChannel.priceMarkupPercent / 100)
+          : posPrice;
+        const netTakeaway = extractNetPriceFromMenuPrice(
+          takeawayPrice,
+          settings.pricesIncludeVat,
+          settings.vatPercent,
+          settings.serviceChargeIncludedInPrice,
+          settings.serviceChargePercent
+        );
+        const takeawayBoxCost =
+          takeawayChannel?.packagingCost ?? costSettings.takeawayPackagingCost ?? 0;
+
+        return {
+          hasData: true,
+          source: 'pos_recipe' as const,
+          matchedMenuName: dish.nameTh || dish.name || '',
+          matchedVariantName: variant.nameTh || variant.name,
+          cost: posCalc.totalCost,
+          foodCostPercent: netDineIn > 0 ? (posCalc.foodCost / netDineIn) * 100 : 0,
+          dineInProfit: netDineIn - posCalc.totalCost,
+          takeawayProfit: netTakeaway - (posCalc.totalCost + takeawayBoxCost),
+        };
+      }
+    }
+
+    return {
+      hasData: false,
+      source: 'none' as const,
+      matchedMenuName: '',
+      matchedVariantName: '',
+      cost: 0,
+      foodCostPercent: 0,
+      dineInProfit: 0,
+      takeawayProfit: 0,
+    };
+  };
+
+  // Inline POS Menu Management handlers (Add / Edit / Delete directly inside POS categories)
+  const handleOpenPosAddDish = (categoryIdOverride?: string | null) => {
     if (dishNameClickTimerRef.current) {
       clearTimeout(dishNameClickTimerRef.current);
       dishNameClickTimerRef.current = null;
     }
     setSelectedDishForOptions(null);
     posManualEnKeysRef.current.clear();
+    setPosModalPriceOverrides({});
+    setPosImageError(null);
+    setPosEditImageSizeKb(null);
+    setPosEditPreviewUrl(null);
+    setIsCreatingDishInPos(true);
+
+    const targetCategoryId =
+      categoryIdOverride && categoryIdOverride !== 'all'
+        ? categoryIdOverride
+        : categories[0]?.id || 'cat_main';
+    const nowIso = new Date().toISOString();
+
+    setEditingDishInPos({
+      id: `dish_${Date.now()}`,
+      name: '',
+      nameTh: '',
+      categoryId: targetCategoryId,
+      variants: [
+        {
+          id: `var_${Date.now()}`,
+          name: 'Standard',
+          nameTh: 'มาตรฐาน',
+          price: 0,
+          ingredients: [],
+          subRecipes: [],
+          packaging: [],
+        },
+      ],
+      optionGroupIds: [],
+      order: dishes.length + 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      version: 1,
+    });
+  };
+
+  const handleOpenPosEditDish = (dish: DishDoc) => {
+    clearDishEditHoldTimer();
+    if (dishNameClickTimerRef.current) {
+      clearTimeout(dishNameClickTimerRef.current);
+      dishNameClickTimerRef.current = null;
+    }
+    setSelectedDishForOptions(null);
+    setIsCreatingDishInPos(false);
+    posManualEnKeysRef.current.clear();
+    setPosModalPriceOverrides({});
     setPosImageError(null);
     setPosEditImageSizeKb(null);
     setPosEditPreviewUrl(dishImages.get(dish.id) || null);
@@ -821,28 +1305,65 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
     setIsSavingPosDish(true);
     try {
-      const normalizedVariants: DishVariant[] = (editingDishInPos.variants || []).map((v) => {
-        const vTh = (v.nameTh || '').trim();
-        const vEn =
-          (v.name || '').trim() ||
-          (vTh ? translateThaiToEnglish(vTh) : '') ||
-          'Standard';
-        return {
-          ...v,
-          name: vEn,
-          ...(vTh ? { nameTh: vTh } : {}),
-          price: Number(v.price) || 0,
-          ingredients: v.ingredients || [],
-          subRecipes: v.subRecipes || [],
-          packaging: v.packaging || [],
-        };
-      });
+      const matchedCostMenu = findMatchingCostMenu(editingDishInPos);
+      const normalizedVariants: DishVariant[] = matchedCostMenu
+        ? getActiveCostVariants(matchedCostMenu).map((cv) => {
+            const existingMatched = findExistingPosVariantForCostVariant(
+              cv,
+              editingDishInPos.variants || []
+            );
+            const vTh = getCostVariantLabel(cv);
+            const vEn =
+              (existingMatched?.name && existingMatched.name !== 'Standard'
+                ? existingMatched.name.trim()
+                : '') ||
+              translateThaiToEnglish(vTh) ||
+              vTh;
+            const resolvedPrice = resolveCostVariantSellingPrice(
+              matchedCostMenu,
+              cv,
+              existingMatched,
+              posModalPriceOverrides[cv.id]
+            );
+            return {
+              id: existingMatched?.id || cv.id || `var_${Date.now()}`,
+              name: vEn,
+              nameTh: vTh,
+              price: resolvedPrice,
+              costMenuId: matchedCostMenu.id,
+              costVariantId: cv.id,
+              ingredients: existingMatched?.ingredients || [],
+              subRecipes: existingMatched?.subRecipes || [],
+              packaging: existingMatched?.packaging || [],
+            };
+          })
+        : (editingDishInPos.variants || []).map((v) => {
+            const vTh = (v.nameTh || '').trim();
+            const vEn =
+              (v.name || '').trim() ||
+              (vTh ? translateThaiToEnglish(vTh) : '') ||
+              'Standard';
+            return {
+              ...v,
+              name: vEn,
+              ...(vTh ? { nameTh: vTh } : {}),
+              price: Number(v.price) || 0,
+              ingredients: v.ingredients || [],
+              subRecipes: v.subRecipes || [],
+              packaging: v.packaging || [],
+            };
+          });
+
+      const isNew = isCreatingDishInPos || !dishes.some((d) => d.id === editingDishInPos.id);
+      const resolvedCostMenuId = matchedCostMenu?.id || editingDishInPos.costMenuId;
 
       const dishToSave: DishDoc = {
         ...editingDishInPos,
+        id: editingDishInPos.id || `dish_${Date.now()}`,
         name: finalDishEn || finalDishTh,
         ...(finalDishTh ? { nameTh: finalDishTh } : {}),
         categoryId: editingDishInPos.categoryId || categories[0]?.id || 'cat_main',
+        ...(resolvedCostMenuId ? { costMenuId: resolvedCostMenuId } : {}),
         variants: normalizedVariants.length
           ? normalizedVariants
           : [
@@ -857,15 +1378,21 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               },
             ],
         optionGroupIds: editingDishInPos.optionGroupIds || [],
+        order: isNew ? dishes.length + 1 : editingDishInPos.order || dishes.length + 1,
+        createdAt: editingDishInPos.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        version: (editingDishInPos.version || 0) + 1,
+        version: isNew ? 1 : (editingDishInPos.version || 0) + 1,
       };
       if (!editingDishInPos.imageId) {
         delete dishToSave.imageId;
       }
 
-      await saveDocument('dishes', dishToSave, false);
-      setDishes((prev) => prev.map((d) => (d.id === dishToSave.id ? dishToSave : d)));
+      await saveDocument('dishes', dishToSave, isNew);
+      setDishes((prev) =>
+        isNew
+          ? [...prev, dishToSave].sort((a, b) => (a.order || 0) - (b.order || 0))
+          : prev.map((d) => (d.id === dishToSave.id ? dishToSave : d))
+      );
       if (posEditPreviewUrl && dishToSave.imageId) {
         loadedDishImageIdsRef.current.set(dishToSave.id, dishToSave.imageId);
         setDishImages((prev) => new Map(prev).set(dishToSave.id, posEditPreviewUrl));
@@ -878,11 +1405,174 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         });
       }
       setEditingDishInPos(null);
+      setIsCreatingDishInPos(false);
       setPosEditPreviewUrl(null);
+      setPosEditImageSizeKb(null);
+      setPosModalPriceOverrides({});
     } catch (err) {
       console.error('POS save dish error:', err);
     } finally {
       setIsSavingPosDish(false);
+    }
+  };
+
+  // Drag-and-drop reorder dish cards inside POS category (Desktop mouse & Touch long-press)
+  const reorderDishesByIds = async (sourceDishId: string, targetDishId: string) => {
+    if (!sourceDishId || !targetDishId || sourceDishId === targetDishId) return;
+    const sourceVisibleIdx = displayedDishes.findIndex((d) => d.id === sourceDishId);
+    const targetVisibleIdx = displayedDishes.findIndex((d) => d.id === targetDishId);
+    if (sourceVisibleIdx === -1 || targetVisibleIdx === -1) return;
+
+    const reorderedVisible = [...displayedDishes];
+    const [moved] = reorderedVisible.splice(sourceVisibleIdx, 1);
+    reorderedVisible.splice(targetVisibleIdx, 0, moved);
+
+    const visibleIdSet = new Set(displayedDishes.map((d) => d.id));
+    const slotIndices: number[] = [];
+    dishes.forEach((d, idx) => {
+      if (visibleIdSet.has(d.id)) slotIndices.push(idx);
+    });
+
+    const nextDishes = [...dishes];
+    slotIndices.forEach((slotIdx, i) => {
+      if (reorderedVisible[i]) {
+        nextDishes[slotIdx] = reorderedVisible[i];
+      }
+    });
+
+    const prevOrderById = new Map(dishes.map((d) => [d.id, d.order]));
+    const updatedWithOrder = nextDishes.map((d, idx) => ({
+      ...d,
+      order: idx + 1,
+    }));
+
+    setDishes(updatedWithOrder);
+
+    const changedDishes = updatedWithOrder.filter((d) => prevOrderById.get(d.id) !== d.order);
+    try {
+      await saveDishesOrder(
+        changedDishes.map((d) => ({
+          id: d.id,
+          order: d.order,
+          version: d.version,
+        }))
+      );
+    } catch (err) {
+      console.error('Save dishes order error:', err);
+    }
+  };
+
+  const clearDishEditHoldTimer = () => {
+    if (dishEditHoldTimerRef.current) {
+      clearTimeout(dishEditHoldTimerRef.current);
+      dishEditHoldTimerRef.current = null;
+    }
+    dishEditHoldOriginRef.current = null;
+  };
+
+  const startDishEditHoldTimer = (dish: DishDoc, clientX: number, clientY: number) => {
+    clearDishEditHoldTimer();
+    dishEditHoldOriginRef.current = {
+      dishId: dish.id,
+      startX: clientX,
+      startY: clientY,
+    };
+    dishEditHoldTimerRef.current = setTimeout(() => {
+      dishEditHoldTimerRef.current = null;
+      dishEditHoldOriginRef.current = null;
+      if (dishTouchTimerRef.current) {
+        clearTimeout(dishTouchTimerRef.current);
+        dishTouchTimerRef.current = null;
+      }
+      dishTouchRef.current = null;
+      setDraggingDishId(null);
+      setDragOverDishId(null);
+      suppressDishClickRef.current = true;
+      setTimeout(() => {
+        suppressDishClickRef.current = false;
+      }, 380);
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(25);
+      }
+      handleOpenPosEditDish(dish);
+    }, 500);
+  };
+
+  const handleDishTouchStart = (e: React.TouchEvent<HTMLDivElement>, dish: DishDoc) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    startDishEditHoldTimer(dish, touch.clientX, touch.clientY);
+    if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+    dishTouchRef.current = {
+      sourceId: dish.id,
+      targetId: dish.id,
+      active: false,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+    dishTouchTimerRef.current = setTimeout(() => {
+      if (dishTouchRef.current && dishTouchRef.current.sourceId === dish.id) {
+        if (dishNameClickTimerRef.current) {
+          clearTimeout(dishNameClickTimerRef.current);
+          dishNameClickTimerRef.current = null;
+        }
+        dishTouchRef.current.active = true;
+        setDraggingDishId(dish.id);
+        setDragOverDishId(dish.id);
+        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+          navigator.vibrate(15);
+        }
+      }
+    }, 180);
+  };
+
+  const handleDishTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const touch = e.touches[0];
+    if (touch && dishEditHoldOriginRef.current) {
+      const origin = dishEditHoldOriginRef.current;
+      if (Math.hypot(touch.clientX - origin.startX, touch.clientY - origin.startY) > 8) {
+        clearDishEditHoldTimer();
+      }
+    }
+
+    const state = dishTouchRef.current;
+    if (!state || e.touches.length !== 1) return;
+
+    if (!state.active) {
+      if (Math.hypot(touch.clientX - state.startX, touch.clientY - state.startY) > 10) {
+        if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+        dishTouchRef.current = null;
+      }
+      return;
+    }
+
+    e.preventDefault();
+    const el = document
+      .elementFromPoint(touch.clientX, touch.clientY)
+      ?.closest('[data-dish-id]') as HTMLElement | null;
+    const hitId = el?.getAttribute('data-dish-id') || null;
+    if (hitId) {
+      state.targetId = hitId;
+      setDragOverDishId(hitId);
+    }
+  };
+
+  const handleDishTouchEnd = async () => {
+    clearDishEditHoldTimer();
+    if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+    const state = dishTouchRef.current;
+    dishTouchRef.current = null;
+
+    if (state?.active) {
+      suppressDishClickRef.current = true;
+      setTimeout(() => {
+        suppressDishClickRef.current = false;
+      }, 220);
+      setDraggingDishId(null);
+      setDragOverDishId(null);
+      if (state.targetId && state.targetId !== state.sourceId) {
+        await reorderDishesByIds(state.sourceId, state.targetId);
+      }
     }
   };
 
@@ -1074,7 +1764,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           {selectedCategoryId ? (
             // Full Screen Category Menu View
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h3 className="font-black text-lg text-neutral-800 flex items-center gap-2 flex-wrap">
                   <Utensils className="w-5 h-5 text-orange-600" />
                   <span>
@@ -1091,78 +1781,193 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                     </span>
                   )}
                 </h3>
-                <button
-                  onClick={() => {
-                    setSelectedCategoryId(null);
-                    setTopViewMode('bills');
-                  }}
-                  className="px-3 py-1 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 shadow-2xs cursor-pointer shrink-0"
-                >
-                  ← {t.pos.billCard}
-                </button>
+                <div className="flex items-center gap-2 shrink-0 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategoryId(null);
+                      setTopViewMode('bills');
+                    }}
+                    className="px-3 py-1.5 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 shadow-2xs cursor-pointer shrink-0"
+                  >
+                    ← {t.pos.billCard}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPosAddDish(selectedCategoryId)}
+                    className="px-3.5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105 active:scale-95 shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{t.menuCost.addDish}</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Dish Cards (~30% smaller): Shows ONLY Photo and Name below it (no price) */}
-              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 gap-2">
-                {displayedDishes.map((dish) => {
-                  const imgDataUrl = dishImages.get(dish.id);
-                  return (
-                    <div
-                      key={dish.id}
-                      onClick={() => handleOpenDishOptions(dish)}
-                      className="group bg-white rounded-xl border border-slate-200 hover:border-orange-400 p-1.5 shadow-[inset_0_1px_0_#ffffff,0_2px_0_#e2e8f0,0_6px_12px_-6px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 hover:shadow-[0_3px_0_#fdba74,0_10px_16px_-6px_rgba(234,88,12,0.18)] transition-all duration-150 cursor-pointer flex flex-col items-center text-center select-none active:translate-y-[1px]"
-                    >
-                      <div className="w-full aspect-square rounded-lg bg-slate-100 overflow-hidden mb-1 relative flex items-center justify-center shadow-[inset_0_1px_3px_rgba(15,23,42,0.06)]">
-                        {imgDataUrl ? (
-                          <img
-                            src={imgDataUrl}
-                            alt={dish.name}
-                            loading="lazy"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                          />
-                        ) : (
-                          <Utensils className="w-7 h-7 text-slate-300" />
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const now = Date.now();
-                          const prevTap = lastDishNameTapRef.current;
+              {/* Dish Cards (~30% smaller): Photo + Name, Draggable (Mouse & Touch) + Double-click Name to Edit */}
+              {displayedDishes.length === 0 ? (
+                <div className="p-8 bg-white/90 rounded-2xl border border-dashed border-slate-300 text-center space-y-3">
+                  <p className="text-xs font-semibold text-slate-500">
+                    {lang === 'th' ? 'ยังไม่มีเมนูอาหารในหมวดหมู่นี้' : 'No menu items in this category'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPosAddDish(selectedCategoryId)}
+                    className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md shadow-orange-500/20 inline-flex items-center gap-1.5 cursor-pointer hover:brightness-105"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{t.menuCost.addDish}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                  {displayedDishes.map((dish) => {
+                    const imgDataUrl = dishImages.get(dish.id);
+                    const isDraggingThis = draggingDishId === dish.id;
+                    const isDropTarget = dragOverDishId === dish.id && draggingDishId !== dish.id;
+                    return (
+                      <div
+                        key={dish.id}
+                        data-dish-id={dish.id}
+                        draggable
+                        onMouseDown={(e) => {
+                          if (e.button === 0) {
+                            startDishEditHoldTimer(dish, e.clientX, e.clientY);
+                          }
+                        }}
+                        onMouseMove={(e) => {
+                          const origin = dishEditHoldOriginRef.current;
                           if (
-                            e.detail >= 2 ||
-                            (prevTap && prevTap.dishId === dish.id && now - prevTap.ts < 340)
+                            origin &&
+                            Math.hypot(e.clientX - origin.startX, e.clientY - origin.startY) > 8
                           ) {
-                            lastDishNameTapRef.current = null;
-                            handleOpenPosEditDish(dish);
+                            clearDishEditHoldTimer();
+                          }
+                        }}
+                        onMouseUp={clearDishEditHoldTimer}
+                        onMouseLeave={clearDishEditHoldTimer}
+                        onDragStart={(e) => {
+                          clearDishEditHoldTimer();
+                          if (dishNameClickTimerRef.current) {
+                            clearTimeout(dishNameClickTimerRef.current);
+                            dishNameClickTimerRef.current = null;
+                          }
+                          setDraggingDishId(dish.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/kinpos-dish-id', dish.id);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = 'move';
+                          if (draggingDishId && draggingDishId !== dish.id) {
+                            setDragOverDishId(dish.id);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dragOverDishId === dish.id) setDragOverDishId(null);
+                        }}
+                        onDrop={async (e) => {
+                          e.preventDefault();
+                          const srcId = e.dataTransfer.getData('text/kinpos-dish-id') || draggingDishId;
+                          setDraggingDishId(null);
+                          setDragOverDishId(null);
+                          if (srcId && srcId !== dish.id) {
+                            suppressDishClickRef.current = true;
+                            setTimeout(() => {
+                              suppressDishClickRef.current = false;
+                            }, 180);
+                            await reorderDishesByIds(srcId, dish.id);
+                          }
+                        }}
+                        onDragEnd={() => {
+                          clearDishEditHoldTimer();
+                          setDraggingDishId(null);
+                          setDragOverDishId(null);
+                        }}
+                        onTouchStart={(e) => handleDishTouchStart(e, dish)}
+                        onTouchMove={handleDishTouchMove}
+                        onTouchEnd={handleDishTouchEnd}
+                        onTouchCancel={handleDishTouchEnd}
+                        onClick={() => {
+                          if (suppressDishClickRef.current) {
+                            suppressDishClickRef.current = false;
                             return;
                           }
-                          lastDishNameTapRef.current = { dishId: dish.id, ts: now };
-                          if (dishNameClickTimerRef.current) clearTimeout(dishNameClickTimerRef.current);
-                          dishNameClickTimerRef.current = setTimeout(() => {
-                            dishNameClickTimerRef.current = null;
-                            handleOpenDishOptions(dish);
-                          }, 240);
+                          handleOpenDishOptions(dish);
                         }}
-                        onDoubleClick={(e) => {
-                          e.stopPropagation();
-                          lastDishNameTapRef.current = null;
-                          handleOpenPosEditDish(dish);
-                        }}
+                        style={{ touchAction: draggingDishId ? 'none' : 'pan-y' }}
                         title={
                           lang === 'th'
-                            ? 'ดับเบิลคลิกที่ชื่อเมนูเพื่อเปิดโหมดแก้ไขทันที'
-                            : 'Double-click dish name to edit immediately'
+                            ? 'แตะเพื่อสั่ง • กดค้าง 0.5 วินาที หรือดับเบิลคลิกชื่อเพื่อแก้ไข • ลากวางเพื่อสลับตำแหน่ง'
+                            : 'Tap to order • Hold 0.5s or double-click name to edit • Drag & drop to reorder'
                         }
-                        className="w-full block text-center font-extrabold text-[11px] sm:text-xs leading-tight text-slate-900 group-hover:text-orange-600 hover:underline decoration-orange-400/70 underline-offset-2 transition-colors line-clamp-2 px-1 py-1 rounded cursor-pointer"
+                        className={`group bg-white rounded-2xl border p-2.5 shadow-[inset_0_1px_0_#ffffff,0_2px_0_#e2e8f0,0_6px_12px_-6px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 hover:shadow-[0_3px_0_#fdba74,0_10px_16px_-6px_rgba(234,88,12,0.18)] transition-all duration-150 cursor-grab active:cursor-grabbing flex flex-col items-center text-center select-none ${
+                          isDraggingThis ? 'opacity-50 scale-95' : ''
+                        } ${
+                          isDropTarget
+                            ? 'ring-2 ring-orange-500 ring-offset-1 scale-[1.03] border-orange-400'
+                            : 'border-slate-200 hover:border-orange-400'
+                        }`}
                       >
-                        {lang === 'th' && dish.nameTh ? dish.nameTh : dish.name}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                        <div className="w-full aspect-square rounded-xl bg-slate-100 overflow-hidden mb-2 relative flex items-center justify-center shadow-[inset_0_1px_3px_rgba(15,23,42,0.06)]">
+                          <span className="absolute top-1.5 left-1.5 z-10 p-1 rounded-md bg-white/75 backdrop-blur-xs text-slate-400 opacity-50 group-hover:opacity-100 pointer-events-none">
+                            <GripVertical className="w-3.5 h-3.5" />
+                          </span>
+                          {imgDataUrl ? (
+                            <img
+                              src={imgDataUrl}
+                              alt={dish.name}
+                              draggable={false}
+                              loading="lazy"
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            />
+                          ) : (
+                            <Utensils className="w-10 h-10 text-slate-300" />
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (suppressDishClickRef.current) {
+                              suppressDishClickRef.current = false;
+                              return;
+                            }
+                            const now = Date.now();
+                            const prevTap = lastDishNameTapRef.current;
+                            if (
+                              e.detail >= 2 ||
+                              (prevTap && prevTap.dishId === dish.id && now - prevTap.ts < 340)
+                            ) {
+                              lastDishNameTapRef.current = null;
+                              handleOpenPosEditDish(dish);
+                              return;
+                            }
+                            lastDishNameTapRef.current = { dishId: dish.id, ts: now };
+                            if (dishNameClickTimerRef.current) clearTimeout(dishNameClickTimerRef.current);
+                            dishNameClickTimerRef.current = setTimeout(() => {
+                              dishNameClickTimerRef.current = null;
+                              handleOpenDishOptions(dish);
+                            }, 240);
+                          }}
+                          onDoubleClick={(e) => {
+                            e.stopPropagation();
+                            lastDishNameTapRef.current = null;
+                            handleOpenPosEditDish(dish);
+                          }}
+                          title={
+                            lang === 'th'
+                              ? 'กดค้าง 0.5 วินาที หรือดับเบิลคลิกที่ชื่อเมนูเพื่อเปิดโหมดแก้ไขทันที'
+                              : 'Hold 0.5s or double-click dish name to edit immediately'
+                          }
+                          className="w-full block text-center font-extrabold text-xs sm:text-sm leading-tight text-slate-900 group-hover:text-orange-600 hover:underline decoration-orange-400/70 underline-offset-2 transition-colors line-clamp-2 px-1.5 py-1.5 rounded cursor-pointer"
+                        >
+                          {lang === 'th' && dish.nameTh ? dish.nameTh : dish.name}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           ) : topViewMode === 'bills' ? (
             // Unpaid Ordered Bills View ("บิล"): Displays ONLY ordered bills awaiting payment, draggable on desktop & touch
@@ -1959,21 +2764,26 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         />
       )}
 
-      {/* Inline Quick Edit Dish Modal directly inside POS */}
+      {/* Inline Full Menu Management Modal directly inside POS Categories (Create / Edit / Delete) */}
       {editingDishInPos && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
             onSubmit={handleSavePosDish}
-            className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
+            className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
           >
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2">
-                <Edit2 className="w-4 h-4" />
-                <h3 className="font-extrabold text-base">{t.menuCost.editDish}</h3>
+                {isCreatingDishInPos ? <Plus className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
+                <h3 className="font-extrabold text-base">
+                  {isCreatingDishInPos ? t.menuCost.addDish : t.menuCost.editDish}
+                </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setEditingDishInPos(null)}
+                onClick={() => {
+                  setEditingDishInPos(null);
+                  setIsCreatingDishInPos(false);
+                }}
                 className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -2001,6 +2811,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       });
                       setEditingDishInPos({ ...editingDishInPos, nameTh: nextTh, name: nextEn });
                     }}
+                    placeholder="เช่น กะเพรา, ผัดกะเพรา, ข้าวผัด"
                     className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
@@ -2034,6 +2845,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       else posManualEnKeysRef.current.delete('dish');
                       setEditingDishInPos({ ...editingDishInPos, name: val });
                     }}
+                    placeholder="e.g. Stir-Fried Holy Basil"
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                   />
                 </div>
@@ -2126,118 +2938,297 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 </div>
               </div>
 
-              {/* Primary Variants & Prices */}
-              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-black text-neutral-800">{t.menuCost.variants}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextVar: DishVariant = {
-                        id: `var_${Date.now()}`,
-                        nameTh: '',
-                        name: '',
-                        price: editingDishInPos.variants?.[0]?.price || 100,
-                        ingredients: [],
-                        subRecipes: [],
-                        packaging: [],
-                      };
-                      setEditingDishInPos({
-                        ...editingDishInPos,
-                        variants: [...(editingDishInPos.variants || []), nextVar],
-                      });
-                    }}
-                    className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-neutral-300 text-neutral-700 rounded-lg text-[11px] font-bold cursor-pointer flex items-center gap-1"
-                  >
-                    <Plus className="w-3 h-3 text-orange-600" />
-                    <span>{lang === 'th' ? 'เพิ่มตัวเลือก' : 'Add Option'}</span>
-                  </button>
+              {/* Primary Options ("ตัวเลือกหลักของเมนู") — Linked Real-Time From Food Cost OR Manual */}
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-3">
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-black text-neutral-800">{t.menuCost.variants}</span>
+                    {matchedEditingPosCostMenu && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                        <CheckCircle2 className="w-3 h-3 shrink-0" />
+                        <span>
+                          ดึงข้อมูลจริงจากต้นทุนอาหาร: {matchedEditingPosCostMenu.name} (
+                          {getActiveCostVariants(matchedEditingPosCostMenu).length} รายการ)
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {costMenus.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedPosCostMenuId(null);
+                          setPosPickerSourceTab('menus');
+                          setPosPrimaryOptionSearch('');
+                          setIsPosPrimaryOptionPickerOpen(true);
+                        }}
+                        className="px-2.5 py-1 bg-orange-50 hover:bg-orange-100 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>
+                          {matchedEditingPosCostMenu ? 'เปลี่ยนเมนูต้นทุน' : '+ เชื่อมข้อมูลจากต้นทุนอาหาร'}
+                        </span>
+                      </button>
+                    )}
+                    {!matchedEditingPosCostMenu && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextVar: DishVariant = {
+                            id: `var_${Date.now()}`,
+                            nameTh: '',
+                            name: '',
+                            price: editingDishInPos.variants?.[0]?.price || 100,
+                            ingredients: [],
+                            subRecipes: [],
+                            packaging: [],
+                          };
+                          setEditingDishInPos({
+                            ...editingDishInPos,
+                            variants: [...(editingDishInPos.variants || []), nextVar],
+                          });
+                        }}
+                        className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-neutral-300 text-neutral-700 rounded-xl text-[11px] font-bold cursor-pointer flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3 text-orange-600" />
+                        <span>{lang === 'th' ? 'เพิ่มตัวเลือก' : 'Add Option'}</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  {editingDishInPos.variants.map((v, vIdx) => (
-                    <div
-                      key={v.id}
-                      className="grid grid-cols-12 gap-2 items-center bg-white p-2 rounded-xl border border-neutral-200"
-                    >
-                      <div className="col-span-5">
-                        <input
-                          type="text"
-                          required={!v.name}
-                          value={v.nameTh || ''}
-                          onChange={(e) => {
-                            const nextTh = e.target.value;
-                            const updated = [...editingDishInPos.variants];
-                            const prev = updated[vIdx];
-                            const nextEn = computeAutoEnglishName({
-                              previousThai: prev.nameTh || '',
-                              nextThai: nextTh,
-                              currentEnglish: prev.name || '',
-                              isManuallyEdited: posManualEnKeysRef.current.has(`var_${v.id}`),
-                            });
-                            updated[vIdx] = { ...prev, nameTh: nextTh, name: nextEn };
-                            setEditingDishInPos({ ...editingDishInPos, variants: updated });
-                          }}
-                          placeholder="ชื่อตัวเลือก (TH)"
-                          className="w-full px-2 py-1 text-xs border border-neutral-300 rounded-lg"
-                        />
+                {matchedEditingPosCostMenu ? (
+                  (() => {
+                    const costVars = getActiveCostVariants(matchedEditingPosCostMenu);
+                    return (
+                      <div className="space-y-2">
+                        <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white">
+                          <table className="w-full min-w-[560px] text-left border-collapse text-xs">
+                            <thead>
+                              <tr className="bg-neutral-100 border-b border-neutral-200 text-[10.5px] font-extrabold text-neutral-700">
+                                <th className="py-2 px-2.5">ชื่อรายการ</th>
+                                <th className="py-2 px-2 text-right w-28">ราคาตั้งขาย (฿)</th>
+                                <th className="py-2 px-2 text-right">ต้นทุนรวม</th>
+                                <th className="py-2 px-2 text-right">%ต้นทุน</th>
+                                <th className="py-2 px-2 text-right">กำไรกินที่ร้าน</th>
+                                <th className="py-2 px-2.5 text-right">กำไรใส่กล่อง</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-neutral-100">
+                              {costVars.map((cv) => {
+                                const labelTh = getCostVariantLabel(cv);
+                                const existingMatched = findExistingPosVariantForCostVariant(
+                                  cv,
+                                  editingDishInPos.variants || []
+                                );
+                                const currentSellingPrice = resolveCostVariantSellingPrice(
+                                  matchedEditingPosCostMenu,
+                                  cv,
+                                  existingMatched,
+                                  posModalPriceOverrides[cv.id]
+                                );
+                                const bd = computeCostVariantRealtimeBreakdown(
+                                  matchedEditingPosCostMenu,
+                                  cv,
+                                  currentSellingPrice
+                                );
+                                const fcPct = bd.fcPercent || 0;
+
+                                return (
+                                  <tr key={cv.id} className="hover:bg-orange-50/40 transition-colors">
+                                    <td className="py-2 px-2.5">
+                                      <div className="font-black text-neutral-900 text-xs leading-tight">
+                                        {labelTh}
+                                      </div>
+                                      {cv.name && cv.name !== labelTh && (
+                                        <div className="text-[10px] text-neutral-400 truncate max-w-[160px]">
+                                          {cv.name}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="py-1.5 px-2 text-right">
+                                      <NumericInput
+                                        min={0}
+                                        step={1}
+                                        value={currentSellingPrice}
+                                        onValueChange={(val) =>
+                                          handleUpdatePosCostVariantPrice(
+                                            matchedEditingPosCostMenu,
+                                            cv,
+                                            val
+                                          )
+                                        }
+                                        className="w-24 px-2 py-1 text-right text-xs font-black bg-orange-50/70 border border-orange-300 rounded-lg text-orange-700 focus:ring-2 focus:ring-orange-500 focus:bg-white"
+                                      />
+                                    </td>
+                                    <td className="py-2 px-2 text-right font-mono font-bold text-neutral-800">
+                                      ฿{formatMoney(bd.totalCost)}
+                                    </td>
+                                    <td className="py-2 px-2 text-right font-mono font-black">
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded-md text-[11px] ${
+                                          fcPct > 45
+                                            ? 'bg-rose-50 text-rose-700'
+                                            : fcPct > 35
+                                            ? 'bg-amber-50 text-amber-700'
+                                            : 'bg-emerald-50 text-emerald-700'
+                                        }`}
+                                      >
+                                        {fcPct}%
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-2 text-right font-mono font-black">
+                                      <span
+                                        className={
+                                          bd.dineInProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                                        }
+                                      >
+                                        {bd.dineInProfit > 0 ? '+' : ''}฿{formatMoney(bd.dineInProfit)}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-2.5 text-right font-mono font-black">
+                                      <span
+                                        className={
+                                          bd.takeawayProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                                        }
+                                      >
+                                        {bd.takeawayProfit > 0 ? '+' : ''}฿{formatMoney(bd.takeawayProfit)}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="text-[10.5px] text-neutral-500">
+                          ยึดตามตัวเลือกที่สร้างไว้ใน &quot;ต้นทุนอาหาร&quot; • แก้ไขราคาตั้งขายเพื่อคำนวณ %ต้นทุน และกำไรแบบเรียลไทม์ทันที
+                        </p>
                       </div>
-                      <div className="col-span-3">
-                        <input
-                          type="text"
-                          value={v.name || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const key = `var_${v.id}`;
-                            if (val.trim()) posManualEnKeysRef.current.add(key);
-                            else posManualEnKeysRef.current.delete(key);
-                            const updated = [...editingDishInPos.variants];
-                            updated[vIdx] = { ...updated[vIdx], name: val };
-                            setEditingDishInPos({ ...editingDishInPos, variants: updated });
-                          }}
-                          placeholder="EN"
-                          className="w-full px-2 py-1 text-xs bg-neutral-50 border border-neutral-300 rounded-lg"
-                        />
-                      </div>
-                      <div className="col-span-3">
-                        <NumericInput
-                          min={0}
-                          step={1}
-                          value={v.price}
-                          onValueChange={(val) => {
-                            const updated = [...editingDishInPos.variants];
-                            updated[vIdx] = { ...updated[vIdx], price: val };
-                            setEditingDishInPos({ ...editingDishInPos, variants: updated });
-                          }}
-                          className="w-full px-2 py-1 text-xs text-right font-black border border-orange-300 rounded-lg text-orange-700"
-                        />
-                      </div>
-                      <div className="col-span-1 flex justify-end">
-                        {editingDishInPos.variants.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = editingDishInPos.variants.filter((_, i) => i !== vIdx);
-                              setEditingDishInPos({ ...editingDishInPos, variants: updated });
-                            }}
-                            className="p-1 text-neutral-400 hover:text-rose-600 cursor-pointer"
-                            title={t.common.delete}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    );
+                  })()
+                ) : (
+                  <div className="space-y-2">
+                    {editingDishInPos.variants.map((v, vIdx) => {
+                      const varMetrics = getPosLinkedFoodCostMetrics(editingDishInPos, v);
+                      return (
+                        <div key={v.id} className="space-y-1.5 bg-white p-2 rounded-xl border border-neutral-200">
+                          <div className="grid grid-cols-12 gap-2 items-center">
+                            <div className="col-span-5">
+                              <input
+                                type="text"
+                                required={!v.name}
+                                value={v.nameTh || ''}
+                                onChange={(e) => {
+                                  const nextTh = e.target.value;
+                                  const updated = [...editingDishInPos.variants];
+                                  const prev = updated[vIdx];
+                                  const nextEn = computeAutoEnglishName({
+                                    previousThai: prev.nameTh || '',
+                                    nextThai: nextTh,
+                                    currentEnglish: prev.name || '',
+                                    isManuallyEdited: posManualEnKeysRef.current.has(`var_${v.id}`),
+                                  });
+                                  updated[vIdx] = { ...prev, nameTh: nextTh, name: nextEn };
+                                  setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                                }}
+                                placeholder="ชื่อตัวเลือก (TH)"
+                                className="w-full px-2 py-1 text-xs border border-neutral-300 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-3">
+                              <input
+                                type="text"
+                                value={v.name || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  const key = `var_${v.id}`;
+                                  if (val.trim()) posManualEnKeysRef.current.add(key);
+                                  else posManualEnKeysRef.current.delete(key);
+                                  const updated = [...editingDishInPos.variants];
+                                  updated[vIdx] = { ...updated[vIdx], name: val };
+                                  setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                                }}
+                                placeholder="EN"
+                                className="w-full px-2 py-1 text-xs bg-neutral-50 border border-neutral-300 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-3">
+                              <NumericInput
+                                min={0}
+                                step={1}
+                                value={v.price}
+                                onValueChange={(val) => {
+                                  const updated = [...editingDishInPos.variants];
+                                  updated[vIdx] = { ...updated[vIdx], price: val };
+                                  setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                                }}
+                                className="w-full px-2 py-1 text-xs text-right font-black border border-orange-300 rounded-lg text-orange-700"
+                              />
+                            </div>
+                            <div className="col-span-1 flex justify-end">
+                              {editingDishInPos.variants.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = editingDishInPos.variants.filter((_, i) => i !== vIdx);
+                                    setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                                  }}
+                                  className="p-1 text-neutral-400 hover:text-rose-600 cursor-pointer"
+                                  title={t.common.delete}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {varMetrics.hasData && (
+                            <div className="px-2.5 py-1.5 rounded-lg bg-emerald-50/80 border border-emerald-200 text-[10.5px] flex flex-wrap items-center justify-between gap-2 text-emerald-900">
+                              <span className="font-bold flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                <span>ต้นทุน: ฿{formatMoney(varMetrics.cost)} ({varMetrics.foodCostPercent.toFixed(1)}%)</span>
+                              </span>
+                              <span className="font-black">
+                                ที่ร้าน: {varMetrics.dineInProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.dineInProfit)} • กล่อง: {varMetrics.takeawayProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.takeawayProfit)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
-              {/* Option Groups Attached */}
-              {optionGroups.length > 0 && (
-                <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
-                  <div className="text-xs font-black text-neutral-800">
+              {/* Sub-Option Groups Attached + Picker */}
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-black text-neutral-800">
                     {t.menuCost.attachedOptionGroups}
+                  </span>
+                  {optionGroups.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPosOptionGroupSearch('');
+                        setIsPosOptionGroupPickerOpen(true);
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>เพิ่มตัวเลือกย่อย</span>
+                    </button>
+                  )}
+                </div>
+
+                {optionGroups.length === 0 ? (
+                  <div className="p-2.5 bg-white rounded-xl border border-dashed border-neutral-300 text-[11px] text-neutral-500 text-center">
+                    {lang === 'th'
+                      ? 'ยังไม่มีกลุ่มตัวเลือกย่อย'
+                      : 'No sub-option groups yet'}
                   </div>
+                ) : (
                   <div className="flex flex-wrap gap-1.5">
                     {optionGroups.map((grp) => {
                       const active = (editingDishInPos.optionGroupIds || []).includes(grp.id);
@@ -2263,13 +3254,23 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       );
                     })}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 shrink-0">
-              <div>
-                {onEditDish && (
+            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 shrink-0 flex-wrap">
+              <div className="flex items-center gap-2">
+                {!isCreatingDishInPos && (
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteDish(editingDishInPos)}
+                    className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold border border-rose-200 cursor-pointer flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{t.common.delete}</span>
+                  </button>
+                )}
+                {!isCreatingDishInPos && onEditDish && (
                   <button
                     type="button"
                     onClick={() => {
@@ -2279,14 +3280,17 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                     }}
                     className="px-3 py-2 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
                   >
-                    {lang === 'th' ? 'จัดการเมนู & ต้นทุนเต็ม' : 'Full Menu Editor'}
+                    {lang === 'th' ? 'จัดการต้นทุนละเอียด' : 'Detailed Costing'}
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 ml-auto">
                 <button
                   type="button"
-                  onClick={() => setEditingDishInPos(null)}
+                  onClick={() => {
+                    setEditingDishInPos(null);
+                    setIsCreatingDishInPos(false);
+                  }}
                   className="px-4 py-2 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
                 >
                   {t.common.cancel}
@@ -2303,6 +3307,426 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           </form>
         </div>
       )}
+
+      {/* POS Food Cost Primary Option Picker Modal */}
+      {isPosPrimaryOptionPickerOpen && editingDishInPos && (() => {
+        const q = posPrimaryOptionSearch.trim().toLowerCase();
+        const dishThLower = (editingDishInPos.nameTh || '').trim().toLowerCase();
+        const dishEnLower = (editingDishInPos.name || '').trim().toLowerCase();
+
+        const sortedCostMenus = [...costMenus]
+          .filter((m) => m.active !== false && (m.variants || []).length > 0)
+          .sort((a, b) => {
+            const aName = a.name.toLowerCase();
+            const bName = b.name.toLowerCase();
+            const aMatch =
+              (dishThLower && (aName.includes(dishThLower) || dishThLower.includes(aName))) ||
+              (dishEnLower && aName.includes(dishEnLower));
+            const bMatch =
+              (dishThLower && (bName.includes(dishThLower) || dishThLower.includes(bName))) ||
+              (dishEnLower && bName.includes(dishEnLower));
+            if (aMatch && !bMatch) return -1;
+            if (!aMatch && bMatch) return 1;
+            return (a.displayOrder || 99) - (b.displayOrder || 99);
+          });
+
+        const selectedCostMenu = selectedPosCostMenuId
+          ? sortedCostMenus.find((m) => m.id === selectedPosCostMenuId) || null
+          : null;
+
+        const filteredMenus = sortedCostMenus.filter((menu) => {
+          if (!q) return true;
+          return `${menu.name} ${menu.category || ''}`.toLowerCase().includes(q);
+        });
+
+        const selectedMenuVariants: Array<{
+          variant: CostMenuVariant;
+          sellingPrice: number;
+          cost: number;
+          dineInProfit: number;
+          takeawayProfit: number;
+        }> = [];
+
+        if (selectedCostMenu) {
+          for (const v of selectedCostMenu.variants || []) {
+            const hay = `${v.name} ${v.proteinType || ''}`.toLowerCase();
+            if (q && !hay.includes(q)) continue;
+            const bd = calculateSpreadsheetRowMetrics({
+              menu: selectedCostMenu,
+              variant: v,
+              ingredientsMap: costIngMap,
+              servingMode: 'ON_RICE',
+            });
+            selectedMenuVariants.push({
+              variant: v,
+              sellingPrice: bd.sellingPrice,
+              cost: bd.totalCost || 0,
+              dineInProfit: bd.dineInProfit || 0,
+              takeawayProfit: bd.takeawayProfit || 0,
+            });
+          }
+        }
+
+        const proteinIngredients = costIngredients.filter((ing) => {
+          if (ing.active === false) return false;
+          const isMeat = ing.category === 'เนื้อสัตว์และอาหารทะเล';
+          return q ? ing.name.toLowerCase().includes(q) : isMeat;
+        });
+
+        const appendImportedVariant = (newVariant: DishVariant) => {
+          const currentVars = editingDishInPos.variants || [];
+          const hasOnlyBlankPlaceholder =
+            currentVars.length === 1 &&
+            isCreatingDishInPos &&
+            (currentVars[0].name === 'Standard' || currentVars[0].nameTh === 'มาตรฐาน') &&
+            (currentVars[0].ingredients?.length || 0) === 0;
+
+          const nextVariants = hasOnlyBlankPlaceholder ? [newVariant] : [...currentVars, newVariant];
+          setEditingDishInPos({ ...editingDishInPos, variants: nextVariants });
+          setIsPosPrimaryOptionPickerOpen(false);
+        };
+
+        return (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[88vh] flex flex-col border border-orange-200 overflow-hidden">
+              <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ChefHat className="w-5 h-5" />
+                  <h3 className="font-extrabold text-base">
+                    {selectedCostMenu
+                      ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
+                      : 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPosPrimaryOptionPickerOpen(false)}
+                  className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3 border-b border-neutral-200 bg-neutral-50 space-y-2">
+                {selectedCostMenu ? (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedPosCostMenuId(null);
+                        setPosPrimaryOptionSearch('');
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
+                    >
+                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <span>เปลี่ยนรายการเมนูอาหาร</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingDishInPos({
+                          ...editingDishInPos,
+                          costMenuId: selectedCostMenu.id,
+                        });
+                        setIsPosPrimaryOptionPickerOpen(false);
+                      }}
+                      className="px-3 py-1 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer hover:brightness-105"
+                    >
+                      เชื่อมตัวเลือกทั้งหมด ({selectedMenuVariants.length})
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPosPickerSourceTab('menus');
+                        setPosPrimaryOptionSearch('');
+                      }}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold cursor-pointer ${
+                        posPickerSourceTab === 'menus'
+                          ? 'bg-orange-500 text-white'
+                          : 'bg-white border border-neutral-300 text-neutral-700'
+                      }`}
+                    >
+                      เลือกจากรายการเมนู ({sortedCostMenus.length})
+                    </button>
+                    {proteinIngredients.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPosPickerSourceTab('ingredients');
+                          setPosPrimaryOptionSearch('');
+                        }}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold cursor-pointer ${
+                          posPickerSourceTab === 'ingredients'
+                            ? 'bg-orange-500 text-white'
+                            : 'bg-white border border-neutral-300 text-neutral-700'
+                        }`}
+                      >
+                        เลือกจากวัตถุดิบเนื้อสัตว์เดี่ยว
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div className="relative">
+                  <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={posPrimaryOptionSearch}
+                    onChange={(e) => setPosPrimaryOptionSearch(e.target.value)}
+                    placeholder="ค้นหาเมนูหรือวัตถุดิบ..."
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+                {posPickerSourceTab === 'menus' && !selectedCostMenu && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {filteredMenus.map((menu) => (
+                      <button
+                        key={menu.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPosCostMenuId(menu.id);
+                          setPosPrimaryOptionSearch('');
+                        }}
+                        className="p-3 rounded-2xl border bg-white border-neutral-200 hover:border-orange-400 text-left cursor-pointer flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-black text-sm text-neutral-900 truncate">{menu.name}</div>
+                          <div className="text-[11px] text-neutral-500">
+                            {menu.category || 'เมนูอาหาร'} • {(menu.variants || []).length} ตัวเลือกหลัก
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-orange-500 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {posPickerSourceTab === 'menus' && selectedCostMenu && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {selectedMenuVariants.map(({ variant, sellingPrice, cost }) => {
+                      const displayProtein =
+                        variant.proteinType &&
+                        variant.proteinType !== 'ทั่วไป' &&
+                        variant.proteinType !== 'Standard'
+                          ? variant.proteinType
+                          : variant.name;
+                      return (
+                        <button
+                          key={`${selectedCostMenu.id}_${variant.id}`}
+                          type="button"
+                          disabled={isImportingPosCostOption}
+                          onClick={async () => {
+                            setIsImportingPosCostOption(true);
+                            try {
+                              const converted = await importCostingVariantToDishVariant({
+                                variant,
+                                costMenuId: selectedCostMenu.id,
+                                costIngredients,
+                                costSauces,
+                                preferredNameTh: displayProtein,
+                              });
+                              converted.price = sellingPrice;
+                              appendImportedVariant(converted);
+                            } finally {
+                              setIsImportingPosCostOption(false);
+                            }
+                          }}
+                          className="p-3 rounded-2xl border bg-white border-neutral-200 hover:border-orange-400 text-left cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-black text-sm text-neutral-900 truncate">{displayProtein}</div>
+                            <div className="text-[11px] text-neutral-500">ต้นทุน ฿{formatMoney(cost)}</div>
+                          </div>
+                          <span className="text-xs font-black text-orange-600 shrink-0">
+                            ฿{formatMoney(sellingPrice || 0)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {posPickerSourceTab === 'ingredients' && !selectedCostMenu && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {proteinIngredients.map((ing) => (
+                      <button
+                        key={ing.id}
+                        type="button"
+                        disabled={isImportingPosCostOption}
+                        onClick={async () => {
+                          setIsImportingPosCostOption(true);
+                          try {
+                            const converted = await importCostingIngredientAsDishVariant(ing, 100);
+                            converted.price = editingDishInPos.variants?.[0]?.price || 65;
+                            appendImportedVariant(converted);
+                          } finally {
+                            setIsImportingPosCostOption(false);
+                          }
+                        }}
+                        className="p-2.5 bg-neutral-50 hover:bg-orange-50 rounded-xl border border-neutral-200 hover:border-orange-300 text-left cursor-pointer flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-neutral-900 truncate">{ing.name}</div>
+                          <div className="text-[10px] text-neutral-500">
+                            ฿{formatMoney(ing.costPerBaseUnit)} / {ing.baseUnit}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-orange-600 shrink-0">+ เลือกใช้</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsPosPrimaryOptionPickerOpen(false)}
+                  className="px-4 py-1.5 bg-neutral-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  {t.common.close}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* POS Sub-Option Group Picker Modal */}
+      {isPosOptionGroupPickerOpen && editingDishInPos && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[84vh] flex flex-col border border-orange-200 overflow-hidden">
+            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-5 h-5" />
+                <h3 className="font-extrabold text-base">เลือกตัวเลือกย่อยที่ใช้งาน</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPosOptionGroupPickerOpen(false)}
+                className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 border-b border-neutral-200 bg-neutral-50">
+              <div className="relative">
+                <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  autoFocus
+                  value={posOptionGroupSearch}
+                  onChange={(e) => setPosOptionGroupSearch(e.target.value)}
+                  placeholder="ค้นหากลุ่มตัวเลือกย่อย..."
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {optionGroups
+                .filter((grp) => {
+                  const q = posOptionGroupSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    grp.name.toLowerCase().includes(q) ||
+                    (grp.nameTh && grp.nameTh.toLowerCase().includes(q))
+                  );
+                })
+                .map((grp) => {
+                  const isSelected = (editingDishInPos.optionGroupIds || []).includes(grp.id);
+                  return (
+                    <button
+                      key={grp.id}
+                      type="button"
+                      onClick={() => {
+                        const curr = editingDishInPos.optionGroupIds || [];
+                        const next = isSelected
+                          ? curr.filter((id) => id !== grp.id)
+                          : [...curr, grp.id];
+                        setEditingDishInPos({ ...editingDishInPos, optionGroupIds: next });
+                      }}
+                      className={`w-full p-3 rounded-2xl border text-left cursor-pointer transition-colors flex items-start justify-between gap-2 ${
+                        isSelected
+                          ? 'bg-orange-50 border-orange-500'
+                          : 'bg-white border-neutral-200 hover:bg-neutral-50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-extrabold text-xs text-neutral-900">
+                          {grp.nameTh || grp.name}
+                        </div>
+                        <div className="text-[11px] text-neutral-500 mt-0.5">
+                          {grp.choices.map((c) => c.nameTh || c.name).join(' • ')}
+                        </div>
+                      </div>
+                      <span
+                        className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border ${
+                          isSelected
+                            ? 'bg-orange-500 border-orange-600 text-white'
+                            : 'bg-white border-neutral-300 text-transparent'
+                        }`}
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+
+            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsPosOptionGroupPickerOpen(false)}
+                className="px-5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
+              >
+                ตกลง ({(editingDishInPos.optionGroupIds || []).length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Dish Modal inside POS */}
+      <ConfirmModal
+        isOpen={Boolean(pendingDeleteDish)}
+        title={lang === 'th' ? 'ยืนยันการลบเมนู' : 'Delete Menu Item'}
+        message={
+          lang === 'th'
+            ? `ต้องการลบ "${pendingDeleteDish?.nameTh || pendingDeleteDish?.name || ''}" ใช่หรือไม่? การลบไม่สามารถย้อนกลับได้`
+            : `Are you sure you want to delete "${pendingDeleteDish?.name || ''}"?`
+        }
+        confirmLabel={t.common.delete}
+        cancelLabel={t.common.cancel}
+        isLoading={isDeletingPosDish}
+        onCancel={() => {
+          if (!isDeletingPosDish) setPendingDeleteDish(null);
+        }}
+        onConfirm={async () => {
+          if (!pendingDeleteDish) return;
+          setIsDeletingPosDish(true);
+          try {
+            const delId = pendingDeleteDish.id;
+            await deleteDocument('dishes', delId);
+            setDishes((prev) => prev.filter((d) => d.id !== delId));
+            if (editingDishInPos?.id === delId) {
+              setEditingDishInPos(null);
+              setIsCreatingDishInPos(false);
+            }
+            setPendingDeleteDish(null);
+          } finally {
+            setIsDeletingPosDish(false);
+          }
+        }}
+      />
     </div>
   );
 };

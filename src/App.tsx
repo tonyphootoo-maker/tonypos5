@@ -21,21 +21,30 @@ import { FloorPlanPage } from './pages/FloorPlanPage';
 import { MenuFoodCostPage } from './pages/MenuFoodCostPage';
 import { OptionGroupsPage } from './pages/OptionGroupsPage';
 import { BillsHistoryPage } from './pages/BillsHistoryPage';
-import { FinancePage } from './pages/FinancePage';
-import { ReportsPage } from './pages/ReportsPage';
-import { DashboardPage } from './pages/DashboardPage';
+import { UnifiedFinanceHubPage, FinanceHubTab } from './pages/UnifiedFinanceHubPage';
 import { BackupPage } from './pages/BackupPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CostingWorkspace, CostingTabId } from './costing/CostingWorkspace';
 import {
   UtensilsCrossed,
-  Sparkles,
   Lock,
   Globe,
   Loader2,
-  CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
+
+const FINANCE_HUB_PAGE_TAB_MAP: Partial<Record<AppPage, FinanceHubTab>> = {
+  finance_hub: 'overview',
+  dashboard: 'overview',
+  cost_executive_dashboard: 'overview',
+  reports: 'pnl',
+  cost_pnl: 'pnl',
+  cost_sales_entry: 'sales',
+  finance: 'expenses',
+  cost_expenses: 'expenses',
+  cost_labor: 'labor',
+  cost_overhead_breakeven: 'breakeven',
+};
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -299,6 +308,7 @@ export default function App() {
 
   const isFullViewportPage =
     currentPage === 'pos' || currentPage === 'floor_plan' || currentPage === 'menu_cost';
+  const financeHubTab = FINANCE_HUB_PAGE_TAB_MAP[currentPage];
 
   return (
     <div
@@ -360,14 +370,14 @@ export default function App() {
         {currentPage === 'bills' && (
           <BillsHistoryPage settings={settings} lang={lang} />
         )}
-        {currentPage === 'finance' && (
-          <FinancePage settings={settings} lang={lang} />
-        )}
-        {currentPage === 'reports' && (
-          <ReportsPage settings={settings} lang={lang} />
-        )}
-        {currentPage === 'dashboard' && (
-          <DashboardPage settings={settings} lang={lang} onNavigate={(p) => setCurrentPage(p)} />
+        {financeHubTab !== undefined && (
+          <UnifiedFinanceHubPage
+            user={user}
+            settings={settings}
+            lang={lang}
+            initialTab={financeHubTab}
+            onNavigatePage={(p) => setCurrentPage(p)}
+          />
         )}
         {currentPage === 'backup' && (
           <BackupPage settings={settings} lang={lang} />
@@ -379,7 +389,7 @@ export default function App() {
             onSettingsUpdated={(newSet) => setSettings(newSet)}
           />
         )}
-        {currentPage.startsWith('cost_') && (
+        {currentPage.startsWith('cost_') && financeHubTab === undefined && (
           <CostingWorkspace
             activeTab={currentPage.replace(/^cost_/, '') as CostingTabId}
             onSelectCostTab={(tab) => setCurrentPage(`cost_${tab}` as AppPage)}

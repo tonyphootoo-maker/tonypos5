@@ -8,8 +8,6 @@ import {
   Sliders,
   Receipt,
   CircleDollarSign,
-  BarChart3,
-  LayoutDashboard,
   DatabaseBackup,
   Settings,
   LogOut,
@@ -22,11 +20,7 @@ import {
   Beef,
   ShoppingCart,
   Boxes,
-  PieChart,
-  TrendingUp,
-  Users,
   FileSpreadsheet,
-  ClipboardList,
   Layers,
 } from 'lucide-react';
 import { Language, ShiftDoc } from '../types';
@@ -41,6 +35,7 @@ export type AppPage =
   | 'menu_cost'
   | 'option_groups'
   | 'bills'
+  | 'finance_hub'
   | 'finance'
   | 'reports'
   | 'dashboard'
@@ -62,6 +57,19 @@ export type AppPage =
   | 'cost_sales_entry'
   | 'cost_reports'
   | 'cost_settings';
+
+const UNIFIED_FINANCE_PAGES: AppPage[] = [
+  'finance_hub',
+  'finance',
+  'reports',
+  'dashboard',
+  'cost_executive_dashboard',
+  'cost_pnl',
+  'cost_overhead_breakeven',
+  'cost_expenses',
+  'cost_labor',
+  'cost_sales_entry',
+];
 
 interface Props {
   currentPage: AppPage;
@@ -237,85 +245,13 @@ export const Navigation: React.FC<Props> = ({
       title: { th: 'การเงิน บริหาร & รายงาน P&L', en: 'Finance & Executive P&L' },
       items: [
         {
-          id: 'cost_executive_dashboard',
-          label: lang === 'th' ? 'แดชบอร์ดบริหาร & คำแนะนำ' : 'Executive Insights',
+          id: 'finance_hub',
+          label: lang === 'th' ? 'การเงิน บริหาร & รายงาน P&L' : 'Finance & Executive P&L',
           desc: {
-            th: 'KPI บริหาร + คำแนะนำเชิงธุรกิจอัตโนมัติ',
-            en: 'Executive KPIs & automated recommendations',
-          },
-          icon: <LayoutDashboard className="w-5 h-5 text-indigo-600" />,
-        },
-        {
-          id: 'cost_pnl',
-          label: lang === 'th' ? 'งบกำไรขาดทุนบริหาร (Costing)' : 'Executive P&L (Costing)',
-          desc: {
-            th: 'วิเคราะห์ P&L พร้อมซิงค์ยอดขายจาก POS',
-            en: 'Costing P&L synced with live POS sales',
-          },
-          icon: <PieChart className="w-5 h-5 text-purple-600" />,
-        },
-        {
-          id: 'cost_overhead_breakeven',
-          label: lang === 'th' ? 'โสหุ้ย & จุดคุ้มทุน' : 'Overhead & Break-Even',
-          desc: {
-            th: 'คำนวณยอดขายคุ้มทุนรายวัน/รายเดือน',
-            en: 'Fixed overhead & break-even analysis',
-          },
-          icon: <TrendingUp className="w-5 h-5 text-emerald-600" />,
-        },
-        {
-          id: 'cost_sales_entry',
-          label: lang === 'th' ? 'บันทึกยอดขายประจำวัน' : 'Daily Sales Entry',
-          desc: {
-            th: 'ลงยอดขายแยกช่องทาง & รวมยอดจาก POS',
-            en: 'Channel sales entry & POS sync',
-          },
-          icon: <ClipboardList className="w-5 h-5 text-blue-600" />,
-        },
-        {
-          id: 'cost_expenses',
-          label: lang === 'th' ? 'ค่าใช้จ่าย & โสหุ้ย (Costing)' : 'Expenses & Overhead',
-          desc: {
-            th: 'รายจ่ายประจำ/ผ่อน/ค่าเสื่อมราคา',
-            en: 'Recurring, installment & depreciation costs',
-          },
-          icon: <Receipt className="w-5 h-5 text-rose-600" />,
-        },
-        {
-          id: 'cost_labor',
-          label: lang === 'th' ? 'ค่าแรง & โครงสร้างทีม' : 'Labor & Departments',
-          desc: {
-            th: 'ค่าแรงแยกแผนก ครัว / บริการ / บริหาร',
-            en: 'Kitchen, service & management labor',
-          },
-          icon: <Users className="w-5 h-5 text-sky-600" />,
-        },
-        {
-          id: 'finance',
-          label: t.nav.finance,
-          desc: {
-            th: 'ค่าใช้จ่าย กะพนักงาน & จุดคุ้มทุน POS',
-            en: 'POS expenses, staff labor & break-even',
+            th: 'รวม KPI บริหาร งบ P&L ยอดขาย ค่าใช้จ่าย ค่าแรง และจุดคุ้มทุน',
+            en: 'Unified KPIs, P&L, daily sales, expenses, labor & break-even',
           },
           icon: <CircleDollarSign className="w-5 h-5 text-emerald-600" />,
-        },
-        {
-          id: 'reports',
-          label: t.nav.reports,
-          desc: {
-            th: 'งบ USALI P&L จากบิลขายจริง POS',
-            en: 'USALI P&L report from POS bills',
-          },
-          icon: <BarChart3 className="w-5 h-5 text-purple-600" />,
-        },
-        {
-          id: 'dashboard',
-          label: t.nav.dashboard,
-          desc: {
-            th: 'สถิติร้านค้าและยอดขายเรียลไทม์ POS',
-            en: 'Real-time POS KPIs & turnover',
-          },
-          icon: <LayoutDashboard className="w-5 h-5 text-orange-500" />,
         },
       ],
     },
@@ -405,7 +341,10 @@ export const Navigation: React.FC<Props> = ({
                 {group.title[lang]}
               </div>
               {group.items.map((item) => {
-                const isActive = currentPage === item.id;
+                const isActive =
+                  item.id === 'finance_hub'
+                    ? UNIFIED_FINANCE_PAGES.includes(currentPage)
+                    : currentPage === item.id;
                 return (
                   <button
                     key={item.id}

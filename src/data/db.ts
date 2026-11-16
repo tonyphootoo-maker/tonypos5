@@ -906,6 +906,36 @@ export async function saveBillsOrder(
   }
 }
 
+export async function saveDishesOrder(
+  orderedDishes: Pick<DishDoc, 'id' | 'order' | 'version'>[]
+): Promise<void> {
+  if (orderedDishes.length === 0) return;
+  const uid = getCurrentUid();
+  const now = new Date().toISOString();
+  const CHUNK_SIZE = 450;
+
+  try {
+    for (let i = 0; i < orderedDishes.length; i += CHUNK_SIZE) {
+      const chunk = orderedDishes.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const dish of chunk) {
+        const ref = doc(db, `users/${uid}/dishes/${dish.id}`);
+        batch.update(
+          ref,
+          stripUndefined({
+            order: dish.order,
+            updatedAt: now,
+            version: (dish.version || 0) + 1,
+          })
+        );
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `users/${uid}/dishes`);
+  }
+}
+
 // ==========================================
 // Atomic Bill Number Generation via Counter
 // Format: T{TableNo}-{BE_YYMMDD} (e.g. T2-691115)
