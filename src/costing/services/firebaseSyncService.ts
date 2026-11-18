@@ -309,11 +309,24 @@ export const FirebaseSyncService = {
         return { success: true, data: StorageService.getDailySales() };
       }
 
-      const summariesSnap = await getDocs(collection(db, 'users', uid, 'dailySummaries'));
+      const [summariesSnap, cloudSalesSnap] = await Promise.all([
+        getDocs(collection(db, 'users', uid, 'dailySummaries')),
+        getDocs(collection(db, 'users', uid, COST_COLLECTIONS.DAILY_SALES)),
+      ]);
       const summaries = summariesSnap.docs.map((docSnap) => docSnap.data() as DailySummaryDoc);
-      const existingRecords = StorageService.getDailySales();
+      const localRecords = StorageService.getDailySales();
+      const cloudMap = new Map<string, DailySalesRecord>();
+      for (const rec of localRecords) {
+        if (rec?.id) cloudMap.set(rec.id, rec);
+      }
+      for (const docSnap of cloudSalesSnap.docs) {
+        const cloudRec = { ...(docSnap.data() as DailySalesRecord), id: docSnap.id };
+        if (!cloudRec.id.startsWith('pos_sync_') || !cloudMap.has(cloudRec.id)) {
+          cloudMap.set(cloudRec.id, cloudRec);
+        }
+      }
 
-      const merged = convertDailySummariesToSalesRecords(summaries, existingRecords);
+      const merged = convertDailySummariesToSalesRecords(summaries, Array.from(cloudMap.values()));
       StorageService.saveDailySales(merged);
       return { success: true, data: merged };
     } catch (err: any) {

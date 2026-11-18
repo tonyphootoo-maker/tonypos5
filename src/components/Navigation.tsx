@@ -22,6 +22,7 @@ import {
   Boxes,
   FileSpreadsheet,
   Layers,
+  ShoppingBag,
 } from 'lucide-react';
 import { Language, ShiftDoc } from '../types';
 import { translations } from '../i18n/translations';
@@ -35,6 +36,7 @@ export type AppPage =
   | 'menu_cost'
   | 'option_groups'
   | 'bills'
+  | 'online_orders'
   | 'finance_hub'
   | 'finance'
   | 'reports'
@@ -165,6 +167,15 @@ export const Navigation: React.FC<Props> = ({
             en: 'Bills history & receipt reprint',
           },
           icon: <Receipt className="w-5 h-5 text-orange-600" />,
+        },
+        {
+          id: 'online_orders',
+          label: t.nav.onlineOrders,
+          desc: {
+            th: 'รับออเดอร์หน้าร้าน/เดลิเวอรี ส่งงาน Rider & ซิงค์ยอดเข้า P&L',
+            en: 'Manage web pickup/delivery orders, Rider dispatch & P&L sync',
+          },
+          icon: <ShoppingBag className="w-5 h-5 text-emerald-600" />,
         },
       ],
     },

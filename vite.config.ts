@@ -19,6 +19,12 @@ export default defineConfig(() => {
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',
+          'rider-icon.svg',
+          'rider-192x192.png',
+          'rider-512x512.png',
+          'rider-maskable-512x512.png',
+          'rider-apple-touch-icon.png',
+          'manifest-rider.webmanifest',
         ],
         manifest: {
           id: './',
@@ -55,9 +61,9 @@ export default defineConfig(() => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,webmanifest}'],
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/__/, /^\/api/],
+          navigateFallbackDenylist: [/^\/__/, /^\/api/, /manifest-rider\.webmanifest$/],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

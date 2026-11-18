@@ -18,6 +18,13 @@
         "commissionVatAsCost": { "type": "boolean" },
         "priceRounding": { "type": "number" },
         "defaultTicketSize": { "type": "number" },
+        "onlineOrderingEnabled": { "type": "boolean" },
+        "onlineDeliveryFee": { "type": "number" },
+        "onlinePickupEnabled": { "type": "boolean" },
+        "onlineDeliveryEnabled": { "type": "boolean" },
+        "onlineEstimatedPrepMinutes": { "type": "number" },
+        "onlinePublishDefaultIndex": { "type": "boolean" },
+        "onlineLastPublishedAt": { "type": "string" },
         "version": { "type": "number" }
       }
     },
@@ -415,6 +422,60 @@
         "notes": { "type": "string" },
         "countedBy": { "type": "string" }
       }
+    },
+    "PublicStore": {
+      "title": "PublicStore",
+      "description": "Sanitized public storefront menu and online ordering settings with zero recipe/cost fields",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "storeId": { "type": "string" },
+        "shopName": { "type": "string" },
+        "onlineOrderingEnabled": { "type": "boolean" },
+        "onlineDeliveryFee": { "type": "number" },
+        "onlinePickupEnabled": { "type": "boolean" },
+        "onlineDeliveryEnabled": { "type": "boolean" },
+        "publishedAt": { "type": "string" }
+      }
+    },
+    "PublicStoreImage": {
+      "title": "PublicStoreImage",
+      "description": "Publicly readable compressed dish or PromptPay QR image copied from owner collection",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "dataUrl": { "type": "string" },
+        "sizeBytes": { "type": "number" }
+      }
+    },
+    "PublicStoreIndex": {
+      "title": "PublicStoreIndex",
+      "description": "Default public storefront index mapping so /?mode=order and /?mode=rider resolve store automatically",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "storeId": { "type": "string" },
+        "shopName": { "type": "string" }
+      }
+    },
+    "OnlineOrder": {
+      "title": "OnlineOrder",
+      "description": "Customer pickup or delivery online order isolated from POS tables/bills",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderNumber": { "type": "string" },
+        "storeId": { "type": "string" },
+        "customerUid": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "orderMode": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "subtotal": { "type": "number" },
+        "deliveryFee": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -449,6 +510,10 @@
     "/users/{uid}/costSuppliers/{supplierId}": { "schema": "CostSupplier", "description": "Costing suppliers" },
     "/users/{uid}/costPriceHistory/{historyId}": { "schema": "CostPriceHistory", "description": "Costing price history" },
     "/users/{uid}/costSalesOrders/{orderId}": { "schema": "CostSaleOrder", "description": "Costing sale orders" },
-    "/users/{uid}/costStockCounts/{snapshotId}": { "schema": "CostStockCount", "description": "Dated stock count snapshots" }
+    "/users/{uid}/costStockCounts/{snapshotId}": { "schema": "CostStockCount", "description": "Dated stock count snapshots" },
+    "/publicStoreIndex/{indexId}": { "schema": "PublicStoreIndex", "description": "Default public storefront mapping" },
+    "/publicStores/{storeId}": { "schema": "PublicStore", "description": "Published public storefront menu and config" },
+    "/publicStores/{storeId}/images/{imageId}": { "schema": "PublicStoreImage", "description": "Published public storefront dish and QR images" },
+    "/onlineOrders/{orderId}": { "schema": "OnlineOrder", "description": "Customer pickup and delivery online orders" }
   }
 }

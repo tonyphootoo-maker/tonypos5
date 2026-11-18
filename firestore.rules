@@ -7,12 +7,160 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isNonAnonymous() {
+      return isSignedIn() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+      return isNonAnonymous() && request.auth.uid == uid;
     }
 
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isOptionalString(val, maxLen) {
+      return val == null || (val is string && val.size() <= maxLen);
+    }
+
+    function isOptionalNumber(val) {
+      return val == null || (val is number);
+    }
+
+    function isValidPublicStore(storeId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'id', 'storeId', 'shopName',
+          'onlineOrderingEnabled', 'onlineDeliveryFee',
+          'onlinePickupEnabled', 'onlineDeliveryEnabled',
+          'onlineEstimatedPrepMinutes', 'pricesIncludeVat', 'vatPercent',
+          'categories', 'dishes', 'optionGroups', 'publishedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'storeId', 'shopName', 'shopAddress', 'shopPhone', 'qrImageId',
+          'onlineOrderingEnabled', 'onlineDeliveryFee',
+          'onlinePickupEnabled', 'onlineDeliveryEnabled',
+          'onlineEstimatedPrepMinutes', 'pricesIncludeVat', 'vatPercent',
+          'categories', 'dishes', 'optionGroups', 'publishedAt'
+        ])
+        && data.id == storeId
+        && data.storeId == storeId
+        && data.shopName is string && data.shopName.size() > 0 && data.shopName.size() <= 160
+        && data.onlineOrderingEnabled is bool
+        && data.onlineDeliveryFee is number && data.onlineDeliveryFee >= 0 && data.onlineDeliveryFee <= 10000
+        && data.onlinePickupEnabled is bool
+        && data.onlineDeliveryEnabled is bool
+        && data.onlineEstimatedPrepMinutes is number && data.onlineEstimatedPrepMinutes >= 1 && data.onlineEstimatedPrepMinutes <= 300
+        && data.pricesIncludeVat is bool
+        && data.vatPercent is number && data.vatPercent >= 0 && data.vatPercent <= 30
+        && data.categories is list && data.categories.size() <= 100
+        && data.dishes is list && data.dishes.size() <= 400
+        && data.optionGroups is list && data.optionGroups.size() <= 150
+        && data.publishedAt is string && data.publishedAt.size() <= 64;
+    }
+
+    function isValidOnlineOrderCreate(orderId) {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+          'id', 'orderNumber', 'storeId', 'customerUid',
+          'customerName', 'customerPhone', 'orderMode', 'paymentMethod',
+          'items', 'subtotal', 'deliveryFee', 'totalAmount',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id', 'orderNumber', 'storeId', 'customerUid',
+          'customerName', 'customerPhone', 'orderMode', 'paymentMethod',
+          'deliveryAddress', 'deliveryLat', 'deliveryLng', 'customerNote',
+          'items', 'subtotal', 'deliveryFee', 'totalAmount',
+          'status', 'createdAt', 'updatedAt'
+        ])
+        && data.id == orderId
+        && isValidId(data.storeId)
+        && exists(/databases/$(database)/documents/publicStores/$(data.storeId))
+        && data.customerUid == request.auth.uid
+        && data.orderNumber is string && data.orderNumber.size() >= 3 && data.orderNumber.size() <= 48
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 100
+        && data.customerPhone is string && data.customerPhone.size() >= 6 && data.customerPhone.size() <= 30
+        && data.orderMode in ['pickup', 'delivery']
+        && data.paymentMethod in ['cash', 'qr_payment']
+        && isOptionalString(data.get('deliveryAddress', null), 500)
+        && isOptionalString(data.get('customerNote', null), 500)
+        && isOptionalNumber(data.get('deliveryLat', null))
+        && isOptionalNumber(data.get('deliveryLng', null))
+        && data.items is list && data.items.size() >= 1 && data.items.size() <= 50
+        && data.subtotal is number && data.subtotal >= 0 && data.subtotal <= 1000000
+        && data.deliveryFee is number && data.deliveryFee >= 0 && data.deliveryFee <= 50000
+        && data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 1050000
+        && data.status == 'pending'
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function orderImmutableFieldsUnchanged() {
+      let d = request.resource.data;
+      let o = resource.data;
+      return d.id == o.id
+        && d.orderNumber == o.orderNumber
+        && d.storeId == o.storeId
+        && d.customerUid == o.customerUid
+        && d.orderMode == o.orderMode
+        && d.paymentMethod == o.paymentMethod
+        && d.items == o.items
+        && d.subtotal == o.subtotal
+        && d.deliveryFee == o.deliveryFee
+        && d.totalAmount == o.totalAmount
+        && d.createdAt == o.createdAt;
+    }
+
+    function isValidOwnerOrderUpdate() {
+      let d = request.resource.data;
+      let o = resource.data;
+      let changed = d.diff(o).affectedKeys();
+      let isCompletedMetadataOnly =
+        o.status == 'completed'
+        && d.status == 'completed'
+        && changed.hasOnly(['pnlSyncedAt', 'workDate', 'foodCostSnapshot', 'packagingCostSnapshot', 'updatedAt']);
+      let isNormalTransition =
+        o.status != 'cancelled'
+        && o.status != 'completed'
+        && d.status in ['pending', 'accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'completed', 'cancelled']
+        && changed.hasOnly([
+          'status', 'riderName', 'riderUid', 'cancelReason',
+          'acceptedAt', 'readyAt', 'pickedUpAt', 'completedAt', 'cancelledAt',
+          'workDate', 'foodCostSnapshot', 'packagingCostSnapshot', 'pnlSyncedAt', 'updatedAt'
+        ]);
+      return isOwner(o.storeId)
+        && orderImmutableFieldsUnchanged()
+        && (isCompletedMetadataOnly || isNormalTransition)
+        && d.updatedAt == request.time;
+    }
+
+    function isValidRiderOrderUpdate() {
+      let d = request.resource.data;
+      let o = resource.data;
+      let changed = d.diff(o).affectedKeys();
+      return isSignedIn()
+        && o.orderMode == 'delivery'
+        && o.status in ['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery']
+        && d.status in ['out_for_delivery', 'completed']
+        && orderImmutableFieldsUnchanged()
+        && changed.hasOnly(['status', 'riderName', 'riderUid', 'pickedUpAt', 'completedAt', 'updatedAt'])
+        && isOptionalString(d.get('riderName', null), 100)
+        && d.updatedAt == request.time;
+    }
+
+    function isValidCustomerOrderCancel() {
+      let d = request.resource.data;
+      let o = resource.data;
+      let changed = d.diff(o).affectedKeys();
+      return isSignedIn()
+        && o.customerUid == request.auth.uid
+        && o.status == 'pending'
+        && d.status == 'cancelled'
+        && orderImmutableFieldsUnchanged()
+        && changed.hasOnly(['status', 'cancelReason', 'cancelledAt', 'updatedAt'])
+        && isOptionalString(d.get('cancelReason', null), 300)
+        && d.updatedAt == request.time;
     }
 
     // Default deny all other paths
@@ -20,13 +168,67 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // All restaurant user data strictly partitioned by authenticated owner UID
+    // All private restaurant owner data strictly partitioned by non-anonymous authenticated owner UID
     match /users/{uid} {
       allow read, write: if isOwner(uid);
     }
 
     match /users/{uid}/{document=**} {
       allow read, write: if isOwner(uid);
+    }
+
+    // Public store index so /?mode=order and /?mode=rider work even without ?store=
+    match /publicStoreIndex/{indexId} {
+      allow get: if isValidId(indexId);
+      allow list: if false;
+      allow create, update: if isNonAnonymous()
+        && indexId == 'default'
+        && (!exists(/databases/$(database)/documents/publicStoreIndex/$(indexId)) || resource.data.storeId == request.auth.uid)
+        && request.resource.data.keys().hasAll(['id', 'storeId', 'shopName', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['id', 'storeId', 'shopName', 'updatedAt'])
+        && request.resource.data.id == indexId
+        && request.resource.data.storeId == request.auth.uid
+        && request.resource.data.shopName is string
+        && request.resource.data.shopName.size() > 0
+        && request.resource.data.shopName.size() <= 160
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isNonAnonymous() && resource.data.storeId == request.auth.uid;
+    }
+
+    // Sanitized public storefront menu & settings (zero cost/recipe exposure)
+    match /publicStores/{storeId} {
+      allow get: if isValidId(storeId);
+      allow list: if false;
+      allow create, update: if isOwner(storeId) && isValidPublicStore(storeId);
+      allow delete: if isOwner(storeId);
+
+      match /images/{imageId} {
+        allow get: if isValidId(storeId) && isValidId(imageId);
+        allow list: if isOwner(storeId);
+        allow create, update: if isOwner(storeId)
+          && isValidId(imageId)
+          && request.resource.data.keys().hasAll(['id', 'dataUrl', 'sizeBytes', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['id', 'dataUrl', 'sizeBytes', 'updatedAt'])
+          && request.resource.data.id == imageId
+          && request.resource.data.dataUrl is string
+          && request.resource.data.dataUrl.size() <= 600000
+          && request.resource.data.sizeBytes is number
+          && request.resource.data.sizeBytes >= 0
+          && request.resource.data.updatedAt == request.time;
+        allow delete: if isOwner(storeId);
+      }
+    }
+
+    // Customer & Rider online orders (completely isolated from POS tables/bills/dailySummaries)
+    match /onlineOrders/{orderId} {
+      allow read: if isSignedIn() && (
+        isOwner(resource.data.storeId)
+        || resource.data.customerUid == request.auth.uid
+        || (resource.data.orderMode == 'delivery' && isValidId(resource.data.storeId))
+      );
+      allow create: if isSignedIn() && isValidId(orderId) && isValidOnlineOrderCreate(orderId);
+      allow update: if isValidOwnerOrderUpdate() || isValidRiderOrderUpdate() || isValidCustomerOrderCancel();
+      allow delete: if isOwner(resource.data.storeId);
     }
   }
 }

@@ -25,6 +25,7 @@ import {
   CreditCard,
   Store,
   ShieldCheck,
+  ExternalLink,
 } from 'lucide-react';
 import {
   DailySummaryDoc,
@@ -35,6 +36,8 @@ import {
   ExpenseDoc,
   EmployeeDoc,
   SettingsDoc,
+  OptionGroupDoc,
+  OnlineOrderDoc,
   Language,
 } from '../types';
 import { translations } from '../i18n/translations';
@@ -65,6 +68,10 @@ import {
   saveDocument,
   deleteDocument,
 } from '../data/db';
+import {
+  subscribeOwnerOnlineOrders,
+  syncCompletedOnlineOrdersToPnl,
+} from '../data/onlineDb';
 import {
   Ingredient,
   Sauce,
@@ -187,6 +194,8 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
   const [packagings, setPackagings] = useState<PackagingDoc[]>([]);
   const [posExpenses, setPosExpenses] = useState<ExpenseDoc[]>([]);
   const [posEmployees, setPosEmployees] = useState<EmployeeDoc[]>([]);
+  const [optionGroups, setOptionGroups] = useState<OptionGroupDoc[]>([]);
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrderDoc[]>([]);
 
   // Costing real-time collections
   const [costSettings, setCostSettings] = useState<RestaurantSettings>(() => StorageService.getSettings());
@@ -241,6 +250,8 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         subscribeCollection<PackagingDoc>('packaging', (p) => isMounted && setPackagings(p)),
         subscribeCollection<ExpenseDoc>('expenses', (e) => isMounted && setPosExpenses(e)),
         subscribeCollection<EmployeeDoc>('employees', (e) => isMounted && setPosEmployees(e)),
+        subscribeCollection<OptionGroupDoc>('optionGroups', (g) => isMounted && setOptionGroups(g)),
+        subscribeOwnerOnlineOrders(user.uid, (orders) => isMounted && setOnlineOrders(orders)),
 
         // Auto-sync dailySummaries -> costDailySales
         subscribeCollection<DailySummaryDoc>('dailySummaries', async () => {
@@ -384,6 +395,27 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       unsubs.forEach((u) => u());
     };
   }, [user?.uid, todayStr, settings.dailyClosingTime]);
+
+  // Auto-sync any Rider/Owner completed online orders not yet reflected in P&L
+  useEffect(() => {
+    if (!user?.uid || onlineOrders.length === 0) return;
+    const hasUnsyncedCompleted = onlineOrders.some(
+      (o) => o.status === 'completed' && !o.pnlSyncedAt
+    );
+    if (!hasUnsyncedCompleted) return;
+    syncCompletedOnlineOrdersToPnl({
+      uid: user.uid,
+      orders: onlineOrders,
+      settings,
+      dishes,
+      optionGroups,
+      ingredients: posIngredients,
+      subRecipes,
+      packaging: packagings,
+    }).catch((err) => {
+      console.warn('Online orders auto-sync to P&L warning:', err);
+    });
+  }, [user?.uid, onlineOrders, settings, dishes, optionGroups, posIngredients, subRecipes, packagings]);
 
   // Period-filtered POS dailySummaries
   useEffect(() => {
@@ -960,29 +992,6 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     ]
   );
 
-  const handleResolveHealthIssue = (checkId: DataHealthCheckId) => {
-    switch (checkId) {
-      case 'zero_price_ingredients':
-        onNavigatePage('cost_ingredients');
-        break;
-      case 'menus_without_recipe':
-        onNavigatePage('cost_recipes');
-        break;
-      case 'uncosted_manual_sales':
-        setActiveTab('sales');
-        break;
-      case 'missing_stock_counts':
-        onNavigatePage('cost_inventory');
-        break;
-      case 'duplicate_payroll':
-        setActiveTab('expenses');
-        break;
-      case 'sauces_without_net_qty':
-        onNavigatePage('cost_sauces');
-        break;
-    }
-  };
-
   // Actionable Business Recommendations
   const advices = useMemo<WhatShouldIDoAdvice[]>(() => {
     const list: WhatShouldIDoAdvice[] = [];
@@ -1277,8 +1286,6 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     document.body.removeChild(link);
   };
 
-  const healthIssueCount = dataHealthReport.checks.filter((c) => !c.passed).length;
-
   const tabs: { id: FinanceHubTab; labelTh: string; labelEn: string; icon: React.ReactNode }[] = [
     { id: 'overview', labelTh: 'ภาพรวมผู้บริหาร', labelEn: 'Overview', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'pnl', labelTh: 'งบกำไรขาดทุน P&L', labelEn: 'P&L Statement', icon: <PieChart className="w-4 h-4" /> },
@@ -1286,12 +1293,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     { id: 'expenses', labelTh: 'ค่าใช้จ่าย & โสหุ้ย', labelEn: 'Expenses', icon: <Receipt className="w-4 h-4" /> },
     { id: 'labor', labelTh: 'ค่าแรง & พนักงาน', labelEn: 'Labor', icon: <Users className="w-4 h-4" /> },
     { id: 'breakeven', labelTh: 'จุดคุ้มทุน & เป้าหมาย', labelEn: 'Break-Even', icon: <Scale className="w-4 h-4" /> },
-    {
-      id: 'health',
-      labelTh: healthIssueCount > 0 ? `ตรวจสุขภาพข้อมูล (${healthIssueCount})` : 'ตรวจสุขภาพข้อมูล',
-      labelEn: healthIssueCount > 0 ? `Data Health (${healthIssueCount})` : 'Data Health',
-      icon: <ShieldCheck className="w-4 h-4" />,
-    },
+    { id: 'health', labelTh: 'ตรวจสุขภาพข้อมูล', labelEn: 'Data Health', icon: <ShieldCheck className="w-4 h-4" /> },
   ];
 
   const targetFoodCostPct = costSettings.defaultTargetFoodCostPercent || settings.targetFoodCostPercent || 30;
@@ -1376,6 +1378,15 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                 >
                   {tab.icon}
                   <span>{lang === 'th' ? tab.labelTh : tab.labelEn}</span>
+                  {tab.id === 'health' && dataHealthReport.totalIssueCount > 0 && (
+                    <span
+                      className={`text-[10px] font-extrabold tabular-nums ${
+                        isActive ? 'text-white/95' : 'text-amber-600'
+                      }`}
+                    >
+                      ({dataHealthReport.totalIssueCount})
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -2372,130 +2383,191 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
            ========================================================= */}
         {activeTab === 'health' && (
           <div className="space-y-5">
-            {/* Summary Banner */}
-            <div
+            <section
               className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
                 dataHealthReport.isHealthy
                   ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950'
-                  : 'bg-white/95 border-slate-200 text-slate-900'
+                  : dataHealthReport.criticalCount > 0
+                  ? 'bg-rose-50/90 border-rose-200 text-rose-950'
+                  : 'bg-amber-50/90 border-amber-200 text-amber-950'
               }`}
             >
               <div className="flex items-start gap-3">
                 {dataHealthReport.isHealthy ? (
                   <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
                 ) : (
-                  <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                  <AlertTriangle
+                    className={`w-6 h-6 shrink-0 mt-0.5 ${
+                      dataHealthReport.criticalCount > 0 ? 'text-rose-600' : 'text-amber-600'
+                    }`}
+                  />
                 )}
                 <div>
                   <h2 className="text-base font-extrabold">
-                    {lang === 'th' ? 'ตรวจสุขภาพข้อมูลบัญชีและต้นทุนอาหาร' : 'Accounting & Costing Data Health Check'}
-                  </h2>
-                  <p className="text-xs text-slate-600 mt-1">
                     {dataHealthReport.isHealthy
                       ? lang === 'th'
-                        ? `ผ่านการตรวจสอบครบทั้ง ${dataHealthReport.totalChecks} หัวข้อ ตัวเลข P&L และต้นทุนพร้อมใช้งาน`
-                        : `All ${dataHealthReport.totalChecks} data integrity checks passed.`
+                        ? 'สุขภาพข้อมูลครบถ้วน พร้อมใช้ออกงบและตั้งราคา'
+                        : 'All Data Health Checks Passed'
                       : lang === 'th'
-                      ? `ผ่าน ${dataHealthReport.passedCount}/${dataHealthReport.totalChecks} หัวข้อ • พบจุดที่ควรตรวจสอบ ${dataHealthReport.totalIssueCount} รายการ (${period}:${dateParam})`
-                      : `${dataHealthReport.passedCount}/${dataHealthReport.totalChecks} checks passed • ${dataHealthReport.totalIssueCount} item(s) need attention (${period}:${dateParam})`}
+                      ? `พบจุดที่ควรตรวจสอบ ${dataHealthReport.totalIssueCount} รายการ (${dataHealthReport.passedCount}/${dataHealthReport.totalChecks} หมวดผ่านเกณฑ์)`
+                      : `Detected ${dataHealthReport.totalIssueCount} issue(s) (${dataHealthReport.passedCount}/${dataHealthReport.totalChecks} checks passed)`}
+                  </h2>
+                  <p className="text-xs opacity-85 mt-0.5">
+                    {lang === 'th'
+                      ? `ตรวจสอบความสมบูรณ์ของต้นทุนวัตถุดิบ สูตรอาหาร ซอส สต็อกงวด ${dateParam} และรายจ่ายซ้ำซ้อน`
+                      : `Audits ingredient prices, menu recipes, net sauce yields, period ${dateParam} stock counts, manual sales cost, and payroll overlaps.`}
                   </p>
                 </div>
               </div>
-              <div className="text-right shrink-0">
-                <span
-                  className={`text-sm font-extrabold tabular-nums ${
-                    dataHealthReport.isHealthy ? 'text-emerald-700' : 'text-amber-700'
-                  }`}
-                >
-                  {dataHealthReport.passedCount} / {dataHealthReport.totalChecks}{' '}
-                  {lang === 'th' ? 'ผ่าน' : 'Passed'}
-                </span>
+              <div className="text-right tabular-nums shrink-0">
+                <div className="text-xs font-semibold opacity-75">
+                  {lang === 'th' ? 'คะแนนความพร้อม' : 'Readiness'}
+                </div>
+                <div className="text-2xl font-extrabold">
+                  {dataHealthReport.passedCount}/{dataHealthReport.totalChecks}
+                </div>
               </div>
-            </div>
+            </section>
 
-            {/* 6 Check Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {dataHealthReport.checks.map((check) => {
-                const borderColor = check.passed
-                  ? 'border-emerald-200 bg-white/95'
+                const actionConfig: Record<
+                  DataHealthCheckId,
+                  { labelTh: string; labelEn: string; onClick: () => void }
+                > = {
+                  zero_price_ingredients: {
+                    labelTh: 'ไปหน้าจัดการวัตถุดิบ',
+                    labelEn: 'Open Ingredients',
+                    onClick: () => onNavigatePage('cost_ingredients'),
+                  },
+                  menus_without_recipe: {
+                    labelTh: 'ไปผูกสูตรเมนู',
+                    labelEn: 'Open Recipes',
+                    onClick: () => onNavigatePage('cost_recipes'),
+                  },
+                  uncosted_manual_sales: {
+                    labelTh: 'ไปหน้ายอดขายรายวัน',
+                    labelEn: 'Open Daily Sales',
+                    onClick: () => setActiveTab('sales'),
+                  },
+                  missing_stock_counts: {
+                    labelTh: 'ไปหน้านับสต็อก',
+                    labelEn: 'Open Inventory',
+                    onClick: () => onNavigatePage('cost_inventory'),
+                  },
+                  duplicate_payroll: {
+                    labelTh: 'ไปตรวจค่าใช้จ่าย',
+                    labelEn: 'Review Expenses',
+                    onClick: () => setActiveTab('expenses'),
+                  },
+                  sauces_without_net_qty: {
+                    labelTh: 'ไปแก้สูตรซอส',
+                    labelEn: 'Open Sauces',
+                    onClick: () => onNavigatePage('cost_sauces'),
+                  },
+                };
+                const action = actionConfig[check.id];
+                const borderClass = check.passed
+                  ? 'border-emerald-200/90 bg-white/95'
                   : check.severity === 'critical'
-                  ? 'border-rose-300 bg-rose-50/40'
-                  : 'border-amber-300 bg-amber-50/40';
-                const statusColor = check.passed
-                  ? 'text-emerald-700'
-                  : check.severity === 'critical'
-                  ? 'text-rose-700'
-                  : 'text-amber-700';
+                  ? 'border-rose-300 bg-white/95'
+                  : 'border-amber-300 bg-white/95';
 
                 return (
                   <div
                     key={check.id}
-                    className={`rounded-2xl border p-5 flex flex-col justify-between gap-3 ${borderColor}`}
+                    className={`rounded-2xl border p-5 flex flex-col justify-between gap-4 ${borderClass}`}
                   >
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
                           {check.passed ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                           ) : (
                             <AlertTriangle
-                              className={`w-4 h-4 shrink-0 ${
+                              className={`w-5 h-5 shrink-0 mt-0.5 ${
                                 check.severity === 'critical' ? 'text-rose-600' : 'text-amber-600'
                               }`}
                             />
                           )}
-                          <h3 className="text-sm font-extrabold text-slate-900">
-                            {lang === 'th' ? check.titleTh : check.titleEn}
-                          </h3>
+                          <div>
+                            <h3 className="text-sm font-extrabold text-slate-900">
+                              {lang === 'th' ? check.titleTh : check.titleEn}
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {lang === 'th' ? check.descriptionTh : check.descriptionEn}
+                            </p>
+                          </div>
                         </div>
-                        <span className={`text-xs font-bold tabular-nums whitespace-nowrap ${statusColor}`}>
+                        <span
+                          className={`text-xs font-bold whitespace-nowrap tabular-nums ${
+                            check.passed
+                              ? 'text-emerald-700'
+                              : check.severity === 'critical'
+                              ? 'text-rose-700'
+                              : 'text-amber-700'
+                          }`}
+                        >
                           {check.passed
-                            ? lang === 'th' ? 'ปกติ' : 'OK'
-                            : lang === 'th' ? `${check.count} รายการ` : `${check.count} issue(s)`}
+                            ? lang === 'th'
+                              ? 'ผ่านเกณฑ์'
+                              : 'OK'
+                            : lang === 'th'
+                            ? `${check.count} รายการ`
+                            : `${check.count} issue(s)`}
                         </span>
                       </div>
 
-                      <p className="text-xs text-slate-600">
-                        {lang === 'th' ? check.descriptionTh : check.descriptionEn}
-                      </p>
-
-                      <div className="text-xs font-semibold text-slate-800 pt-1">
+                      <div
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold ${
+                          check.passed
+                            ? 'bg-emerald-50 text-emerald-800'
+                            : check.severity === 'critical'
+                            ? 'bg-rose-50 text-rose-900'
+                            : 'bg-amber-50 text-amber-900'
+                        }`}
+                      >
                         {lang === 'th' ? check.summaryTh : check.summaryEn}
                       </div>
 
-                      {!check.passed && check.items.length > 0 && (
-                        <ul className="mt-2 space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                          {check.items.map((item) => (
+                      {check.items.length > 0 && (
+                        <ul className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                          {check.items.slice(0, 8).map((item) => (
                             <li
                               key={item.id}
-                              className="text-xs bg-white/90 border border-slate-200/80 rounded-xl px-3 py-2 flex flex-col gap-0.5"
+                              className="flex items-start justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-xs"
                             >
-                              <span className="font-bold text-slate-900">{item.label}</span>
-                              <span className="text-[11px] text-slate-600 tabular-nums">
+                              <span className="font-semibold text-slate-800 truncate">{item.label}</span>
+                              <span className="text-[11px] text-slate-500 text-right shrink-0">
                                 {lang === 'th' ? item.detailTh : item.detailEn}
                               </span>
                             </li>
                           ))}
+                          {check.items.length > 8 && (
+                            <li className="text-[11px] text-slate-500 px-3 pt-1 font-medium">
+                              {lang === 'th'
+                                ? `และอีก ${check.items.length - 8} รายการ...`
+                                : `+ ${check.items.length - 8} more item(s)...`}
+                            </li>
+                          )}
                         </ul>
                       )}
                     </div>
 
-                    {!check.passed && (
-                      <div className="pt-2 border-t border-slate-200/70 flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => handleResolveHealthIssue(check.id)}
-                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-                        >
-                          <span>{lang === 'th' ? 'ไปแก้ไขข้อมูล' : 'Review & Fix'}</span>
-                          <ArrowUpRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    <div className="pt-2 border-t border-slate-100 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={action.onClick}
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-50 hover:bg-orange-50 text-slate-700 hover:text-orange-700 border border-slate-200 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <span>{lang === 'th' ? action.labelTh : action.labelEn}</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
-            </div>
+            </section>
           </div>
         )}
       </div>

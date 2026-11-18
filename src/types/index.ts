@@ -45,6 +45,14 @@ export interface SettingsDoc extends BaseDoc {
   socialSecurityEnabled?: boolean; // Employer Social Security contribution (default false)
   socialSecurityRatePercent?: number; // Default 5%
   socialSecurityCapWage?: number; // Default 15,000 THB/month cap (750 THB max)
+  // Online Ordering & Storefront Configuration
+  onlineOrderingEnabled?: boolean;
+  onlineDeliveryFee?: number;
+  onlinePickupEnabled?: boolean;
+  onlineDeliveryEnabled?: boolean;
+  onlineEstimatedPrepMinutes?: number;
+  onlinePublishDefaultIndex?: boolean;
+  onlineLastPublishedAt?: string;
 }
 
 export interface IngredientDoc extends BaseDoc {
@@ -335,3 +343,150 @@ export interface CounterDoc extends BaseDoc {
   count: number;
   workDate: string;
 }
+
+// ==========================================
+// Online Ordering, Public Storefront & Rider
+// ==========================================
+
+export type AppEntryMode = 'owner' | 'customer' | 'rider';
+export type OnlineOrderMode = 'pickup' | 'delivery';
+export type OnlinePaymentMethod = 'cash' | 'qr_payment';
+export type OnlineOrderStatus =
+  | 'pending'
+  | 'accepted'
+  | 'preparing'
+  | 'ready_for_pickup'
+  | 'out_for_delivery'
+  | 'completed'
+  | 'cancelled';
+
+export interface PublicDishVariant {
+  id: string;
+  name: string;
+  nameTh?: string;
+  price: number;
+}
+
+export interface PublicDish {
+  id: string;
+  name: string;
+  nameTh?: string;
+  categoryId: string;
+  imageId?: string;
+  description?: string;
+  variants: PublicDishVariant[];
+  optionGroupIds: string[];
+  order: number;
+}
+
+export interface PublicOptionChoice {
+  id: string;
+  name: string;
+  nameTh?: string;
+  price: number;
+}
+
+export interface PublicOptionGroup {
+  id: string;
+  name: string;
+  nameTh?: string;
+  minSelect: number;
+  maxSelect: number;
+  order: number;
+  choices: PublicOptionChoice[];
+}
+
+export interface PublicCategory {
+  id: string;
+  name: string;
+  nameTh?: string;
+  order: number;
+}
+
+export interface PublicStoreDoc {
+  id: string;
+  storeId: string;
+  shopName: string;
+  shopAddress?: string;
+  shopPhone?: string;
+  qrImageId?: string;
+  onlineOrderingEnabled: boolean;
+  onlineDeliveryFee: number;
+  onlinePickupEnabled: boolean;
+  onlineDeliveryEnabled: boolean;
+  onlineEstimatedPrepMinutes: number;
+  pricesIncludeVat: boolean;
+  vatPercent: number;
+  categories: PublicCategory[];
+  dishes: PublicDish[];
+  optionGroups: PublicOptionGroup[];
+  publishedAt: string;
+}
+
+export interface PublicStoreImageDoc {
+  id: string;
+  dataUrl: string;
+  sizeBytes: number;
+  updatedAt?: string;
+}
+
+export interface PublicStoreIndexDoc {
+  id: string;
+  storeId: string;
+  shopName: string;
+  updatedAt?: string;
+}
+
+export interface OnlineOrderItemOption {
+  groupId: string;
+  groupName: string;
+  choiceId: string;
+  choiceName: string;
+  price: number;
+}
+
+export interface OnlineOrderItem {
+  dishId: string;
+  dishName: string;
+  variantId: string;
+  variantName: string;
+  unitPrice: number;
+  quantity: number;
+  notes?: string;
+  options: OnlineOrderItemOption[];
+}
+
+export interface OnlineOrderDoc {
+  id: string;
+  orderNumber: string;
+  storeId: string;
+  customerUid: string;
+  customerName: string;
+  customerPhone: string;
+  orderMode: OnlineOrderMode;
+  paymentMethod: OnlinePaymentMethod;
+  deliveryAddress?: string;
+  deliveryLat?: number | null;
+  deliveryLng?: number | null;
+  customerNote?: string;
+  items: OnlineOrderItem[];
+  subtotal: number;
+  deliveryFee: number;
+  totalAmount: number;
+  status: OnlineOrderStatus;
+  riderName?: string;
+  riderUid?: string;
+  cancelReason?: string;
+  workDate?: string;
+  foodCostSnapshot?: number;
+  packagingCostSnapshot?: number;
+  pnlSyncedAt?: string;
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  acceptedAt?: unknown;
+  readyAt?: unknown;
+  pickedUpAt?: unknown;
+  completedAt?: unknown;
+  cancelledAt?: unknown;
+}
+

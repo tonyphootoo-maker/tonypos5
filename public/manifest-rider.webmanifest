@@ -1,0 +1,32 @@
+{
+  "id": "./?mode=rider",
+  "name": "KinPOS Rider - งานจัดส่ง",
+  "short_name": "KinPOS Rider",
+  "description": "ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ KinPOS",
+  "start_url": "./?mode=rider",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "icons": [
+    {
+      "src": "rider-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "rider-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "rider-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

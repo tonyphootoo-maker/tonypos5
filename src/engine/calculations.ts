@@ -1575,9 +1575,13 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
   const posDateChannelKeys = new Set<string>();
   const posWholeDateCovered = new Set<string>();
 
-  // Identify manual records explicitly chosen to override POS for a (date, channel)
+  // Identify manual records explicitly chosen to override POS for a (date, channel),
+  // POS sync entries, and dedicated online order sync entries (web_sync_*)
   const posSyncEntries = periodManual.filter((r) => r.id?.startsWith('pos_sync_'));
-  const manualOnlyEntries = periodManual.filter((r) => !r.id?.startsWith('pos_sync_'));
+  const webSyncEntries = periodManual.filter((r) => r.id?.startsWith('web_sync_'));
+  const manualOnlyEntries = periodManual.filter(
+    (r) => !r.id?.startsWith('pos_sync_') && !r.id?.startsWith('web_sync_')
+  );
   const replacedPosKeys = new Set<string>();
   for (const rec of manualOnlyEntries) {
     if (rec.replacesPosSync) {
@@ -1717,6 +1721,26 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     if (rec.estimatedAllocation) {
       estimatedAllocationCount += 1;
     }
+    if (typeof rec.foodCost === 'number') {
+      manualExplicitFoodCogsRaw += Math.max(0, rec.foodCost);
+      manualExplicitPackagingCogsRaw += Math.max(0, rec.packagingCost || 0);
+      manualSalesWithExplicitCogsCount += 1;
+    } else if (recNet > 0) {
+      manualSalesWithoutCogsRaw += recNet;
+    }
+    manualSalesCount += 1;
+  }
+
+  // Always include online order sync records (web_sync_*) even if POS dailySummaries exist on the same date
+  for (const rec of webSyncEntries) {
+    const recNet = resolveRecordNetSalesExVat(rec);
+    netSalesExVatRaw += recNet;
+    grossSalesRefRaw += Math.max(0, rec.grossSales || 0);
+    discountsRefRaw += Math.max(0, rec.discounts || 0);
+    refundsRefRaw += Math.max(0, rec.refunds || 0);
+    serviceChargeCollectedRaw += Math.max(0, rec.serviceCharge || 0);
+    orderCount += Math.max(0, rec.orderCount || 0);
+    channelFeesRaw += Math.max(0, rec.platformFees || 0);
     if (typeof rec.foodCost === 'number') {
       manualExplicitFoodCogsRaw += Math.max(0, rec.foodCost);
       manualExplicitPackagingCogsRaw += Math.max(0, rec.packagingCost || 0);
@@ -2320,5 +2344,3 @@ export function buildPnlCsvRows(
     ['Monthly Break-Even Target', roundTo2(monthlyBreakEvenSales).toFixed(2)],
   ];
 }
-
-

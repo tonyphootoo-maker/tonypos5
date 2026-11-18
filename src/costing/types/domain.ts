@@ -280,6 +280,10 @@ export interface DailySalesRecord {
   serviceCharge?: number;
   foodCost?: number;
   packagingCost?: number;
+  deliveryFeeTotal?: number;
+  cashSalesTotal?: number;
+  qrSalesTotal?: number;
+  source?: 'pos' | 'online' | 'manual';
   estimatedAllocation?: boolean;
   replacesPosSync?: boolean;
   itemSales?: {

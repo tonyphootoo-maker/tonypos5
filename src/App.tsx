@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { User } from 'firebase/auth';
 import {
   SettingsDoc,
@@ -13,6 +13,7 @@ import {
   subscribeCollection,
   firebaseInitError,
 } from './data/db';
+import { resolveAppMode } from './engine/onlineOrdering';
 import { Navigation, AppPage } from './components/Navigation';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { ShiftModal } from './components/ShiftModal';
@@ -33,6 +34,16 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
+const CustomerOrderPage = React.lazy(() =>
+  import('./pages/CustomerOrderPage').then((m) => ({ default: m.CustomerOrderPage }))
+);
+const RiderAppPage = React.lazy(() =>
+  import('./pages/RiderAppPage').then((m) => ({ default: m.RiderAppPage }))
+);
+const OnlineOrdersManagerPage = React.lazy(() =>
+  import('./pages/OnlineOrdersManagerPage').then((m) => ({ default: m.OnlineOrdersManagerPage }))
+);
+
 const FINANCE_HUB_PAGE_TAB_MAP: Partial<Record<AppPage, FinanceHubTab>> = {
   finance_hub: 'overview',
   dashboard: 'overview',
@@ -47,8 +58,13 @@ const FINANCE_HUB_PAGE_TAB_MAP: Partial<Record<AppPage, FinanceHubTab>> = {
 };
 
 export default function App() {
+  const [appMode] = useState(() =>
+    typeof window !== 'undefined'
+      ? resolveAppMode(window.location.search, window.location.pathname)
+      : 'owner'
+  );
   const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(appMode === 'owner');
   const [lang, setLang] = useState<Language>('th'); // Default to Thai with 1-click toggle to English
 
   const [settings, setSettings] = useState<SettingsDoc | null>(null);
@@ -64,8 +80,13 @@ export default function App() {
 
   const t = translations[lang];
 
-  // Subscribe to Auth state changes and wire real-time Settings & Shifts listeners
+  // Subscribe to Auth state changes for Owner mode ONLY
   useEffect(() => {
+    if (appMode !== 'owner') {
+      setAuthLoading(false);
+      return;
+    }
+
     let isMounted = true;
     let unsubSettings: (() => void) | null = null;
     let unsubShifts: (() => void) | null = null;
@@ -91,9 +112,12 @@ export default function App() {
     const unsubscribe = subscribeAuth((currentUser) => {
       if (!isMounted) return;
       cleanupDataSubs();
-      setUser(currentUser);
 
-      if (currentUser) {
+      // Guard: Anonymous sessions created on Customer/Rider tabs must NOT bypass Owner Google Sign-In
+      const ownerUser = currentUser && !currentUser.isAnonymous ? currentUser : null;
+      setUser(ownerUser);
+
+      if (ownerUser) {
         unsubSettings = subscribeSettings(
           (loadedSettings) => {
             if (!isMounted) return;
@@ -155,7 +179,7 @@ export default function App() {
       cleanupDataSubs();
       unsubscribe();
     };
-  }, []);
+  }, [appMode]);
 
   const handleToggleLanguage = () => {
     setLang((prev) => (prev === 'th' ? 'en' : 'th'));
@@ -185,6 +209,37 @@ export default function App() {
       }
     }
   };
+
+  // 0. Role-Based Public Storefront & Rider Entry (No Google Sign-In, No POS Navigation)
+  if (appMode === 'customer') {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-4 text-slate-700 text-xs font-bold">
+            <Loader2 className="w-5 h-5 animate-spin text-orange-600 mr-2" />
+            <span>กำลังโหลดเมนูออนไลน์...</span>
+          </div>
+        }
+      >
+        <CustomerOrderPage lang={lang} onToggleLang={handleToggleLanguage} />
+      </Suspense>
+    );
+  }
+
+  if (appMode === 'rider') {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-200 text-xs font-bold">
+            <Loader2 className="w-5 h-5 animate-spin text-emerald-400 mr-2" />
+            <span>กำลังโหลดแอป Rider...</span>
+          </div>
+        }
+      >
+        <RiderAppPage lang={lang} />
+      </Suspense>
+    );
+  }
 
   // 1. Initial Loading Screen
   if (authLoading) {
@@ -369,6 +424,23 @@ export default function App() {
         )}
         {currentPage === 'bills' && (
           <BillsHistoryPage settings={settings} lang={lang} />
+        )}
+        {currentPage === 'online_orders' && (
+          <Suspense
+            fallback={
+              <div className="p-8 flex items-center justify-center text-slate-600 text-xs font-bold">
+                <Loader2 className="w-5 h-5 animate-spin text-emerald-600 mr-2" />
+                <span>กำลังโหลดระบบออเดอร์ออนไลน์...</span>
+              </div>
+            }
+          >
+            <OnlineOrdersManagerPage
+              user={user}
+              settings={settings}
+              lang={lang}
+              onSettingsUpdated={(newSet) => setSettings(newSet)}
+            />
+          </Suspense>
         )}
         {financeHubTab !== undefined && (
           <UnifiedFinanceHubPage

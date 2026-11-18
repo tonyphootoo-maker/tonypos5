@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="rider-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="55%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#065f46" />
+    </linearGradient>
+    <linearGradient id="rider-accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#rider-bg)" />
+  <rect x="28" y="28" width="456" height="456" rx="92" fill="none" stroke="rgba(52,211,153,0.35)" stroke-width="6" />
+  <!-- Delivery scooter / route badge centered with safe margin -->
+  <g transform="translate(88, 96)">
+    <!-- Delivery box on back -->
+    <rect x="34" y="92" width="96" height="82" rx="18" fill="url(#rider-accent)" stroke="#ecfdf5" stroke-width="8" />
+    <!-- Wind speed lines -->
+    <path d="M8 118 L34 118 M2 146 L26 146" stroke="#34d399" stroke-width="10" stroke-linecap="round" />
+    <!-- Scooter body & front -->
+    <path d="M56 206 L160 206 C192 206 212 178 218 144 L232 96 L272 96" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M132 174 L196 174 L240 206" fill="none" stroke="#ffffff" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" />
+    <!-- Handlebar headlight -->
+    <circle cx="268" cy="108" r="14" fill="#fbbf24" />
+    <!-- Wheels -->
+    <circle cx="88" cy="242" r="42" fill="#0f172a" stroke="#34d399" stroke-width="18" />
+    <circle cx="88" cy="242" r="12" fill="#ffffff" />
+    <circle cx="256" cy="242" r="42" fill="#0f172a" stroke="#34d399" stroke-width="18" />
+    <circle cx="256" cy="242" r="12" fill="#ffffff" />
+    <!-- Pin badge top right -->
+    <path d="M276 8 C298 8 316 26 316 48 C316 74 276 108 276 108 C276 108 236 74 236 48 C236 26 254 8 276 8 Z" fill="#f97316" stroke="#ffffff" stroke-width="8" />
+    <circle cx="276" cy="46" r="13" fill="#ffffff" />
+  </g>
+</svg>

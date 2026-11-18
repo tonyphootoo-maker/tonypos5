@@ -7,12 +7,14 @@ import { usePWAInstall } from '../hooks/usePWAInstall';
 interface Props {
   lang: Language;
   variant?: 'header' | 'button' | 'card';
+  appName?: string;
   onActionTaken?: () => void;
 }
 
 export const PWAInstallButton: React.FC<Props> = ({
   lang,
   variant = 'header',
+  appName = 'KinPOS',
   onActionTaken,
 }) => {
   const { isInstallable, isInstalled, isIOS, isAndroid, install } = usePWAInstall();
@@ -28,7 +30,7 @@ export const PWAInstallButton: React.FC<Props> = ({
           </div>
           <div>
             <div className="text-sm font-extrabold">
-              {lang === 'th' ? 'ติดตั้งแอป KinPOS บนเครื่องนี้แล้ว' : 'KinPOS App Installed'}
+              {lang === 'th' ? `ติดตั้งแอป ${appName} บนเครื่องนี้แล้ว` : `${appName} App Installed`}
             </div>
             <p className="text-xs text-emerald-700 mt-0.5">
               {lang === 'th'
@@ -82,8 +84,8 @@ export const PWAInstallButton: React.FC<Props> = ({
                   <Tablet className="w-5 h-5" />
                   <h3 className="font-extrabold text-base">
                     {lang === 'th'
-                      ? 'ติดตั้ง KinPOS ลงเครื่อง Tablet / POS'
-                      : 'Install KinPOS on Tablet / POS'}
+                      ? `ติดตั้ง ${appName} ลงบนมือถือ / Tablet`
+                      : `Install ${appName} on Phone / Tablet`}
                   </h3>
                 </div>
                 <button
