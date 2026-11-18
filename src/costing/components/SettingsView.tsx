@@ -246,6 +246,74 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 ตัวเลขนี้เป็นการประมาณการเพื่อดูภาพรวม ไม่ใช่ตัวเลขสำหรับยื่นภาษี กรุณาปรึกษานักบัญชี
               </p>
             </div>
+
+            {/* Optional Employer Social Security (SSO) */}
+            <div className="sm:col-span-2 p-3 bg-black/30 rounded-2xl border border-white/10 space-y-2">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(localSettings.socialSecurityEnabled)}
+                  onChange={(e) =>
+                    setLocalSettings({
+                      ...localSettings,
+                      socialSecurityEnabled: e.target.checked,
+                      socialSecurityRatePercent: localSettings.socialSecurityRatePercent ?? 5,
+                      socialSecurityCapWage: localSettings.socialSecurityCapWage ?? 15000,
+                    })
+                  }
+                  className="mt-0.5 w-4 h-4 accent-[#F27D26] rounded"
+                />
+                <div>
+                  <span className="font-bold text-white block">
+                    รวมเงินสมทบประกันสังคมนายจ้าง (Employer Social Security)
+                  </span>
+                  <span className="text-[10px] text-white/50 block">
+                    คำนวณอัตโนมัติในต้นทุนพนักงาน (ค่าเริ่มต้น 5% เพดานฐานเงินเดือน 15,000 บาท = สูงสุด 750 บาท/เดือน)
+                  </span>
+                </div>
+              </label>
+
+              {localSettings.socialSecurityEnabled && (
+                <div className="grid grid-cols-2 gap-3 pl-6 pt-1">
+                  <div>
+                    <label className="block text-[10px] font-bold text-white/70 mb-1">อัตราประกันสังคม (%)</label>
+                    <NumericInput
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max="20"
+                      value={localSettings.socialSecurityRatePercent ?? 5}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setLocalSettings({
+                          ...localSettings,
+                          socialSecurityRatePercent: Number.isFinite(val) ? Math.max(0, Math.min(20, val)) : 5,
+                        });
+                      }}
+                      className="w-full p-2 bg-black/40 border border-white/15 rounded-xl font-mono font-bold text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-white/70 mb-1">เพดานค่าจ้าง (บาท)</label>
+                    <NumericInput
+                      type="number"
+                      step="500"
+                      min="0"
+                      max="100000"
+                      value={localSettings.socialSecurityCapWage ?? 15000}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setLocalSettings({
+                          ...localSettings,
+                          socialSecurityCapWage: Number.isFinite(val) ? Math.max(0, val) : 15000,
+                        });
+                      }}
+                      className="w-full p-2 bg-black/40 border border-white/15 rounded-xl font-mono font-bold text-white"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -333,6 +401,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
               <span className="text-[11px] text-white/40 mt-1.5 block">
                 สูตร: GP = ยอดขาย LINE MAN × GP%
               </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 text-xs">
+            <label className="flex items-start gap-2.5 p-3.5 bg-black/30 rounded-2xl border border-white/10 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={localSettings.commissionVatAsCost ?? localSettings.grabFoodCommissionHasVat ?? true}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setLocalSettings({
+                    ...localSettings,
+                    commissionVatAsCost: checked,
+                    grabFoodCommissionHasVat: checked,
+                    lineManCommissionHasVat: checked,
+                  });
+                }}
+                className="mt-0.5 w-4 h-4 accent-[#F27D26] rounded"
+              />
+              <div>
+                <span className="font-bold text-white block">
+                  รวม VAT {localSettings.vatRatePercent ?? 7}% บนค่า GP เดลิเวอรีเป็นต้นทุน
+                </span>
+                <span className="text-[10px] text-white/50 block mt-0.5">
+                  เช่น GP 30% จะคิดเป็น Effective GP {((localSettings.grabFoodCommissionPercent ?? 30) * (1 + (localSettings.vatRatePercent ?? 7) / 100)).toFixed(1)}% ในราคาแนะนำและ P&L
+                </span>
+              </div>
+            </label>
+
+            <div className="p-3.5 bg-black/30 rounded-2xl border border-white/10">
+              <label className="block font-bold text-white/80 mb-1.5">
+                การปัดเศษราคาขายแนะนำ (Price Rounding Step)
+              </label>
+              <select
+                value={localSettings.priceRounding ?? 1}
+                onChange={(e) => {
+                  const val = Number(e.target.value) as 1 | 5 | 10;
+                  setLocalSettings({ ...localSettings, priceRounding: val });
+                }}
+                className="w-full p-2 bg-black/60 border border-white/15 rounded-xl font-bold text-white cursor-pointer"
+              >
+                <option value={1} className="bg-[#1a1a1a]">ปัดขึ้นเป็น 1 บาท (เช่น 148)</option>
+                <option value={5} className="bg-[#1a1a1a]">ปัดขึ้นเป็น 5 บาท (เช่น 150)</option>
+                <option value={10} className="bg-[#1a1a1a]">ปัดขึ้นเป็น 10 บาท (เช่น 150)</option>
+              </select>
             </div>
           </div>
         </div>

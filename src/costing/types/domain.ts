@@ -149,6 +149,7 @@ export interface PortionVariant {
 export interface MenuItem {
   id: string;
   code: string;
+  name?: string;
   thaiName: string;
   englishName: string;
   category: string;
@@ -177,6 +178,7 @@ export interface SalesChannel {
   fixedFeePerOrder: number; // e.g. 0 or 3 THB
   packagingFeeSurcharge: number; // added to customer bill or borne by restaurant
   taxOnCommissionPercent: number; // 7% VAT on platform commission
+  gpBase?: 'gross_incl_vat' | 'net_ex_vat'; // GP calculation basis: gross (default) vs ex-VAT
   active: boolean;
   notes?: string;
 }
@@ -218,13 +220,14 @@ export interface ExpenseRecord {
   id: string;
   date: string;
   endDate?: string;
-  category: ExpenseCategory;
+  category: ExpenseCategory | string;
+  name?: string;
   description: string;
   amount: number;
-  isFixed: boolean; // Fixed vs Variable
+  isFixed?: boolean; // Fixed vs Variable
   isPayroll?: boolean; // Explicit flag replacing keyword matching
   paymentMethod: 'Cash' | 'Bank Transfer' | 'Credit Card' | 'PromptPay' | string;
-  recurring: boolean;
+  recurring?: boolean;
   frequency?: ExpenseFrequency;
   operatingDaysPerMonth?: number;
   isExcluded?: boolean;
@@ -243,13 +246,13 @@ export interface Employee {
   id: string;
   name: string;
   position: string;
-  type: 'hourly' | 'daily' | 'monthly';
-  roleCategory: 'direct_kitchen' | 'direct_service' | 'indirect_management';
-  wageRate: number; // rate per hour, day, or month in THB
-  standardHoursPerMonth: number;
-  overtimeHoursMonthly: number;
-  overtimeRateMultiplier: number;
-  benefitsMonthly: number;
+  type?: 'hourly' | 'daily' | 'monthly';
+  roleCategory?: 'direct_kitchen' | 'direct_service' | 'indirect_management';
+  wageRate?: number; // rate per hour, day, or month in THB
+  standardHoursPerMonth?: number;
+  overtimeHoursMonthly?: number;
+  overtimeRateMultiplier?: number;
+  benefitsMonthly?: number;
   active: boolean;
   role?: string;
   department?: 'kitchen' | 'front_of_house' | 'management';
@@ -274,8 +277,11 @@ export interface DailySalesRecord {
   vatRatePercent?: number;
   platformFees: number;
   actualPayout: number;
+  serviceCharge?: number;
   foodCost?: number;
   packagingCost?: number;
+  estimatedAllocation?: boolean;
+  replacesPosSync?: boolean;
   itemSales?: {
     menuItemId: string;
     portionId: string;
@@ -348,24 +354,42 @@ export interface StockCountSnapshot {
 
 export interface BusinessSettings {
   restaurantName: string;
-  currency: string; // '฿' or 'THB'
-  vatRatePercent: number; // default 7% VAT
-  incomeTaxRatePercent: number; // default 20% estimated corporate income tax
+  currency?: string; // '฿' or 'THB'
+  vatRatePercent?: number; // default 7% VAT
+  incomeTaxRatePercent?: number; // default 20% estimated corporate income tax
   /** @deprecated Do not read in calculations. Use vatRatePercent or incomeTaxRatePercent instead. */
   taxRatePercent?: number;
-  defaultTargetFoodCostPercent: number; // e.g. 30%
-  defaultTargetGrossMarginPercent: number; // e.g. 70%
+  defaultTargetFoodCostPercent?: number; // e.g. 30%
+  defaultTargetGrossMarginPercent?: number; // e.g. 70%
   targetFoodCostPercent?: number;
-  defaultPricingMethod: 'food_cost_target' | 'gross_margin_target';
-  cogsCalculationMode: 'recipe_operational' | 'inventory_accounting';
-  laborTargetPercent: number; // e.g. 20%
-  primeCostTargetPercent: number; // e.g. 55%
-  operatingDaysPerMonth: number; // e.g. 26 or 30
+  defaultPricingMethod?: 'food_cost_target' | 'gross_margin_target';
+  cogsCalculationMode?: 'recipe_operational' | 'inventory_accounting';
+  laborTargetPercent?: number; // e.g. 20%
+  primeCostTargetPercent?: number; // e.g. 55%
+  operatingDaysPerMonth?: number; // e.g. 26 or 30
   cogsVarianceThresholdPercent?: number; // e.g. 3.0 percentage points of net sales
   socialSecurityEnabled?: boolean;
   socialSecurityRatePercent?: number;
   socialSecurityCapWage?: number;
+  serviceChargeTreatment?: 'staff_pool' | 'retained';
   primaryLanguage?: 'th' | 'en';
+  pricesIncludeVat?: boolean;
+  salesVatInclusive?: boolean;
+  serviceChargeIncludedInPrice?: boolean;
+  serviceChargePercent?: number;
+  defaultOverheadCostPerDish?: number;
+  overheadRatePercent?: number;
+  overheadCalculationBase?: 'SELLING_PRICE' | 'FOOD_COST';
+  targetProfitAmount?: number;
+  takeawayPackagingCost?: number;
+  deliveryPackagingCost?: number;
+  grabFoodCommissionPercent?: number;
+  grabFoodCommissionHasVat?: boolean;
+  lineManCommissionPercent?: number;
+  lineManCommissionHasVat?: boolean;
+  commissionVatAsCost?: boolean;
+  priceRounding?: 1 | 5 | 10;
+  defaultTicketSize?: number;
 }
 
 export interface WhatShouldIDoAdvice {

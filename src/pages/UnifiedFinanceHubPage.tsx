@@ -43,11 +43,17 @@ import {
   getBusinessWorkDate,
   getMonthDateRange,
   calculateDishVariantCost,
-  calculateFoodCostPercent,
+  calculateExVatFoodCostPercent,
   extractNetPriceFromMenuPrice,
   buildPeriodPnl,
   calculateEmployeeMonthlyCost,
+  getEmployeeMonthlyCost,
   deriveVariableCostPercent,
+  normalizeToMonthly,
+  formatPeriodCalculationLabel,
+  isExplicitPayrollExpense,
+  calculateWeightedFoodCostPercent,
+  isDateInPeriod,
 } from '../engine/calculations';
 import {
   subscribeCollection,
@@ -77,11 +83,12 @@ import {
 import { StorageService } from '../costing/services/storageService';
 import { FirebaseSyncService, COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
 import {
-  calculateBreakEven,
+  calculateDetailedBreakEven,
   convertExpenseToMonthly,
   upsertDailySalesRecord,
+  normalizeUpsertChannelId,
 } from '../costing/engine/calculations';
-import { calculateVariantCostBreakdown } from '../costing/services/calculationEngine';
+import { calculateVariantCostBreakdown, getEffectiveDeliveryGpPercent } from '../costing/services/calculationEngine';
 import { WhatShouldIDoSection } from '../costing/components/Dashboard/WhatShouldIDoSection';
 import { SalesEntryView } from '../costing/components/Financials/SalesEntryView';
 import { ExpensesView } from '../costing/components/Financials/ExpensesView';
@@ -139,11 +146,7 @@ const mapPosCategoryToCost = (cat: ExpenseDoc['category']): ExpenseRecord['categ
   }
 };
 
-const isPayrollExpenseRecord = (e: ExpenseRecord): boolean => {
-  const text = `${e.category || ''} ${(e as any).title || (e as any).name || (e as any).description || ''} ${e.notes || ''}`.toLowerCase();
-  const keywords = ['labor', 'salary', 'wage', 'ค่าแรง', 'เงินเดือน'];
-  return e.category === 'Labor (Salary & Wages)' || keywords.some((kw) => text.includes(kw));
-};
+const isPayrollExpenseRecord = isExplicitPayrollExpense;
 
 export const UnifiedFinanceHubPage: React.FC<Props> = ({
   user,
@@ -166,6 +169,9 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
   const [selectedMonth, setSelectedMonth] = useState<string>(todayStr.substring(0, 7));
   const [selectedYear, setSelectedYear] = useState<string>(todayStr.substring(0, 4));
   const [cogsMode, setCogsMode] = useState<'estimated' | 'actual'>('estimated');
+  const [excludePayrollDuplicates, setExcludePayrollDuplicates] = useState<boolean>(true);
+  const [assumedCmPercent, setAssumedCmPercent] = useState<number>(0);
+  const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(DEFAULT_SALES_CHANNELS);
 
   // POS real-time collections
   const [todaySummary, setTodaySummary] = useState<DailySummaryDoc | null>(null);
@@ -184,10 +190,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
   const [costSauces, setCostSauces] = useState<Sauce[]>(() => StorageService.getSauces());
   const [costMenus, setCostMenus] = useState<MenuItem[]>(() => StorageService.getMenus());
   const [costExpenses, setCostExpenses] = useState<ExpenseRecord[]>(
-    () => StorageService.getExpenses() as unknown as ExpenseRecord[]
+    () => StorageService.getExpenses()
   );
   const [costEmployees, setCostEmployees] = useState<CostEmployee[]>(
-    () => StorageService.getEmployees() as unknown as CostEmployee[]
+    () => StorageService.getEmployees()
   );
   const [costDailySales, setCostDailySales] = useState<DailySalesRecord[]>(() => StorageService.getDailySales());
   const [inventory, setInventory] = useState<InventoryItem[]>(() => StorageService.getInventory());
@@ -301,7 +307,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           (items) => {
             if (isMounted) {
               setCostExpenses(items);
-              StorageService.saveExpenses(items as any);
+              StorageService.saveExpenses(items);
             }
           }
         ),
@@ -311,7 +317,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           (items) => {
             if (isMounted) {
               setCostEmployees(items);
-              StorageService.saveEmployees(items as any);
+              StorageService.saveEmployees(items);
             }
           }
         ),
@@ -421,6 +427,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           recurring: posE.isRecurring ?? true,
           frequency: 'monthly',
           isExcluded: false,
+          ...(posE.isPayroll !== undefined ? { isPayroll: posE.isPayroll } : {}),
           operatingDaysPerMonth: operatingDays,
         });
       }
@@ -482,10 +489,20 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     return Array.from(empById.values());
   }, [costEmployees, posEmployees, operatingDays]);
 
+  const payrollFlaggedExpenses = useMemo(
+    () => unifiedExpenses.filter((e) => !e.isExcluded && isExplicitPayrollExpense(e)),
+    [unifiedExpenses]
+  );
+  const hasDuplicatePayroll = unifiedEmployees.length > 0 && payrollFlaggedExpenses.length > 0;
+
   // Normalized POS ExpenseDoc[] and EmployeeDoc[] synchronized from unified lists
   const unifiedPosExpenses = useMemo<ExpenseDoc[]>(() => {
     return unifiedExpenses
-      .filter((e) => !e.isExcluded && !(unifiedEmployees.length > 0 && isPayrollExpenseRecord(e)))
+      .filter(
+        (e) =>
+          !e.isExcluded &&
+          !(hasDuplicatePayroll && excludePayrollDuplicates && isExplicitPayrollExpense(e))
+      )
       .map((e) => {
         const isRecurring = Boolean(e.recurring ?? e.isFixed);
         const rawAmount = isRecurring
@@ -501,26 +518,27 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           endDate: e.endDate,
           isFixed: Boolean(e.isFixed),
           isRecurring,
+          ...(e.isPayroll !== undefined ? { isPayroll: e.isPayroll } : {}),
           createdAt: e.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           version: 1,
         };
       });
-  }, [unifiedExpenses, unifiedEmployees.length, operatingDays]);
+  }, [unifiedExpenses, hasDuplicatePayroll, excludePayrollDuplicates, operatingDays]);
 
   const unifiedPosEmployees = useMemo<EmployeeDoc[]>(() => {
     return unifiedEmployees.map((emp) => {
-      const rate = emp.wageRate ?? emp.baseSalary ?? 0;
-      const usesExplicitMonthly =
-        typeof emp.monthlyCost === 'number' && Number.isFinite(emp.monthlyCost);
-      const wageType: EmployeeDoc['wageType'] = usesExplicitMonthly
-        ? 'monthly'
-        : emp.type === 'hourly'
-        ? 'hourly'
-        : emp.type === 'daily'
-        ? 'daily'
-        : 'monthly';
-      const wageAmount = usesExplicitMonthly ? emp.monthlyCost! : rate;
+      const rawRate = emp.wageRate ?? emp.baseSalary ?? emp.hourlyRate ?? 0;
+      const hasBaseRate = rawRate > 0;
+      const wageType: EmployeeDoc['wageType'] =
+        !hasBaseRate && typeof emp.monthlyCost === 'number' && emp.monthlyCost > 0
+          ? 'monthly'
+          : emp.type === 'hourly' || emp.employmentType === 'hourly'
+          ? 'hourly'
+          : emp.type === 'daily'
+          ? 'daily'
+          : 'monthly';
+      const wageAmount = hasBaseRate ? rawRate : emp.monthlyCost || 0;
       return {
         id: emp.id,
         name: emp.name,
@@ -533,8 +551,8 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           emp.standardHoursPerMonth ||
           emp.hoursPerMonth ||
           (wageType === 'hourly' ? 208 : operatingDays),
-        benefitsMonthly: usesExplicitMonthly ? 0 : emp.benefitsMonthly || 0,
-        overtimeHoursMonthly: usesExplicitMonthly ? 0 : emp.overtimeHoursMonthly || 0,
+        benefitsMonthly: emp.benefitsMonthly || 0,
+        overtimeHoursMonthly: emp.overtimeHoursMonthly || 0,
         overtimeRateMultiplier: emp.overtimeRateMultiplier || 1.5,
         isActive: emp.active !== false,
         createdAt: new Date().toISOString(),
@@ -544,41 +562,75 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     });
   }, [unifiedEmployees, operatingDays]);
 
-  // Average Food Cost % across active menu variants (no silent hardcoded fallback)
+  // Per-portion dine-in menu breakdown (no takeaway packaging box, ex-VAT denominator, uncapped profit)
   const getMenuPortions = useMemo(() => {
     const ingMap = new Map(costIngredients.map((i) => [i.id, i]));
     const sauceMap = new Map(costSauces.map((s) => [s.id, s]));
-    return (menu: any) => {
+    type HubPortionSummary = {
+      id: string;
+      name: string;
+      directFoodCost: number;
+      packagingCost: number;
+      totalDirectCost: number;
+      sellingPrice: number;
+      netSellingPrice?: number;
+      foodCostPercent: number;
+      contributionProfit: number;
+    };
+    type HubMenuLike = MenuItem & { portions?: HubPortionSummary[] };
+
+    return (menu: HubMenuLike): HubPortionSummary[] => {
       if (!menu) return [];
       if (Array.isArray(menu.portions) && menu.portions.length > 0) return menu.portions;
       if (Array.isArray(menu.variants) && menu.variants.length > 0) {
-        return menu.variants.map((v: any) => {
+        const vatPct = costSettings.vatRatePercent ?? settings.vatPercent ?? 7;
+        const scIncludedDefault = Boolean(
+          costSettings.serviceChargeIncludedInPrice ?? settings.serviceChargeIncludedInPrice
+        );
+        const scPctDefault = costSettings.serviceChargePercent ?? settings.serviceChargePercent ?? 0;
+        const defaultPricesIncludeVat = Boolean(
+          costSettings.pricesIncludeVat ??
+            costSettings.salesVatInclusive ??
+            settings.pricesIncludeVat
+        );
+
+        return menu.variants.map((v) => {
           let directFoodCost = 0;
-          let packagingCost = (costSettings as any)?.defaultTakeawayPackagingCost ?? 0;
           let sellingPrice = v.sellingPrice || 0;
           try {
             if (v.recipeItems && v.recipeItems.length > 0) {
               const bd = calculateVariantCostBreakdown(
                 v,
                 menu.name || menu.thaiName || '',
-                ingMap as any,
-                sauceMap as any,
-                costSettings as any
+                ingMap,
+                sauceMap,
+                costSettings
               );
               directFoodCost = bd.totalFoodCost || bd.totalIngredientCost || 0;
-              packagingCost = bd.packagingCost || packagingCost;
               sellingPrice = bd.sellingPrice || sellingPrice;
-            } else if (typeof v.totalFoodCost === 'number') {
-              directFoodCost = v.totalFoodCost;
-            } else if (typeof v.foodCost === 'number') {
-              directFoodCost = v.foodCost;
+            } else if (typeof v.directFoodCost === 'number') {
+              directFoodCost = v.directFoodCost;
             }
           } catch {
-            directFoodCost = v.foodCost || v.totalFoodCost || 0;
+            directFoodCost = v.directFoodCost || 0;
           }
-          const totalDirectCost = directFoodCost + packagingCost;
-          const foodCostPercent = sellingPrice > 0 ? (totalDirectCost / sellingPrice) * 100 : 0;
-          const contributionProfit = Math.max(0, sellingPrice - totalDirectCost);
+
+          // Dine-in has 0 packaging box cost; extract VAT & included SC before % / profit calculation
+          const packagingCost = 0;
+          const totalDirectCost = directFoodCost;
+          const isVatInc =
+            v.taxType === 'INCLUSIVE' ||
+            (v.taxType !== 'EXCLUSIVE' && v.taxType !== 'NONE' && defaultPricesIncludeVat);
+          const netSellingPrice = extractNetPriceFromMenuPrice(
+            sellingPrice,
+            isVatInc,
+            vatPct,
+            scIncludedDefault,
+            scPctDefault
+          );
+          const foodCostPercent = netSellingPrice > 0 ? (directFoodCost / netSellingPrice) * 100 : 0;
+          const contributionProfit = netSellingPrice - totalDirectCost;
+
           return {
             id: v.id,
             name: v.name || v.proteinType || 'มาตรฐาน',
@@ -586,6 +638,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
             packagingCost,
             totalDirectCost,
             sellingPrice,
+            netSellingPrice,
             foodCostPercent,
             contributionProfit,
           };
@@ -593,31 +646,49 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       }
       return [];
     };
-  }, [costIngredients, costSauces, costSettings]);
+  }, [costIngredients, costSauces, costSettings, settings.vatPercent, settings.serviceChargeIncludedInPrice, settings.serviceChargePercent, settings.pricesIncludeVat]);
 
-  const allCostPortions = useMemo(() => costMenus.flatMap((m) => getMenuPortions(m)), [costMenus, getMenuPortions]);
-  const portionsWithRecipeCost = useMemo(
-    () => allCostPortions.filter((p) => (p.foodCostPercent || 0) > 0 && (p.sellingPrice || 0) > 0),
-    [allCostPortions]
+  // Real sales-weighted Food Cost % across POS summaries in the selected period (never unweighted catalog mean)
+  const weightedFoodCostResult = useMemo(
+    () =>
+      calculateWeightedFoodCostPercent(periodSummaries, {
+        pricesIncludeVat: Boolean(
+          costSettings.pricesIncludeVat ??
+            costSettings.salesVatInclusive ??
+            settings.pricesIncludeVat
+        ),
+        vatPercent: costSettings.vatRatePercent ?? settings.vatPercent ?? 7,
+        serviceChargeIncludedInPrice: Boolean(
+          costSettings.serviceChargeIncludedInPrice ?? settings.serviceChargeIncludedInPrice
+        ),
+        serviceChargePercent: costSettings.serviceChargePercent ?? settings.serviceChargePercent ?? 0,
+      }),
+    [periodSummaries, costSettings, settings]
   );
-  const avgFoodCostPercent: number | null =
-    portionsWithRecipeCost.length > 0
-      ? portionsWithRecipeCost.reduce((sum, p) => sum + (p.foodCostPercent || 0), 0) /
-        portionsWithRecipeCost.length
-      : null;
+  const avgFoodCostPercent: number | null = weightedFoodCostResult.foodCostPercent;
 
   const dateParam = period === 'day' ? selectedDate : period === 'month' ? selectedMonth : selectedYear;
 
   const incomeTaxRate =
-    typeof (costSettings as any).incomeTaxRatePercent === 'number' &&
-    Number.isFinite((costSettings as any).incomeTaxRatePercent)
-      ? (costSettings as any).incomeTaxRatePercent
+    typeof costSettings.incomeTaxRatePercent === 'number' &&
+    Number.isFinite(costSettings.incomeTaxRatePercent)
+      ? costSettings.incomeTaxRatePercent
       : typeof settings.incomeTaxRatePercent === 'number' && Number.isFinite(settings.incomeTaxRatePercent)
       ? settings.incomeTaxRatePercent
       : 20;
 
   // Keep inventory prop referenced cleanly
   void inventory;
+
+  const socialSecurityEnabled = Boolean(
+    costSettings.socialSecurityEnabled ?? settings.socialSecurityEnabled ?? false
+  );
+  const socialSecurityRatePercent = Number(
+    costSettings.socialSecurityRatePercent ?? settings.socialSecurityRatePercent ?? 5
+  );
+  const socialSecurityCapWage = Number(
+    costSettings.socialSecurityCapWage ?? settings.socialSecurityCapWage ?? 15000
+  );
 
   // Single Source of Truth P&L for Selected Period (uses date-scoped StockCountSnapshot + period-filtered purchases/waste)
   const periodPnl = useMemo(
@@ -632,7 +703,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         settings: {
           ...settings,
           incomeTaxRatePercent: incomeTaxRate,
-          cogsVarianceThresholdPercent: (costSettings as any).cogsVarianceThresholdPercent ?? 3.0,
+          cogsVarianceThresholdPercent: costSettings.cogsVarianceThresholdPercent ?? 3.0,
+          socialSecurityEnabled,
+          socialSecurityRatePercent,
+          socialSecurityCapWage,
         },
         cogsMode,
         stockCountSnapshots: stockCounts,
@@ -655,6 +729,9 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       settings,
       incomeTaxRate,
       costSettings,
+      socialSecurityEnabled,
+      socialSecurityRatePercent,
+      socialSecurityCapWage,
       cogsMode,
       stockCounts,
       purchases,
@@ -680,7 +757,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         settings: {
           ...settings,
           incomeTaxRatePercent: incomeTaxRate,
-          cogsVarianceThresholdPercent: (costSettings as any).cogsVarianceThresholdPercent ?? 3.0,
+          cogsVarianceThresholdPercent: costSettings.cogsVarianceThresholdPercent ?? 3.0,
+          socialSecurityEnabled,
+          socialSecurityRatePercent,
+          socialSecurityCapWage,
         },
         cogsMode: 'estimated',
         todayDate: todayStr,
@@ -697,13 +777,16 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       settings,
       incomeTaxRate,
       costSettings,
+      socialSecurityEnabled,
+      socialSecurityRatePercent,
+      socialSecurityCapWage,
       avgFoodCostPercent,
     ]
   );
 
   const theoreticalSalesOrdersCost = periodPnl.theoreticalFoodCogs;
   const varianceAmount = periodPnl.varianceAmount;
-  const varianceThresholdPercent = (costSettings as any).cogsVarianceThresholdPercent ?? 3.0;
+  const varianceThresholdPercent = costSettings.cogsVarianceThresholdPercent ?? 3.0;
   const isVarianceExceeded = periodPnl.hasCompleteStockSnapshots && periodPnl.varianceStatus !== 'ON_TRACK';
 
   // Real Break-Even using Monthly Fixed Overhead (honoring endDate) + All Active Staff Payroll
@@ -713,7 +796,20 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       unifiedPosExpenses
         .filter(
           (e) =>
-            e.isFixed &&
+            e.isFixed !== false &&
+            (!e.isRecurring ||
+              ((e.date || '').substring(0, 7) <= currentMonthKey &&
+                (!e.endDate || e.endDate.substring(0, 7) >= currentMonthKey)))
+        )
+        .reduce((sum, e) => sum + e.amount, 0),
+    [unifiedPosExpenses, currentMonthKey]
+  );
+  const monthlyVariableExpensesOnly = useMemo(
+    () =>
+      unifiedPosExpenses
+        .filter(
+          (e) =>
+            e.isFixed === false &&
             (!e.isRecurring ||
               ((e.date || '').substring(0, 7) <= currentMonthKey &&
                 (!e.endDate || e.endDate.substring(0, 7) >= currentMonthKey)))
@@ -722,24 +818,68 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     [unifiedPosExpenses, currentMonthKey]
   );
   const totalMonthlyStaffPayroll = useMemo(
-    () => unifiedPosEmployees.reduce((sum, emp) => sum + calculateEmployeeMonthlyCost(emp), 0),
-    [unifiedPosEmployees]
+    () =>
+      unifiedPosEmployees.reduce(
+        (sum, emp) =>
+          sum +
+          calculateEmployeeMonthlyCost(emp, {
+            socialSecurityEnabled,
+            socialSecurityRatePercent,
+            socialSecurityCapWage,
+            defaultOperatingDays: operatingDays,
+          }),
+        0
+      ),
+    [
+      unifiedPosEmployees,
+      socialSecurityEnabled,
+      socialSecurityRatePercent,
+      socialSecurityCapWage,
+      operatingDays,
+    ]
   );
-  const derivedMargin30d = useMemo(() => deriveVariableCostPercent(last30Summaries), [last30Summaries]);
+  const derivedMargin30d = useMemo(
+    () =>
+      deriveVariableCostPercent(last30Summaries, {
+        otherVariableCostAmount: monthlyVariableExpensesOnly,
+      }),
+    [last30Summaries, monthlyVariableExpensesOnly]
+  );
+  const isExecutiveCmAssumed = !derivedMargin30d.hasRealData;
   const liveCMPercent = derivedMargin30d.hasRealData
     ? derivedMargin30d.contributionMarginPercent
     : avgFoodCostPercent !== null
     ? Math.max(0, 100 - avgFoodCostPercent)
-    : 0;
-  const avgTicketForBe = periodPnl.avgOrderValue > 0 ? periodPnl.avgOrderValue : 140;
+    : assumedCmPercent;
+  const avgTicketForBe =
+    periodPnl.avgOrderValue > 0
+      ? periodPnl.avgOrderValue
+      : costSettings.defaultTicketSize ?? settings.defaultTicketSize ?? 0;
 
-  const executiveBreakEven = calculateBreakEven(
+  // Normalize selected period net sales to monthly equivalent so Break-Even Safety Margin matches monthly target
+  const monthlyNormalizedNetSales = useMemo(
+    () => normalizeToMonthly(periodPnl.netSalesExVat, period, periodPnl.coveredMonths, dateParam),
+    [periodPnl.netSalesExVat, period, periodPnl.coveredMonths, dateParam]
+  );
+
+  const periodSalesLabel = useMemo(
+    () => formatPeriodCalculationLabel(period, dateParam, lang),
+    [period, dateParam, lang]
+  );
+
+  const periodFilteredCostSales = useMemo(() => {
+    if (period === 'day') return costDailySales.filter((s) => s.date === selectedDate);
+    if (period === 'month') return costDailySales.filter((s) => s.date?.startsWith(selectedMonth));
+    return costDailySales.filter((s) => s.date?.startsWith(selectedYear));
+  }, [costDailySales, period, selectedDate, selectedMonth, selectedYear]);
+
+  const executiveBreakEven = calculateDetailedBreakEven(
     monthlyFixedExpensesOnly + totalMonthlyStaffPayroll,
     liveCMPercent,
     avgTicketForBe,
     operatingDays,
     0,
-    periodPnl.netSalesExVat
+    monthlyNormalizedNetSales
   );
 
   // Recipe Audit Warnings (from POS Dishes & Ingredients)
@@ -770,7 +910,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           settings.serviceChargeIncludedInPrice,
           settings.serviceChargePercent
         );
-        const pct = calculateFoodCostPercent(calc.foodCost, netPrice);
+        const pct = calculateExVatFoodCostPercent(calc.foodCost, netPrice);
         if (pct > settings.targetFoodCostPercent) {
           aboveTarget.push({ dish, costPct: pct });
         }
@@ -782,10 +922,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
   // Actionable Business Recommendations
   const advices = useMemo<WhatShouldIDoAdvice[]>(() => {
     const list: WhatShouldIDoAdvice[] = [];
-    const targetFC = (costSettings as any).defaultTargetFoodCostPercent || settings.targetFoodCostPercent || 35;
+    const targetFC = costSettings.defaultTargetFoodCostPercent || settings.targetFoodCostPercent || 35;
 
     const highCostPortion = costMenus
-      .flatMap((m) => getMenuPortions(m).map((p: any) => ({ menu: m, portion: p })))
+      .flatMap((m) => getMenuPortions(m).map((p) => ({ menu: m, portion: p })))
       .filter((x) => (x.portion.foodCostPercent || 0) > targetFC)
       .sort((a, b) => (b.portion.foodCostPercent || 0) - (a.portion.foodCostPercent || 0))[0];
 
@@ -809,18 +949,26 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       });
     }
 
-    const grabGp = ((costSettings as any).grabFoodCommissionPercent ?? 30) * 1.07;
-      list.push({
-        id: 'adv-delivery',
-        type: 'WARNING',
-        category: 'Delivery Loss',
-      titleTh: `ค่า GP เดลิเวอรีรวม VAT อยู่ที่ ${grabGp.toFixed(1)}%`,
-      titleEn: `Effective Delivery GP + VAT is ${grabGp.toFixed(1)}%`,
+    const grabGp = getEffectiveDeliveryGpPercent(costSettings, 'grab');
+    const hasGpVat =
+      costSettings.commissionVatAsCost ??
+      costSettings.grabFoodCommissionHasVat ??
+      true;
+    list.push({
+      id: 'adv-delivery',
+      type: 'WARNING',
+      category: 'Delivery Loss',
+      titleTh: hasGpVat
+        ? `ค่า GP เดลิเวอรีรวม VAT อยู่ที่ ${grabGp.toFixed(1)}%`
+        : `ค่า GP เดลิเวอรีอยู่ที่ ${grabGp.toFixed(1)}%`,
+      titleEn: hasGpVat
+        ? `Effective Delivery GP + VAT is ${grabGp.toFixed(1)}%`
+        : `Effective Delivery GP is ${grabGp.toFixed(1)}%`,
       descriptionTh: 'ควรตั้งราคาขายบนแอป Delivery สูงกว่าหน้าร้านเพื่อชดเชยค่าคอมมิชชั่นและคงกำไรสุทธิ',
-      descriptionEn: 'Ensure delivery menu markup covers platform GP + VAT to preserve net margin.',
+      descriptionEn: 'Ensure delivery menu markup covers platform GP to preserve net margin.',
       actionRecommendationTh: 'ตั้งราคา Delivery Markup',
       actionRecommendationEn: 'Configure delivery markup',
-      metricLabel: 'GP + VAT',
+      metricLabel: hasGpVat ? 'GP + VAT' : 'GP',
       metricValue: `${grabGp.toFixed(1)}%`,
       relatedEntityType: 'channel',
     });
@@ -940,7 +1088,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
 
   const syncExpenseMirrorToPos = async (exp: ExpenseRecord) => {
     try {
-      if (exp.isExcluded || isPayrollExpenseRecord(exp)) {
+      if (exp.isExcluded || (hasDuplicatePayroll && excludePayrollDuplicates && isPayrollExpenseRecord(exp))) {
         await deleteDocument('expenses', exp.id).catch(() => {});
         return;
       }
@@ -955,6 +1103,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         ...(exp.endDate ? { endDate: exp.endDate } : {}),
         isFixed: Boolean(exp.isFixed),
         isRecurring,
+        ...(exp.isPayroll !== undefined ? { isPayroll: exp.isPayroll } : {}),
         createdAt: exp.createdAt || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         version: 1,
@@ -1025,9 +1174,27 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     void deleteDocument('employees', id).catch(() => {});
   };
 
-  const handleAddSalesRecord = (rec: DailySalesRecord) => {
-    setCostDailySales((prev) => upsertDailySalesRecord(prev, rec));
-    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.DAILY_SALES, rec.id, rec);
+  const handleAddSalesRecord = (rec: DailySalesRecord, replacedPosRecordId?: string) => {
+    const cleanedCurrent = replacedPosRecordId
+      ? costDailySales.filter((s) => s.id !== replacedPosRecordId)
+      : costDailySales;
+    const nextCurrent = upsertDailySalesRecord(cleanedCurrent, rec);
+    const targetCh = normalizeUpsertChannelId(rec.channelId);
+    const savedRecord =
+      nextCurrent.find(
+        (r) => r.date === rec.date && normalizeUpsertChannelId(r.channelId) === targetCh
+      ) || rec;
+
+    setCostDailySales((prev) => {
+      const cleaned = replacedPosRecordId
+        ? prev.filter((s) => s.id !== replacedPosRecordId)
+        : prev;
+      return upsertDailySalesRecord(cleaned, rec);
+    });
+    if (replacedPosRecordId) {
+      FirebaseSyncService.deleteUserDoc(user.uid, COST_COLLECTIONS.DAILY_SALES, replacedPosRecordId);
+    }
+    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.DAILY_SALES, savedRecord.id, savedRecord);
   };
 
   const handleDeleteSalesRecord = (id: string) => {
@@ -1054,7 +1221,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
       ['Prime Cost (Total COGS + Total Labor)', periodPnl.primeCost.toFixed(2)],
       ['Prime Cost %', `${periodPnl.primeCostPercent.toFixed(1)}%`],
       ['Operating Expenses (OPEX)', periodPnl.opex.toFixed(2)],
-      ['Operating Profit', periodPnl.operatingProfit.toFixed(2)],
+      ['Operating Profit (กำไรจากการดำเนินงาน)', periodPnl.operatingProfit.toFixed(2)],
       ['Estimated Tax (Confirm with Accountant)', periodPnl.estimatedTax.toFixed(2)],
       ['Net Profit', periodPnl.netProfit.toFixed(2)],
       ['COGS Data Status', periodPnl.cogsStatus],
@@ -1078,8 +1245,8 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     { id: 'breakeven', labelTh: 'จุดคุ้มทุน & เป้าหมาย', labelEn: 'Break-Even', icon: <Scale className="w-4 h-4" /> },
   ];
 
-  const targetFoodCostPct = (costSettings as any).defaultTargetFoodCostPercent || settings.targetFoodCostPercent || 30;
-  const targetPrimeCostPct = (costSettings as any).primeCostTargetPercent || 55;
+  const targetFoodCostPct = costSettings.defaultTargetFoodCostPercent || settings.targetFoodCostPercent || 30;
+  const targetPrimeCostPct = costSettings.primeCostTargetPercent || 55;
   const effectiveFoodCostPct = periodPnl.foodCostPercent;
 
   return (
@@ -1165,7 +1332,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
             })}
           </nav>
 
-          {(activeTab === 'overview' || activeTab === 'pnl') && (
+          {(activeTab === 'overview' || activeTab === 'pnl' || activeTab === 'labor' || activeTab === 'breakeven') && (
             <div className="flex items-center gap-2 bg-white/85 border border-slate-200/90 px-2.5 py-1.5 rounded-2xl shrink-0">
               <div className="flex items-center gap-1">
                 {(['day', 'month', 'year'] as PeriodType[]).map((p) => (
@@ -1217,6 +1384,40 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           )}
         </div>
 
+        {/* Payroll Overlap Explicit Warning Banner */}
+        {hasDuplicatePayroll && ['overview', 'pnl', 'expenses', 'labor', 'breakeven'].includes(activeTab) && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-start sm:items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+              <div>
+                <span className="font-bold">
+                  {lang === 'th'
+                    ? `ตรวจพบรายการค่าใช้จ่ายที่ระบุเป็น Payroll (${payrollFlaggedExpenses.length} รายการ) ซ้อนกับทะเบียนพนักงาน (${unifiedEmployees.length} คน)`
+                    : `Detected ${payrollFlaggedExpenses.length} Payroll-flagged expense(s) alongside ${unifiedEmployees.length} staff records`}
+                </span>
+                <span className="block text-[11px] text-amber-800">
+                  {excludePayrollDuplicates
+                    ? lang === 'th'
+                      ? 'ระบบตัดรายการค่าใช้จ่าย Payroll ออกชั่วคราวเพื่อป้องกันการนับค่าแรงซ้ำ'
+                      : 'Excluded from OPEX by default to avoid double-counting payroll.'
+                    : lang === 'th'
+                    ? 'คำเตือน: กำลังนับรวมทั้งรายการค่าใช้จ่าย Payroll และทะเบียนพนักงาน'
+                    : 'Warning: Currently including both payroll expenses and employee payroll.'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExcludePayrollDuplicates((prev) => !prev)}
+              className="px-3 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 cursor-pointer shrink-0 text-[11px]"
+            >
+              {excludePayrollDuplicates
+                ? lang === 'th' ? 'คลิกเพื่อนำกลับมานับรวม' : 'Include Anyway'
+                : lang === 'th' ? 'ตัดรายการซ้ำออก (แนะนำ)' : 'Exclude Duplicates'}
+            </button>
+          </div>
+        )}
+
         {/* =========================================================
             TAB 1: EXECUTIVE OVERVIEW (POS Today + Costing Executive KPIs + Alerts + Menu Margins)
            ========================================================= */}
@@ -1240,7 +1441,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                 </div>
                 <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
                   {lang === 'th'
-                    ? `กำไรดำเนินงานวันนี้: ฿${formatMoney(todayPnl.operatingProfit)}`
+                    ? `กำไรจากการดำเนินงานวันนี้: ฿${formatMoney(todayPnl.operatingProfit)}`
                     : `Today Operating Profit: ฿${formatMoney(todayPnl.operatingProfit)}`}
                 </div>
               </div>
@@ -1263,38 +1464,55 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               </div>
 
               {/* 3. Food Cost % */}
-              <div className="rounded-2xl bg-white/90 border border-slate-200/90 p-5 flex flex-col justify-between">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
-                    <Percent className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Food Cost %</span>
-                  </span>
-                  <span
-                    className={`text-[11px] font-semibold ${
-                      periodPnl.cogsStatus === 'incomplete'
-                        ? 'text-amber-700'
-                        : effectiveFoodCostPct > targetFoodCostPct
-                        ? 'text-rose-700'
-                        : 'text-emerald-700'
-                    }`}
-                  >
-                    {periodPnl.cogsStatus === 'incomplete'
-                      ? lang === 'th' ? 'ข้อมูลไม่ครบ' : 'Incomplete'
-                      : periodPnl.cogsStatus === 'estimated'
-                      ? lang === 'th' ? 'ประมาณการ' : 'Estimated'
-                      : effectiveFoodCostPct > targetFoodCostPct
-                      ? lang === 'th' ? 'เกินเป้า' : 'Above Target'
-                      : lang === 'th' ? 'ตามเกณฑ์' : 'Healthy'}
-                  </span>
-                </div>
-                <div className="mt-2.5 flex items-baseline gap-2 tabular-nums">
-                  <span className="text-2xl font-bold text-slate-900">{effectiveFoodCostPct.toFixed(1)}%</span>
-                  <span className="text-xs text-slate-400">/ {targetFoodCostPct}%</span>
-                </div>
-                <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
-                  COGS: ฿{formatMoney(periodPnl.foodCogs)}
-                </div>
-              </div>
+              {(() => {
+                const hasAnySales = periodPnl.netSalesExVat > 0 || weightedFoodCostResult.hasSalesData;
+                return (
+                  <div className="rounded-2xl bg-white/90 border border-slate-200/90 p-5 flex flex-col justify-between">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
+                        <Percent className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Food Cost %</span>
+                      </span>
+                      <span
+                        className={`text-[11px] font-semibold ${
+                          !hasAnySales
+                            ? 'text-slate-500'
+                            : periodPnl.cogsStatus === 'incomplete'
+                            ? 'text-amber-700'
+                            : effectiveFoodCostPct > targetFoodCostPct
+                            ? 'text-rose-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {!hasAnySales
+                          ? lang === 'th' ? 'ยังไม่มีข้อมูลขาย' : 'No sales data'
+                          : periodPnl.cogsStatus === 'incomplete'
+                          ? lang === 'th' ? 'ข้อมูลไม่ครบ' : 'Incomplete'
+                          : periodPnl.cogsStatus === 'estimated'
+                          ? lang === 'th' ? 'ประมาณการ' : 'Estimated'
+                          : effectiveFoodCostPct > targetFoodCostPct
+                          ? lang === 'th' ? 'เกินเป้า' : 'Above Target'
+                          : lang === 'th' ? 'ตามเกณฑ์' : 'Healthy'}
+                      </span>
+                    </div>
+                    <div className="mt-2.5 flex items-baseline gap-2 tabular-nums">
+                      {hasAnySales ? (
+                        <>
+                          <span className="text-2xl font-bold text-slate-900">{effectiveFoodCostPct.toFixed(1)}%</span>
+                          <span className="text-xs text-slate-400">/ {targetFoodCostPct}%</span>
+                        </>
+                      ) : (
+                        <span className="text-lg font-bold text-slate-500">
+                          {lang === 'th' ? 'ยังไม่มีข้อมูลขาย' : 'No sales data'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-slate-500 tabular-nums">
+                      COGS: ฿{formatMoney(periodPnl.foodCogs)}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* 4. Prime Cost % */}
               <div className="rounded-2xl bg-white/90 border border-slate-200/90 p-5 flex flex-col justify-between">
@@ -1402,21 +1620,59 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                     <Scale className="w-3.5 h-3.5 text-orange-600" />
                     <span>{lang === 'th' ? 'จุดคุ้มทุนต่อเดือน' : 'Monthly Break-Even'}</span>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('breakeven')}
-                    className="text-[11px] font-semibold text-orange-600 hover:underline cursor-pointer"
-                  >
-                    {lang === 'th' ? 'จำลอง →' : 'Simulate →'}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    {isExecutiveCmAssumed && liveCMPercent > 0 && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                        {lang === 'th' ? 'ค่าสมมติ' : 'Assumed'}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('breakeven')}
+                      className="text-[11px] font-semibold text-orange-600 hover:underline cursor-pointer"
+                    >
+                      {lang === 'th' ? 'จำลอง →' : 'Simulate →'}
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-2.5 text-2xl font-bold text-slate-900 tabular-nums">
-                  ฿{Math.round(executiveBreakEven.breakEvenSales).toLocaleString()}
+                  {executiveBreakEven.isValid
+                    ? `฿${Math.round(executiveBreakEven.breakEvenSales).toLocaleString()}`
+                    : lang === 'th'
+                    ? 'รอข้อมูลขายจริง'
+                    : 'Awaiting Sales'}
                 </div>
-                <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] text-emerald-700 font-semibold tabular-nums">
-                  {lang === 'th'
-                    ? `฿${Math.round(executiveBreakEven.breakEvenDailySales).toLocaleString()}/วัน · ${executiveBreakEven.breakEvenDailyOrders} จาน/วัน`
-                    : `฿${Math.round(executiveBreakEven.breakEvenDailySales).toLocaleString()}/day`}
+                {isExecutiveCmAssumed && avgFoodCostPercent === null && (
+                  <div className="mt-2 flex items-center gap-2 text-[11px]">
+                    <span className="text-amber-700 font-semibold">CM% สมมติ:</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={95}
+                      step={1}
+                      value={assumedCmPercent || ''}
+                      placeholder="0"
+                      onChange={(e) => setAssumedCmPercent(Math.max(0, Math.min(95, Number(e.target.value) || 0)))}
+                      className="w-16 px-2 py-0.5 text-xs bg-amber-50 border border-amber-300 rounded font-bold text-slate-900"
+                    />
+                    <span className="text-slate-500">%</span>
+                  </div>
+                )}
+                <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] font-semibold tabular-nums space-y-0.5">
+                  {executiveBreakEven.isValid ? (
+                    <div className={executiveBreakEven.safetyMarginPercent >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                      {lang === 'th'
+                        ? `฿${Math.round(executiveBreakEven.breakEvenDailySales).toLocaleString()}/วัน · Margin ${executiveBreakEven.safetyMarginPercent >= 0 ? '+' : ''}${executiveBreakEven.safetyMarginPercent.toFixed(1)}%`
+                        : `฿${Math.round(executiveBreakEven.breakEvenDailySales).toLocaleString()}/day · Safety ${executiveBreakEven.safetyMarginPercent >= 0 ? '+' : ''}${executiveBreakEven.safetyMarginPercent.toFixed(1)}%`}
+                    </div>
+                  ) : (
+                    <div className="text-amber-700">
+                      {lang === 'th' ? 'บันทึกยอดขายหรือระบุ CM% เพื่อคำนวณ' : 'Record sales or enter assumed CM%'}
+                    </div>
+                  )}
+                  <div className="text-[10px] font-normal text-slate-400">
+                    {periodSalesLabel}
+                  </div>
                 </div>
               </div>
             </section>
@@ -1576,6 +1832,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                         if (!portionsList || portionsList.length === 0) return null;
                         return portionsList.map((portion: any, idx: number) => {
                           const isHigh = (portion.foodCostPercent || 0) > targetFoodCostPct;
+                          const isLoss = (portion.contributionProfit ?? 0) < 0;
                           return (
                             <tr key={`${menu.id}-${portion.id}`} className="hover:bg-orange-50/40">
                               <td className="py-2.5 px-3.5 font-semibold text-slate-900">
@@ -1589,11 +1846,13 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                               <td className={`py-2.5 px-3.5 text-right font-semibold ${isHigh ? 'text-rose-600' : 'text-emerald-700'}`}>
                                 {(portion.foodCostPercent || 0).toFixed(1)}%
                               </td>
-                              <td className="py-2.5 px-3.5 text-right font-bold text-emerald-700">
-                                ฿{(portion.contributionProfit || 0).toFixed(2)}
+                              <td className={`py-2.5 px-3.5 text-right font-bold ${isLoss ? 'text-rose-600' : 'text-emerald-700'}`}>
+                                ฿{(portion.contributionProfit ?? 0).toFixed(2)}
                               </td>
                               <td className="py-2.5 px-3.5 text-center font-semibold">
-                                {isHigh ? (
+                                {isLoss ? (
+                                  <span className="text-rose-700">{lang === 'th' ? 'ขาดทุน' : 'Loss'}</span>
+                                ) : isHigh ? (
                                   <span className="text-rose-700">{lang === 'th' ? 'ควรปรับราคา' : 'Review'}</span>
                                 ) : (
                                   <span className="text-emerald-700">{lang === 'th' ? 'กำไรดี' : 'Good'}</span>
@@ -1709,6 +1968,18 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span className="font-semibold">{periodPnl.uncostedManualSalesWarning}</span>
+              </div>
+            )}
+
+            {(periodPnl.hasEstimatedChannelAllocation ||
+              costDailySales.some(
+                (r) => r.estimatedAllocation && isDateInPeriod(r.date, period, dateParam)
+              )) && (
+              <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>ข้อมูลช่องทางบางส่วนเป็นการประมาณการตามสัดส่วน</strong> — สรุปยอด POS เดิมไม่มีข้อมูลส่วนลด/ค่า GP/Service Charge แยกต่อช่องทาง แนะนำกด Rebuild Daily Summaries ในหน้าตั้งค่าเมื่อต้องการแยกยอดจริงระดับบิล
+                </span>
               </div>
             )}
 
@@ -1968,9 +2239,10 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
           <div className="tonycost-workspace rounded-2xl bg-white/95 border border-slate-200/90 p-5 sm:p-6">
             <SalesEntryView
               sales={costDailySales}
-              channels={DEFAULT_SALES_CHANNELS}
+              channels={salesChannels}
               onAddSalesRecord={handleAddSalesRecord}
               onDeleteSalesRecord={handleDeleteSalesRecord}
+              onUpdateChannels={setSalesChannels}
               defaultVatRate={settings.vatPercent ?? 7}
               activeLanguage={lang}
             />
@@ -1989,6 +2261,9 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               onUpdateExpense={handleUpdateExpense}
               operatingDays={operatingDays}
               activeLanguage={lang}
+              employeesCount={unifiedEmployees.length}
+              excludePayrollDuplicates={excludePayrollDuplicates}
+              onToggleExcludePayrollDuplicates={setExcludePayrollDuplicates}
             />
           </div>
         )}
@@ -2004,6 +2279,14 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               onAddEmployee={handleAddEmployee}
               onDeleteEmployee={handleDeleteEmployee}
               activeLanguage={lang}
+              period={period}
+              dateParam={dateParam}
+              coveredMonths={periodPnl.coveredMonths}
+              periodLaborCost={periodPnl.totalLabor}
+              periodSalesLabel={periodSalesLabel}
+              socialSecurityEnabled={socialSecurityEnabled}
+              socialSecurityRatePercent={socialSecurityRatePercent}
+              socialSecurityCapWage={socialSecurityCapWage}
             />
           </div>
         )}
@@ -2014,12 +2297,23 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
         {activeTab === 'breakeven' && (
           <div className="tonycost-workspace rounded-2xl bg-white/95 border border-slate-200/90 p-5 sm:p-6">
             <BreakEvenView
-              key={`${unifiedExpenses.length}-${unifiedEmployees.length}-${Math.round(monthlyFixedExpensesOnly + totalMonthlyStaffPayroll)}-${operatingDays}`}
+              key={`${unifiedExpenses.length}-${unifiedEmployees.length}-${Math.round(monthlyFixedExpensesOnly + totalMonthlyStaffPayroll)}-${operatingDays}-${period}-${dateParam}`}
               expenses={unifiedExpenses}
               employees={unifiedEmployees}
-              sales={costDailySales}
-              settings={costSettings as any}
+              sales={periodFilteredCostSales}
+              settings={costSettings}
               activeLanguage={lang}
+              period={period}
+              dateParam={dateParam}
+              coveredMonths={periodPnl.coveredMonths}
+              normalizedMonthlyNetSales={monthlyNormalizedNetSales}
+              recentSummaries={last30Summaries}
+              periodSalesLabel={periodSalesLabel}
+              excludePayrollDuplicates={excludePayrollDuplicates}
+              onToggleExcludePayrollDuplicates={setExcludePayrollDuplicates}
+              socialSecurityEnabled={socialSecurityEnabled}
+              socialSecurityRatePercent={socialSecurityRatePercent}
+              socialSecurityCapWage={socialSecurityCapWage}
             />
           </div>
         )}

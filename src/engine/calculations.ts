@@ -352,9 +352,10 @@ export function calculateSuggestedPricing(
 }
 
 /**
- * Backward compatibility: calculate suggested price.
+ * Calculates **ex-VAT** suggested net selling price: `cost / (targetFoodCostPercent / 100)`.
+ * Returns net price before VAT and service charge.
  */
-export function calculateSuggestedPrice(cost: number, targetFoodCostPercent: number): number {
+export function calculateExVatSuggestedNetPrice(cost: number, targetFoodCostPercent: number): number {
   return calculateSuggestedPricing(cost, targetFoodCostPercent).suggestedNetPrice;
 }
 
@@ -387,12 +388,95 @@ export function extractNetPriceFromMenuPrice(
 }
 
 /**
- * Calculates Theoretical Food Cost %:
- * Food Cost % = Food COGS / Net Sales (net of discounts, excluding VAT, excluding service charge).
+ * Calculates Theoretical Food Cost % on an **ex-VAT** net sales basis:
+ * Food Cost % = Food COGS / Net Sales (ex-VAT, net of discounts, excluding customer-paid Service Charge).
  */
-export function calculateFoodCostPercent(foodCost: number, netSales: number): number {
+export function calculateExVatFoodCostPercent(foodCost: number, netSales: number): number {
   if (netSales <= 0 || foodCost <= 0) return 0;
   return roundTo2((foodCost / netSales) * 100);
+}
+
+export interface DishSalesStat {
+  quantity?: number;
+  revenue?: number;
+  cost?: number;
+}
+
+export interface WeightedFoodCostResult {
+  foodCostPercent: number | null;
+  totalFoodCost: number;
+  totalNetRevenue: number;
+  hasSalesData: boolean;
+}
+
+/**
+ * Computes sales-weighted Food Cost % across actual POS period summaries or orders:
+ *   Weighted Food Cost % = (Σ foodCost / Σ netRevenueExVat) × 100
+ * Strips VAT & included Service Charge from dishStats[].revenue when pricesIncludeVat is true.
+ * Returns foodCostPercent: null when no sales exist (never uses unweighted mean or 31.5/32 fallback).
+ */
+export function calculateWeightedFoodCostPercent(
+  summaries: Array<{
+    dishStats?: Record<string, DishSalesStat>;
+    netSales?: number;
+    totalFoodCost?: number;
+  }>,
+  vatOptions?: {
+    pricesIncludeVat?: boolean;
+    vatPercent?: number;
+    serviceChargeIncludedInPrice?: boolean;
+    serviceChargePercent?: number;
+  }
+): WeightedFoodCostResult {
+  const pricesIncludeVat = Boolean(vatOptions?.pricesIncludeVat);
+  const vatRate = Math.max(0, vatOptions?.vatPercent ?? 7) / 100;
+  const scRate = vatOptions?.serviceChargeIncludedInPrice
+    ? Math.max(0, vatOptions?.serviceChargePercent ?? 0) / 100
+    : 0;
+  const taxDivisor = pricesIncludeVat ? (1 + scRate) * (1 + vatRate) : 1;
+
+  let totalDishCost = 0;
+  let totalDishGrossRev = 0;
+  let totalSummaryCost = 0;
+  let totalSummaryNetSales = 0;
+
+  for (const s of summaries) {
+    if (s.dishStats) {
+      for (const dst of Object.values(s.dishStats)) {
+        if (!dst) continue;
+        totalDishCost += Math.max(0, Number(dst.cost) || 0);
+        totalDishGrossRev += Math.max(0, Number(dst.revenue) || 0);
+      }
+    }
+    totalSummaryCost += Math.max(0, Number(s.totalFoodCost) || 0);
+    totalSummaryNetSales += Math.max(0, Number(s.netSales) || 0);
+  }
+
+  if (totalDishGrossRev > 0) {
+    const netRevenue = taxDivisor > 0 ? totalDishGrossRev / taxDivisor : totalDishGrossRev;
+    return {
+      foodCostPercent: netRevenue > 0 ? (totalDishCost / netRevenue) * 100 : null,
+      totalFoodCost: totalDishCost,
+      totalNetRevenue: netRevenue,
+      hasSalesData: netRevenue > 0,
+    };
+  }
+
+  if (totalSummaryNetSales > 0) {
+    return {
+      foodCostPercent: (totalSummaryCost / totalSummaryNetSales) * 100,
+      totalFoodCost: totalSummaryCost,
+      totalNetRevenue: totalSummaryNetSales,
+      hasSalesData: true,
+    };
+  }
+
+  return {
+    foodCostPercent: null,
+    totalFoodCost: 0,
+    totalNetRevenue: 0,
+    hasSalesData: false,
+  };
 }
 
 /**
@@ -848,7 +932,7 @@ function isRecurringExpenseActiveInMonth(exp: ExpenseDoc, targetMonth: string): 
   return true;
 }
 
-function isDateInPeriod(dateStr: string, period: 'day' | 'month' | 'year', dateParam: string): boolean {
+export function isDateInPeriod(dateStr: string, period: 'day' | 'month' | 'year', dateParam: string): boolean {
   if (!dateStr) return false;
   if (period === 'day') return dateStr === dateParam;
   if (period === 'month') return dateStr.startsWith(dateParam);
@@ -1223,7 +1307,7 @@ export function resolveStockCountSnapshotsForPeriod(
 
 export function isPackagingPurchase(
   purchase: PurchaseRecord,
-  ingredients?: Array<Pick<Ingredient, 'id' | 'category'>>
+  ingredients?: Array<{ id: string; category: string }>
 ): boolean {
   if (!purchase) return false;
   if (purchase.isPackaging === true) return true;
@@ -1248,7 +1332,7 @@ export function filterPeriodPurchases(
   purchases: PurchaseRecord[],
   periodStart: string,
   periodEnd: string,
-  ingredients?: Array<Pick<Ingredient, 'id' | 'category'>>
+  ingredients?: Array<{ id: string; category: string }>
 ): {
   foodPurchases: PurchaseRecord[];
   packagingPurchases: PurchaseRecord[];
@@ -1280,15 +1364,17 @@ export function filterPeriodPurchases(
   };
 }
 
-export function filterPeriodWaste(
-  wasteLog: WasteRecord[],
+export function filterPeriodWaste<
+  T extends { date?: string; totalCost?: number; cost?: number } = WasteRecord
+>(
+  wasteLog: T[],
   periodStart: string,
   periodEnd: string
 ): {
-  periodWaste: WasteRecord[];
+  periodWaste: T[];
   totalWasteCost: number;
 } {
-  const periodWaste: WasteRecord[] = [];
+  const periodWaste: T[] = [];
   let totalWasteCost = 0;
 
   for (const w of wasteLog || []) {
@@ -1416,6 +1502,8 @@ export interface PeriodPnlResult {
 
   cogsStatus: PnlDataStatus;
   statusReasons: string[];
+  hasEstimatedChannelAllocation: boolean;
+  estimatedAllocationCount: number;
   sourcesUsed: {
     posSummaryCount: number;
     manualSalesCount: number;
@@ -1487,28 +1575,95 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
   const posDateChannelKeys = new Set<string>();
   const posWholeDateCovered = new Set<string>();
 
-  for (const s of periodSummaries) {
-    posDatesAll.add(s.date);
-    netSalesExVatRaw += Math.max(0, s.netSales || 0);
-    grossSalesRefRaw += Math.max(0, s.grossSales || 0);
-    discountsRefRaw += Math.max(0, s.discounts || 0);
-    serviceChargeCollectedRaw += Math.max(0, s.serviceCharge || 0);
-    vatTotalRaw += Math.max(0, s.vat || 0);
-    orderCount += Math.max(0, s.orderCount || 0);
-    channelFeesRaw += Math.max(0, s.platformFees || 0);
-    posFoodCogsRaw += Math.max(0, s.totalFoodCost || 0);
-    posPackagingCogsRaw += Math.max(0, s.packagingCost || 0);
+  // Identify manual records explicitly chosen to override POS for a (date, channel)
+  const posSyncEntries = periodManual.filter((r) => r.id?.startsWith('pos_sync_'));
+  const manualOnlyEntries = periodManual.filter((r) => !r.id?.startsWith('pos_sync_'));
+  const replacedPosKeys = new Set<string>();
+  for (const rec of manualOnlyEntries) {
+    if (rec.replacesPosSync) {
+      const normCh = normalizeChannelId(rec.channelId || rec.channelName);
+      replacedPosKeys.add(`${rec.date}::${normCh}`);
+    }
+  }
 
+  let estimatedAllocationCount = 0;
+
+  for (const s of periodSummaries) {
     const activeChannels = Object.entries(s.channelTotals || {}).filter(
       ([, v]) => (v?.netSales || 0) > 0 || (v?.orderCount || 0) > 0
     );
+
+    if (activeChannels.length === 0 && replacedPosKeys.has(`${s.date}::dine_in`)) {
+      // Whole-day summary replaced by manual dine_in override — do not double count
+      continue;
+    }
+
+    posDatesAll.add(s.date);
+    let summaryNet = Math.max(0, s.netSales || 0);
+    let summaryGross = Math.max(0, s.grossSales || 0);
+    let summaryDisc = Math.max(0, s.discounts || 0);
+    let summarySc = Math.max(0, s.serviceCharge || 0);
+    let summaryOrders = Math.max(0, s.orderCount || 0);
+    let summaryFees = Math.max(0, s.platformFees || 0);
+    let summaryFoodCogs = Math.max(0, s.totalFoodCost || 0);
+    let summaryPkgCogs = Math.max(0, s.packagingCost || 0);
+
     if (activeChannels.length > 0) {
-      for (const [ch] of activeChannels) {
-        posDateChannelKeys.add(`${s.date}::${normalizeChannelId(ch)}`);
+      const totalChNet = activeChannels.reduce((acc, [, v]) => acc + Math.max(0, v?.netSales || 0), 0);
+      for (const [ch, chVal] of activeChannels) {
+        const key = `${s.date}::${normalizeChannelId(ch)}`;
+        if (replacedPosKeys.has(key)) {
+          // Deduct this channel's POS share so the manual override replaces it cleanly
+          const share = totalChNet > 0 ? Math.max(0, chVal?.netSales || 0) / totalChNet : 1 / activeChannels.length;
+          summaryNet = Math.max(0, summaryNet - Math.max(0, chVal?.netSales || 0));
+          summaryOrders = Math.max(0, summaryOrders - Math.max(0, chVal?.orderCount || 0));
+          summaryGross = Math.max(
+            0,
+            summaryGross -
+              (typeof chVal?.grossSales === 'number' ? chVal.grossSales : summaryGross * share)
+          );
+          summaryDisc = Math.max(
+            0,
+            summaryDisc -
+              (typeof chVal?.discounts === 'number' ? chVal.discounts : summaryDisc * share)
+          );
+          summaryFees = Math.max(
+            0,
+            summaryFees -
+              (typeof chVal?.platformFees === 'number' ? chVal.platformFees : 0)
+          );
+          summarySc = Math.max(
+            0,
+            summarySc -
+              (typeof chVal?.serviceCharge === 'number' ? chVal.serviceCharge : summarySc * share)
+          );
+          summaryFoodCogs = Math.max(
+            0,
+            summaryFoodCogs -
+              (typeof chVal?.totalFoodCost === 'number' ? chVal.totalFoodCost : summaryFoodCogs * share)
+          );
+          summaryPkgCogs = Math.max(
+            0,
+            summaryPkgCogs -
+              (typeof chVal?.packagingCost === 'number' ? chVal.packagingCost : summaryPkgCogs * share)
+          );
+        } else {
+          posDateChannelKeys.add(key);
+        }
       }
     } else if ((s.netSales || 0) > 0 || (s.orderCount || 0) > 0) {
       posWholeDateCovered.add(s.date);
     }
+
+    netSalesExVatRaw += summaryNet;
+    grossSalesRefRaw += summaryGross;
+    discountsRefRaw += summaryDisc;
+    serviceChargeCollectedRaw += summarySc;
+    vatTotalRaw += Math.max(0, s.vat || 0);
+    orderCount += summaryOrders;
+    channelFeesRaw += summaryFees;
+    posFoodCogsRaw += summaryFoodCogs;
+    posPackagingCogsRaw += summaryPkgCogs;
   }
 
   // Add SaleOrder food/packaging COGS ONLY for dates not already covered by POS dailySummaries (avoid double-counting)
@@ -1523,10 +1678,6 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     unmatchedOrderFoodCogsRaw += Math.max(0, order.totalFoodCost || 0);
     unmatchedOrderPackagingCogsRaw += Math.max(0, order.packagingCost || 0);
   }
-
-  // Fallback pos_sync_* entries in manualSales only when summaries lacked that date
-  const posSyncEntries = periodManual.filter((r) => r.id?.startsWith('pos_sync_'));
-  const manualOnlyEntries = periodManual.filter((r) => !r.id?.startsWith('pos_sync_'));
 
   let manualSalesCount = 0;
   let deduplicatedManualSkippedCount = 0;
@@ -1550,7 +1701,7 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
   for (const rec of posSyncEntries) {
     const normCh = normalizeChannelId(rec.channelId || rec.channelName);
     const key = `${rec.date}::${normCh}`;
-    if (posDatesAll.has(rec.date) || posDateChannelKeys.has(key)) {
+    if (posDatesAll.has(rec.date) || posDateChannelKeys.has(key) || replacedPosKeys.has(key)) {
       deduplicatedManualSkippedCount += 1;
       continue;
     }
@@ -1560,8 +1711,12 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     grossSalesRefRaw += Math.max(0, rec.grossSales || 0);
     discountsRefRaw += Math.max(0, rec.discounts || 0);
     refundsRefRaw += Math.max(0, rec.refunds || 0);
+    serviceChargeCollectedRaw += Math.max(0, rec.serviceCharge || 0);
     orderCount += Math.max(0, rec.orderCount || 0);
     channelFeesRaw += Math.max(0, rec.platformFees || 0);
+    if (rec.estimatedAllocation) {
+      estimatedAllocationCount += 1;
+    }
     if (typeof rec.foodCost === 'number') {
       manualExplicitFoodCogsRaw += Math.max(0, rec.foodCost);
       manualExplicitPackagingCogsRaw += Math.max(0, rec.packagingCost || 0);
@@ -1575,7 +1730,7 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
   for (const rec of manualOnlyEntries) {
     const normCh = normalizeChannelId(rec.channelId || rec.channelName);
     const key = `${rec.date}::${normCh}`;
-    if (posWholeDateCovered.has(rec.date) || posDateChannelKeys.has(key)) {
+    if (!rec.replacesPosSync && (posWholeDateCovered.has(rec.date) || posDateChannelKeys.has(key))) {
       deduplicatedManualSkippedCount += 1;
       continue;
     }
@@ -1584,8 +1739,12 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
     grossSalesRefRaw += Math.max(0, rec.grossSales || 0);
     discountsRefRaw += Math.max(0, rec.discounts || 0);
     refundsRefRaw += Math.max(0, rec.refunds || 0);
+    serviceChargeCollectedRaw += Math.max(0, rec.serviceCharge || 0);
     orderCount += Math.max(0, rec.orderCount || 0);
     channelFeesRaw += Math.max(0, rec.platformFees || 0);
+    if (rec.estimatedAllocation) {
+      estimatedAllocationCount += 1;
+    }
     if (typeof rec.foodCost === 'number') {
       manualExplicitFoodCogsRaw += Math.max(0, rec.foodCost);
       manualExplicitPackagingCogsRaw += Math.max(0, rec.packagingCost || 0);
@@ -1860,6 +2019,8 @@ export function buildPeriodPnl(input: BuildPeriodPnlInput): PeriodPnlResult {
 
     cogsStatus,
     statusReasons,
+    hasEstimatedChannelAllocation: estimatedAllocationCount > 0,
+    estimatedAllocationCount,
     sourcesUsed: {
       posSummaryCount: periodSummaries.length,
       manualSalesCount: manualSalesCount + manualSalesWithExplicitCogsCount * 0,
@@ -2068,11 +2229,11 @@ export function deriveVariableCostPercent(
 }
 
 /**
- * Calculates break-even sales:
- * Break-even Sales = Total Fixed Overhead / Contribution Margin %
- * Daily Break-even = Monthly / Operating Days
+ * Calculates simple monthly & daily **ex-VAT** break-even net sales from monthly fixed overhead & labor:
+ * Break-even Sales (ex-VAT) = (Monthly Fixed Expenses + Monthly Labor Cost) / (Contribution Margin % / 100)
+ * Daily Break-even (ex-VAT) = Monthly Break-even / Operating Days
  */
-export function calculateBreakEven(
+export function calculateSimpleMonthlyBreakEven(
   monthlyFixedExpenses: number,
   monthlyLaborCost: number,
   contributionMarginPercent: number,

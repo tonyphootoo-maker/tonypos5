@@ -11,12 +11,14 @@ import { translations } from '../i18n/translations';
 import {
   formatMoney,
   calculateEmployeeMonthlyCost,
-  calculateBreakEven,
+  calculateSimpleMonthlyBreakEven,
   calculatePeriodExpensesAndLabor,
   deriveVariableCostPercent,
   getBusinessWorkDate,
   roundTo2,
   formatPercent,
+  formatPeriodCalculationLabel,
+  isExplicitPayrollExpense,
 } from '../engine/calculations';
 import {
   subscribeCollection,
@@ -38,6 +40,7 @@ import {
   Flame,
   Wrench,
   ShoppingBag,
+  AlertTriangle,
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -72,7 +75,8 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
 
   // Break-even optional custom override (derived automatically from real 30-day data by default)
   const [useCustomOverride, setUseCustomOverride] = useState<boolean>(false);
-  const [overrideContributionMargin, setOverrideContributionMargin] = useState<number>(65);
+  const [overrideContributionMargin, setOverrideContributionMargin] = useState<number>(0);
+  const [excludePayrollDuplicates, setExcludePayrollDuplicates] = useState<boolean>(true);
 
   const todayStr = getBusinessWorkDate(new Date(), settings.dailyClosingTime);
 
@@ -98,21 +102,48 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
     };
   }, [todayStr, settings.dailyClosingTime]);
 
-  // Compute current month fixed expenses & labor via centralized engine
+  const laborOptions = {
+    socialSecurityEnabled: Boolean(settings.socialSecurityEnabled),
+    socialSecurityRatePercent: settings.socialSecurityRatePercent ?? 5,
+    socialSecurityCapWage: settings.socialSecurityCapWage ?? 15000,
+    defaultOperatingDays: settings.operatingDaysPerMonth || 26,
+  };
+
+  // Explicit payroll duplicate detection (no brittle keyword matching)
+  const payrollFlaggedExpenses = expenses.filter((e) => isExplicitPayrollExpense(e));
+  const activeEmployeesCount = employees.filter((e) => e.isActive !== false).length;
+  const hasDuplicatePayroll = activeEmployeesCount > 0 && payrollFlaggedExpenses.length > 0;
+  const effectiveExpenses =
+    hasDuplicatePayroll && excludePayrollDuplicates
+      ? expenses.filter((e) => !isExplicitPayrollExpense(e))
+      : expenses;
+
+  // Compute current month fixed/variable expenses & labor via centralized engine
   const currentMonth = todayStr.substring(0, 7);
-  const monthlyCosts = calculatePeriodExpensesAndLabor('month', currentMonth, expenses, employees);
+  const periodLabel = formatPeriodCalculationLabel('month', currentMonth, lang);
+  const monthlyCosts = calculatePeriodExpensesAndLabor(
+    'month',
+    currentMonth,
+    effectiveExpenses,
+    employees,
+    undefined,
+    laborOptions
+  );
   const totalMonthlyFixedExpenses = monthlyCosts.fixedExpenses;
   const totalMonthlyLabor = monthlyCosts.laborCost;
 
-  // Derive Variable Cost % and Contribution Margin % from last 30 days' real data
-  const derivedMargin = deriveVariableCostPercent(last30Summaries);
+  // Derive Variable Cost % and Contribution Margin % from last 30 days' real data (including variable OpEx)
+  const derivedMargin = deriveVariableCostPercent(last30Summaries, {
+    otherVariableCostAmount: monthlyCosts.variableExpenses,
+  });
+  const isUsingAssumedCm = useCustomOverride || !derivedMargin.hasRealData;
   const activeContributionMarginPercent = useCustomOverride
     ? overrideContributionMargin
     : derivedMargin.contributionMarginPercent;
 
-  // Break-even calculation using real derived CM% (or user override) and configured operating days
-  const operatingDays = settings.operatingDaysPerMonth || 30;
-  const breakEven = calculateBreakEven(
+  // Break-even calculation using real derived CM% (or explicit user assumption) and configured operating days
+  const operatingDays = settings.operatingDaysPerMonth || 26;
+  const breakEven = calculateSimpleMonthlyBreakEven(
     totalMonthlyFixedExpenses,
     totalMonthlyLabor,
     activeContributionMarginPercent,
@@ -136,6 +167,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
       date: editingExpense.date || new Date().toISOString().split('T')[0],
       isFixed: editingExpense.isFixed ?? true,
       isRecurring: editingExpense.isRecurring ?? true,
+      ...(editingExpense.isPayroll !== undefined ? { isPayroll: editingExpense.isPayroll } : {}),
       createdAt: editingExpense.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       version: editingExpense.version || 1,
@@ -155,13 +187,15 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
     if (!editingEmployee || !editingEmployee.name || !editingEmployee.wageAmount) return;
 
     const isNew = !editingEmployee.id;
+    const wType = editingEmployee.wageType || 'monthly';
     const empToSave: EmployeeDoc = {
       id: editingEmployee.id || `emp_${Date.now()}`,
       name: editingEmployee.name,
       role: editingEmployee.role || 'Staff',
-      wageType: editingEmployee.wageType || 'monthly',
+      wageType: wType,
       wageAmount: editingEmployee.wageAmount || 0,
-      workDaysOrHoursPerMonth: editingEmployee.workDaysOrHoursPerMonth || 26,
+      workDaysOrHoursPerMonth:
+        editingEmployee.workDaysOrHoursPerMonth || (wType === 'hourly' ? 208 : 26),
       ...(editingEmployee.phone ? { phone: editingEmployee.phone } : {}),
       isActive: editingEmployee.isActive ?? true,
       createdAt: editingEmployee.createdAt || new Date().toISOString(),
@@ -219,12 +253,47 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
         </button>
       </div>
 
+      {/* Explicit Payroll Overlap Warning */}
+      {hasDuplicatePayroll && (
+        <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-start sm:items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            <div>
+              <strong className="font-bold">
+                {lang === 'th'
+                  ? `พบค่าใช้จ่าย Payroll (${payrollFlaggedExpenses.length} รายการ) ร่วมกับข้อมูลพนักงาน (${activeEmployeesCount} คน)`
+                  : `Found ${payrollFlaggedExpenses.length} Payroll expense(s) alongside ${activeEmployeesCount} active staff`}
+              </strong>
+              <span className="block text-[11px] text-amber-800">
+                {excludePayrollDuplicates
+                  ? lang === 'th'
+                    ? 'ระบบตัดรายการ Payroll ในค่าใช้จ่ายออกเพื่อไม่ให้นับซ้ำ'
+                    : 'Excluded from overhead to avoid double counting.'
+                  : lang === 'th'
+                  ? 'กำลังนับรวมทั้งคู่'
+                  : 'Both payroll expenses and staff records are included.'}
+              </span>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setExcludePayrollDuplicates((prev) => !prev)}
+            className="px-3 py-1.5 rounded-xl bg-white border border-amber-300 text-amber-900 font-bold hover:bg-amber-100 cursor-pointer shrink-0 text-[11px]"
+          >
+            {excludePayrollDuplicates
+              ? lang === 'th' ? 'นำกลับมานับรวม' : 'Include Anyway'
+              : lang === 'th' ? 'ตัดรายการซ้ำออก' : 'Exclude Duplicates'}
+          </button>
+        </div>
+      )}
+
       {/* TAB: EXPENSES */}
       {activeTab === 'expenses' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <div className="text-xs text-neutral-600">
               Total Monthly Fixed Overhead: <strong className="text-emerald-700 font-extrabold">฿{formatMoney(totalMonthlyFixedExpenses)}</strong>
+              <span className="text-[11px] text-neutral-400 ml-2">({periodLabel})</span>
             </div>
             <button
               onClick={() => {
@@ -234,6 +303,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   amount: 15000,
                   isFixed: true,
                   isRecurring: true,
+                  isPayroll: false,
                   date: new Date().toISOString().split('T')[0],
                 });
                 setIsExpenseModalOpen(true);
@@ -252,15 +322,22 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                 className="p-3.5 bg-white rounded-2xl border border-neutral-200 shadow-xs flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex justify-between items-start">
+                  <div className="flex justify-between items-start gap-1">
                     <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700">
                       {exp.category}
                     </span>
-                    {exp.isRecurring && (
-                      <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                        Monthly
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {isExplicitPayrollExpense(exp) && (
+                        <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
+                          Payroll
+                        </span>
+                      )}
+                      {exp.isRecurring && (
+                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                          Monthly
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <h4 className="font-black text-sm text-neutral-900 mt-2">
@@ -312,6 +389,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
           <div className="flex justify-between items-center">
             <div className="text-xs text-neutral-600">
               Total Monthly Labor Cost: <strong className="text-emerald-700 font-extrabold">฿{formatMoney(totalMonthlyLabor)}</strong>
+              <span className="text-[11px] text-neutral-400 ml-2">({periodLabel})</span>
             </div>
             <button
               onClick={() => {
@@ -334,7 +412,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {employees.map((emp) => {
-              const monthlyCost = calculateEmployeeMonthlyCost(emp);
+              const monthlyCost = calculateEmployeeMonthlyCost(emp, laborOptions);
               return (
                 <div
                   key={emp.id}
@@ -399,10 +477,20 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
       {/* TAB: BREAK-EVEN CALCULATOR */}
       {activeTab === 'breakeven' && (
         <div className="max-w-2xl bg-white p-5 rounded-3xl border border-neutral-200 shadow-xs space-y-4">
-          <h3 className="font-black text-base text-neutral-900 flex items-center gap-2">
-            <Calculator className="w-5 h-5 text-orange-600" />
-            <span>{t.finance.tabBreakEven}</span>
-          </h3>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="font-black text-base text-neutral-900 flex items-center gap-2">
+                <Calculator className="w-5 h-5 text-orange-600" />
+                <span>{t.finance.tabBreakEven}</span>
+              </h3>
+              <p className="text-[11px] text-neutral-500 mt-0.5">{periodLabel}</p>
+            </div>
+            {isUsingAssumedCm && activeContributionMarginPercent > 0 && (
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                {lang === 'th' ? 'ค่าสมมติ' : 'Assumed'}
+              </span>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-neutral-50 rounded-2xl text-xs">
             <div>
@@ -435,11 +523,17 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-extrabold">
-                {derivedMargin.hasRealData ? t.finance.derivedVariableCostNote : t.finance.estimatedDefaultNote}
+                {derivedMargin.hasRealData
+                  ? t.finance.derivedVariableCostNote
+                  : lang === 'th'
+                  ? 'ยังไม่มียอดขาย 30 วัน — โปรดกรอก CM% สมมติด้านล่างเพื่อคำนวณ'
+                  : 'No 30-day real sales yet — enter an assumed CM% below'}
               </span>
-              <span className="font-black text-sm">
-                Var Cost {formatPercent(derivedMargin.variableCostPercent)} → CM {formatPercent(derivedMargin.contributionMarginPercent)}
-              </span>
+              {derivedMargin.hasRealData && (
+                <span className="font-black text-sm">
+                  Var Cost {formatPercent(derivedMargin.variableCostPercent)} → CM {formatPercent(derivedMargin.contributionMarginPercent)}
+                </span>
+              )}
             </div>
             {derivedMargin.hasRealData ? (
               <div className="text-[11px] opacity-80">
@@ -447,7 +541,9 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
               </div>
             ) : (
               <div className="text-[11px] opacity-80">
-                Estimate (35% Variable Cost / 65% Contribution Margin) shown until sales are recorded.
+                {lang === 'th'
+                  ? 'ระบบไม่ใช้ค่า 65% อัตโนมัติแบบเงียบๆ หากต้องการจำลองจุดคุ้มทุน ให้เปิดสวิตช์ระบุค่าสมมติ'
+                  : 'No silent default CM% is applied. Enable the override toggle to enter an explicit assumed CM%.'}
               </div>
             )}
           </div>
@@ -462,7 +558,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   onChange={(e) => {
                     const checked = e.target.checked;
                     setUseCustomOverride(checked);
-                    if (checked) {
+                    if (checked && overrideContributionMargin <= 0 && derivedMargin.hasRealData) {
                       setOverrideContributionMargin(Math.round(derivedMargin.contributionMarginPercent));
                     }
                   }}
@@ -476,14 +572,20 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
             </label>
 
             {useCustomOverride && (
-              <input
-                type="range"
-                min={10}
-                max={95}
-                value={overrideContributionMargin}
-                onChange={(e) => setOverrideContributionMargin(parseInt(e.target.value, 10))}
-                className="w-full accent-orange-600 cursor-pointer"
-              />
+              <div className="flex items-center gap-2 pt-1">
+                <NumericInput
+                  min={1}
+                  max={95}
+                  value={overrideContributionMargin}
+                  onValueChange={(val) =>
+                    setOverrideContributionMargin(Math.max(0, Math.min(95, val)))
+                  }
+                  className="w-24 px-2.5 py-1 text-xs bg-white border border-amber-300 rounded-lg font-bold"
+                />
+                <span className="text-xs font-bold text-amber-800">
+                  % ({lang === 'th' ? 'ค่าสมมติ' : 'Assumed'})
+                </span>
+              </div>
             )}
           </div>
 
@@ -492,14 +594,22 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
             <div className="p-4 bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 rounded-2xl text-center">
               <div className="text-xs font-bold text-orange-800">{t.finance.breakEvenMonthlyRevenue}</div>
               <div className="text-xl font-black text-neutral-900 mt-1">
-                ฿{formatMoney(breakEven.monthlyBreakEvenSales)}
+                {activeContributionMarginPercent > 0
+                  ? `฿${formatMoney(breakEven.monthlyBreakEvenSales)}`
+                  : lang === 'th'
+                  ? 'รอข้อมูล / CM%'
+                  : 'N/A'}
               </div>
             </div>
 
             <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl text-center">
               <div className="text-xs font-bold text-emerald-800">{t.finance.breakEvenDailyRevenue}</div>
               <div className="text-xl font-black text-emerald-900 mt-1">
-                ฿{formatMoney(breakEven.dailyBreakEvenSales)}
+                {activeContributionMarginPercent > 0
+                  ? `฿${formatMoney(breakEven.dailyBreakEvenSales)}`
+                  : lang === 'th'
+                  ? 'รอข้อมูล / CM%'
+                  : 'N/A'}
               </div>
               <div className="text-[10px] text-emerald-700 mt-0.5">
                 ÷ {breakEven.operatingDays} operating days
@@ -587,6 +697,19 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   {t.finance.isRecurring}
                 </label>
               </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="chkPayroll"
+                  checked={Boolean(editingExpense.isPayroll)}
+                  onChange={(e) => setEditingExpense({ ...editingExpense, isPayroll: e.target.checked })}
+                  className="w-4 h-4 text-orange-600 rounded"
+                />
+                <label htmlFor="chkPayroll" className="text-xs text-neutral-700 font-semibold cursor-pointer">
+                  {lang === 'th' ? 'เป็นรายการเงินเดือน/ค่าแรงพนักงาน (Payroll)' : 'Staff Payroll Expense'}
+                </label>
+              </div>
             </div>
 
             <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
@@ -662,7 +785,14 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   </label>
                   <select
                     value={editingEmployee.wageType || 'monthly'}
-                    onChange={(e) => setEditingEmployee({ ...editingEmployee, wageType: e.target.value as WageType })}
+                    onChange={(e) => {
+                      const nextType = e.target.value as WageType;
+                      setEditingEmployee({
+                        ...editingEmployee,
+                        wageType: nextType,
+                        workDaysOrHoursPerMonth: nextType === 'hourly' ? 208 : 26,
+                      });
+                    }}
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                   >
                     <option value="monthly">{t.finance.monthly}</option>
@@ -686,6 +816,25 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   />
                 </div>
               </div>
+
+              {(editingEmployee.wageType === 'hourly' || editingEmployee.wageType === 'daily') && (
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    {editingEmployee.wageType === 'hourly'
+                      ? lang === 'th' ? 'ชั่วโมงทำงานต่อเดือน' : 'Hours per Month'
+                      : lang === 'th' ? 'วันทำงานต่อเดือน' : 'Work Days per Month'}
+                  </label>
+                  <NumericInput
+                    min={1}
+                    max={744}
+                    value={editingEmployee.workDaysOrHoursPerMonth ?? (editingEmployee.wageType === 'hourly' ? 208 : 26)}
+                    onValueChange={(val) =>
+                      setEditingEmployee({ ...editingEmployee, workDaysOrHoursPerMonth: Math.max(1, val) })
+                    }
+                    className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl font-bold"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">

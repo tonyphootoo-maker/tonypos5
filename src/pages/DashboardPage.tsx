@@ -16,7 +16,7 @@ import {
   formatPercent,
   getBusinessWorkDate,
   calculateDishVariantCost,
-  calculateFoodCostPercent,
+  calculateExVatFoodCostPercent,
   extractNetPriceFromMenuPrice,
   calculatePeriodExpensesAndLabor,
   calculateUsaliPnl,
@@ -111,7 +111,7 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
         settings.serviceChargeIncludedInPrice,
         settings.serviceChargePercent
       );
-      const pct = calculateFoodCostPercent(costCalc.foodCost, netVariantPrice);
+      const pct = calculateExVatFoodCostPercent(costCalc.foodCost, netVariantPrice);
       if (pct > settings.targetFoodCostPercent) {
         dishesAboveTarget.push({ dish, costPct: pct, hasMissing: costCalc.hasMissing });
       }

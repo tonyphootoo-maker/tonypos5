@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Scale, AlertCircle, CheckCircle2, Target, AlertTriangle, RotateCcw } from 'lucide-react';
 import { ExpenseRecord, Employee, DailySalesRecord, BusinessSettings } from '../../types/domain';
 import { DailySummaryDoc } from '../../../types';
-import { calculateBreakEven, convertExpenseToMonthly, calculateOverheadRatePercent } from '../../engine/calculations';
+import { calculateDetailedBreakEven, convertExpenseToMonthly, calculateOverheadRatePercent } from '../../engine/calculations';
 import {
   getEmployeeMonthlyCost,
   isExplicitPayrollExpense,
@@ -158,7 +158,8 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
     if (recentSummaries && recentSummaries.length > 0) return recentSummaries;
     return sales
       .filter((s) => (s.netSales || 0) > 0 && (typeof s.foodCost === 'number' || (s.platformFees || 0) > 0 || (s.packagingCost || 0) > 0))
-      .map((s) => ({
+      .map((s, idx) => ({
+        id: s.id || `sum_${s.date}_${idx}`,
         date: s.date,
         grossSales: s.grossSales || 0,
         discounts: s.discounts || 0,
@@ -168,11 +169,11 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
         totalFoodCost: s.foodCost || 0,
         packagingCost: s.packagingCost || 0,
         platformFees: s.platformFees || 0,
-        grossProfit: 0,
         orderCount: s.orderCount || 0,
-        paymentTotals: {},
+        paymentTotals: { cash: 0, qr: 0, card: 0, transfer: 0 },
         channelTotals: {},
         dishStats: {},
+        createdAt: '',
         updatedAt: '',
         version: 1,
       }));
@@ -214,7 +215,7 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
 
   const isAssumedCM = !derivedMargin.hasRealData || isCmEdited;
 
-  const breakEven = calculateBreakEven(
+  const breakEven = calculateDetailedBreakEven(
     fixedCosts,
     contributionMarginPercent,
     averageTicket,

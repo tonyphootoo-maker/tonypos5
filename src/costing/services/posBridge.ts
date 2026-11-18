@@ -18,6 +18,7 @@ import {
 import { fetchCollection, saveDocument } from '../../data/db';
 import { calculateIngredientCostPerBaseUnit } from '../../engine/calculations';
 import { translateThaiToEnglish } from '../../utils/thaiToEnglish';
+import { convertUnit } from '../engine/units';
 
 function mapUnitToPosPurchaseUnit(unit: string): {
   purchaseUnit: string;
@@ -25,7 +26,7 @@ function mapUnitToPosPurchaseUnit(unit: string): {
   multiplierToBase: number;
 } {
   const u = (unit || '').toLowerCase().trim();
-  if (u === 'kg' || u === 'กิโลกรัม') {
+  if (u === 'kg' || u === 'กิโลกรัม' || u === 'กก.') {
     return { purchaseUnit: 'kg', baseUnit: 'g', multiplierToBase: 1000 };
   }
   if (u === 'g' || u === 'กรัม') {
@@ -34,10 +35,35 @@ function mapUnitToPosPurchaseUnit(unit: string): {
   if (u === 'l' || u === 'ลิตร') {
     return { purchaseUnit: 'l', baseUnit: 'ml', multiplierToBase: 1000 };
   }
-  if (u === 'ml' || u === 'มิลลิลิตร') {
+  if (u === 'ml' || u === 'มิลลิลิตร' || u === 'มล.') {
     return { purchaseUnit: 'ml', baseUnit: 'ml', multiplierToBase: 1 };
   }
+  if (u === 'tbsp' || u === 'ช้อนโต๊ะ') {
+    return { purchaseUnit: 'ml', baseUnit: 'ml', multiplierToBase: 15 };
+  }
+  if (u === 'tsp' || u === 'ช้อนชา') {
+    return { purchaseUnit: 'ml', baseUnit: 'ml', multiplierToBase: 5 };
+  }
+  if (u === 'cup' || u === 'ถ้วย' || u === 'ถ้วยตวง') {
+    return { purchaseUnit: 'ml', baseUnit: 'ml', multiplierToBase: 240 };
+  }
   return { purchaseUnit: 'piece', baseUnit: 'piece', multiplierToBase: 1 };
+}
+
+function convertRecipeQtyToPosBase(
+  quantity: number,
+  fromUnit: string,
+  targetBaseUnit: 'g' | 'ml' | 'piece'
+): number {
+  const conv = convertUnit(quantity, fromUnit, targetBaseUnit);
+  if (conv.success) {
+    return conv.convertedQuantity;
+  }
+  const { baseUnit, multiplierToBase } = mapUnitToPosPurchaseUnit(fromUnit);
+  if (baseUnit === targetBaseUnit) {
+    return quantity * multiplierToBase;
+  }
+  return quantity;
 }
 
 function normalizePosId(raw: string): string {
@@ -181,17 +207,23 @@ async function syncSingleMenuWithContext(
     for (const item of sauce.items || []) {
       const mappedIngId = await ensureIngredientInPos(item.ingredientId);
       if (mappedIngId) {
-        const { multiplierToBase } = mapUnitToPosPurchaseUnit(item.unit);
+        const posIng = posIngById.get(mappedIngId);
+        const targetBase: 'g' | 'ml' | 'piece' = posIng?.baseUnit || mapUnitToPosPurchaseUnit(item.unit).baseUnit;
         subIngs.push({
           ingredientId: mappedIngId,
-          quantity: (item.quantity || 0) * multiplierToBase,
+          quantity: convertRecipeQtyToPosBase(item.quantity || 0, item.unit, targetBase),
         });
       }
     }
 
-    const { multiplierToBase: outMult } = mapUnitToPosPurchaseUnit(sauce.productionUnit);
-    const outQty = Math.max(1, (sauce.actualQuantity || sauce.productionQuantity || 1) * outMult);
-    const outUnit = sauce.productionUnit === 'kg' ? 'g' : sauce.productionUnit === 'l' ? 'ml' : 'g';
+    const rawActual = Number(sauce.actualQuantity);
+    if (!Number.isFinite(rawActual) || rawActual <= 0) {
+      return null;
+    }
+    const { baseUnit: outUnit, multiplierToBase: outMult } = mapUnitToPosPurchaseUnit(sauce.productionUnit);
+    const convOut = convertUnit(rawActual, sauce.productionUnit, outUnit === 'piece' ? 'g' : outUnit);
+    const outQty = convOut.success ? convOut.convertedQuantity : rawActual * outMult;
+    const normalizedOutUnit = outUnit === 'ml' ? 'ml' : 'g';
 
     const existingSub = existingSubRecipes.find(
       (s) =>
@@ -202,12 +234,12 @@ async function syncSingleMenuWithContext(
     if (existingSub) {
       const changed =
         existingSub.outputQuantity !== outQty ||
-        existingSub.outputUnit !== outUnit ||
+        existingSub.outputUnit !== normalizedOutUnit ||
         JSON.stringify(existingSub.ingredients) !== JSON.stringify(subIngs);
       if (changed) {
         const updatedSub: SubRecipeDoc = {
           ...existingSub,
-          outputUnit: outUnit,
+          outputUnit: normalizedOutUnit,
           outputQuantity: outQty,
           ingredients: subIngs,
           updatedAt: now,
@@ -226,7 +258,7 @@ async function syncSingleMenuWithContext(
       id: posSubId,
       name: sauce.englishName || translateThaiToEnglish(thName) || thName,
       nameTh: thName,
-      outputUnit: outUnit,
+      outputUnit: normalizedOutUnit,
       outputQuantity: outQty,
       ingredients: subIngs,
       subRecipes: [],
@@ -285,10 +317,11 @@ async function syncSingleMenuWithContext(
       } else {
         const mappedIng = await ensureIngredientInPos(r.ingredientId);
         if (mappedIng) {
-          const { multiplierToBase } = mapUnitToPosPurchaseUnit(r.unit);
+          const posIng = posIngById.get(mappedIng);
+          const targetBase: 'g' | 'ml' | 'piece' = posIng?.baseUnit || mapUnitToPosPurchaseUnit(r.unit).baseUnit;
           vIngs.push({
             ingredientId: mappedIng,
-            quantity: (r.quantity || 0) * multiplierToBase,
+            quantity: convertRecipeQtyToPosBase(r.quantity || 0, r.unit, targetBase),
           });
         }
       }
@@ -690,22 +723,29 @@ export async function importCostingVariantToDishVariant(params: {
     for (const item of sauce.items || []) {
       const mappedIngId = await ensureIngredientInPos(item.ingredientId);
       if (mappedIngId) {
-        const { multiplierToBase } = mapUnitToPosPurchaseUnit(item.unit);
+        const posIng = posIngById.get(mappedIngId);
+        const targetBase: 'g' | 'ml' | 'piece' = posIng?.baseUnit || mapUnitToPosPurchaseUnit(item.unit).baseUnit;
         subIngs.push({
           ingredientId: mappedIngId,
-          quantity: (item.quantity || 0) * multiplierToBase,
+          quantity: convertRecipeQtyToPosBase(item.quantity || 0, item.unit, targetBase),
         });
       }
     }
 
-    const { multiplierToBase: outMult } = mapUnitToPosPurchaseUnit(sauce.productionUnit);
+    const rawActual = Number(sauce.actualQuantity);
+    if (!Number.isFinite(rawActual) || rawActual <= 0) {
+      return null;
+    }
+    const { baseUnit: outUnit, multiplierToBase: outMult } = mapUnitToPosPurchaseUnit(sauce.productionUnit);
+    const convOut = convertUnit(rawActual, sauce.productionUnit, outUnit === 'piece' ? 'g' : outUnit);
+    const outQty = convOut.success ? convOut.convertedQuantity : rawActual * outMult;
     const thName = sauce.thaiName || sauce.name;
     const newSub: SubRecipeDoc = {
       id: posSubId,
       name: sauce.englishName || translateThaiToEnglish(thName) || thName,
       nameTh: thName,
-      outputUnit: sauce.productionUnit === 'kg' ? 'g' : sauce.productionUnit === 'l' ? 'ml' : 'g',
-      outputQuantity: Math.max(1, (sauce.actualQuantity || sauce.productionQuantity || 1) * outMult),
+      outputUnit: outUnit === 'ml' ? 'ml' : 'g',
+      outputQuantity: outQty,
       ingredients: subIngs,
       subRecipes: [],
       createdAt: now,
@@ -753,10 +793,11 @@ export async function importCostingVariantToDishVariant(params: {
     } else {
       const mappedIng = await ensureIngredientInPos(r.ingredientId);
       if (mappedIng) {
-        const { multiplierToBase } = mapUnitToPosPurchaseUnit(r.unit);
+        const posIng = posIngById.get(mappedIng);
+        const targetBase: 'g' | 'ml' | 'piece' = posIng?.baseUnit || mapUnitToPosPurchaseUnit(r.unit).baseUnit;
         vIngs.push({
           ingredientId: mappedIng,
-          quantity: (r.quantity || 0) * multiplierToBase,
+          quantity: convertRecipeQtyToPosBase(r.quantity || 0, r.unit, targetBase),
         });
       }
     }

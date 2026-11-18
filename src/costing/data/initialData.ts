@@ -28,7 +28,12 @@ export const INITIAL_SETTINGS: RestaurantSettings = {
   packagingCostTakeaway: 5.0,
   deliveryPackagingCost: 8.0,
   grabFoodCommissionPercent: 30.0,
+  grabFoodCommissionHasVat: true,
   lineManCommissionPercent: 25.0,
+  lineManCommissionHasVat: true,
+  commissionVatAsCost: true,
+  priceRounding: 1,
+  defaultTicketSize: 140,
   channels: [
     {
       channelId: 'dinein',

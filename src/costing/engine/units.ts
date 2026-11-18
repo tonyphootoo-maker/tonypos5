@@ -5,6 +5,95 @@
 
 import { UnitType } from '../types/domain';
 
+// Normalized unit aliases (Thai + English)
+const UNIT_ALIASES: Record<string, string> = {
+  g: 'g',
+  gm: 'g',
+  gram: 'g',
+  grams: 'g',
+  'กรัม': 'g',
+  'ก.': 'g',
+  kg: 'kg',
+  kilogram: 'kg',
+  kilograms: 'kg',
+  'กิโลกรัม': 'kg',
+  'กก.': 'kg',
+  'กก': 'kg',
+  mg: 'mg',
+  milligram: 'mg',
+  milligrams: 'mg',
+  'มิลลิกรัม': 'mg',
+  'มก.': 'mg',
+  ml: 'ml',
+  cc: 'ml',
+  milliliter: 'ml',
+  milliliters: 'ml',
+  'มิลลิลิตร': 'ml',
+  'มล.': 'ml',
+  'มล': 'ml',
+  'ซีซี': 'ml',
+  l: 'l',
+  liter: 'l',
+  liters: 'l',
+  litre: 'l',
+  litres: 'l',
+  'ลิตร': 'l',
+  'ล.': 'l',
+  tbsp: 'tbsp',
+  tablespoon: 'tbsp',
+  tablespoons: 'tbsp',
+  'ช้อนโต๊ะ': 'tbsp',
+  'ชต.': 'tbsp',
+  tsp: 'tsp',
+  teaspoon: 'tsp',
+  teaspoons: 'tsp',
+  'ช้อนชา': 'tsp',
+  'ชช.': 'tsp',
+  cup: 'cup',
+  cups: 'cup',
+  'ถ้วย': 'cup',
+  'ถ้วยตวง': 'cup',
+  piece: 'piece',
+  pieces: 'piece',
+  pc: 'piece',
+  pcs: 'piece',
+  'ชิ้น': 'piece',
+  'อัน': 'piece',
+  egg: 'ฟอง',
+  eggs: 'ฟอง',
+  'ฟอง': 'ฟอง',
+  'ตัว': 'ตัว',
+  'ลูก': 'ลูก',
+  pack: 'pack',
+  packs: 'pack',
+  'แพ็ค': 'pack',
+  'แพค': 'pack',
+  'ห่อ': 'pack',
+  tray: 'tray',
+  'แผง': 'tray',
+  bottle: 'bottle',
+  'ขวด': 'bottle',
+  box: 'box',
+  'กล่อง': 'box',
+  can: 'can',
+  'กระป๋อง': 'can',
+  bag: 'bag',
+  'ถุง': 'bag',
+  portion: 'portion',
+  'ที่': 'portion',
+  'พอร์ชั่น': 'portion',
+  serving: 'serving',
+  'เสิร์ฟ': 'serving',
+  'จาน': 'serving',
+  'มัด': 'มัด',
+  'ชุด': 'ชุด',
+};
+
+export function normalizeUnitToken(unit: string | undefined | null): string {
+  const raw = (unit || '').trim().toLowerCase();
+  return UNIT_ALIASES[raw] || raw;
+}
+
 // Standard base conversions
 const MASS_TO_GRAM: Record<string, number> = {
   g: 1,
@@ -23,15 +112,26 @@ const VOLUME_TO_ML: Record<string, number> = {
 const COUNT_UNITS = new Set([
   'piece',
   'pack',
+  'tray',
   'bottle',
   'box',
   'can',
   'bag',
   'egg',
+  'ฟอง',
+  'ตัว',
+  'ลูก',
   'portion',
   'serving',
+  'มัด',
+  'ชุด',
   'custom',
 ]);
+
+export function isPieceLikeUnit(unit: string | undefined | null): boolean {
+  const norm = normalizeUnitToken(unit);
+  return COUNT_UNITS.has(norm);
+}
 
 export interface ConversionResult {
   success: boolean;
@@ -45,13 +145,13 @@ export interface ConversionResult {
  * @param quantity Amount to convert
  * @param fromUnit Starting unit
  * @param toUnit Target unit
- * @param density Grams per milliliter (optional, defaults to 1.0 for aqueous liquids)
- * @param piecesPerPack Custom count factor if converting between packaging units
+ * @param density Grams per milliliter (optional)
+ * @param customMultiplier Custom count factor if converting between packaging units
  */
 export function convertUnit(
   quantity: number,
-  fromUnit: UnitType,
-  toUnit: UnitType,
+  fromUnit: UnitType | string,
+  toUnit: UnitType | string,
   density?: number,
   customMultiplier: number = 1.0
 ): ConversionResult {
@@ -64,8 +164,11 @@ export function convertUnit(
     };
   }
 
-  // Same unit
-  if (fromUnit === toUnit) {
+  const normFrom = normalizeUnitToken(fromUnit);
+  const normTo = normalizeUnitToken(toUnit);
+
+  // Same unit (including Thai/English aliases like กรัม -> g or ฟอง -> egg)
+  if (normFrom && normTo && normFrom === normTo) {
     return {
       success: true,
       convertedQuantity: quantity,
@@ -73,9 +176,9 @@ export function convertUnit(
   }
 
   // Mass to Mass
-  if (MASS_TO_GRAM[fromUnit] && MASS_TO_GRAM[toUnit]) {
-    const inGrams = quantity * MASS_TO_GRAM[fromUnit];
-    const target = inGrams / MASS_TO_GRAM[toUnit];
+  if (MASS_TO_GRAM[normFrom] && MASS_TO_GRAM[normTo]) {
+    const inGrams = quantity * MASS_TO_GRAM[normFrom];
+    const target = inGrams / MASS_TO_GRAM[normTo];
     return {
       success: true,
       convertedQuantity: target,
@@ -83,9 +186,9 @@ export function convertUnit(
   }
 
   // Volume to Volume
-  if (VOLUME_TO_ML[fromUnit] && VOLUME_TO_ML[toUnit]) {
-    const inMl = quantity * VOLUME_TO_ML[fromUnit];
-    const target = inMl / VOLUME_TO_ML[toUnit];
+  if (VOLUME_TO_ML[normFrom] && VOLUME_TO_ML[normTo]) {
+    const inMl = quantity * VOLUME_TO_ML[normFrom];
+    const target = inMl / VOLUME_TO_ML[normTo];
     return {
       success: true,
       convertedQuantity: target,
@@ -93,7 +196,7 @@ export function convertUnit(
   }
 
   // Mass to Volume (using density: g / density = ml)
-  if (MASS_TO_GRAM[fromUnit] && VOLUME_TO_ML[toUnit]) {
+  if (MASS_TO_GRAM[normFrom] && VOLUME_TO_ML[normTo]) {
     if (density === undefined || density === null || density <= 0) {
       return {
         success: false,
@@ -102,9 +205,9 @@ export function convertUnit(
         errorMessageEn: `Density is required to convert from ${fromUnit} to ${toUnit}`,
       };
     }
-    const inGrams = quantity * MASS_TO_GRAM[fromUnit];
+    const inGrams = quantity * MASS_TO_GRAM[normFrom];
     const inMl = inGrams / density;
-    const target = inMl / VOLUME_TO_ML[toUnit];
+    const target = inMl / VOLUME_TO_ML[normTo];
     return {
       success: true,
       convertedQuantity: target,
@@ -112,7 +215,7 @@ export function convertUnit(
   }
 
   // Volume to Mass (using density: ml * density = g)
-  if (VOLUME_TO_ML[fromUnit] && MASS_TO_GRAM[toUnit]) {
+  if (VOLUME_TO_ML[normFrom] && MASS_TO_GRAM[normTo]) {
     if (density === undefined || density === null || density <= 0) {
       return {
         success: false,
@@ -121,9 +224,9 @@ export function convertUnit(
         errorMessageEn: `Density is required to convert from ${fromUnit} to ${toUnit}`,
       };
     }
-    const inMl = quantity * VOLUME_TO_ML[fromUnit];
+    const inMl = quantity * VOLUME_TO_ML[normFrom];
     const inGrams = inMl * density;
-    const target = inGrams / MASS_TO_GRAM[toUnit];
+    const target = inGrams / MASS_TO_GRAM[normTo];
     return {
       success: true,
       convertedQuantity: target,

@@ -1106,13 +1106,16 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   </div>
                 </div>
 
-                {/* Shrimp pieces definition */}
-                {editingIngredient.usageUnit === 'ตัว' && (
-                  <div className="mt-2 p-2.5 bg-[#FFC107]/10 rounded-xl border border-[#FFC107]/30 text-[11px] text-white/90">
-                    <span className="font-bold text-[#FFC107]">กุ้ง / ของคิดเป็นตัว:</span> ระบุจำนวนตัวต่อรอบซื้อ
-                    (เช่น 60 ตัว = 510 บาท ต้นทุน 8.50 บาท/ตัว)
-                    <div className="mt-1 flex items-center gap-2">
-                      <span>จำนวนตัวที่ใช้ได้:</span>
+                {/* Piece-based definition (กุ้ง/ไข่/ชิ้น/ลูก) */}
+                {(['ตัว', 'ฟอง', 'ชิ้น', 'ลูก'].includes(editingIngredient.usageUnit || '') ||
+                  (editingIngredient.piecesPerPurchaseUnit ?? 0) > 0) && (
+                  <div className="mt-2 p-2.5 bg-[#FFC107]/10 rounded-xl border border-[#FFC107]/30 text-[11px] text-white/90 space-y-2">
+                    <div>
+                      <span className="font-bold text-[#FFC107]">ของคิดเป็น{editingIngredient.usageUnit || 'ชิ้น'}:</span>{' '}
+                      ระบุจำนวนต่อ 1 หน่วยซื้อ (เช่น 30 ฟอง/แผง หรือ 60 ตัว/กล่อง)
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span>จำนวนต่อหน่วยซื้อ:</span>
                       <NumericInput
                         type="number"
                         value={editingIngredient.piecesPerPurchaseUnit || ''}
@@ -1123,10 +1126,24 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                           })
                         }
                         className="w-24 p-1 bg-black/40 border border-white/20 rounded font-bold text-white"
-                        placeholder="เช่น 60"
+                        placeholder="เช่น 30"
                       />
-                      <span>ตัว</span>
+                      <span>{editingIngredient.usageUnit || 'ชิ้น'}</span>
                     </div>
+                    <label className="flex items-center gap-2 cursor-pointer text-white/80">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(editingIngredient.piecesCountAlreadyYieldAdjusted)}
+                        onChange={(e) =>
+                          setEditingIngredient({
+                            ...editingIngredient,
+                            piecesCountAlreadyYieldAdjusted: e.target.checked,
+                          })
+                        }
+                        className="w-3.5 h-3.5 accent-[#FFC107] rounded"
+                      />
+                      <span>จำนวนนี้หักเปลือก/หัวแล้ว (ไม่ต้องหัก Yield % ซ้ำ)</span>
+                    </label>
                   </div>
                 )}
               </div>
@@ -1135,17 +1152,24 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               {(() => {
                 const previewCalc = calculateIngredientCost(editingIngredient);
                 return (
-                  <div className="p-3 bg-black/40 border border-white/10 rounded-2xl flex items-center justify-between font-mono">
-                    <div>
-                      <div className="text-[10px] text-white/40">ต้นทุนจริงหลังหัก Yield</div>
-                      <div className="font-bold text-sm text-white">฿{previewCalc.actualCost.toFixed(2)}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] text-[#F27D26]">ต้นทุนต่อหน่วยใช้งาน ({editingIngredient.usageUnit})</div>
-                      <div className="font-bold text-base text-[#FFC107]">
-                        ฿{previewCalc.costPerBaseUnit.toFixed(6)}
+                  <div className="space-y-2">
+                    <div className="p-3 bg-black/40 border border-white/10 rounded-2xl flex items-center justify-between font-mono">
+                      <div>
+                        <div className="text-[10px] text-white/40">ต้นทุนจริงหลังหัก Yield</div>
+                        <div className="font-bold text-sm text-white">฿{previewCalc.actualCost.toFixed(2)}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-[#F27D26]">ต้นทุนต่อหน่วยใช้งาน ({editingIngredient.usageUnit})</div>
+                        <div className="font-bold text-base text-[#FFC107]">
+                          ฿{previewCalc.costPerBaseUnit.toFixed(6)}
+                        </div>
                       </div>
                     </div>
+                    {!previewCalc.isValid && previewCalc.errorMessage && (
+                      <div className="p-2 bg-rose-500/15 border border-rose-500/30 rounded-xl text-[11px] text-rose-300 font-semibold">
+                        {previewCalc.errorMessage}
+                      </div>
+                    )}
                   </div>
                 );
               })()}

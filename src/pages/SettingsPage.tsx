@@ -492,6 +492,78 @@ export const SettingsPage: React.FC<Props> = ({
                   {lang === 'th' ? 'ประมาณการ — โปรดยืนยันกับนักบัญชี' : 'Estimate — please confirm with your accountant'}
                 </p>
               </div>
+
+              {/* Employer Social Security (Optional) */}
+              <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.socialSecurityEnabled)}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        socialSecurityEnabled: e.target.checked,
+                        socialSecurityRatePercent: form.socialSecurityRatePercent ?? 5,
+                        socialSecurityCapWage: form.socialSecurityCapWage ?? 15000,
+                      })
+                    }
+                    className="mt-0.5 w-4 h-4 accent-orange-600 rounded"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-neutral-900 block">
+                      {lang === 'th'
+                        ? 'รวมเงินสมทบประกันสังคมนายจ้าง (Employer SSO)'
+                        : 'Include Employer Social Security'}
+                    </span>
+                    <span className="text-[11px] text-neutral-500 block mt-0.5">
+                      {lang === 'th'
+                        ? 'ค่าเริ่มต้น 5% เพดานฐานเงินเดือน 15,000 บาท (สูงสุด 750 บาท/คน/เดือน)'
+                        : 'Default 5% capped at ฿15,000 base wage (max ฿750/mo)'}
+                    </span>
+                  </div>
+                </label>
+
+                {form.socialSecurityEnabled && (
+                  <div className="grid grid-cols-2 gap-2 pl-6 pt-1">
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-600 mb-0.5">
+                        {lang === 'th' ? 'อัตรา (%)' : 'Rate (%)'}
+                      </label>
+                      <NumericInput
+                        min={0}
+                        max={20}
+                        step={0.5}
+                        value={form.socialSecurityRatePercent ?? 5}
+                        onValueChange={(val) =>
+                          setForm({
+                            ...form,
+                            socialSecurityRatePercent: Number.isFinite(val) ? Math.max(0, Math.min(20, val)) : 5,
+                          })
+                        }
+                        className="w-full px-2.5 py-1 text-xs bg-white border border-neutral-300 rounded-lg font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-neutral-600 mb-0.5">
+                        {lang === 'th' ? 'เพดานค่าจ้าง (บาท)' : 'Wage Cap (THB)'}
+                      </label>
+                      <NumericInput
+                        min={0}
+                        max={100000}
+                        step={500}
+                        value={form.socialSecurityCapWage ?? 15000}
+                        onValueChange={(val) =>
+                          setForm({
+                            ...form,
+                            socialSecurityCapWage: Number.isFinite(val) ? Math.max(0, val) : 15000,
+                          })
+                        }
+                        className="w-full px-2.5 py-1 text-xs bg-white border border-neutral-300 rounded-lg font-bold"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

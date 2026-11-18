@@ -22,7 +22,7 @@ import {
   calculateOptionChoiceCost,
   calculateBillFinancials,
   calculateEffectiveChannelPrice,
-  calculateFoodCostPercent,
+  calculateExVatFoodCostPercent,
   extractNetPriceFromMenuPrice,
   getBusinessWorkDate,
   formatMoney,
@@ -2573,7 +2573,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                           );
                           return (
                             <div className="text-[10px] text-neutral-500 mt-0.5">
-                              Food: ฿{formatMoney(vCost.foodCost)} ({formatPercent(calculateFoodCostPercent(vCost.foodCost, netEffectivePrice))})
+                              Food: ฿{formatMoney(vCost.foodCost)} ({formatPercent(calculateExVatFoodCostPercent(vCost.foodCost, netEffectivePrice))})
                             </div>
                           );
                         })()}

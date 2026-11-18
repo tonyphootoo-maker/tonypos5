@@ -310,99 +310,10 @@ export const FirebaseSyncService = {
       }
 
       const summariesSnap = await getDocs(collection(db, 'users', uid, 'dailySummaries'));
-      const existingManual = StorageService.getDailySales().filter(
-        (rec) => !rec.id.startsWith('pos_sync_')
-      );
+      const summaries = summariesSnap.docs.map((docSnap) => docSnap.data() as DailySummaryDoc);
+      const existingRecords = StorageService.getDailySales();
 
-      if (summariesSnap.empty) {
-        return { success: true, data: existingManual };
-      }
-
-      const CHANNEL_DISPLAY_NAMES: Record<string, string> = {
-        dine_in: 'หน้าร้าน (Dine-in)',
-        takeaway: 'สั่งกลับบ้าน (Takeaway)',
-        grab: 'GrabFood',
-        lineman: 'LINE MAN',
-        shopeefood: 'ShopeeFood',
-        robinhood: 'Robinhood',
-      };
-
-      const posRecords: DailySalesRecord[] = [];
-
-      for (const docSnap of summariesSnap.docs) {
-        const s = docSnap.data() as DailySummaryDoc;
-        const channelEntries = Object.entries(s.channelTotals || {}).filter(
-          ([, chData]) => (chData?.netSales || 0) > 0 || (chData?.orderCount || 0) > 0
-        );
-
-        if (channelEntries.length > 0) {
-          const deliveryKeys = channelEntries
-            .map(([k]) => k)
-            .filter((k) => k !== 'dine_in' && k !== 'takeaway');
-          const deliverySalesSum = deliveryKeys.reduce(
-            (sum, k) => sum + (s.channelTotals?.[k]?.netSales || 0),
-            0
-          );
-          const totalNetSum = channelEntries.reduce((sum, [, d]) => sum + (d?.netSales || 0), 0);
-
-          for (const [chId, chData] of channelEntries) {
-            const chNet = chData.netSales || 0;
-            const chOrders = chData.orderCount || 0;
-            const shareOfTotal = totalNetSum > 0 ? chNet / totalNetSum : 1 / channelEntries.length;
-            const isDelivery = chId !== 'dine_in' && chId !== 'takeaway';
-            const feeShare = isDelivery
-              ? deliverySalesSum > 0
-                ? chNet / deliverySalesSum
-                : 1 / Math.max(1, deliveryKeys.length)
-              : 0;
-            const chPlatformFees = Number(((s.platformFees || 0) * feeShare).toFixed(2));
-            const chDiscounts = Number(((s.discounts || 0) * shareOfTotal).toFixed(2));
-
-            posRecords.push({
-              id: `pos_sync_${s.date}_${chId}`,
-              date: s.date,
-              channelId: chId,
-              channelName: CHANNEL_DISPLAY_NAMES[chId] || chId,
-              orderCount: chOrders,
-              grossSales: Number((chNet + chDiscounts).toFixed(2)),
-              discounts: chDiscounts,
-              refunds: 0,
-              netSales: chNet,
-              vatRatePercent: s.vat > 0 && chNet > 0 ? 7 : 0,
-              platformFees: chPlatformFees,
-              actualPayout: Math.max(0, Number((chNet - chPlatformFees).toFixed(2))),
-            });
-          }
-        } else {
-          const netSales =
-            s.netSales > 0 ? s.netSales : Math.max(0, (s.grossSales || 0) - (s.discounts || 0));
-          const platformFees = s.platformFees || 0;
-          posRecords.push({
-            id: `pos_sync_${s.date}_dine_in`,
-            date: s.date,
-            channelId: 'dine_in',
-            channelName: 'หน้าร้าน (Dine-in)',
-            orderCount: s.orderCount || 0,
-            grossSales: s.grossSales || netSales,
-            discounts: s.discounts || 0,
-            refunds: 0,
-            netSales,
-            vatRatePercent: s.vat > 0 && netSales > 0 ? 7 : 0,
-            platformFees,
-            actualPayout: Math.max(0, Number((netSales - platformFees).toFixed(2))),
-          });
-        }
-      }
-
-      const byKey = new Map<string, DailySalesRecord>();
-      for (const rec of existingManual) {
-        byKey.set(`${rec.date}::${rec.channelId}`, rec);
-      }
-      for (const posRec of posRecords) {
-        byKey.set(`${posRec.date}::${posRec.channelId}`, posRec);
-      }
-
-      const merged = Array.from(byKey.values()).sort((a, b) => a.date.localeCompare(b.date));
+      const merged = convertDailySummariesToSalesRecords(summaries, existingRecords);
       StorageService.saveDailySales(merged);
       return { success: true, data: merged };
     } catch (err: any) {
@@ -415,3 +326,178 @@ export const FirebaseSyncService = {
     }
   },
 };
+
+/**
+ * Pure conversion from POS dailySummaries -> DailySalesRecord[] with idempotency,
+ * exact per-channel breakdown when present, legacy proportional fallback flagging
+ * (estimatedAllocation: true), Service Charge propagation, and preservation of explicit
+ * manual overrides marked `replacesPosSync: true`.
+ */
+export function convertDailySummariesToSalesRecords(
+  summaries: DailySummaryDoc[],
+  existingRecords: DailySalesRecord[] = []
+): DailySalesRecord[] {
+  const existingManual = (existingRecords || []).filter(
+    (rec) => !rec.id?.startsWith('pos_sync_')
+  );
+
+  if (!summaries || summaries.length === 0) {
+    return [...existingManual].sort(
+      (a, b) => a.date.localeCompare(b.date) || (a.channelId || '').localeCompare(b.channelId || '')
+    );
+  }
+
+  const CHANNEL_DISPLAY_NAMES: Record<string, string> = {
+    dine_in: 'หน้าร้าน (Dine-in)',
+    takeaway: 'สั่งกลับบ้าน (Takeaway)',
+    grab: 'GrabFood',
+    lineman: 'LINE MAN',
+    shopeefood: 'ShopeeFood',
+    robinhood: 'Robinhood',
+  };
+
+  const normalizeKey = (ch?: string): string => {
+    const raw = (ch || '').trim().toLowerCase().replace(/-/g, '_');
+    if (!raw) return '';
+    if (raw === 'dinein') return 'dine_in';
+    if (raw === 'take_away') return 'takeaway';
+    if (raw === 'grabfood') return 'grab';
+    if (raw === 'line_man') return 'lineman';
+    return raw;
+  };
+
+  const round2 = (v: number): number =>
+    Number.isFinite(v) ? Math.round((v + Number.EPSILON) * 100) / 100 : 0;
+
+  const posRecords: DailySalesRecord[] = [];
+
+  for (const s of summaries) {
+    const channelEntries = Object.entries(s.channelTotals || {}).filter(
+      ([, chData]) => (chData?.netSales || 0) > 0 || (chData?.orderCount || 0) > 0
+    );
+
+    if (channelEntries.length > 0) {
+      const deliveryKeys = channelEntries
+        .map(([k]) => k)
+        .filter((k) => k !== 'dine_in' && k !== 'takeaway');
+      const deliverySalesSum = deliveryKeys.reduce(
+        (sum, k) => sum + (s.channelTotals?.[k]?.netSales || 0),
+        0
+      );
+      const totalNetSum = channelEntries.reduce((sum, [, d]) => sum + (d?.netSales || 0), 0);
+
+      for (const [chId, chData] of channelEntries) {
+        const chNet = Math.max(0, chData.netSales || 0);
+        const chOrders = Math.max(0, chData.orderCount || 0);
+
+        const hasExactBreakdown =
+          typeof chData.grossSales === 'number' &&
+          typeof chData.discounts === 'number' &&
+          typeof chData.platformFees === 'number';
+
+        const shareOfTotal = totalNetSum > 0 ? chNet / totalNetSum : 1 / channelEntries.length;
+        const isDelivery = chId !== 'dine_in' && chId !== 'takeaway';
+        const feeShare = isDelivery
+          ? deliverySalesSum > 0
+            ? chNet / deliverySalesSum
+            : 1 / Math.max(1, deliveryKeys.length)
+          : 0;
+
+        const chDiscounts =
+          typeof chData.discounts === 'number'
+            ? round2(Math.max(0, chData.discounts))
+            : round2((s.discounts || 0) * shareOfTotal);
+
+        const chPlatformFees =
+          typeof chData.platformFees === 'number'
+            ? round2(Math.max(0, chData.platformFees))
+            : round2((s.platformFees || 0) * feeShare);
+
+        const chGross =
+          typeof chData.grossSales === 'number'
+            ? round2(Math.max(0, chData.grossSales))
+            : round2(chNet + chDiscounts);
+
+        const chFoodCost =
+          typeof chData.totalFoodCost === 'number'
+            ? round2(Math.max(0, chData.totalFoodCost))
+            : typeof s.totalFoodCost === 'number'
+              ? round2(Math.max(0, s.totalFoodCost * shareOfTotal))
+              : undefined;
+
+        const chPackagingCost =
+          typeof chData.packagingCost === 'number'
+            ? round2(Math.max(0, chData.packagingCost))
+            : typeof s.packagingCost === 'number'
+              ? round2(Math.max(0, s.packagingCost * shareOfTotal))
+              : undefined;
+
+        const chServiceCharge =
+          typeof chData.serviceCharge === 'number'
+            ? round2(Math.max(0, chData.serviceCharge))
+            : typeof s.serviceCharge === 'number'
+              ? round2(Math.max(0, s.serviceCharge * shareOfTotal))
+              : 0;
+
+        posRecords.push({
+          id: `pos_sync_${s.date}_${chId}`,
+          date: s.date,
+          channelId: chId,
+          channelName: CHANNEL_DISPLAY_NAMES[chId] || chId,
+          orderCount: chOrders,
+          grossSales: chGross,
+          discounts: chDiscounts,
+          refunds: 0,
+          netSales: chNet,
+          vatRatePercent: (s.vat || 0) > 0 && chNet > 0 ? 7 : 0,
+          platformFees: chPlatformFees,
+          actualPayout: Math.max(0, round2(chNet - chPlatformFees)),
+          serviceCharge: chServiceCharge,
+          foodCost: chFoodCost,
+          packagingCost: chPackagingCost,
+          estimatedAllocation: !hasExactBreakdown,
+        });
+      }
+    } else {
+      const netSales =
+        s.netSales > 0 ? s.netSales : Math.max(0, (s.grossSales || 0) - (s.discounts || 0));
+      const platformFees = Math.max(0, s.platformFees || 0);
+      posRecords.push({
+        id: `pos_sync_${s.date}_dine_in`,
+        date: s.date,
+        channelId: 'dine_in',
+        channelName: 'หน้าร้าน (Dine-in)',
+        orderCount: s.orderCount || 0,
+        grossSales: s.grossSales || netSales,
+        discounts: Math.max(0, s.discounts || 0),
+        refunds: 0,
+        netSales,
+        vatRatePercent: (s.vat || 0) > 0 && netSales > 0 ? 7 : 0,
+        platformFees,
+        actualPayout: Math.max(0, round2(netSales - platformFees)),
+        serviceCharge: Math.max(0, s.serviceCharge || 0),
+        foodCost: typeof s.totalFoodCost === 'number' ? round2(Math.max(0, s.totalFoodCost)) : undefined,
+        packagingCost: typeof s.packagingCost === 'number' ? round2(Math.max(0, s.packagingCost)) : undefined,
+        estimatedAllocation: false,
+      });
+    }
+  }
+
+  const byKey = new Map<string, DailySalesRecord>();
+  for (const rec of existingManual) {
+    byKey.set(`${rec.date}::${normalizeKey(rec.channelId)}`, rec);
+  }
+  for (const posRec of posRecords) {
+    const key = `${posRec.date}::${normalizeKey(posRec.channelId)}`;
+    const existing = byKey.get(key);
+    if (existing?.replacesPosSync) {
+      // Explicit user override ("แทนที่ POS") must not be overwritten by subsequent syncs
+      continue;
+    }
+    byKey.set(key, posRec);
+  }
+
+  return Array.from(byKey.values()).sort(
+    (a, b) => a.date.localeCompare(b.date) || (a.channelId || '').localeCompare(b.channelId || '')
+  );
+}

@@ -36,7 +36,8 @@ import { FirebaseSyncService, COST_COLLECTIONS } from './services/firebaseSyncSe
 import { subscribeCollection } from '../data/db';
 import { DailySummaryDoc } from '../types';
 import { calculateIngredientCost } from './services/calculationEngine';
-import { upsertDailySalesRecord } from './engine/calculations';
+import { upsertDailySalesRecord, normalizeUpsertChannelId } from './engine/calculations';
+import { formatPeriodCalculationLabel, normalizeToMonthly } from '../engine/calculations';
 import { syncAllCostingToPOS } from './services/posBridge';
 import { AppIconService } from './services/appIconService';
 
@@ -113,6 +114,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const [employees, setEmployees] = useState<CostEmployee[]>(() => StorageService.getEmployees());
   const [dailySales, setDailySales] = useState<DailySalesRecord[]>(() => StorageService.getDailySales());
   const [stockCounts, setStockCounts] = useState<StockCountSnapshot[]>(() => StorageService.getStockCounts());
+  const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(DEFAULT_SALES_CHANNELS);
 
   const [targetRecipeVariantId, setTargetRecipeVariantId] = useState<string>('');
   const [isIconModalOpen, setIsIconModalOpen] = useState<boolean>(false);
@@ -319,7 +321,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   useEffect(() => { StorageService.saveExpenses(expenses); }, [expenses]);
   useEffect(() => { StorageService.saveSalesOrders(salesOrders); }, [salesOrders]);
   useEffect(() => { StorageService.saveWasteLog(wasteLog); }, [wasteLog]);
-  useEffect(() => { StorageService.saveEmployees(employees as any); }, [employees]);
+  useEffect(() => { StorageService.saveEmployees(employees); }, [employees]);
   useEffect(() => { StorageService.saveDailySales(dailySales); }, [dailySales]);
   useEffect(() => { StorageService.saveStockCounts(stockCounts); }, [stockCounts]);
 
@@ -510,9 +512,27 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.EXPENSES, updatedExp.id, updatedExp);
   };
 
-  const handleAddDailySalesRecord = (rec: DailySalesRecord) => {
-    setDailySales((prev) => upsertDailySalesRecord(prev, rec));
-    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.DAILY_SALES, rec.id, rec);
+  const handleAddDailySalesRecord = (rec: DailySalesRecord, replacedPosRecordId?: string) => {
+    const cleanedCurrent = replacedPosRecordId
+      ? dailySales.filter((s) => s.id !== replacedPosRecordId)
+      : dailySales;
+    const nextCurrent = upsertDailySalesRecord(cleanedCurrent, rec);
+    const targetCh = normalizeUpsertChannelId(rec.channelId);
+    const savedRecord =
+      nextCurrent.find(
+        (r) => r.date === rec.date && normalizeUpsertChannelId(r.channelId) === targetCh
+      ) || rec;
+
+    setDailySales((prev) => {
+      const cleaned = replacedPosRecordId
+        ? prev.filter((s) => s.id !== replacedPosRecordId)
+        : prev;
+      return upsertDailySalesRecord(cleaned, rec);
+    });
+    if (replacedPosRecordId) {
+      FirebaseSyncService.deleteUserDoc(user.uid, COST_COLLECTIONS.DAILY_SALES, replacedPosRecordId);
+    }
+    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.DAILY_SALES, savedRecord.id, savedRecord);
   };
 
   const handleDeleteDailySalesRecord = (id: string) => {
@@ -781,33 +801,57 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           />
         )}
 
-        {activeTab === 'overhead_breakeven' && (
-          <BreakEvenView
-            expenses={expenses as any}
-            employees={employees as any}
-            sales={dailySales}
-            settings={settings as any}
-            activeLanguage={lang}
-          />
-        )}
+        {activeTab === 'overhead_breakeven' && (() => {
+          const latestDate = dailySales.length > 0
+            ? [...dailySales].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
+            : null;
+          const targetMonth = (latestDate || new Date().toISOString().slice(0, 10)).slice(0, 7);
+          const monthSales = dailySales.filter((s) => s.date && s.date.startsWith(targetMonth));
+          const monthNetSales = monthSales.reduce((sum, s) => {
+            if (typeof s.netSales === 'number' && Number.isFinite(s.netSales)) {
+              return sum + Math.max(0, s.netSales);
+            }
+            const nominal = Math.max(0, (s.grossSales || 0) - (s.discounts || 0) - (s.refunds || 0));
+            const vatPct = s.vatRatePercent ?? 7;
+            return sum + (s.isVatInclusive && vatPct > 0 ? nominal / (1 + vatPct / 100) : nominal);
+          }, 0);
+          return (
+            <BreakEvenView
+              expenses={expenses}
+              employees={employees}
+              sales={monthSales}
+              settings={settings}
+              activeLanguage={lang}
+              period="month"
+              dateParam={targetMonth}
+              normalizedMonthlyNetSales={normalizeToMonthly(monthNetSales, 'month', 1, targetMonth)}
+              periodSalesLabel={formatPeriodCalculationLabel('month', targetMonth, lang)}
+              socialSecurityEnabled={Boolean(settings.socialSecurityEnabled)}
+              socialSecurityRatePercent={settings.socialSecurityRatePercent ?? 5}
+              socialSecurityCapWage={settings.socialSecurityCapWage ?? 15000}
+            />
+          );
+        })()}
 
         {activeTab === 'expenses' && (
           <ExpensesView
-            expenses={expenses as any}
+            expenses={expenses}
             onAddExpense={handleSaveExpense}
             onDeleteExpense={handleDeleteExpense}
             onUpdateExpense={handleUpdateExpense}
             operatingDays={settings.operatingDaysPerMonth || 26}
             activeLanguage={lang}
+            employeesCount={employees.length}
           />
         )}
 
         {activeTab === 'sales_entry' && (
           <SalesEntryView
             sales={dailySales}
-            channels={DEFAULT_SALES_CHANNELS}
+            channels={salesChannels}
             onAddSalesRecord={handleAddDailySalesRecord}
             onDeleteSalesRecord={handleDeleteDailySalesRecord}
+            onUpdateChannels={setSalesChannels}
             defaultVatRate={
               typeof settings.vatRatePercent === 'number' && Number.isFinite(settings.vatRatePercent)
                 ? settings.vatRatePercent
@@ -819,17 +863,17 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
 
         {activeTab === 'executive_dashboard' && (
           <ExecutiveDashboard
-            ingredients={ingredients as any}
+            ingredients={ingredients}
             sales={dailySales}
-            expenses={expenses as any}
-            employees={employees as any}
-            menuItems={menus as any}
-            inventory={inventory as any}
-            allWaste={wasteLog as any}
+            expenses={expenses}
+            employees={employees}
+            menuItems={menus}
+            inventory={inventory}
+            allWaste={wasteLog}
             purchases={purchases}
             stockCounts={stockCounts}
             salesOrders={salesOrders}
-            channels={DEFAULT_SALES_CHANNELS}
+            channels={salesChannels}
             currentSettings={settings}
             activeLanguage={lang}
             onNavigate={(tabId) => {
@@ -855,9 +899,9 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
         {activeTab === 'pnl' && (
           <ProfitAndLossView
             sales={dailySales}
-            expenses={expenses as any}
-            employees={employees as any}
-            settings={settings as any}
+            expenses={expenses}
+            employees={employees}
+            settings={settings}
             ingredients={ingredients}
             purchases={purchases}
             wasteLog={wasteLog}
@@ -868,15 +912,36 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           />
         )}
 
-        {activeTab === 'labor' && (
-          <LaborView
-            employees={employees as any}
-            monthlyNetSales={dailySales.reduce((sum, s) => sum + s.netSales, 0)}
-            onAddEmployee={handleAddEmployee}
-            onDeleteEmployee={handleDeleteEmployee}
-            activeLanguage={lang}
-          />
-        )}
+        {activeTab === 'labor' && (() => {
+          const latestDate = dailySales.length > 0
+            ? [...dailySales].sort((a, b) => b.date.localeCompare(a.date))[0]?.date
+            : null;
+          const targetMonth = (latestDate || new Date().toISOString().slice(0, 10)).slice(0, 7);
+          const monthSales = dailySales.filter((s) => s.date && s.date.startsWith(targetMonth));
+          const monthNetSales = monthSales.reduce((sum, s) => {
+            if (typeof s.netSales === 'number' && Number.isFinite(s.netSales)) {
+              return sum + Math.max(0, s.netSales);
+            }
+            const nominal = Math.max(0, (s.grossSales || 0) - (s.discounts || 0) - (s.refunds || 0));
+            const vatPct = s.vatRatePercent ?? 7;
+            return sum + (s.isVatInclusive && vatPct > 0 ? nominal / (1 + vatPct / 100) : nominal);
+          }, 0);
+          return (
+            <LaborView
+              employees={employees}
+              monthlyNetSales={monthNetSales}
+              onAddEmployee={handleAddEmployee}
+              onDeleteEmployee={handleDeleteEmployee}
+              activeLanguage={lang}
+              period="month"
+              dateParam={targetMonth}
+              periodSalesLabel={formatPeriodCalculationLabel('month', targetMonth, lang)}
+              socialSecurityEnabled={Boolean(settings.socialSecurityEnabled)}
+              socialSecurityRatePercent={settings.socialSecurityRatePercent ?? 5}
+              socialSecurityCapWage={settings.socialSecurityCapWage ?? 15000}
+            />
+          );
+        })()}
 
         {activeTab === 'inventory' && (
           <InventoryView

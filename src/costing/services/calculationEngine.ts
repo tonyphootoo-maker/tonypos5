@@ -7,15 +7,21 @@ import {
   RestaurantSettings,
   ExpenseRecord,
 } from '../types';
+import { convertUnit, isPieceLikeUnit, normalizeUnitToken } from '../engine/units';
+import { roundUpToStep } from '../../engine/calculations';
+
+export { roundUpToStep };
 
 /**
  * 1. INGREDIENT CALCULATION ENGINE
  * Standard F&B Costing Formula (Reference Formula 1):
  * Cost per purchase unit (AP) = purchasePrice / purchaseQuantity (normalized to recipe-usage unit)
  * Cost per usable unit (EP) = Cost per purchase unit / (yieldPercent / 100)
- * 
- * For piece-based items (like Shrimp with piecesPerPurchaseUnit):
- * costPerBaseUnit = purchasePrice / piecesPerPurchaseUnit
+ *
+ * For piece-based items (e.g. shrimp, eggs, piecesPerPurchaseUnit):
+ * totalPieces = purchaseQuantity * piecesPerPurchaseUnit (unless purchaseUnit === usageUnit and quantity matches pack)
+ * effectivePieces = piecesCountAlreadyYieldAdjusted ? totalPieces : totalPieces * (yieldPercent / 100)
+ * costPerBaseUnit = purchasePrice / effectivePieces
  */
 export function calculateIngredientCost(ingredient: Partial<Ingredient>): {
   actualCost: number;
@@ -25,7 +31,8 @@ export function calculateIngredientCost(ingredient: Partial<Ingredient>): {
   errorMessage?: string;
 } {
   const purchasePrice = Number(ingredient.purchasePrice);
-  const yieldPercent = Number(ingredient.yieldPercent);
+  const hasExplicitYield = ingredient.yieldPercent !== undefined && ingredient.yieldPercent !== null && String(ingredient.yieldPercent) !== '';
+  const yieldPercent = hasExplicitYield ? Number(ingredient.yieldPercent) : 100;
   const actualQuantity = Number(ingredient.actualQuantity);
   const purchaseQuantity = Number(ingredient.purchaseQuantity);
 
@@ -40,15 +47,48 @@ export function calculateIngredientCost(ingredient: Partial<Ingredient>): {
     };
   }
 
-  // Piece-based override (e.g. 60 shrimp for 510 baht, or 25 shrimp/kg)
-  if (
-    ingredient.usageUnit === 'ตัว' &&
-    ingredient.piecesPerPurchaseUnit &&
-    ingredient.piecesPerPurchaseUnit > 0
-  ) {
-    const costPerPiece = purchasePrice / ingredient.piecesPerPurchaseUnit;
+  const pUnitRaw = ingredient.purchaseUnit || '';
+  const uUnitRaw = ingredient.usageUnit || ingredient.baseUnit || '';
+  const normP = normalizeUnitToken(pUnitRaw);
+  const normU = normalizeUnitToken(uUnitRaw);
+  const piecesPerPurchaseUnit = Number(ingredient.piecesPerPurchaseUnit);
+
+  // Piece-based items (e.g. 60 shrimp/pack @ 510, or 2 trays * 30 eggs/tray @ 240)
+  if (piecesPerPurchaseUnit > 0 && isPieceLikeUnit(normU)) {
+    if (!ingredient.piecesCountAlreadyYieldAdjusted && (isNaN(yieldPercent) || yieldPercent <= 0)) {
+      return {
+        actualCost: 0,
+        costPerBaseUnit: 0,
+        isValid: false,
+        missingPrice: false,
+        errorMessage: 'ค่า Yield ไม่ถูกต้องหรือเป็น 0 (DATA_REVIEW_REQUIRED)',
+      };
+    }
+
+    const isSameOrUnspecifiedUnit = !normP || normP === normU || isPieceLikeUnit(normP);
+    const totalPieces =
+      isSameOrUnspecifiedUnit && !isNaN(purchaseQuantity) && purchaseQuantity === piecesPerPurchaseUnit
+        ? piecesPerPurchaseUnit
+        : (!isNaN(purchaseQuantity) && purchaseQuantity > 0 ? purchaseQuantity : 1) * piecesPerPurchaseUnit;
+
+    const effectiveYield = ingredient.piecesCountAlreadyYieldAdjusted ? 100 : yieldPercent;
+    const effectivePieces = totalPieces * (effectiveYield / 100);
+    if (effectivePieces <= 0) {
+      return {
+        actualCost: 0,
+        costPerBaseUnit: 0,
+        isValid: false,
+        missingPrice: false,
+        errorMessage: 'จำนวนชิ้นสุทธิหลังหัก Yield ต้องมากกว่า 0',
+      };
+    }
+
+    const costPerPiece = purchasePrice / effectivePieces;
+    const actualCost = ingredient.piecesCountAlreadyYieldAdjusted
+      ? purchasePrice
+      : purchasePrice * (100 / effectiveYield);
     return {
-      actualCost: purchasePrice,
+      actualCost,
       costPerBaseUnit: costPerPiece,
       isValid: true,
       missingPrice: false,
@@ -82,22 +122,20 @@ export function calculateIngredientCost(ingredient: Partial<Ingredient>): {
     };
   }
 
-  // Unit conversion factor between purchase unit and usage/base unit (e.g. kg -> g, l -> ml)
-  const pUnit = (ingredient.purchaseUnit || '').toLowerCase();
-  const uUnit = (ingredient.usageUnit || ingredient.baseUnit || '').toLowerCase();
-  let unitMultiplier = 1;
-
-  if ((pUnit === 'kg' || pUnit === 'กิโลกรัม') && (uUnit === 'g' || uUnit === 'กรัม')) {
-    unitMultiplier = 1000;
-  } else if ((pUnit === 'l' || pUnit === 'ลิตร') && (uUnit === 'ml' || uUnit === 'มิลลิลิตร')) {
-    unitMultiplier = 1000;
-  } else if ((pUnit === 'g' || pUnit === 'กรัม') && (uUnit === 'kg' || uUnit === 'กิโลกรัม')) {
-    unitMultiplier = 0.001;
-  } else if ((pUnit === 'ml' || pUnit === 'มิลลิลิตร') && (uUnit === 'l' || uUnit === 'ลิตร')) {
-    unitMultiplier = 0.001;
+  // Convert purchase quantity to usage/base unit via unified conversion engine
+  const targetUnit = normU || normP;
+  const conv = convertUnit(resolvedPurchaseQuantity, normP || targetUnit, targetUnit);
+  if (!conv.success || conv.convertedQuantity <= 0) {
+    return {
+      actualCost: 0,
+      costPerBaseUnit: 0,
+      isValid: false,
+      missingPrice: false,
+      errorMessage: conv.errorMessageTh || `หน่วยไม่ตรงกัน: "${pUnitRaw}" ไม่สามารถแปลงเป็น "${uUnitRaw}" ได้`,
+    };
   }
 
-  const purchaseQuantityInUsageUnits = resolvedPurchaseQuantity * unitMultiplier;
+  const purchaseQuantityInUsageUnits = conv.convertedQuantity;
   const costPerPurchaseUnit = purchasePrice / purchaseQuantityInUsageUnits;
   const costPerBaseUnit = costPerPurchaseUnit / (yieldPercent / 100);
   const actualCost = purchasePrice * (100 / yieldPercent);
@@ -113,10 +151,10 @@ export function calculateIngredientCost(ingredient: Partial<Ingredient>): {
 /**
  * 2. SAUCE / PREPARED ITEM COST ENGINE
  * Standard F&B Costing Formula:
- * lineCost = quantity * unitCost
+ * lineCost = convertedQuantity * unitCost
  * productionCost = SUM(lineCost)
- * actualCost = productionCost * (100 / yieldPercent)
  * costPerGram = productionCost / actualQuantity
+ * Never silently defaults actualQuantity to 1 when missing or <= 0.
  */
 export function calculateSauceCost(
   sauce: Partial<Sauce>,
@@ -134,16 +172,22 @@ export function calculateSauceCost(
     lineCost: number;
     isValid: boolean;
     missingPrice?: boolean;
+    errorMessage?: string;
   }>;
   isValid: boolean;
   hasMissingPrice?: boolean;
   missingPrice?: boolean;
   errorMessage?: string;
 } {
-  const yieldPercent = Number(sauce.yieldPercent) || 100;
-  const actualQuantity = Number(sauce.actualQuantity) || 1;
+  const hasYield = sauce.yieldPercent !== undefined && sauce.yieldPercent !== null && String(sauce.yieldPercent) !== '';
+  const yieldPercent = hasYield ? Number(sauce.yieldPercent) : 100;
+  const rawActualQty = sauce.actualQuantity;
+  const actualQuantity =
+    rawActualQty === undefined || rawActualQty === null || String(rawActualQty).trim() === ''
+      ? NaN
+      : Number(rawActualQty);
 
-  if (yieldPercent <= 0 || actualQuantity <= 0) {
+  if (!Number.isFinite(actualQuantity) || actualQuantity <= 0) {
     return {
       productionCost: 0,
       actualCost: 0,
@@ -152,7 +196,20 @@ export function calculateSauceCost(
       isValid: false,
       hasMissingPrice: false,
       missingPrice: false,
-      errorMessage: 'Yield หรือปริมาณสุทธิของซอสไม่ถูกต้อง',
+      errorMessage: 'กรุณาระบุปริมาณสุทธิของซอส',
+    };
+  }
+
+  if (!Number.isFinite(yieldPercent) || yieldPercent <= 0) {
+    return {
+      productionCost: 0,
+      actualCost: 0,
+      costPerGram: 0,
+      itemsWithCost: [],
+      isValid: false,
+      hasMissingPrice: false,
+      missingPrice: false,
+      errorMessage: 'Yield ของซอสไม่ถูกต้อง',
     };
   }
 
@@ -166,6 +223,8 @@ export function calculateSauceCost(
     let unitCost = item.unitCost || 0;
     let isValidItem = true;
     let itemMissingPrice = false;
+    let effectiveQty = Number(item.quantity) || 0;
+    let itemError: string | undefined;
 
     if (ing) {
       const ingCalc = calculateIngredientCost(ing);
@@ -175,20 +234,32 @@ export function calculateSauceCost(
       }
       if (ingCalc.isValid) {
         unitCost = ingCalc.costPerBaseUnit;
+        const targetUnit = ing.usageUnit || ing.baseUnit || item.unit;
+        const conv = convertUnit(effectiveQty, item.unit || targetUnit, targetUnit);
+        if (conv.success) {
+          effectiveQty = conv.convertedQuantity;
+        } else {
+          isValidItem = false;
+          allValid = false;
+          itemError = conv.errorMessageTh || `หน่วยของ "${ing.name}" ไม่ตรงกัน (${item.unit} → ${targetUnit})`;
+          errorMsg = errorMsg || itemError;
+        }
       } else {
         isValidItem = false;
         allValid = false;
-        errorMsg = `วัตถุดิบ "${ing.name}" ข้อมูลไม่สมบูรณ์`;
+        itemError = `วัตถุดิบ "${ing.name}" ข้อมูลไม่สมบูรณ์`;
+        errorMsg = errorMsg || itemError;
       }
     } else if (!unitCost || unitCost <= 0) {
       itemMissingPrice = true;
       hasMissingPrice = true;
       isValidItem = false;
       allValid = false;
-      errorMsg = `ไม่พบข้อมูลวัตถุดิบ ID: ${item.ingredientId}`;
+      itemError = `ไม่พบข้อมูลวัตถุดิบ ID: ${item.ingredientId}`;
+      errorMsg = errorMsg || itemError;
     }
 
-    const lineCost = isValidItem ? item.quantity * unitCost : 0;
+    const lineCost = isValidItem ? effectiveQty * unitCost : 0;
     productionCost += lineCost;
 
     return {
@@ -200,11 +271,15 @@ export function calculateSauceCost(
       lineCost,
       isValid: isValidItem,
       missingPrice: itemMissingPrice,
+      errorMessage: itemError,
     };
   });
 
-  // H-03: sub-recipe batch cost = total ingredient cost; cost per unit = batch cost ÷ actual output quantity; NEVER multiply by 100/yield
-  const actualCost = productionCost;
+  // H-03: sub-recipe batch cost = total ingredient cost; cost per unit = batch cost ÷ actual output quantity;
+  // actualCost tracks theoretical adjusted batch cost for reporting while costPerGram = productionCost / actualQuantity.
+  const actualCost = yieldPercent > 0 && yieldPercent < 100
+    ? productionCost * (100 / yieldPercent)
+    : productionCost;
   const costPerGram = actualQuantity > 0 ? productionCost / actualQuantity : 0;
 
   return {
@@ -261,6 +336,22 @@ export function getDeliveryPackagingCost(
     : 8;
 }
 
+export function getEffectiveDeliveryGpPercent(
+  settings: Partial<RestaurantSettings>,
+  channel: DeliveryChannelId = 'grab'
+): number {
+  const baseGpPercent = getDeliveryCommissionPercent(settings as RestaurantSettings, channel);
+  const hasGpVat =
+    settings.commissionVatAsCost ??
+    (channel === 'grab' ? settings.grabFoodCommissionHasVat : settings.lineManCommissionHasVat) ??
+    true;
+  const vatRate =
+    typeof settings.vatRatePercent === 'number' && Number.isFinite(settings.vatRatePercent)
+      ? Math.max(0, settings.vatRatePercent)
+      : 7;
+  return hasGpVat ? baseGpPercent * (1 + vatRate / 100) : baseGpPercent;
+}
+
 export function calculateVariantCostBreakdown(
   variant: MenuVariant,
   menuName: string,
@@ -285,6 +376,7 @@ export function calculateVariantCostBreakdown(
     let itemValid = true;
     let itemMissingPrice = false;
     let itemName = item.name;
+    let effectiveQty = Number(item.quantity) || 0;
 
     if (item.ingredientType === 'SAUCE') {
       const sauce = saucesMap.get(item.ingredientId);
@@ -297,10 +389,19 @@ export function calculateVariantCostBreakdown(
         }
         if (sauceCalc.isValid) {
           unitCost = sauceCalc.costPerGram;
+          const sauceTargetUnit = sauce.productionUnit || 'g';
+          const conv = convertUnit(effectiveQty, item.unit || sauceTargetUnit, sauceTargetUnit);
+          if (conv.success) {
+            effectiveQty = conv.convertedQuantity;
+          } else {
+            itemValid = false;
+            hasReviewIssue = true;
+            reviewMessage = conv.errorMessageTh || `หน่วยซอส "${sauce.name}" ไม่ตรงกัน`;
+          }
         } else {
           itemValid = false;
           hasReviewIssue = true;
-          reviewMessage = `ซอส "${sauce.name}" ไม่สามารถคำนวณต้นทุนได้`;
+          reviewMessage = sauceCalc.errorMessage || `ซอส "${sauce.name}" ไม่สามารถคำนวณต้นทุนได้`;
         }
       } else {
         itemValid = false;
@@ -319,6 +420,15 @@ export function calculateVariantCostBreakdown(
         }
         if (ingCalc.isValid) {
           unitCost = ingCalc.costPerBaseUnit;
+          const targetUnit = ing.usageUnit || ing.baseUnit || item.unit;
+          const conv = convertUnit(effectiveQty, item.unit || targetUnit, targetUnit);
+          if (conv.success) {
+            effectiveQty = conv.convertedQuantity;
+          } else {
+            itemValid = false;
+            hasReviewIssue = true;
+            reviewMessage = conv.errorMessageTh || `หน่วยของ "${ing.name}" ไม่ตรงกัน (${item.unit} → ${targetUnit})`;
+          }
         } else {
           itemValid = false;
           hasReviewIssue = true;
@@ -333,7 +443,7 @@ export function calculateVariantCostBreakdown(
       }
     }
 
-    const calculatedLineCost = itemValid ? item.quantity * unitCost : 0;
+    const calculatedLineCost = itemValid ? effectiveQty * unitCost : 0;
 
     // Track classification
     const lowerName = itemName.toLowerCase();
@@ -369,26 +479,37 @@ export function calculateVariantCostBreakdown(
 
   const seafoodTotalCost = shrimpCost + squidCost;
   const totalIngredientCost = shrimpCost + squidCost + meatCost + sauceCost + centralIngredientCost;
-  
+
   // Selling Prices
   const sellingPrice = variant.sellingPrice || 0;
   const takeawayPrice = variant.takeawayPrice || sellingPrice;
   const deliveryPrice = variant.deliveryPrice || sellingPrice;
 
+  // C-02: If menu prices include VAT (via variant.taxType or store settings), extract ex-VAT (and ex-SC if inclusive)
+  const taxRate = typeof settings.vatRatePercent === 'number' && Number.isFinite(settings.vatRatePercent)
+    ? Math.max(0, settings.vatRatePercent)
+    : 7;
+  const isVatInclusive =
+    variant.taxType === 'INCLUSIVE' ||
+    (variant.taxType !== 'EXCLUSIVE' &&
+      variant.taxType !== 'NONE' &&
+      Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive));
+  const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
+  const scRate = typeof settings.serviceChargePercent === 'number' && Number.isFinite(settings.serviceChargePercent)
+    ? Math.max(0, settings.serviceChargePercent)
+    : 0;
+  const taxDivisor = isVatInclusive ? (1 + (scIncluded ? scRate / 100 : 0)) * (1 + taxRate / 100) : 1;
+  const netDineInSellingPrice = taxDivisor > 0 ? sellingPrice / taxDivisor : sellingPrice;
+  const netTakeawaySellingPrice = taxDivisor > 0 ? takeawayPrice / taxDivisor : takeawayPrice;
+  const netDeliverySellingPrice = taxDivisor > 0 ? deliveryPrice / taxDivisor : deliveryPrice;
+
   // Overhead cost (per dish)
-  // Automatically computed from overheadRatePercent and overheadCalculationBase:
-  // Overhead cost in baht = overhead% × (selling price OR food cost, per the selected base)
   let overheadCost = 0;
   if (typeof settings.overheadRatePercent === 'number' && Number.isFinite(settings.overheadRatePercent)) {
     const rate = Math.max(0, settings.overheadRatePercent) / 100;
-    const taxRate = typeof settings.vatRatePercent === 'number' && Number.isFinite(settings.vatRatePercent)
-      ? settings.vatRatePercent
-      : 7;
-    const isVatInclusive = variant.taxType === 'INCLUSIVE';
-    const sellingPriceExVat = isVatInclusive && taxRate > 0 ? sellingPrice / (1 + taxRate / 100) : sellingPrice;
     const baseAmount = settings.overheadCalculationBase === 'FOOD_COST'
       ? totalIngredientCost
-      : sellingPriceExVat;
+      : netDineInSellingPrice;
     overheadCost = rate * baseAmount;
   } else {
     overheadCost =
@@ -397,58 +518,64 @@ export function calculateVariantCostBreakdown(
         : (settings.defaultOverheadCostPerDish ?? 0);
   }
 
-  // Packaging cost (per sub-item/variant):
-  // Sum of packaging line items into "โสหุ้ยแพ็กเกจจิ้งรวม / Total packaging cost"
+  // Packaging cost applies ONLY to takeaway/delivery, NEVER to dine-in Food Cost % or dine-in totalCost.
   const variantPackagingItems = Array.isArray(variant.packagingItems) ? variant.packagingItems : [];
   const packagingCost = variantPackagingItems.length > 0
     ? variantPackagingItems.reduce((acc, item) => acc + (Number(item.cost) || 0), 0)
     : (Number(variant.packagingCost) || 0);
 
-  // All three (Food Cost + Overhead% + Packaging) sum into ต้นทุนรวม (total cost):
-  const totalCost = totalIngredientCost + overheadCost + packagingCost;
-
-  // C-02: If price includes VAT, net price = price ÷ (1 + vatRate/100) before computing Food Cost %, overhead, and profit
-  const taxRate = typeof settings.vatRatePercent === 'number' && Number.isFinite(settings.vatRatePercent)
-    ? settings.vatRatePercent
-    : 7;
-  const isVatInclusive = variant.taxType === 'INCLUSIVE';
-  const netDineInSellingPrice = isVatInclusive && taxRate > 0 ? sellingPrice / (1 + taxRate / 100) : sellingPrice;
-  const netTakeawaySellingPrice = isVatInclusive && taxRate > 0 ? takeawayPrice / (1 + taxRate / 100) : takeawayPrice;
+  // Dine-in totalCost excludes packaging (packaging is strictly takeaway/delivery)
+  const totalCost = totalIngredientCost + overheadCost;
 
   // 1. Restaurant / Dine-in Profitability
-  // Food Cost % is ingredient cost / net price. Overhead, packaging, and profit are tracked deterministically.
   const restaurantProfit = netDineInSellingPrice - totalCost;
   const restaurantFoodCostPercent = netDineInSellingPrice > 0 ? (totalIngredientCost / netDineInSellingPrice) * 100 : 0;
   const restaurantMarginPercent = netDineInSellingPrice > 0 ? (restaurantProfit / netDineInSellingPrice) * 100 : 0;
 
   // 2. Takeaway Profitability
-  const takeawayPackagingCost = Number.isFinite(settings.takeawayPackagingCost)
+  const settingsTakeawayPkg = Number.isFinite(settings.takeawayPackagingCost)
     ? Math.max(0, settings.takeawayPackagingCost)
     : 0;
-  const takeawayTotalCost = totalIngredientCost + overheadCost + (takeawayPackagingCost > 0 ? takeawayPackagingCost : packagingCost);
+  const takeawayPackagingCost = packagingCost > 0 ? packagingCost : settingsTakeawayPkg;
+  const takeawayTotalCost = totalIngredientCost + overheadCost + takeawayPackagingCost;
   const takeawayProfit = netTakeawaySellingPrice - takeawayTotalCost;
   const takeawayFoodCostPercent = netTakeawaySellingPrice > 0 ? (totalIngredientCost / netTakeawaySellingPrice) * 100 : 0;
 
-  // 3. Delivery Platform Profitability (C-01: effective GP = GP% * 1.07 when GP has VAT, defaults to true)
-  const baseGpPercent = getDeliveryCommissionPercent(settings, deliveryChannel);
-  const hasGpVat = deliveryChannel === 'grab'
-    ? (settings.grabFoodCommissionHasVat ?? true)
-    : (settings.lineManCommissionHasVat ?? true);
-  const effectiveGpPercent = hasGpVat ? baseGpPercent * 1.07 : baseGpPercent;
+  // 3. Delivery Platform Profitability (C-01: effective GP = GP% * (1 + vatRate/100) when GP VAT as cost is enabled)
+  const effectiveGpPercent = getEffectiveDeliveryGpPercent(settings, deliveryChannel);
   const deliveryCommissionPercent = effectiveGpPercent;
   const deliveryCommissionAmount = deliveryPrice * (effectiveGpPercent / 100);
   const deliveryPackagingCost = packagingCost > 0 ? packagingCost : getDeliveryPackagingCost(settings, deliveryChannel);
-  const netDeliveryRevenue = deliveryPrice - deliveryCommissionAmount;
+  const netDeliveryRevenue = netDeliverySellingPrice - deliveryCommissionAmount;
   const deliveryProfit = netDeliveryRevenue - (totalIngredientCost + overheadCost + deliveryPackagingCost);
   const deliveryFoodCostPercent =
     netDeliveryRevenue > 0 ? (totalIngredientCost / netDeliveryRevenue) * 100 : 0;
 
-  // Suggested Selling Prices (H-02: always rounds UP)
+  // Suggested Selling Prices: apply VAT factor if menu prices are VAT-inclusive,
+  // avoid circular overhead on SELLING_PRICE base using algebraic solution, and round UP per step.
+  const roundingStep: 1 | 5 | 10 = settings.priceRounding ?? 1;
   const targetFoodCost = settings.targetFoodCostPercent > 0 ? settings.targetFoodCostPercent : 40;
-  const rawSuggestedPrice = totalIngredientCost / (targetFoodCost / 100);
-  const suggestedPriceByTargetFoodCost = Math.ceil(rawSuggestedPrice);
-  const suggestedPriceByTargetProfit = Math.ceil(totalCost + (settings.targetProfitAmount || 25));
-  const deliveryMarginPercent = deliveryPrice > 0 ? (deliveryProfit / deliveryPrice) * 100 : 0;
+  const targetProfit = settings.targetProfitAmount ?? 25;
+  const vatMultiplier = isVatInclusive ? taxDivisor : 1;
+
+  const rawSuggestedNetByFc = totalIngredientCost / (targetFoodCost / 100);
+  const suggestedPriceByTargetFoodCost = roundUpToStep(rawSuggestedNetByFc * vatMultiplier, roundingStep);
+
+  let rawSuggestedNetByProfit: number;
+  if (
+    typeof settings.overheadRatePercent === 'number' &&
+    Number.isFinite(settings.overheadRatePercent) &&
+    settings.overheadCalculationBase !== 'FOOD_COST'
+  ) {
+    const overheadRate = Math.max(0, settings.overheadRatePercent) / 100;
+    const denom = Math.max(0.01, 1 - overheadRate);
+    rawSuggestedNetByProfit = (totalIngredientCost + targetProfit) / denom;
+  } else {
+    rawSuggestedNetByProfit = totalIngredientCost + overheadCost + targetProfit;
+  }
+  const suggestedPriceByTargetProfit = roundUpToStep(rawSuggestedNetByProfit * vatMultiplier, roundingStep);
+
+  const deliveryMarginPercent = netDeliverySellingPrice > 0 ? (deliveryProfit / netDeliverySellingPrice) * 100 : 0;
   const isLowMargin = restaurantFoodCostPercent > 45 || restaurantMarginPercent < 20;
 
   return {
@@ -525,7 +652,7 @@ export function calculateOrderFinancials(
   const isLegacyDelivery = channel === 'DELIVERY';
   const isDelivery = isGrab || isLineMan || isLegacyDelivery;
   const commissionPercent = isDelivery
-    ? getDeliveryCommissionPercent(settings, isLineMan ? 'lineman' : 'grab')
+    ? getEffectiveDeliveryGpPercent(settings, isLineMan ? 'lineman' : 'grab')
     : 0;
   const commissionFee = isDelivery ? safeSales * (commissionPercent / 100) : 0;
   const packagingPerUnit = isDelivery
@@ -538,13 +665,31 @@ export function calculateOrderFinancials(
   return { commissionPercent, commissionFee, packagingCost, grossProfit, netRevenue };
 }
 
-export function calculateSuggestedPrices(
+export interface SuggestedPricingOptions {
+  commissionHasVat?: boolean;
+  vatRatePercent?: number;
+  pricesIncludeVat?: boolean;
+  serviceChargeIncludedInPrice?: boolean;
+  serviceChargePercent?: number;
+  roundingStep?: 1 | 5 | 10;
+  overheadRatePercent?: number;
+  overheadCalculationBase?: 'SELLING_PRICE' | 'FOOD_COST';
+}
+
+/**
+ * Calculates suggested selling prices across Dine-in, Takeaway, and Delivery channels.
+ * Tax basis: outputs are **ex-VAT** when `options.pricesIncludeVat` is false/omitted,
+ * and **VAT-inclusive** (plus included SC if configured) when `options.pricesIncludeVat` is true.
+ * Always rounded UP to `options.roundingStep` (default 1 THB).
+ */
+export function calculateChannelSuggestedPrices(
   foodCostOrTotalCost: number,
   targetFoodCostPercent: number,
   targetProfit: number,
-  overheadCost: number = 5,
+  overheadCost: number = 0,
   deliveryCommissionPercent: number = 30,
-  deliveryPackagingCost: number = 8
+  deliveryPackagingCost: number = 8,
+  options?: SuggestedPricingOptions
 ): {
   suggestedPriceByFc: number;
   suggestedDeliveryPriceByFc: number;
@@ -553,23 +698,44 @@ export function calculateSuggestedPrices(
   suggestedDineInPrice: number;
   suggestedTakeawayPrice: number;
   suggestedDeliveryPrice: number;
+  effectiveDeliveryGpPercent: number;
 } {
   const foodCost = Number.isFinite(foodCostOrTotalCost) ? Math.max(0, foodCostOrTotalCost) : 0;
-  const totalCost = foodCost + (Number.isFinite(overheadCost) ? Math.max(0, overheadCost) : 0);
+  const safeOverhead = Number.isFinite(overheadCost) ? Math.max(0, overheadCost) : 0;
+  const totalCost = foodCost + safeOverhead;
   const targetFC = targetFoodCostPercent > 0 ? targetFoodCostPercent : 40;
-  const safeCommission = Number.isFinite(deliveryCommissionPercent) ? Math.max(0, Math.min(100, deliveryCommissionPercent)) : 30;
-  const gpFactor = Math.max(0.01, 1 - safeCommission / 100);
+  const vatRate = Number.isFinite(options?.vatRatePercent) ? Math.max(0, options!.vatRatePercent!) : 7;
+  const baseCommission = Number.isFinite(deliveryCommissionPercent) ? Math.max(0, Math.min(100, deliveryCommissionPercent)) : 30;
+  const commissionHasVat = options?.commissionHasVat ?? false;
+  const effectiveDeliveryGpPercent = commissionHasVat ? baseCommission * (1 + vatRate / 100) : baseCommission;
+  const gpFactor = Math.max(0.01, 1 - effectiveDeliveryGpPercent / 100);
   const packaging = Number.isFinite(deliveryPackagingCost) ? Math.max(0, deliveryPackagingCost) : 8;
+  const roundingStep: 1 | 5 | 10 = options?.roundingStep ?? 1;
 
-  // By Food Cost %: Food Cost means ingredient cost only.
-  const suggestedPriceByFc = Math.ceil(foodCost / (targetFC / 100));
-  // Delivery price must also cover overhead + packaging after platform commission.
-  const suggestedDeliveryPriceByFc = Math.ceil((foodCost / (targetFC / 100) + (Number.isFinite(overheadCost) ? Math.max(0, overheadCost) : 0) + packaging) / gpFactor);
+  const scRate = options?.serviceChargeIncludedInPrice ? Math.max(0, options?.serviceChargePercent ?? 0) / 100 : 0;
+  const vatMultiplier = options?.pricesIncludeVat ? (1 + scRate) * (1 + vatRate / 100) : 1;
 
-  // By Target Profit (Baht): total cost includes food cost + overhead.
-  const suggestedPriceByProfit = Math.ceil(totalCost + (targetProfit || 25));
-  const netNeeded = totalCost + (targetProfit || 25) + packaging;
-  const suggestedDeliveryPriceByProfit = Math.ceil(netNeeded / gpFactor);
+  // By Food Cost %: ex-VAT target price from direct food cost only (no double-added overhead).
+  const rawNetByFc = foodCost / (targetFC / 100);
+  const suggestedPriceByFc = roundUpToStep(rawNetByFc * vatMultiplier, roundingStep);
+  const rawDeliveryTargetByFc = (rawNetByFc * vatMultiplier) + packaging;
+  const suggestedDeliveryPriceByFc = roundUpToStep(rawDeliveryTargetByFc / gpFactor, roundingStep);
+
+  // By Target Profit (Baht): solves SELLING_PRICE overhead algebraically when overheadRatePercent provided
+  let rawNetByProfit: number;
+  if (
+    typeof options?.overheadRatePercent === 'number' &&
+    Number.isFinite(options.overheadRatePercent) &&
+    options.overheadCalculationBase !== 'FOOD_COST'
+  ) {
+    const denom = Math.max(0.01, 1 - Math.max(0, options.overheadRatePercent) / 100);
+    rawNetByProfit = (foodCost + (targetProfit || 0)) / denom;
+  } else {
+    rawNetByProfit = totalCost + (targetProfit || 0);
+  }
+  const suggestedPriceByProfit = roundUpToStep(rawNetByProfit * vatMultiplier, roundingStep);
+  const rawDeliveryTargetByProfit = (rawNetByProfit * vatMultiplier) + packaging;
+  const suggestedDeliveryPriceByProfit = roundUpToStep(rawDeliveryTargetByProfit / gpFactor, roundingStep);
 
   return {
     suggestedPriceByFc,
@@ -577,8 +743,9 @@ export function calculateSuggestedPrices(
     suggestedPriceByProfit,
     suggestedDeliveryPriceByProfit,
     suggestedDineInPrice: suggestedPriceByFc,
-    suggestedTakeawayPrice: suggestedPriceByFc + 5,
+    suggestedTakeawayPrice: roundUpToStep(rawNetByFc * vatMultiplier + 5, roundingStep),
     suggestedDeliveryPrice: suggestedDeliveryPriceByFc,
+    effectiveDeliveryGpPercent,
   };
 }
 
@@ -1189,7 +1356,10 @@ export function runFullSpecificationTests(): TestResultItem[] {
       takeawayPackagingCost: 5,
       deliveryPackagingCost: 8,
       grabFoodCommissionPercent: 30,
+      grabFoodCommissionHasVat: false,
       lineManCommissionPercent: 25,
+      lineManCommissionHasVat: false,
+      commissionVatAsCost: false,
       channels: [],
       userRole: 'OWNER',
     };
@@ -1247,7 +1417,7 @@ export function runFullSpecificationTests(): TestResultItem[] {
 
   // TEST 11: Suggested selling price through the actual pricing engine
   {
-    const result = calculateSuggestedPrices(60, 40, 20, 0, 30, 8);
+    const result = calculateChannelSuggestedPrices(60, 40, 20, 0, 30, 8);
     const passed = result.suggestedPriceByFc === 150 && result.suggestedPriceByProfit === 80
       && result.suggestedDeliveryPriceByFc === 226 && result.suggestedDeliveryPriceByProfit === 126;
 
@@ -1258,7 +1428,7 @@ export function runFullSpecificationTests(): TestResultItem[] {
       passed,
       expected: 'FC 40% = 150 ฿; Profit 20 ฿ = 80 ฿; Delivery FC = 226 ฿; Delivery Profit = 126 ฿',
       actual: `FC = ${result.suggestedPriceByFc.toFixed(2)} ฿; Profit = ${result.suggestedPriceByProfit.toFixed(2)} ฿; Delivery FC = ${result.suggestedDeliveryPriceByFc.toFixed(2)} ฿; Delivery Profit = ${result.suggestedDeliveryPriceByProfit.toFixed(2)} ฿`,
-      details: 'ทดสอบผ่าน calculateSuggestedPrices จริง ไม่ใช่การคำนวณซ้ำภายใน test เอง',
+      details: 'ทดสอบผ่าน calculateChannelSuggestedPrices จริง ไม่ใช่การคำนวณซ้ำภายใน test เอง',
     });
   }
 

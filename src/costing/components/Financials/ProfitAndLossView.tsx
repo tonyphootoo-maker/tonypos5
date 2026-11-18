@@ -80,6 +80,11 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
     return s.isVatInclusive && vatPct > 0 ? nominal / (1 + vatPct / 100) : nominal;
   };
   const netSales = sales.reduce((sum, s) => sum + resolveSaleNet(s), 0);
+  const serviceChargeTotal = sales.reduce((sum, s) => sum + Math.max(0, s.serviceCharge || 0), 0);
+  const retainedServiceCharge =
+    (settings.serviceChargeTreatment || 'staff_pool') === 'retained' ? serviceChargeTotal : 0;
+  const effectiveRevenueForPnl = netSales + retainedServiceCharge;
+  const hasEstimatedChannelAllocation = sales.some((s) => Boolean(s.estimatedAllocation));
   const channelFees = sales.reduce((sum, s) => sum + Math.max(0, s.platformFees || 0), 0);
 
   // Double-counting guard using explicit isPayroll flag + user choice (never brittle keyword matching)
@@ -268,7 +273,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
     incomeTaxRate,
     nonKitchenLabor,
     channelFees,
-    netSales
+    effectiveRevenueForPnl
   );
 
 
@@ -300,6 +305,16 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Warning banner when legacy POS summaries used proportional channel estimates */}
+      {hasEstimatedChannelAllocation && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-200 text-xs flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+          <span>
+            ข้อมูล POS บางส่วนจากสรุปยอดเก่าไม่มีรายละเอียดแยกช่องทาง ระบบประมาณการส่วนลด ค่า GP และ Service Charge ตามสัดส่วนยอดขาย (แนะนำซิงค์หรือ Rebuild สรุปยอดจากบิลจริง)
+          </span>
+        </div>
+      )}
 
       {/* Warning banner when stock calculation is negative (only if actual stock is tracked and negative) */}
       {effectiveCogsMode === 'actual' && hasActualStockData && actualCogsResult.isNegative && (
@@ -544,6 +559,14 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
               <div className="flex justify-between px-3 py-1 text-[#EF4444]">
                 <span className="font-sans">หัก: รายการคืนเงินและยกเลิกบิล (Refunds)</span>
                 <span>-฿{refunds.toLocaleString()}</span>
+              </div>
+            )}
+            {serviceChargeTotal > 0 && (
+              <div className="flex justify-between px-3 py-1 text-white/70">
+                <span className="font-sans">
+                  Service Charge {(settings.serviceChargeTreatment || 'staff_pool') === 'retained' ? '(รวมเป็นรายได้ร้าน)' : '(กองทุนพนักงาน — ไม่นับเป็นรายได้)'}
+                </span>
+                <span>{retainedServiceCharge > 0 ? `+฿${serviceChargeTotal.toLocaleString()}` : `฿${serviceChargeTotal.toLocaleString()} (อ้างอิง)`}</span>
               </div>
             )}
             <div className="flex justify-between px-3 py-2 font-bold text-white bg-white/[0.04] rounded-lg text-sm border border-white/5">

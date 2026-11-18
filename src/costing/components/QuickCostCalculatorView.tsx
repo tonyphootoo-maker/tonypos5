@@ -22,6 +22,8 @@ import {
   Box,
 } from 'lucide-react';
 import { Ingredient, Sauce, MenuItem, RestaurantSettings } from '../types';
+import { calculateChannelSuggestedPrices, roundUpToStep } from '../services/calculationEngine';
+import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
 import { NumericInput } from './common/NumericInput';
 
 interface CalculatorItem {
@@ -54,7 +56,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   const [dishName, setDishName] = useState<string>('ข้าวกะเพราหมูสับไข่ดาว (ตัวอย่าง)');
   const [category, setCategory] = useState<string>('ผัดและกะเพรา');
   const [sellingPrice, setSellingPrice] = useState<number>(75);
-  const [targetFcPercent, setTargetFcPercent] = useState<number>(settings.targetFoodCostPercent || 32);
+  const [targetFcPercent, setTargetFcPercent] = useState<number>(settings.targetFoodCostPercent || 40);
   const [deliveryGpPercent, setDeliveryGpPercent] = useState<number>(settings.grabFoodCommissionPercent || 30);
   const [savedSuccessMsg, setSavedSuccessMsg] = useState<string | null>(null);
 
@@ -369,25 +371,54 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
     return calculatedPackagingRows.reduce((sum, row) => sum + row.lineCost, 0);
   }, [calculatedPackagingRows]);
 
-  // Total plate cost (รวม วัตถุดิบหลัก + เครื่องปรุงย่อย/Q-Factor + บรรจุภัณฑ์)
+  // Food-only cost per dish (direct food + Q-factor seasoning; packaging is strictly takeaway/delivery)
+  const foodOnlyCostPerPortion = useMemo(() => {
+    return directFoodCost + totalQFactorCost;
+  }, [directFoodCost, totalQFactorCost]);
+
+  // Total takeaway/delivery plate cost including packaging
   const totalCostPerPortion = useMemo(() => {
-    return directFoodCost + totalQFactorCost + totalPackagingCost;
-  }, [directFoodCost, totalQFactorCost, totalPackagingCost]);
+    return foodOnlyCostPerPortion + totalPackagingCost;
+  }, [foodOnlyCostPerPortion, totalPackagingCost]);
 
-  // Actual food cost % based on Selling Price
-  const actualFoodCostPercent = sellingPrice > 0 ? (totalCostPerPortion / sellingPrice) * 100 : 0;
-  const contributionMargin = sellingPrice - totalCostPerPortion;
-  const marginPercent = sellingPrice > 0 ? (contributionMargin / sellingPrice) * 100 : 0;
+  const isVatInclusive = Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive);
+  const vatRate = settings.vatRatePercent ?? 7;
+  const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
+  const scRate = settings.serviceChargePercent ?? 0;
+  const netSellingPrice = extractNetPriceFromMenuPrice(
+    sellingPrice,
+    isVatInclusive,
+    vatRate,
+    scIncluded,
+    scRate
+  );
 
-  // Suggested selling price by Target Food Cost %
-  const suggestedSellingPrice = targetFcPercent > 0 ? totalCostPerPortion / (targetFcPercent / 100) : 0;
+  // Actual food cost % & dine-in contribution margin strictly exclude packaging & VAT
+  const actualFoodCostPercent = netSellingPrice > 0 ? (foodOnlyCostPerPortion / netSellingPrice) * 100 : 0;
+  const contributionMargin = netSellingPrice - foodOnlyCostPerPortion;
+  const marginPercent = netSellingPrice > 0 ? (contributionMargin / netSellingPrice) * 100 : 0;
 
-  // Suggested Delivery Selling Price (หลังหัก GP เดลิเวอรี)
-  const effectiveNetMultiplier = 1 - deliveryGpPercent / 100;
-  const suggestedDeliveryPrice =
-    effectiveNetMultiplier > 0 && targetFcPercent > 0
-      ? totalCostPerPortion / ((targetFcPercent / 100) * effectiveNetMultiplier)
-      : 0;
+  const hasGpVat = settings.commissionVatAsCost ?? settings.grabFoodCommissionHasVat ?? true;
+  const roundingStep: 1 | 5 | 10 = settings.priceRounding ?? 1;
+  const suggestedPricing = calculateChannelSuggestedPrices(
+    foodOnlyCostPerPortion,
+    targetFcPercent,
+    settings.targetProfitAmount ?? 25,
+    0,
+    deliveryGpPercent,
+    totalPackagingCost,
+    {
+      commissionHasVat: hasGpVat,
+      vatRatePercent: vatRate,
+      pricesIncludeVat: isVatInclusive,
+      serviceChargeIncludedInPrice: scIncluded,
+      serviceChargePercent: scRate,
+      roundingStep,
+    }
+  );
+  const suggestedSellingPrice = suggestedPricing.suggestedPriceByFc;
+  const suggestedDeliveryPrice = suggestedPricing.suggestedDeliveryPriceByFc;
+  const effectiveDeliveryGpPercent = suggestedPricing.effectiveDeliveryGpPercent;
 
   // Status benchmark badge
   const getBenchmarkStatus = (fcPercent: number) => {
@@ -1126,10 +1157,10 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
           <div className="bg-[#FFFDF9] border border-[#EAE4D9] rounded-2xl p-5 sm:p-6 shadow-md space-y-5">
             <div className="border-b border-[#EAE4D9] pb-4">
               <span className="text-[10px] uppercase font-bold tracking-widest text-stone-500 block">
-                สรุปต้นทุนรวมต่อจาน (Total Plate Cost)
+                ต้นทุนอาหารต่อจาน (Food Cost หน้าร้าน)
               </span>
               <div className="text-3xl sm:text-4xl font-mono font-bold text-stone-900 mt-1">
-                ฿{totalCostPerPortion.toFixed(2)}
+                ฿{foodOnlyCostPerPortion.toFixed(2)}
               </div>
               <div className="flex items-center gap-2 mt-2 text-xs text-stone-500 flex-wrap">
                 <span className="bg-[#FAF8F5] px-2 py-0.5 rounded-md border border-[#EAE4D9]">
@@ -1139,9 +1170,8 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                 <span className="bg-[#FAF8F5] px-2 py-0.5 rounded-md border border-[#EAE4D9]">
                   เครื่องปรุง ฿{totalQFactorCost.toFixed(2)}
                 </span>
-                <span>+</span>
-                <span className="bg-[#FAF8F5] px-2 py-0.5 rounded-md border border-[#EAE4D9]">
-                  บรรจุภัณฑ์ ฿{totalPackagingCost.toFixed(2)}
+                <span className="bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-amber-800 font-semibold">
+                  + บรรจุภัณฑ์ (Takeaway/Delivery) ฿{totalPackagingCost.toFixed(2)}
                 </span>
               </div>
             </div>
@@ -1150,7 +1180,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-stone-800 mb-1">
-                  ราคาขายปัจจุบันที่ตั้งไว้ (Selling Price)
+                  ราคาขายปัจจุบันที่ตั้งไว้ (Selling Price) {isVatInclusive ? `(รวม VAT ${vatRate}% • Net ฿${netSellingPrice.toFixed(2)})` : ''}
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 font-bold">฿</span>
@@ -1178,7 +1208,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     {actualFoodCostPercent.toFixed(1)}%
                   </span>
                   <span className="text-xs font-semibold">
-                    (เป้าหมายสากล ≤ {targetFcPercent}%)
+                    (เป้าหมาย ≤ {targetFcPercent}%)
                   </span>
                 </div>
                 {/* Progress bar */}
@@ -1203,15 +1233,15 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <div className="p-3.5 bg-[#FAF8F5] border border-[#EAE4D9] rounded-xl flex items-center justify-between text-xs">
                 <div>
                   <span className="font-bold text-stone-800 block">
-                    กำไรส่วนเกินต่อจาน (Gross Profit / Margin)
+                    กำไรส่วนเกินต่อจาน (หน้าร้าน ไม่รวมกล่อง)
                   </span>
                   <span className="text-[10px] text-stone-500">
-                    ราคาขาย ฿{sellingPrice} หักต้นทุน ฿{totalCostPerPortion.toFixed(2)}
+                    ราคา Net ฿{netSellingPrice.toFixed(2)} หักต้นทุนอาหาร ฿{foodOnlyCostPerPortion.toFixed(2)}
                   </span>
                 </div>
                 <div className="text-right">
-                  <span className="text-base font-mono font-bold text-emerald-700 block">
-                    +฿{contributionMargin.toFixed(2)}
+                  <span className={`text-base font-mono font-bold block ${contributionMargin < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                    {contributionMargin >= 0 ? `+฿${contributionMargin.toFixed(2)}` : `-฿${Math.abs(contributionMargin).toFixed(2)}`}
                   </span>
                   <span className="text-[10px] font-mono text-stone-500">
                     Margin {marginPercent.toFixed(1)}%
@@ -1247,19 +1277,19 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     ราคาขายหน้าร้านที่แนะนำ (Suggested Price):
                   </span>
                   <span className="font-mono text-lg font-bold text-amber-900">
-                    ฿{Math.ceil(suggestedSellingPrice)}
+                    ฿{suggestedSellingPrice}
                   </span>
                 </div>
                 <p className="text-[10px] text-stone-600">
-                  สูตรสากล: ต้นทุน ฿{totalCostPerPortion.toFixed(2)} ÷ {targetFcPercent}% = ฿{suggestedSellingPrice.toFixed(2)} (ปัดเศษเป็น ฿{Math.ceil(suggestedSellingPrice)})
+                  ต้นทุนอาหาร ฿{foodOnlyCostPerPortion.toFixed(2)} ÷ {targetFcPercent}%{isVatInclusive ? ` × VAT ${vatRate}%` : ''} (ปัดขึ้นทีละ {roundingStep}฿ = ฿{suggestedSellingPrice})
                 </p>
                 {suggestedSellingPrice > sellingPrice && (
                   <button
                     type="button"
-                    onClick={() => setSellingPrice(Math.ceil(suggestedSellingPrice))}
+                    onClick={() => setSellingPrice(roundUpToStep(suggestedSellingPrice, roundingStep))}
                     className="w-full mt-2 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
                   >
-                    ปรับใช้ราคาแนะนำ ฿{Math.ceil(suggestedSellingPrice)} ทันที
+                    ปรับใช้ราคาแนะนำ ฿{suggestedSellingPrice} ทันที
                   </button>
                 )}
               </div>
@@ -1268,14 +1298,14 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <div className="p-4 bg-[#FAF8F5] border border-[#EAE4D9] rounded-xl space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-stone-800">
-                    ราคาขายเดลิเวอรี (หัก GP {deliveryGpPercent}%)
+                    ราคาขายเดลิเวอรี (GP {deliveryGpPercent}%{hasGpVat ? ` + VAT = ${effectiveDeliveryGpPercent.toFixed(1)}%` : ''})
                   </span>
                   <span className="font-mono text-base font-bold text-stone-900">
-                    ฿{Math.ceil(suggestedDeliveryPrice)}
+                    ฿{suggestedDeliveryPrice}
                   </span>
                 </div>
                 <p className="text-[10px] text-stone-500">
-                  ตั้งราคาเดลิเวอรีที่ ฿{Math.ceil(suggestedDeliveryPrice)} เพื่อให้หลังจากโดนหัก GP {deliveryGpPercent}% แล้ว ร้านยังคงได้ Food Cost {targetFcPercent}% ตามเป้าหมาย ไม่ขาดทุน
+                  ครอบคลุมค่ากล่อง ฿{totalPackagingCost.toFixed(2)} และ Effective GP {effectiveDeliveryGpPercent.toFixed(1)}% ปัดขึ้นเป็น ฿{suggestedDeliveryPrice}
                 </p>
               </div>
             </div>

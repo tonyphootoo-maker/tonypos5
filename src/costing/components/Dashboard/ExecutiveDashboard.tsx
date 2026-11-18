@@ -24,8 +24,17 @@ import {
   BusinessSettings,
   WhatShouldIDoAdvice,
 } from '../../types/domain';
-import { calculateProfitAndLoss, calculateBreakEven, calculateInventoryCOGS, convertExpenseToMonthly } from '../../engine/calculations';
-import { StockCountSnapshot, PurchaseRecord, SaleOrder } from '../../types';
+import { calculateProfitAndLoss, calculateDetailedBreakEven, calculateInventoryCOGS, convertExpenseToMonthly } from '../../engine/calculations';
+import {
+  StockCountSnapshot,
+  PurchaseRecord,
+  SaleOrder,
+  Ingredient as IndexIngredient,
+  MenuItem as IndexMenuItem,
+  InventoryItem as IndexInventoryItem,
+  WasteRecord as IndexWasteRecord,
+  RestaurantSettings,
+} from '../../types';
 import {
   getPeriodDateBounds,
   resolveStockCountSnapshotsForPeriod,
@@ -35,16 +44,18 @@ import {
   isExplicitPayrollExpense,
   deriveVariableCostPercent,
   formatPeriodCalculationLabel,
+  calculateWeightedFoodCostPercent,
+  extractNetPriceFromMenuPrice,
 } from '../../../engine/calculations';
 import { StorageService } from '../../services/storageService';
 import { FirebaseSyncService } from '../../services/firebaseSyncService';
-import { calculateVariantCostBreakdown } from '../../services/calculationEngine';
+import { calculateVariantCostBreakdown, getEffectiveDeliveryGpPercent } from '../../services/calculationEngine';
 import { INITIAL_SETTINGS } from '../../data/initialData';
 import { WhatShouldIDoSection } from './WhatShouldIDoSection';
 
 interface ExecutiveDashboardProps {
-  ingredients?: any[];
-  menuItems: any[];
+  ingredients?: Array<IndexIngredient | Ingredient>;
+  menuItems: Array<IndexMenuItem | MenuItem>;
   subRecipes?: SubRecipe[];
   channels: SalesChannel[];
   expenses: ExpenseRecord[];
@@ -52,13 +63,13 @@ interface ExecutiveDashboardProps {
   sales: DailySalesRecord[];
   waste?: WasteRecord[];
   wasteRecords?: WasteRecord[];
-  inventory?: any[];
-  allWaste?: any[];
+  inventory?: Array<IndexInventoryItem | Record<string, unknown>>;
+  allWaste?: Array<IndexWasteRecord | WasteRecord>;
   purchases?: PurchaseRecord[];
   stockCounts?: StockCountSnapshot[];
   salesOrders?: SaleOrder[];
   settings?: BusinessSettings;
-  currentSettings?: any;
+  currentSettings?: RestaurantSettings;
   advices?: WhatShouldIDoAdvice[];
   activeLanguage: 'th' | 'en';
   onNavigate?: (view: string) => void;
@@ -126,7 +137,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     ? rawAllWaste
     : (waste && waste.length > 0 ? waste : wasteRecords || []);
 
-  // Safe helper to extract or adapt portions/variants for any menu structure
+  // Safe helper to extract or adapt portions/variants for dine-in menu profitability (pkg = 0, ex-VAT denominator, uncapped profit)
   const getMenuPortions = React.useCallback(
     (menu: any): any[] => {
       if (!menu) return [];
@@ -139,17 +150,19 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
         const ingMap = new Map((ings as any[]).map((i: any) => [i.id, i]));
         const sauceMap = new Map((sauces as any[]).map((s: any) => [s.id, s]));
         const st = currentSettings || StorageService.getSettings();
+        const vatPct = (st as any)?.vatRatePercent ?? 7;
+        const scIncluded = Boolean((st as any)?.serviceChargeIncludedInPrice);
+        const scPct = (st as any)?.serviceChargePercent ?? 0;
+        const defaultPricesIncludeVat = Boolean((st as any)?.pricesIncludeVat ?? (st as any)?.salesVatInclusive);
 
         return menu.variants.map((v: any) => {
           let directFoodCost = 0;
-          let packagingCost = (st as any)?.defaultTakeawayPackagingCost || 3.5;
-          let sellingPrice = v.sellingPrice || 50;
+          let sellingPrice = v.sellingPrice || 0;
 
           try {
             if (v.recipeItems && v.recipeItems.length > 0) {
               const bd = calculateVariantCostBreakdown(v, menu.name || menu.thaiName || '', ingMap as any, sauceMap as any, st as any);
               directFoodCost = bd.totalFoodCost || bd.totalIngredientCost || 0;
-              packagingCost = bd.packagingCost || packagingCost;
               sellingPrice = bd.sellingPrice || sellingPrice;
             } else if (typeof v.totalFoodCost === 'number') {
               directFoodCost = v.totalFoodCost;
@@ -160,9 +173,21 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
             directFoodCost = v.foodCost || v.totalFoodCost || 0;
           }
 
-          const totalDirectCost = directFoodCost + packagingCost;
-          const foodCostPercent = sellingPrice > 0 ? (totalDirectCost / sellingPrice) * 100 : 0;
-          const contributionProfit = Math.max(0, sellingPrice - totalDirectCost);
+          // Dine-in has 0 takeaway box cost; strip VAT & included SC before Food Cost % and profit
+          const packagingCost = 0;
+          const totalDirectCost = directFoodCost;
+          const isVatInc =
+            v.taxType === 'INCLUSIVE' ||
+            (v.taxType !== 'EXCLUSIVE' && v.taxType !== 'NONE' && defaultPricesIncludeVat);
+          const netSellingPrice = extractNetPriceFromMenuPrice(
+            sellingPrice,
+            isVatInc,
+            vatPct,
+            scIncluded,
+            scPct
+          );
+          const foodCostPercent = netSellingPrice > 0 ? (directFoodCost / netSellingPrice) * 100 : 0;
+          const contributionProfit = netSellingPrice - totalDirectCost;
 
           return {
             id: v.id,
@@ -171,6 +196,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
             packagingCost,
             totalDirectCost,
             sellingPrice,
+            netSellingPrice,
             foodCostPercent,
             contributionProfit,
           };
@@ -260,15 +286,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   const periodWasteRes = filterPeriodWaste(allWaste || [], periodStart, periodEnd);
   const hasActualStock = snapshotPair.hasCompletePair;
 
-  // Weighted operational food cost % across all active portions
-  const allPortions = menuItems.flatMap((m) => getMenuPortions(m));
-  const avgFoodCostPercent = allPortions.length > 0
-    ? allPortions.reduce((sum, p) => sum + (p.foodCostPercent || 0), 0) / allPortions.length
-    : 32;
-
-  const estimatedFoodCogs = monthlyNetSales * (avgFoodCostPercent / 100);
-  const estimatedPackagingCogs = monthlyNetSales * 0.035;
-
+  // Sales-weighted Food Cost & Actual/Theoretical COGS (never fabricate 32% or 3.5% packaging)
   const explicitSalesFoodCost = monthSales.reduce(
     (sum, s) => sum + (typeof s.foodCost === 'number' ? Math.max(0, s.foodCost) : 0),
     0
@@ -278,19 +296,24 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     0
   );
   const orderDatesCovered = new Set(monthSales.filter((s) => typeof s.foodCost === 'number').map((s) => s.date));
-  const unmatchedOrderFoodCost = salesOrdersList
-    .filter((o) => o.date >= periodStart && o.date <= periodEnd && o.orderStatus !== 'CANCELLED' && !orderDatesCovered.has(o.date))
-    .reduce((sum, o) => sum + (o.totalFoodCost || 0), 0);
-  const unmatchedOrderPkgCost = salesOrdersList
-    .filter((o) => o.date >= periodStart && o.date <= periodEnd && o.orderStatus !== 'CANCELLED' && !orderDatesCovered.has(o.date))
-    .reduce((sum, o) => sum + (o.packagingCost || 0), 0);
+  const unmatchedOrders = salesOrdersList.filter(
+    (o) => o.date >= periodStart && o.date <= periodEnd && o.orderStatus !== 'CANCELLED' && !orderDatesCovered.has(o.date)
+  );
+  const unmatchedOrderFoodCost = unmatchedOrders.reduce((sum, o) => sum + (o.totalFoodCost || 0), 0);
+  const unmatchedOrderPkgCost = unmatchedOrders.reduce((sum, o) => sum + (o.packagingCost || 0), 0);
+  const unmatchedOrderNetSales = unmatchedOrders.reduce((sum, o) => {
+    if (typeof o.netRevenue === 'number' && Number.isFinite(o.netRevenue) && o.netRevenue >= 0) {
+      return sum + o.netRevenue;
+    }
+    const gross = Math.max(0, o.grossSales || 0);
+    const vatPct = (currentSettings as any)?.vatRatePercent ?? 7;
+    const isVatInc = Boolean((currentSettings as any)?.pricesIncludeVat ?? (currentSettings as any)?.salesVatInclusive);
+    return sum + (isVatInc && vatPct > 0 ? gross / (1 + vatPct / 100) : gross);
+  }, 0);
   const theoreticalFoodCostTotal = explicitSalesFoodCost + unmatchedOrderFoodCost;
 
-  let foodCogsToUse = theoreticalFoodCostTotal > 0 ? theoreticalFoodCostTotal : estimatedFoodCogs;
-  let packagingCogsToUse =
-    explicitSalesPackagingCost + unmatchedOrderPkgCost > 0
-      ? explicitSalesPackagingCost + unmatchedOrderPkgCost
-      : estimatedPackagingCogs;
+  let foodCogsToUse = theoreticalFoodCostTotal > 0 ? theoreticalFoodCostTotal : 0;
+  let packagingCogsToUse = explicitSalesPackagingCost + unmatchedOrderPkgCost;
 
   if (hasActualStock && snapshotPair.beginningSnapshot && snapshotPair.endingSnapshot) {
     const actualCogsResult = calculateInventoryCOGS(
@@ -301,6 +324,20 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     );
     foodCogsToUse = actualCogsResult.cogs;
   }
+
+  const effectiveSalesForFoodCost = monthlyNetSales > 0 ? monthlyNetSales : unmatchedOrderNetSales;
+  const weightedFoodCostRes = calculateWeightedFoodCostPercent(
+    effectiveSalesForFoodCost > 0
+      ? [{ netSales: effectiveSalesForFoodCost, totalFoodCost: foodCogsToUse }]
+      : [],
+    {
+      pricesIncludeVat: Boolean((currentSettings as any)?.pricesIncludeVat ?? (currentSettings as any)?.salesVatInclusive),
+      vatPercent: (currentSettings as any)?.vatRatePercent ?? 7,
+      serviceChargeIncludedInPrice: Boolean((currentSettings as any)?.serviceChargeIncludedInPrice),
+      serviceChargePercent: (currentSettings as any)?.serviceChargePercent ?? 0,
+    }
+  );
+  const avgFoodCostPercent: number | null = weightedFoodCostRes.foodCostPercent;
 
   const incomeTaxRate = typeof currentSettings.incomeTaxRatePercent === 'number' && Number.isFinite(currentSettings.incomeTaxRatePercent)
     ? currentSettings.incomeTaxRatePercent
@@ -320,7 +357,8 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     monthlyNetSales
   );
 
-  const syntheticSummariesForCM = monthSales.map((s) => ({
+  const syntheticSummariesForCM = monthSales.map((s, idx) => ({
+    id: s.id || `sum_${s.date}_${idx}`,
     date: s.date,
     grossSales: s.grossSales || 0,
     discounts: s.discounts || 0,
@@ -330,11 +368,11 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     totalFoodCost: s.foodCost || 0,
     packagingCost: s.packagingCost || 0,
     platformFees: s.platformFees || 0,
-    grossProfit: 0,
     orderCount: s.orderCount || 0,
-    paymentTotals: {},
+    paymentTotals: { cash: 0, qr: 0, card: 0, transfer: 0 },
     channelTotals: {},
     dishStats: {},
+    createdAt: '',
     updatedAt: '',
     version: 1,
   }));
@@ -344,14 +382,20 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   });
   const effectiveCMPercent = derivedMargin.hasRealData
     ? derivedMargin.contributionMarginPercent
-    : allPortions.length > 0
+    : avgFoodCostPercent !== null
     ? Math.max(0, 100 - avgFoodCostPercent)
     : 0;
 
-  const breakEven = calculateBreakEven(
+  const monthlyOrderCount = monthSales.reduce((sum, s) => sum + (s.orderCount || 0), 0);
+  const avgTicketSizeForBe =
+    monthlyOrderCount > 0 && monthlyNetSales > 0
+      ? monthlyNetSales / monthlyOrderCount
+      : (currentSettings as any)?.defaultTicketSize ?? 0;
+
+  const breakEven = calculateDetailedBreakEven(
     fixedExpenses + directKitchenLabor,
     effectiveCMPercent,
-    110,
+    avgTicketSizeForBe,
     operatingDays,
     0,
     monthlyNetSales
@@ -394,25 +438,42 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   }
 
   // 2. Delivery GP alert based on real delivery channel settings
-  const grabChannel = channels.find((c) => c.id === 'grab' || c.code === 'GRAB') || { commissionPercent: currentSettings.grabFoodCommissionPercent ?? 30 };
-  const grabVatGp = ((grabChannel.commissionPercent || 30) * 1.07).toFixed(1);
+  const grabChannel = channels.find((c) => c.id === 'grab' || c.code === 'GRAB');
+  const effectiveGrabGp = getEffectiveDeliveryGpPercent(
+    {
+      ...currentSettings,
+      ...(grabChannel?.commissionPercent !== undefined
+        ? { grabFoodCommissionPercent: grabChannel.commissionPercent }
+        : {}),
+    } as any,
+    'grab'
+  );
+  const grabHasVat =
+    (currentSettings as any)?.commissionVatAsCost ??
+    (currentSettings as any)?.grabFoodCommissionHasVat ??
+    true;
+  const grabVatGp = effectiveGrabGp.toFixed(1);
   defaultAdvicesList.push({
     id: 'adv-2',
     type: 'WARNING',
     category: 'Delivery Loss',
-    titleTh: `ช่องทาง GrabFood โดนหัก GP รวม VAT ${grabVatGp}%`,
-    titleEn: `GrabFood Delivery Commission with VAT is ${grabVatGp}%`,
+    titleTh: grabHasVat
+      ? `ช่องทาง GrabFood โดนหัก GP รวม VAT ${grabVatGp}%`
+      : `ช่องทาง GrabFood โดนหัก GP ${grabVatGp}%`,
+    titleEn: grabHasVat
+      ? `GrabFood Delivery Commission with VAT is ${grabVatGp}%`
+      : `GrabFood Delivery Commission is ${grabVatGp}%`,
     descriptionTh: 'หากตั้งราคาขายเดลิเวอรีเท่ากับหน้าร้าน กำไรขั้นต้นจะลดลง แนะนำใช้สูตรคำนวณราคา Delivery Markup เพื่อรักษากำไรสุทธิ',
     descriptionEn: 'Selling at dine-in prices on delivery erodes gross margin. Use the built-in Delivery Markup strategy.',
     actionRecommendationTh: 'ปรับราคาเมนูเดลิเวอรีเพื่อรักษา Net Profit',
     actionRecommendationEn: 'Optimize delivery selling prices',
-    metricLabel: 'GP + VAT',
+    metricLabel: grabHasVat ? 'GP + VAT' : 'GP',
     metricValue: `${grabVatGp}%`,
     relatedEntityType: 'channel',
   });
 
-  // 3. Break-even insight card: only include if enough data (loggedDaysCount >= 1 and breakEvenDailySales > 0)
-  if (loggedDaysCount >= 1 && breakEven.breakEvenDailySales > 0) {
+  // 3. Break-even insight card: only include if enough data (loggedDaysCount >= 1 and valid break-even)
+  if (loggedDaysCount >= 1 && breakEven.isValid && breakEven.breakEvenDailySales > 0) {
     const diffPercent = ((avgDailyNetSales - breakEven.breakEvenDailySales) / breakEven.breakEvenDailySales) * 100;
     const isAbove = diffPercent >= 0;
     defaultAdvicesList.push({
@@ -445,7 +506,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   const targetFoodCostPct =
     settings.defaultTargetFoodCostPercent || currentSettings.defaultTargetFoodCostPercent || 30;
   const targetPrimeCostPct = currentSettings.primeCostTargetPercent || 55;
-  const isFoodCostHigh = avgFoodCostPercent > targetFoodCostPct;
+  const isFoodCostHigh = avgFoodCostPercent !== null && avgFoodCostPercent > targetFoodCostPct;
   const isPrimeCostHigh = pnl.primeCostPercent > targetPrimeCostPct;
 
   return (
@@ -580,10 +641,18 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
               </span>
               <span
                 className={`text-[11px] font-semibold ${
-                  isFoodCostHigh ? 'text-amber-700' : 'text-emerald-700'
+                  avgFoodCostPercent === null
+                    ? 'text-slate-500'
+                    : isFoodCostHigh
+                    ? 'text-amber-700'
+                    : 'text-emerald-700'
                 }`}
               >
-                {isFoodCostHigh
+                {avgFoodCostPercent === null
+                  ? activeLanguage === 'th'
+                    ? 'ยังไม่มีข้อมูลขาย'
+                    : 'No sales data'
+                  : isFoodCostHigh
                   ? activeLanguage === 'th'
                     ? 'เกินเป้า'
                     : 'Above Target'
@@ -593,15 +662,27 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
               </span>
             </div>
             <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
-                {avgFoodCostPercent.toFixed(1)}%
-              </span>
-              <span className="text-[11px] text-slate-400 font-medium tabular-nums">
-                / {targetFoodCostPct}%
-              </span>
+              {avgFoodCostPercent !== null ? (
+                <>
+                  <span className="text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
+                    {avgFoodCostPercent.toFixed(1)}%
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-medium tabular-nums">
+                    / {targetFoodCostPct}%
+                  </span>
+                </>
+              ) : (
+                <span className="text-lg font-bold tracking-tight text-slate-500">
+                  {activeLanguage === 'th' ? 'ยังไม่มีข้อมูลขาย' : 'No sales data'}
+                </span>
+              )}
             </div>
             <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-slate-500 tabular-nums">
-              {isFoodCostHigh
+              {avgFoodCostPercent === null
+                ? activeLanguage === 'th'
+                  ? 'บันทึกยอดขาย POS เพื่อคำนวณถ่วงน้ำหนัก'
+                  : 'Record POS sales for weighted %'
+                : isFoodCostHigh
                 ? activeLanguage === 'th'
                   ? `สูงกว่าเป้า +${(avgFoodCostPercent - targetFoodCostPct).toFixed(1)}%`
                   : `+${(avgFoodCostPercent - targetFoodCostPct).toFixed(1)}% above target`
@@ -669,7 +750,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
                 <FileSpreadsheet className="h-3.5 w-3.5 text-slate-600" />
-                {activeLanguage === 'th' ? 'กำไรดำเนินงาน' : 'Operating Profit'}
+                {activeLanguage === 'th' ? 'กำไรจากการดำเนินงาน (Operating Profit)' : 'Operating Profit'}
               </span>
               <span className="text-[11px] font-semibold text-slate-600 tabular-nums">
                 {pnl.operatingMarginPercent.toFixed(1)}%
@@ -723,15 +804,36 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
                 <Scale className="h-3.5 w-3.5 text-orange-600" />
                 {activeLanguage === 'th' ? 'จุดคุ้มทุนต่อเดือน' : 'Break-Even Target'}
               </span>
-              <span className="text-[11px] font-semibold text-slate-500">BEP</span>
+              {!derivedMargin.hasRealData && avgFoodCostPercent !== null ? (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                  {activeLanguage === 'th' ? 'ประมาณการ' : 'Estimated'}
+                </span>
+              ) : (
+                <span className="text-[11px] font-semibold text-slate-500">BEP</span>
+              )}
             </div>
             <div className="mt-3 text-2xl font-bold tracking-tight text-slate-900 tabular-nums">
-              ฿{Math.round(breakEven.breakEvenSales).toLocaleString()}
+              {breakEven.isValid
+                ? `฿${Math.round(breakEven.breakEvenSales).toLocaleString()}`
+                : activeLanguage === 'th'
+                ? 'รอข้อมูลขายจริง'
+                : 'Awaiting Sales'}
             </div>
-            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] text-emerald-700 font-medium tabular-nums">
-              {activeLanguage === 'th'
-                ? `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/วัน · ${breakEven.breakEvenDailyOrders} จาน/วัน`
-                : `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/day`}
+            <div className="mt-2.5 pt-2 border-t border-slate-200/50 text-[11px] font-medium tabular-nums space-y-0.5">
+              {breakEven.isValid ? (
+                <div className="text-emerald-700">
+                  {activeLanguage === 'th'
+                    ? `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/วัน · ${breakEven.breakEvenDailyOrders} จาน/วัน`
+                    : `฿${Math.round(breakEven.breakEvenDailySales).toLocaleString()}/day`}
+                </div>
+              ) : (
+                <div className="text-amber-700">
+                  {activeLanguage === 'th' ? 'บันทึกยอดขายเพื่อคำนวณ CM%' : 'Record sales to compute CM%'}
+                </div>
+              )}
+              <div className="text-[10px] text-slate-400">
+                {formatPeriodCalculationLabel('month', targetMonth, activeLanguage)}
+              </div>
             </div>
           </div>
         </section>
@@ -796,6 +898,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
                       35;
                     return portionsList.map((portion: any, pIdx: number) => {
                       const isHighFoodCost = (portion.foodCostPercent || 0) > targetFoodCost;
+                      const isLoss = (portion.contributionProfit ?? 0) < 0;
                       return (
                         <tr key={`${menu.id}-${portion.id}`} className="transition-colors">
                           <td className="py-3 px-3.5 font-medium text-slate-900">
@@ -834,11 +937,20 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
                           >
                             {(portion.foodCostPercent || 0).toFixed(1)}%
                           </td>
-                          <td className="py-3 px-3.5 text-right font-bold text-emerald-700">
-                            ฿{(portion.contributionProfit || 0).toFixed(2)}
+                          <td
+                            className={`py-3 px-3.5 text-right font-bold ${
+                              isLoss ? 'text-rose-600' : 'text-emerald-700'
+                            }`}
+                          >
+                            ฿{(portion.contributionProfit ?? 0).toFixed(2)}
                           </td>
                           <td className="py-3 px-3.5 text-center">
-                            {isHighFoodCost ? (
+                            {isLoss ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700">
+                                <AlertTriangle className="h-3 w-3 shrink-0" />
+                                <span>{activeLanguage === 'th' ? 'ขาดทุน' : 'Loss'}</span>
+                              </span>
+                            ) : isHighFoodCost ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700">
                                 <AlertTriangle className="h-3 w-3 shrink-0" />
                                 <span>ควรปรับราคา</span>

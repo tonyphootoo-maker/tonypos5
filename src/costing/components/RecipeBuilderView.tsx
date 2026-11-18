@@ -33,6 +33,7 @@ import {
   calculateVariantCostBreakdown,
   calculateSauceCost,
 } from '../services/calculationEngine';
+import { convertUnit } from '../engine/units';
 import { NumericInput } from './common/NumericInput';
 
 // Helper to determine if a recipe line item is a variant's protein/meat
@@ -284,39 +285,58 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     }
   }, [selectedMenuId, currentMenu, hasUnsavedChanges, localBaseItems.length]);
 
-  // Calculate unit cost and line cost for each item
+  // Calculate unit cost and line cost for each item with unit conversion
   const getItemCost = (item: RecipeItem) => {
     if (item.type === 'SAUCE') {
       const sauce = saucesMap.get(item.ingredientId || item.sauceId || '');
       if (sauce) {
         const c = calculateSauceCost(sauce, ingredientsMap);
+        const conv = convertUnit(item.quantity || 0, item.unit || sauce.productionUnit || 'g', sauce.productionUnit || 'g');
+        const qty = conv.success ? conv.convertedQuantity : 0;
         return {
           unitCost: c.costPerGram,
-          lineCost: item.quantity * c.costPerGram,
-          missingPrice: !!c.hasMissingPrice || !!c.missingPrice,
+          lineCost: c.isValid && conv.success ? qty * c.costPerGram : 0,
+          missingPrice: !!c.hasMissingPrice || !!c.missingPrice || !c.isValid || !conv.success,
         };
       }
-      return { unitCost: item.calculatedUnitCost || 0.05, lineCost: item.quantity * (item.calculatedUnitCost || 0.05), missingPrice: false };
+      return { unitCost: 0, lineCost: 0, missingPrice: true };
     }
 
     if (item.type === 'PACKAGING') {
       const preset = PACKAGING_PRESETS.find((p) => p.id === item.ingredientId || p.name === item.name);
       const ing = ingredientsMap.get(item.ingredientId);
-      const unitCost = preset?.unitCost ?? (ing?.costPerBaseUnit ?? (item.calculatedUnitCost || 2.50));
-      return { unitCost, lineCost: item.quantity * unitCost, missingPrice: false };
+      const unitCost = preset?.unitCost ?? (ing?.costPerBaseUnit ?? (item.calculatedUnitCost || 0));
+      return { unitCost, lineCost: item.quantity * unitCost, missingPrice: unitCost <= 0 };
     }
 
     if (item.type === 'PREPARED_ITEM') {
       const preset = SIDE_DISH_PRESETS.find((p) => p.id === item.ingredientId || p.name === item.name);
       const ing = ingredientsMap.get(item.ingredientId);
-      const unitCost = preset?.unitCost ?? (ing?.costPerBaseUnit ?? (item.calculatedUnitCost || 1.50));
-      return { unitCost, lineCost: item.quantity * unitCost, missingPrice: false };
+      if (preset) {
+        return { unitCost: preset.unitCost, lineCost: item.quantity * preset.unitCost, missingPrice: false };
+      }
+      if (ing) {
+        const targetUnit = ing.usageUnit || ing.baseUnit || item.unit;
+        const conv = convertUnit(item.quantity || 0, item.unit || targetUnit, targetUnit);
+        const qty = conv.success ? conv.convertedQuantity : 0;
+        return { unitCost: ing.costPerBaseUnit, lineCost: conv.success ? qty * ing.costPerBaseUnit : 0, missingPrice: !conv.success };
+      }
+      return { unitCost: 0, lineCost: 0, missingPrice: true };
     }
 
     const ing = ingredientsMap.get(item.ingredientId);
-    const unitCost = ing ? ing.costPerBaseUnit : (item.calculatedUnitCost || 0);
-    const missingPrice = ing ? (!ing.purchasePrice || ing.purchasePrice <= 0) : (!unitCost || unitCost <= 0);
-    return { unitCost, lineCost: item.quantity * unitCost, missingPrice };
+    if (!ing) {
+      return { unitCost: 0, lineCost: 0, missingPrice: true };
+    }
+    const targetUnit = ing.usageUnit || ing.baseUnit || item.unit;
+    const conv = convertUnit(item.quantity || 0, item.unit || targetUnit, targetUnit);
+    const unitCost = ing.costPerBaseUnit;
+    const missingPrice = !ing.purchasePrice || ing.purchasePrice <= 0 || !conv.success;
+    return {
+      unitCost,
+      lineCost: conv.success ? conv.convertedQuantity * unitCost : 0,
+      missingPrice,
+    };
   };
 
   const totalBaseIngredientsCost = useMemo(() => {
@@ -782,6 +802,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   const [selectedSauce, setSelectedSauce] = useState<Sauce | null>(sauces[0] || null);
   const [isSauceModalOpen, setIsSauceModalOpen] = useState(false);
   const [editingSauce, setEditingSauce] = useState<Partial<Sauce> | null>(null);
+  const [sauceFormError, setSauceFormError] = useState<string | null>(null);
 
   const filteredSauces = useMemo(() => {
     return sauces.filter((s) => s.name.toLowerCase().includes(sauceSearch.toLowerCase()));
@@ -805,28 +826,44 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    setSauceFormError(null);
     setEditingSauce(newSauce);
     setIsSauceModalOpen(true);
   };
 
   const handleOpenEditSauce = (sauce: Sauce) => {
+    setSauceFormError(null);
     setEditingSauce(JSON.parse(JSON.stringify(sauce)));
     setIsSauceModalOpen(true);
   };
 
   const handleSaveSauceModal = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingSauce || !editingSauce.name) return;
+    if (!editingSauce || !editingSauce.name?.trim()) {
+      setSauceFormError('กรุณาระบุชื่อสูตรซอส');
+      return;
+    }
+
+    const rawActual = Number(editingSauce.actualQuantity);
+    if (!Number.isFinite(rawActual) || rawActual <= 0) {
+      setSauceFormError('กรุณาระบุปริมาณสุทธิของซอส');
+      return;
+    }
 
     const calc = calculateSauceCost(editingSauce, ingredientsMap);
+    if (!calc.isValid) {
+      setSauceFormError(calc.errorMessage || 'ข้อมูลสูตรซอสยังไม่ถูกต้อง');
+      return;
+    }
+
     const finalSauce: Sauce = {
       id: editingSauce.id || `sauce_${Date.now()}`,
       name: editingSauce.name.trim(),
       category: editingSauce.category || 'ซอสปรุงรส',
-      productionQuantity: Number(editingSauce.productionQuantity) || 1000,
+      productionQuantity: Number(editingSauce.productionQuantity) || rawActual,
       productionUnit: editingSauce.productionUnit || 'g',
-      yieldPercent: Number(editingSauce.yieldPercent) || 100,
-      actualQuantity: Number(editingSauce.actualQuantity) || 1000,
+      yieldPercent: Number(editingSauce.yieldPercent) > 0 ? Number(editingSauce.yieldPercent) : 100,
+      actualQuantity: rawActual,
       productionCost: calc.productionCost,
       actualCost: calc.actualCost,
       costPerGram: calc.costPerGram,
@@ -840,6 +877,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     if (onSaveSauce) {
       onSaveSauce(finalSauce);
     }
+    setSauceFormError(null);
     setSelectedSauce(finalSauce);
     setIsSauceModalOpen(false);
   };
@@ -1526,13 +1564,21 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       </div>
 
                       <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                        <span className="text-[10px] font-sans text-white/40 block">ต้นทุนต่อกรัม</span>
-                        <span className="font-bold text-[#FFC107] mt-0.5 block">
-                          ฿{calc.costPerGram.toFixed(4)}
-                        </span>
-                        <span className="text-[9px] text-white/40">
-                          (฿{(calc.costPerGram * 30).toFixed(2)}/30g)
-                        </span>
+                        <span className="text-[10px] font-sans text-white/40 block">ต้นทุนต่อหน่วย</span>
+                        {calc.isValid ? (
+                          <>
+                            <span className="font-bold text-[#FFC107] mt-0.5 block">
+                              ฿{calc.costPerGram.toFixed(4)}
+                            </span>
+                            <span className="text-[9px] text-white/40">
+                              (฿{(calc.costPerGram * 30).toFixed(2)}/30{sauce.productionUnit || 'g'})
+                            </span>
+                          </>
+                        ) : (
+                          <span className="font-bold text-rose-400 text-[11px] mt-0.5 block">
+                            {calc.errorMessage || 'ข้อมูลไม่ครบ'}
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -1669,10 +1715,56 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   required
                   placeholder="เช่น ซอสผัดกะเพราโบราณ, ซอสพริกไทยดำ"
                   value={editingSauce.name || ''}
-                  onChange={(e) => setEditingSauce({ ...editingSauce, name: e.target.value })}
+                  onChange={(e) => {
+                    setSauceFormError(null);
+                    setEditingSauce({ ...editingSauce, name: e.target.value });
+                  }}
                   className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
                 />
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-white/70 mb-1 font-semibold">ปริมาณสุทธิที่ได้ (Actual Yield)</label>
+                  <NumericInput
+                    type="number"
+                    min="0"
+                    step="any"
+                    required
+                    placeholder="เช่น 600"
+                    value={editingSauce.actualQuantity ?? ''}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setSauceFormError(null);
+                      setEditingSauce({
+                        ...editingSauce,
+                        actualQuantity: Number.isFinite(val) ? val : 0,
+                      });
+                    }}
+                    className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl font-mono font-bold text-white focus:outline-none focus:border-[#F27D26]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-white/70 mb-1 font-semibold">หน่วยผลิตซอส</label>
+                  <select
+                    value={editingSauce.productionUnit || 'g'}
+                    onChange={(e) => {
+                      setSauceFormError(null);
+                      setEditingSauce({ ...editingSauce, productionUnit: e.target.value as UnitType });
+                    }}
+                    className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white cursor-pointer"
+                  >
+                    <option value="g" className="bg-[#1a1a1a]">g (กรัม)</option>
+                    <option value="ml" className="bg-[#1a1a1a]">ml (มิลลิลิตร)</option>
+                  </select>
+                </div>
+              </div>
+
+              {sauceFormError && (
+                <div className="p-2.5 bg-rose-500/15 border border-rose-500/30 rounded-xl text-[11px] text-rose-300 font-semibold">
+                  {sauceFormError}
+                </div>
+              )}
 
               {/* Items in Sauce */}
               <div>

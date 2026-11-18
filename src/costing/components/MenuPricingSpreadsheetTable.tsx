@@ -7,6 +7,15 @@ import {
   RestaurantSettings,
   RecipeCostBreakdown,
 } from '../types';
+import {
+  calculateVariantCostBreakdown,
+  getDeliveryCommissionPercent,
+  getEffectiveDeliveryGpPercent,
+  getDeliveryPackagingCost,
+  roundUpToStep,
+} from '../services/calculationEngine';
+import { convertUnit } from '../engine/units';
+import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
 import { Plus, SlidersHorizontal, Store, Bike, Smartphone, Flame, LayoutGrid, UtensilsCrossed, Edit2, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { NumericInput } from './common/NumericInput';
 
@@ -70,14 +79,19 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
     }
   };
 
-  // Delivery GP rates with 7% VAT linked directly to restaurant settings
-  const grabCommissionBase = settings.grabFoodCommissionPercent ?? 30;
-  const grabGpRateWithVat = (grabCommissionBase * 1.07) / 100;
-  const grabGpPctDisplay = (grabCommissionBase * 1.07).toFixed(2);
+  // Delivery GP rates & pricing config linked directly to restaurant settings
+  const vatRate = settings.vatRatePercent ?? 7;
+  const grabCommissionBase = getDeliveryCommissionPercent(settings, 'grab');
+  const grabEffectiveGpPct = getEffectiveDeliveryGpPercent(settings, 'grab');
+  const grabGpRateWithVat = grabEffectiveGpPct / 100;
+  const grabGpPctDisplay = grabEffectiveGpPct.toFixed(2);
 
-  const linemanCommissionBase = settings.lineManCommissionPercent ?? 25;
-  const linemanGpRateWithVat = (linemanCommissionBase * 1.07) / 100;
-  const linemanGpPctDisplay = (linemanCommissionBase * 1.07).toFixed(2);
+  const linemanCommissionBase = getDeliveryCommissionPercent(settings, 'lineman');
+  const linemanEffectiveGpPct = getEffectiveDeliveryGpPercent(settings, 'lineman');
+  const linemanGpRateWithVat = linemanEffectiveGpPct / 100;
+  const linemanGpPctDisplay = linemanEffectiveGpPct.toFixed(2);
+  const commissionHasVat = settings.commissionVatAsCost ?? settings.grabFoodCommissionHasVat ?? true;
+  const roundingStep: 1 | 5 | 10 = settings.priceRounding ?? 1;
 
   // State & Handlers for reordering meat variants (Drag & Drop + Up/Down arrows)
   const [draggedVariantId, setDraggedVariantId] = useState<string | null>(null);
@@ -868,10 +882,14 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       ? localEdits[v.id]!.seafoodSquidQty!
                       : defaultSquid);
 
-              const shrimpUnitCost = shrimpItemFromRecipe?.calculatedUnitCost || 8.5; // บาท/ตัว
-              const squidUnitCost = squidItemFromRecipe?.calculatedUnitCost || 0.388; // บาท/กรัม
-              const shrimpTotalCost = Math.round(shrimpQty * shrimpUnitCost);
-              const squidTotalCost = Math.round(squidQty * squidUnitCost);
+              const shrimpUnitCost = shrimpItemFromRecipe?.calculatedUnitCost
+                ?? ingredientsMap.get(shrimpItemFromRecipe?.ingredientId || 'ing_shrimp_xl')?.costPerBaseUnit
+                ?? 0;
+              const squidUnitCost = squidItemFromRecipe?.calculatedUnitCost
+                ?? ingredientsMap.get(squidItemFromRecipe?.ingredientId || 'ing_squid_fresh')?.costPerBaseUnit
+                ?? 0;
+              const shrimpTotalCost = shrimpQty * shrimpUnitCost;
+              const squidTotalCost = squidQty * squidUnitCost;
               const seafoodCombinedCost = shrimpTotalCost + squidTotalCost;
 
               // 5. Protein weight used (USER EDITABLE)
@@ -884,93 +902,196 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                           ? proteinItem.quantity
                           : baseWeight));
 
-              // 6. Protein cost per dish (ราคาต้นทุนเนื้อ/จาน)
-              // For seafood: combined total of shrimp and squid!
-              const proteinCost = isSeafood ? seafoodCombinedCost : Math.round(proteinWeight * proteinUnitCost);
+              // 6. Protein cost per dish (full precision)
+              const proteinCostNum = isSeafood ? seafoodCombinedCost : proteinWeight * proteinUnitCost;
 
-              // 7. Central ingredients cost (ต้นทุนวัตถุดิบกลาง)
+              // 7. Central ingredients cost (converted units, skip rice in a la carte mode, zero magic fallback)
               let sumCentral = 0;
-              (v.recipeItems || []).forEach((it) => {
+              const effectiveRecipeItems = (v.recipeItems || []).map((it) => {
+                if (currentServingMode === 'A_LA_CARTE') {
+                  const lower = it.name.toLowerCase();
+                  if (lower.includes('ข้าว') || it.ingredientId === 'ing_cooked_rice') {
+                    return { ...it, quantity: 0 };
+                  }
+                }
+                if (it === proteinItem && !isSeafood) {
+                  return { ...it, quantity: proteinWeight };
+                }
+                if (isSeafood && (it.proteinCategory === 'SHRIMP' || it.name.toLowerCase().includes('กุ้ง'))) {
+                  return { ...it, quantity: shrimpQty };
+                }
+                if (isSeafood && (it.proteinCategory === 'SQUID' || it.name.toLowerCase().includes('หมึก'))) {
+                  return { ...it, quantity: squidQty };
+                }
+                return it;
+              });
+
+              effectiveRecipeItems.forEach((it) => {
                 const lower = it.name.toLowerCase();
                 const isMeatOrSeafood =
                   it === proteinItem ||
                   (isSeafood && (lower.includes('กุ้ง') || lower.includes('หมึก') || it.proteinCategory === 'SHRIMP' || it.proteinCategory === 'SQUID'));
-                if (!isMeatOrSeafood) {
-                  // If in a la carte mode, skip rice
-                  if (currentServingMode === 'A_LA_CARTE' && (lower.includes('ข้าว') || it.ingredientId === 'ing_cooked_rice')) {
-                    return;
+                if (!isMeatOrSeafood && it.quantity > 0) {
+                  const ing = ingredientsMap.get(it.ingredientId);
+                  if (ing) {
+                    const conv = convertUnit(it.quantity, it.unit || ing.usageUnit || ing.baseUnit, ing.usageUnit || ing.baseUnit);
+                    sumCentral += conv.success ? conv.convertedQuantity * ing.costPerBaseUnit : 0;
+                  } else if (it.ingredientType === 'SAUCE') {
+                    const sc = saucesMap.get(it.ingredientId);
+                    if (sc && sc.actualQuantity > 0) {
+                      const conv = convertUnit(it.quantity, it.unit || sc.productionUnit || 'g', sc.productionUnit || 'g');
+                      sumCentral += conv.success ? conv.convertedQuantity * sc.costPerGram : 0;
+                    } else {
+                      sumCentral += it.calculatedLineCost || it.quantity * (it.calculatedUnitCost || 0);
+                    }
+                  } else {
+                    sumCentral += it.calculatedLineCost || it.quantity * (it.calculatedUnitCost || 0);
                   }
-                  sumCentral += it.calculatedLineCost || it.quantity * (it.calculatedUnitCost || 0);
                 }
               });
-              const centralCost = sumCentral > 0 ? Math.round(sumCentral) : 22;
 
-              // 8. Total raw material cost (ต้นทุนวัตถุดิบทั้งหมด)
-              const totalRawMaterialCost = proteinCost + centralCost;
+              // Canonical breakdown from calculationEngine (zero magic fallbacks, clean separation of packaging)
+              const editedVariant: MenuVariant = {
+                ...v,
+                sellingPrice,
+                recipeItems: effectiveRecipeItems,
+              };
+              const grabBd = calculateVariantCostBreakdown(
+                { ...editedVariant, deliveryPrice: localEdits[editKey]?.grabPrice ?? localEdits[v.id]?.grabPrice ?? baseGrabPrice },
+                menu.name,
+                ingredientsMap,
+                saucesMap,
+                settings,
+                'grab'
+              );
+              const linemanBd = calculateVariantCostBreakdown(
+                { ...editedVariant, deliveryPrice: localEdits[editKey]?.linemanPrice ?? localEdits[v.id]?.linemanPrice ?? baseLinemanPrice },
+                menu.name,
+                ingredientsMap,
+                saucesMap,
+                settings,
+                'lineman'
+              );
 
-              // 9. Overhead & Packaging cost (ต้นทุนแฝง)
-              let overheadCost = 28;
-              if (pName.includes('หมูหมัก') || pName.includes('ไส้กรอก')) overheadCost = 32;
-              else if (pName.includes('เนื้อวัวสไลซ์')) overheadCost = 52;
-              else if (pName.includes('เนื้อวัว สับ') || pName.includes('เนื้อสับ')) overheadCost = 40;
-              else if (pName.includes('กุ้ง') || pName.includes('หมึก') || isSeafood) overheadCost = 44;
-              else overheadCost = Math.round((v.overheadCost || 25) + (v.packagingCost || 7));
+              const proteinCost = Number(proteinCostNum.toFixed(2));
+              const centralCost = Number(sumCentral.toFixed(2));
+              const totalRawMaterialCost = Number((proteinCostNum + sumCentral).toFixed(2));
+              const overheadCostNum = grabBd.overheadCost;
+              const overheadCost = Number(overheadCostNum.toFixed(2));
+              // Dine-in total cost excludes packaging
+              const totalCostNum = totalRawMaterialCost + overheadCostNum;
+              const totalCost = Number(totalCostNum.toFixed(2));
 
-              // 10. Total cost (ต้นทุนรวม)
-              const totalCost = totalRawMaterialCost + overheadCost;
+              const isVariantVatInclusive =
+                v.taxType === 'INCLUSIVE' ||
+                (v.taxType !== 'EXCLUSIVE' &&
+                  v.taxType !== 'NONE' &&
+                  Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive));
+              const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
+              const scRate = settings.serviceChargePercent ?? 0;
+              const netDineInPrice = extractNetPriceFromMenuPrice(
+                sellingPrice,
+                isVariantVatInclusive,
+                vatRate,
+                scIncluded,
+                scRate
+              );
 
-              // 11. Food Cost %
+              // 11. Food Cost % (food only / net selling price ex-VAT)
               const fcPercent =
-                sellingPrice > 0 ? Math.round((totalRawMaterialCost / sellingPrice) * 100) : 0;
+                netDineInPrice > 0 ? Number(((totalRawMaterialCost / netDineInPrice) * 100).toFixed(1)) : 0;
 
-              // 12. Profits at restaurant
-              const packagingAmount = v.packagingCost || 9;
-              const dineInProfit = Math.round(sellingPrice - totalCost + packagingAmount);
+              // 12. Profits at restaurant (dine-in has 0 packaging; takeaway adds packaging)
+              const packagingAmount =
+                (grabBd.packagingCost || 0) > 0
+                  ? grabBd.packagingCost
+                  : (settings.takeawayPackagingCost ?? 0);
+              const deliveryPkgAmount =
+                (grabBd.packagingCost || 0) > 0
+                  ? grabBd.packagingCost
+                  : getDeliveryPackagingCost(settings, 'grab');
+
+              const dineInProfit = Number((netDineInPrice - totalCostNum).toFixed(2));
               const boxMarkup =
                 v.takeawayPrice && v.sellingPrice && v.takeawayPrice > v.sellingPrice
                   ? v.takeawayPrice - v.sellingPrice
                   : 0;
               const effectiveTakeawayPrice = sellingPrice + boxMarkup;
-              const takeawayProfit = Math.round(effectiveTakeawayPrice - totalCost);
+              const netTakeawayPrice = extractNetPriceFromMenuPrice(
+                effectiveTakeawayPrice,
+                isVariantVatInclusive,
+                vatRate,
+                scIncluded,
+                scRate
+              );
+              const takeawayProfit = Number((netTakeawayPrice - totalCostNum - packagingAmount).toFixed(2));
 
-              // 13-17. Grab Food calculations
-              const grabSuggestedPrice = Number((sellingPrice * 1.5).toFixed(1));
+              // 13-17. Grab Food calculations (effective GP + packaging + rounding step)
+              const grabSuggestedPrice = roundUpToStep(
+                (sellingPrice + deliveryPkgAmount) / Math.max(0.01, 1 - grabGpRateWithVat),
+                roundingStep
+              );
               const grabPrice =
                 localEdits[editKey]?.grabPrice !== undefined
                   ? localEdits[editKey]!.grabPrice!
                   : (localEdits[v.id]?.grabPrice !== undefined
                       ? localEdits[v.id]!.grabPrice!
                       : baseGrabPrice);
-              const grabGpValue = Math.round(grabPrice * grabGpRateWithVat);
-              const grabNet = grabPrice - grabGpValue;
-              const grabProfit = grabNet - totalCost;
-              const grabMargin = grabPrice > 0 ? Math.round((grabProfit / grabPrice) * 100) : 0;
+              const grabNetSelling = extractNetPriceFromMenuPrice(
+                grabPrice,
+                isVariantVatInclusive,
+                vatRate,
+                scIncluded,
+                scRate
+              );
+              const grabGpValueNum = grabPrice * grabGpRateWithVat;
+              const grabGpValue = Number(grabGpValueNum.toFixed(2));
+              const grabNet = Number((grabNetSelling - grabGpValueNum).toFixed(2));
+              const grabProfit = Number((grabNetSelling - grabGpValueNum - totalCostNum - deliveryPkgAmount).toFixed(2));
+              const grabMargin = grabNetSelling > 0 ? Number(((grabProfit / grabNetSelling) * 100).toFixed(1)) : 0;
 
               // 18-22. Line Man calculations
-              const linemanSuggestedPrice = Number((sellingPrice * 1.5).toFixed(1));
+              const linemanSuggestedPrice = roundUpToStep(
+                (sellingPrice + deliveryPkgAmount) / Math.max(0.01, 1 - linemanGpRateWithVat),
+                roundingStep
+              );
               const linemanPrice =
                 localEdits[editKey]?.linemanPrice !== undefined
                   ? localEdits[editKey]!.linemanPrice!
                   : (localEdits[v.id]?.linemanPrice !== undefined
                       ? localEdits[v.id]!.linemanPrice!
                       : baseLinemanPrice);
-              const linemanGpValue = Math.round(linemanPrice * linemanGpRateWithVat);
-              const linemanNet = linemanPrice - linemanGpValue;
-              const linemanProfit = linemanNet - totalCost;
-              const linemanMargin = linemanPrice > 0 ? Math.round((linemanProfit / linemanPrice) * 100) : 0;
+              const linemanNetSelling = extractNetPriceFromMenuPrice(
+                linemanPrice,
+                isVariantVatInclusive,
+                vatRate,
+                scIncluded,
+                scRate
+              );
+              const linemanGpValueNum = linemanPrice * linemanGpRateWithVat;
+              const linemanGpValue = Number(linemanGpValueNum.toFixed(2));
+              const linemanNet = Number((linemanNetSelling - linemanGpValueNum).toFixed(2));
+              const linemanProfit = Number((linemanNetSelling - linemanGpValueNum - totalCostNum - deliveryPkgAmount).toFixed(2));
+              const linemanMargin = linemanNetSelling > 0 ? Number(((linemanProfit / linemanNetSelling) * 100).toFixed(1)) : 0;
 
               // 23-27. Robinhood calculations (0% GP)
-              const robinhoodSuggestedPrice = sellingPrice; // Recommended same as dine-in
+              const robinhoodSuggestedPrice = roundUpToStep(sellingPrice + deliveryPkgAmount, roundingStep);
               const robinhoodPrice =
                 localEdits[editKey]?.robinhoodPrice !== undefined
                   ? localEdits[editKey]!.robinhoodPrice!
                   : (localEdits[v.id]?.robinhoodPrice !== undefined
                       ? localEdits[v.id]!.robinhoodPrice!
                       : baseRobinhoodPrice);
-              const robinhoodGpValue = 0; // 0% GP
-              const robinhoodNet = robinhoodPrice - robinhoodGpValue;
-              const robinhoodProfit = robinhoodNet - totalCost;
-              const robinhoodMargin = robinhoodPrice > 0 ? Math.round((robinhoodProfit / robinhoodPrice) * 100) : 0;
+              const robinhoodNetSelling = extractNetPriceFromMenuPrice(
+                robinhoodPrice,
+                isVariantVatInclusive,
+                vatRate,
+                scIncluded,
+                scRate
+              );
+              const robinhoodNet = Number(robinhoodNetSelling.toFixed(2));
+              const robinhoodProfit = Number((robinhoodNetSelling - totalCostNum - deliveryPkgAmount).toFixed(2));
+              const robinhoodMargin = robinhoodNetSelling > 0 ? Number(((robinhoodProfit / robinhoodNetSelling) * 100).toFixed(1)) : 0;
 
               // Helper for rendering protein weight cell (single input or dual seafood input)
               const renderProteinWeightInput = (compact: boolean = false) => {
@@ -1134,41 +1255,8 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                           <button
                             type="button"
                             onClick={() => {
-                            const breakdown: RecipeCostBreakdown = {
-                              variantId: v.id,
-                              variantName: v.name,
-                              menuName: menu.name,
-                              proteinType: v.proteinType,
-                              sellingPrice,
-                              takeawayPrice: effectiveTakeawayPrice,
-                              deliveryPrice: v.deliveryPrice || sellingPrice,
-                              shrimpCost: isSeafood ? shrimpTotalCost : (v.proteinType.includes('กุ้ง') ? proteinCost : 0),
-                              squidCost: isSeafood ? squidTotalCost : (v.proteinType.includes('หมึก') ? proteinCost : 0),
-                              seafoodTotalCost: isSeafood ? seafoodCombinedCost : ((v.proteinType.includes('กุ้ง') || v.proteinType.includes('หมึก')) ? proteinCost : 0),
-                              meatCost: proteinCost,
-                              sauceCost: 3,
-                              centralIngredientCost: centralCost,
-                              totalIngredientCost: totalRawMaterialCost,
-                              overheadCost,
-                              packagingCost: packagingAmount,
-                              totalCost,
-                              restaurantProfit: dineInProfit,
-                              restaurantFoodCostPercent: fcPercent,
-                              restaurantMarginPercent: 100 - fcPercent,
-                              takeawayProfit,
-                              takeawayPackagingCost: packagingAmount,
-                              takeawayFoodCostPercent: fcPercent,
-                              deliveryCommissionPercent: 30,
-                              deliveryCommissionAmount: grabGpValue,
-                              deliveryPackagingCost: packagingAmount,
-                              deliveryProfit: grabProfit,
-                              deliveryFoodCostPercent: fcPercent,
-                              suggestedPriceByTargetFoodCost: Math.round(totalRawMaterialCost / 0.35),
-                              suggestedPriceByTargetProfit: Math.round(totalCost + 25),
-                              hasReviewIssue: false,
-                              items: v.recipeItems || [],
-                            };
-                            onSelectBreakdown({ menu, variant: v, breakdown });
+                            const activeBd = currentChannel === 'LINEMAN' ? linemanBd : grabBd;
+                            onSelectBreakdown({ menu, variant: editedVariant, breakdown: activeBd });
                           }}
                           className="p-1 text-stone-500 hover:text-stone-900 rounded cursor-pointer"
                           title="ดูสูตรละเอียดและแพ็กเกจจิ้ง"
@@ -1205,7 +1293,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         <div className="text-stone-900 font-bold">{proteinCost}</div>
                         {isSeafood && (
                           <div className="text-[9px] text-stone-500 font-normal leading-tight">
-                            กุ้ง {shrimpTotalCost} + หมึก {squidTotalCost}
+                            กุ้ง {shrimpTotalCost.toFixed(1)} + หมึก {squidTotalCost.toFixed(1)}
                           </div>
                         )}
                       </td>
@@ -1386,7 +1474,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         <div>{proteinCost}</div>
                         {isSeafood && (
                           <div className="text-[8px] text-stone-500 font-normal leading-tight">
-                            กุ้ง{shrimpTotalCost}+หมึก{squidTotalCost}
+                            กุ้ง{shrimpTotalCost.toFixed(1)}+หมึก{squidTotalCost.toFixed(1)}
                           </div>
                         )}
                       </td>
@@ -1395,8 +1483,8 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       <td className="py-2 px-1.5 bg-white text-stone-900 font-bold border-r border-black">{overheadCost}</td>
                       <td className="py-2 px-1.5 bg-white text-stone-900 font-bold border-r border-black">{totalCost}</td>
                       <td className={`py-2 px-1.5 font-bold border-r-2 border-black ${fcPercent > 50 ? 'bg-[#FFB300] text-black' : 'bg-white'}`}>{fcPercent}%</td>
-                      <td className="py-2 px-1.5 bg-[#C8E6C9] text-stone-900 font-bold border-r border-black">{dineInProfit}</td>
-                      <td className="py-2 px-1.5 bg-[#C8E6C9] text-stone-900 font-bold border-r-2 border-black">{takeawayProfit}</td>
+                      <td className={`py-2 px-1.5 font-bold border-r border-black ${dineInProfit < 0 ? 'bg-[#E53935] text-white' : 'bg-[#C8E6C9] text-stone-900'}`}>{dineInProfit}</td>
+                      <td className={`py-2 px-1.5 font-bold border-r-2 border-black ${takeawayProfit < 0 ? 'bg-[#E53935] text-white' : 'bg-[#C8E6C9] text-stone-900'}`}>{takeawayProfit}</td>
                       <td className="py-2 px-1.5 bg-white text-stone-900 font-bold border-r border-black">{grabSuggestedPrice}</td>
                       <td className="p-1 bg-white border-r border-black">
                         <NumericInput
@@ -1447,9 +1535,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
           </span>
         </div>
         <div className="text-[10px] text-stone-400">
-          {currentChannel === 'DINE_IN' && 'แสดงเฉพาะรายการขายหน้าร้านและใส่กล่องกลับบ้าน'}
-          {currentChannel === 'GRAB' && `คำนวณหัก GP Grab Food: ${grabCommissionBase}% + VAT 7% = ${grabGpPctDisplay}%`}
-          {currentChannel === 'LINEMAN' && `คำนวณหัก GP Line Man: ${linemanCommissionBase}% + VAT 7% = ${linemanGpPctDisplay}%`}
+          {currentChannel === 'DINE_IN' && 'แสดงเฉพาะรายการขายหน้าร้าน (ไม่รวมกล่อง) และใส่กล่องกลับบ้าน'}
+          {currentChannel === 'GRAB' && `คำนวณหัก GP Grab Food: ${grabCommissionBase}%${commissionHasVat ? ` + VAT ${vatRate}%` : ''} = ${grabGpPctDisplay}%`}
+          {currentChannel === 'LINEMAN' && `คำนวณหัก GP Line Man: ${linemanCommissionBase}%${commissionHasVat ? ` + VAT ${vatRate}%` : ''} = ${linemanGpPctDisplay}%`}
           {currentChannel === 'ROBINHOOD' && 'คำนวณ Robinhood: 0% GP รับเงินเต็มจำนวน'}
           {currentChannel === 'ALL' && 'ตารางเปรียบเทียบทุกช่องทางพร้อมกัน'}
         </div>

@@ -1088,6 +1088,178 @@ export async function saveOrderToTableAtomic(
 }
 
 // ==========================================
+// Pure Daily Summary Accumulator / Reversion Helpers
+// ==========================================
+export function createEmptyDailySummary(workDate: string, nowIso: string = new Date().toISOString()): DailySummaryDoc {
+  return {
+    id: workDate,
+    date: workDate,
+    orderCount: 0,
+    grossSales: 0,
+    discounts: 0,
+    netSales: 0,
+    serviceCharge: 0,
+    vat: 0,
+    totalFoodCost: 0,
+    packagingCost: 0,
+    platformFees: 0,
+    paymentTotals: {
+      cash: 0,
+      qr: 0,
+      card: 0,
+      transfer: 0,
+    },
+    channelTotals: {},
+    dishStats: {},
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    version: 1,
+  };
+}
+
+export function applyBillToDailySummary(
+  baseSummary: DailySummaryDoc,
+  bill: BillDoc,
+  payments: BillDoc['payments'] = bill.payments || [],
+  nowIso: string = new Date().toISOString()
+): DailySummaryDoc {
+  const summary: DailySummaryDoc = {
+    ...baseSummary,
+    paymentTotals: { ...(baseSummary.paymentTotals || { cash: 0, qr: 0, card: 0, transfer: 0 }) },
+    channelTotals: { ...(baseSummary.channelTotals || {}) },
+    dishStats: { ...(baseSummary.dishStats || {}) },
+  };
+
+  summary.orderCount = (summary.orderCount || 0) + 1;
+  summary.grossSales = roundTo2((summary.grossSales || 0) + (bill.subtotal || 0));
+  summary.discounts = roundTo2((summary.discounts || 0) + (bill.discountAmount || 0));
+  summary.netSales = roundTo2((summary.netSales || 0) + (bill.netSales || 0));
+  summary.serviceCharge = roundTo2((summary.serviceCharge || 0) + (bill.serviceChargeAmount || 0));
+  summary.vat = roundTo2((summary.vat || 0) + (bill.vatAmount || 0));
+  summary.totalFoodCost = roundTo2((summary.totalFoodCost || 0) + (bill.totalFoodCost || 0));
+  summary.packagingCost = roundTo2((summary.packagingCost || 0) + (bill.packagingCost || 0));
+  summary.platformFees = roundTo2((summary.platformFees || 0) + (bill.platformFee || 0));
+
+  for (const p of payments || []) {
+    const currentMethodTotal = summary.paymentTotals[p.method] || 0;
+    summary.paymentTotals[p.method] = roundTo2(currentMethodTotal + p.amount);
+  }
+
+  const chKey = bill.channelId || 'other';
+  const prevCh = summary.channelTotals[chKey];
+  summary.channelTotals[chKey] = {
+    orderCount: (prevCh?.orderCount || 0) + 1,
+    netSales: roundTo2((prevCh?.netSales || 0) + (bill.netSales || 0)),
+    grossSales: roundTo2((prevCh?.grossSales || 0) + (bill.subtotal || 0)),
+    discounts: roundTo2((prevCh?.discounts || 0) + (bill.discountAmount || 0)),
+    platformFees: roundTo2((prevCh?.platformFees || 0) + (bill.platformFee || 0)),
+    totalFoodCost: roundTo2((prevCh?.totalFoodCost || 0) + (bill.totalFoodCost || 0)),
+    packagingCost: roundTo2((prevCh?.packagingCost || 0) + (bill.packagingCost || 0)),
+    serviceCharge: roundTo2((prevCh?.serviceCharge || 0) + (bill.serviceChargeAmount || 0)),
+  };
+
+  for (const item of bill.items || []) {
+    const dishId = item.dishId;
+    const qty = item.quantity || 1;
+    const itemRevenue = roundTo2(item.unitPrice * qty);
+    const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
+    const itemCost = roundTo2(unitFoodCost * qty);
+    const prevDish = summary.dishStats[dishId];
+
+    summary.dishStats[dishId] = {
+      dishId,
+      dishName: prevDish?.dishName || item.dishName,
+      quantity: (prevDish?.quantity || 0) + qty,
+      revenue: roundTo2((prevDish?.revenue || 0) + itemRevenue),
+      cost: roundTo2((prevDish?.cost || 0) + itemCost),
+    };
+  }
+
+  summary.updatedAt = nowIso;
+  summary.version = (summary.version || 0) + 1;
+  return summary;
+}
+
+export function revertBillFromDailySummary(
+  baseSummary: DailySummaryDoc,
+  bill: BillDoc,
+  nowIso: string = new Date().toISOString()
+): DailySummaryDoc {
+  const summary: DailySummaryDoc = {
+    ...baseSummary,
+    paymentTotals: { ...(baseSummary.paymentTotals || { cash: 0, qr: 0, card: 0, transfer: 0 }) },
+    channelTotals: { ...(baseSummary.channelTotals || {}) },
+    dishStats: { ...(baseSummary.dishStats || {}) },
+  };
+
+  summary.orderCount = Math.max(0, (summary.orderCount || 0) - 1);
+  summary.grossSales = roundTo2(Math.max(0, (summary.grossSales || 0) - (bill.subtotal || 0)));
+  summary.discounts = roundTo2(Math.max(0, (summary.discounts || 0) - (bill.discountAmount || 0)));
+  summary.netSales = roundTo2(Math.max(0, (summary.netSales || 0) - (bill.netSales || 0)));
+  summary.serviceCharge = roundTo2(Math.max(0, (summary.serviceCharge || 0) - (bill.serviceChargeAmount || 0)));
+  summary.vat = roundTo2(Math.max(0, (summary.vat || 0) - (bill.vatAmount || 0)));
+  summary.totalFoodCost = roundTo2(Math.max(0, (summary.totalFoodCost || 0) - (bill.totalFoodCost || 0)));
+  summary.packagingCost = roundTo2(Math.max(0, (summary.packagingCost || 0) - (bill.packagingCost || 0)));
+  summary.platformFees = roundTo2(Math.max(0, (summary.platformFees || 0) - (bill.platformFee || 0)));
+
+  for (const p of bill.payments || []) {
+    if (summary.paymentTotals[p.method]) {
+      summary.paymentTotals[p.method] = roundTo2(
+        Math.max(0, summary.paymentTotals[p.method] - p.amount)
+      );
+    }
+  }
+
+  const chKey = bill.channelId || 'other';
+  const prevCh = summary.channelTotals[chKey];
+  if (prevCh) {
+    const nextCh: DailySummaryDoc['channelTotals'][string] = {
+      ...prevCh,
+      orderCount: Math.max(0, (prevCh.orderCount || 0) - 1),
+      netSales: roundTo2(Math.max(0, (prevCh.netSales || 0) - (bill.netSales || 0))),
+    };
+    if (typeof prevCh.grossSales === 'number') {
+      nextCh.grossSales = roundTo2(Math.max(0, prevCh.grossSales - (bill.subtotal || 0)));
+    }
+    if (typeof prevCh.discounts === 'number') {
+      nextCh.discounts = roundTo2(Math.max(0, prevCh.discounts - (bill.discountAmount || 0)));
+    }
+    if (typeof prevCh.platformFees === 'number') {
+      nextCh.platformFees = roundTo2(Math.max(0, prevCh.platformFees - (bill.platformFee || 0)));
+    }
+    if (typeof prevCh.totalFoodCost === 'number') {
+      nextCh.totalFoodCost = roundTo2(Math.max(0, prevCh.totalFoodCost - (bill.totalFoodCost || 0)));
+    }
+    if (typeof prevCh.packagingCost === 'number') {
+      nextCh.packagingCost = roundTo2(Math.max(0, prevCh.packagingCost - (bill.packagingCost || 0)));
+    }
+    if (typeof prevCh.serviceCharge === 'number') {
+      nextCh.serviceCharge = roundTo2(Math.max(0, prevCh.serviceCharge - (bill.serviceChargeAmount || 0)));
+    }
+    summary.channelTotals[chKey] = nextCh;
+  }
+
+  for (const item of bill.items || []) {
+    const dishId = item.dishId;
+    const qty = item.quantity || 1;
+    const prevDish = summary.dishStats[dishId];
+    if (prevDish) {
+      const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
+      summary.dishStats[dishId] = {
+        ...prevDish,
+        quantity: Math.max(0, prevDish.quantity - qty),
+        revenue: roundTo2(Math.max(0, prevDish.revenue - item.unitPrice * qty)),
+        cost: roundTo2(Math.max(0, prevDish.cost - unitFoodCost * qty)),
+      };
+    }
+  }
+
+  summary.updatedAt = nowIso;
+  summary.version = (summary.version || 0) + 1;
+  return summary;
+}
+
+// ==========================================
 // Atomic Settlement: Pay Bill, Free Table & Update Daily Summary
 // ==========================================
 export async function payBillAtomic(
@@ -1116,92 +1288,15 @@ export async function payBillAtomic(
 
       // 2. Get existing daily summary or prepare empty baseline
       const summarySnap = await txn.get(summaryRef);
-      let summary: DailySummaryDoc;
+      const nowIso = new Date().toISOString();
+      const baseSummary: DailySummaryDoc = summarySnap.exists()
+        ? (summarySnap.data() as DailySummaryDoc)
+        : createEmptyDailySummary(bill.workDate, nowIso);
 
-      if (summarySnap.exists()) {
-        summary = summarySnap.data() as DailySummaryDoc;
-      } else {
-        const now = new Date().toISOString();
-        summary = {
-          id: bill.workDate,
-          date: bill.workDate,
-          orderCount: 0,
-          grossSales: 0,
-          discounts: 0,
-          netSales: 0,
-          serviceCharge: 0,
-          vat: 0,
-          totalFoodCost: 0,
-          packagingCost: 0,
-          platformFees: 0,
-          paymentTotals: {
-            cash: 0,
-            qr: 0,
-            card: 0,
-            transfer: 0,
-          },
-          channelTotals: {},
-          dishStats: {},
-          createdAt: now,
-          updatedAt: now,
-          version: 1,
-        };
-      }
-
-      // 3. Accumulate bill values into daily summary
-      summary.orderCount += 1;
-      summary.grossSales = roundTo2(summary.grossSales + bill.subtotal);
-      summary.discounts = roundTo2(summary.discounts + bill.discountAmount);
-      summary.netSales = roundTo2(summary.netSales + bill.netSales);
-      summary.serviceCharge = roundTo2(summary.serviceCharge + bill.serviceChargeAmount);
-      summary.vat = roundTo2(summary.vat + bill.vatAmount);
-      summary.totalFoodCost = roundTo2(summary.totalFoodCost + bill.totalFoodCost);
-      summary.packagingCost = roundTo2(summary.packagingCost + bill.packagingCost);
-      summary.platformFees = roundTo2(summary.platformFees + bill.platformFee);
-
-      // Payment methods breakdown
-      for (const p of payments) {
-        const currentMethodTotal = summary.paymentTotals[p.method] || 0;
-        summary.paymentTotals[p.method] = roundTo2(currentMethodTotal + p.amount);
-      }
-
-      // Channel totals breakdown
-      const chKey = bill.channelId || 'other';
-      if (!summary.channelTotals[chKey]) {
-        summary.channelTotals[chKey] = { orderCount: 0, netSales: 0 };
-      }
-      summary.channelTotals[chKey].orderCount += 1;
-      summary.channelTotals[chKey].netSales = roundTo2(
-        summary.channelTotals[chKey].netSales + bill.netSales
-      );
-
-      // Per-dish quantity & revenue stats
-      for (const item of bill.items) {
-        const dishId = item.dishId;
-        const qty = item.quantity || 1;
-        const itemRevenue = roundTo2(item.unitPrice * qty);
-        const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
-        const itemCost = roundTo2(unitFoodCost * qty);
-
-        if (!summary.dishStats[dishId]) {
-          summary.dishStats[dishId] = {
-            dishId,
-            dishName: item.dishName,
-            quantity: 0,
-            revenue: 0,
-            cost: 0,
-          };
-        }
-        summary.dishStats[dishId].quantity += qty;
-        summary.dishStats[dishId].revenue = roundTo2(summary.dishStats[dishId].revenue + itemRevenue);
-        summary.dishStats[dishId].cost = roundTo2(summary.dishStats[dishId].cost + itemCost);
-      }
-
-      summary.updatedAt = new Date().toISOString();
-      summary.version = (summary.version || 0) + 1;
+      // 3. Accumulate bill & exact per-channel values into daily summary
+      const summary = applyBillToDailySummary(baseSummary, bill, payments, nowIso);
 
       // 4. Update Bill to 'paid'
-      const nowIso = new Date().toISOString();
       txn.update(
         billRef,
         stripUndefined({
@@ -1287,55 +1382,12 @@ export async function voidBillAtomic(
         const summaryRef = doc(db, `users/${uid}/dailySummaries/${bill.workDate}`);
         const summarySnap = await txn.get(summaryRef);
         if (summarySnap.exists()) {
-          const summary = summarySnap.data() as DailySummaryDoc;
-
-          summary.orderCount = Math.max(0, summary.orderCount - 1);
-          summary.grossSales = roundTo2(Math.max(0, summary.grossSales - bill.subtotal));
-          summary.discounts = roundTo2(Math.max(0, summary.discounts - bill.discountAmount));
-          summary.netSales = roundTo2(Math.max(0, summary.netSales - bill.netSales));
-          summary.serviceCharge = roundTo2(Math.max(0, summary.serviceCharge - bill.serviceChargeAmount));
-          summary.vat = roundTo2(Math.max(0, summary.vat - bill.vatAmount));
-          summary.totalFoodCost = roundTo2(Math.max(0, summary.totalFoodCost - bill.totalFoodCost));
-          summary.packagingCost = roundTo2(Math.max(0, summary.packagingCost - bill.packagingCost));
-          summary.platformFees = roundTo2(Math.max(0, summary.platformFees - bill.platformFee));
-
-          // Deduct payment methods
-          for (const p of bill.payments || []) {
-            if (summary.paymentTotals[p.method]) {
-              summary.paymentTotals[p.method] = roundTo2(
-                Math.max(0, summary.paymentTotals[p.method] - p.amount)
-              );
-            }
-          }
-
-          // Deduct channel
-          const chKey = bill.channelId || 'other';
-          if (summary.channelTotals[chKey]) {
-            summary.channelTotals[chKey].orderCount = Math.max(0, summary.channelTotals[chKey].orderCount - 1);
-            summary.channelTotals[chKey].netSales = roundTo2(
-              Math.max(0, summary.channelTotals[chKey].netSales - bill.netSales)
-            );
-          }
-
-          // Deduct dish stats
-          for (const item of bill.items) {
-            const dishId = item.dishId;
-            const qty = item.quantity || 1;
-            if (summary.dishStats[dishId]) {
-              summary.dishStats[dishId].quantity = Math.max(0, summary.dishStats[dishId].quantity - qty);
-              summary.dishStats[dishId].revenue = roundTo2(
-                Math.max(0, summary.dishStats[dishId].revenue - item.unitPrice * qty)
-              );
-              const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
-              summary.dishStats[dishId].cost = roundTo2(
-                Math.max(0, summary.dishStats[dishId].cost - unitFoodCost * qty)
-              );
-            }
-          }
-
-          summary.updatedAt = nowIso;
-          summary.version = (summary.version || 0) + 1;
-          txn.set(summaryRef, stripUndefined(summary));
+          const updatedSummary = revertBillFromDailySummary(
+            summarySnap.data() as DailySummaryDoc,
+            bill,
+            nowIso
+          );
+          txn.set(summaryRef, stripUndefined(updatedSummary));
         }
       }
 
@@ -1570,71 +1622,12 @@ export async function rebuildSummariesFromBills(): Promise<{
   for (const [date, bills] of byDate.entries()) {
     rebuiltDates.push(date);
     const summaryRef = doc(db, `users/${uid}/dailySummaries/${date}`);
-
-    const summary: DailySummaryDoc = {
-      id: date,
-      date,
-      orderCount: bills.length,
-      grossSales: 0,
-      discounts: 0,
-      netSales: 0,
-      serviceCharge: 0,
-      vat: 0,
-      totalFoodCost: 0,
-      packagingCost: 0,
-      platformFees: 0,
-      paymentTotals: { cash: 0, qr: 0, card: 0, transfer: 0 },
-      channelTotals: {},
-      dishStats: {},
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      version: 1,
-    };
+    const nowIso = new Date().toISOString();
+    let summary = createEmptyDailySummary(date, nowIso);
+    summary.version = 0;
 
     for (const bill of bills) {
-      summary.grossSales = roundTo2(summary.grossSales + bill.subtotal);
-      summary.discounts = roundTo2(summary.discounts + bill.discountAmount);
-      summary.netSales = roundTo2(summary.netSales + bill.netSales);
-      summary.serviceCharge = roundTo2(summary.serviceCharge + bill.serviceChargeAmount);
-      summary.vat = roundTo2(summary.vat + bill.vatAmount);
-      summary.totalFoodCost = roundTo2(summary.totalFoodCost + bill.totalFoodCost);
-      summary.packagingCost = roundTo2(summary.packagingCost + bill.packagingCost);
-      summary.platformFees = roundTo2(summary.platformFees + bill.platformFee);
-
-      for (const p of bill.payments || []) {
-        summary.paymentTotals[p.method] = roundTo2((summary.paymentTotals[p.method] || 0) + p.amount);
-      }
-
-      const chKey = bill.channelId || 'other';
-      if (!summary.channelTotals[chKey]) {
-        summary.channelTotals[chKey] = { orderCount: 0, netSales: 0 };
-      }
-      summary.channelTotals[chKey].orderCount += 1;
-      summary.channelTotals[chKey].netSales = roundTo2(
-        summary.channelTotals[chKey].netSales + bill.netSales
-      );
-
-      for (const item of bill.items) {
-        const dishId = item.dishId;
-        const qty = item.quantity || 1;
-        if (!summary.dishStats[dishId]) {
-          summary.dishStats[dishId] = {
-            dishId,
-            dishName: item.dishName,
-            quantity: 0,
-            revenue: 0,
-            cost: 0,
-          };
-        }
-        summary.dishStats[dishId].quantity += qty;
-        summary.dishStats[dishId].revenue = roundTo2(
-          summary.dishStats[dishId].revenue + item.unitPrice * qty
-        );
-        const unitFoodCost = item.foodCostSnapshot ?? item.totalUnitCostSnapshot;
-        summary.dishStats[dishId].cost = roundTo2(
-          summary.dishStats[dishId].cost + unitFoodCost * qty
-        );
-      }
+      summary = applyBillToDailySummary(summary, bill, bill.payments || [], nowIso);
     }
 
     batch.set(summaryRef, stripUndefined(summary));

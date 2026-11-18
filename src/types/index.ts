@@ -38,6 +38,7 @@ export interface SettingsDoc extends BaseDoc {
   commissionBase?: 'net_food_sales'; // Commission base (default 'net_food_sales')
   commissionVatAsCost?: boolean; // If true, add 7% VAT on platform commission as a cost
   priceRounding?: 1 | 5 | 10; // Suggested price rounding (default 5 THB)
+  defaultTicketSize?: number; // Optional default ticket size when no POS orders exist
   operatingDaysPerMonth?: number; // Number of operating days for daily break-even (default 30)
   incomeTaxRatePercent?: number; // Estimated income tax rate % (default 20)
   cogsVarianceThresholdPercent?: number; // Default 3% of net sales
@@ -55,6 +56,8 @@ export interface IngredientDoc extends BaseDoc {
   yieldPercent: number; // e.g. 85 for 85% yield after trimming
   baseUnit: 'g' | 'ml' | 'piece'; // Normalized unit
   costPerBaseUnit: number; // Automatic cost per g / ml / piece
+  piecesPerPurchaseUnit?: number;
+  piecesCountAlreadyYieldAdjusted?: boolean;
   costMethod?: 'latest' | 'average'; // 'latest' = current price, 'average' = avg of last 3 priceHistory
   priceHistory?: { date: string; price: number; yieldPercent: number }[];
 }
@@ -144,6 +147,7 @@ export interface ChannelDoc extends BaseDoc {
   commissionPercent: number; // e.g. 30% for delivery platforms
   packagingCost: number; // default packaging cost for channel
   priceMarkupPercent?: number; // e.g. 15 for 15% price markup on channel (default 0)
+  gpBase?: 'gross_incl_vat' | 'net_ex_vat';
 }
 
 export interface TableDoc extends BaseDoc {
@@ -300,6 +304,17 @@ export interface DailySummaryDishStat {
   cost: number;
 }
 
+export interface DailySummaryChannelStat {
+  orderCount: number;
+  netSales: number;
+  grossSales?: number;
+  discounts?: number;
+  platformFees?: number;
+  totalFoodCost?: number;
+  packagingCost?: number;
+  serviceCharge?: number;
+}
+
 export interface DailySummaryDoc extends BaseDoc {
   date: string; // YYYY-MM-DD (matches daily closing time cycle)
   orderCount: number;
@@ -312,7 +327,7 @@ export interface DailySummaryDoc extends BaseDoc {
   packagingCost: number;
   platformFees: number;
   paymentTotals: Record<PaymentMethod, number>;
-  channelTotals: Record<string, { orderCount: number; netSales: number }>;
+  channelTotals: Record<string, DailySummaryChannelStat>;
   dishStats: Record<string, DailySummaryDishStat>;
 }
 

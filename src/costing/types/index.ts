@@ -46,6 +46,7 @@ export interface Ingredient {
   packUnit?: UnitType; // legacy alias of purchaseUnit
   recipeUnit?: UnitType; // legacy alias of usageUnit
   piecesPerPurchaseUnit?: number; // for shrimp or piece-based items (e.g. 60 pieces per purchase)
+  piecesCountAlreadyYieldAdjusted?: boolean; // true if piece count already accounts for trim/shell loss
   active: boolean;
   notes?: string;
   preparationMethod?: string;
@@ -170,6 +171,8 @@ export interface MenuItem {
   availableChannels?: string[];
   displayOrder?: number;
   variants: MenuVariant[];
+  thaiName?: string;
+  englishName?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -263,6 +266,12 @@ export interface RestaurantSettings {
   grabFoodCommissionHasVat?: boolean; // C-01: delivery GP must include 7% VAT: effective GP = GP% * 1.07 (defaults to true)
   lineManCommissionPercent?: number;
   lineManCommissionHasVat?: boolean; // C-01: delivery GP must include 7% VAT (defaults to true)
+  commissionVatAsCost?: boolean; // Unified toggle: delivery GP includes VAT as cost
+  priceRounding?: 1 | 5 | 10; // Suggested menu price rounding step (1, 5, or 10 THB)
+  defaultTicketSize?: number; // Optional fallback ticket size if no live ticket average
+  pricesIncludeVat?: boolean; // Canonical alias aligned with SettingsDoc.pricesIncludeVat
+  serviceChargeIncludedInPrice?: boolean;
+  serviceChargePercent?: number;
   channels: ChannelSettings[];
   userRole: UserRole;
   cogsVarianceThresholdPercent?: number; // e.g. 3.0 percentage points of net sales
@@ -271,6 +280,13 @@ export interface RestaurantSettings {
   socialSecurityEnabled?: boolean;
   socialSecurityRatePercent?: number;
   socialSecurityCapWage?: number;
+  currency?: string;
+  defaultTargetGrossMarginPercent?: number;
+  defaultPricingMethod?: 'food_cost_target' | 'gross_margin_target';
+  cogsCalculationMode?: 'recipe_operational' | 'inventory_accounting';
+  laborTargetPercent?: number;
+  serviceChargeTreatment?: 'staff_pool' | 'retained';
+  primaryLanguage?: 'th' | 'en';
 }
 
 export interface InventoryItem {
@@ -412,6 +428,7 @@ export interface ExpenseRecord {
   description: string;
   amount: number;
   isFixed?: boolean;
+  recurring?: boolean;
   isPayroll?: boolean;
   paymentMethod: 'เงินสด' | 'โอนเงิน' | 'บัตรเครดิต' | 'CASH' | 'TRANSFER' | 'CREDIT' | string;
   frequency?: ExpenseFrequency;
@@ -421,6 +438,9 @@ export interface ExpenseRecord {
   monthlyInstallment?: number;
   assetCost?: number;
   usefulLifeYears?: number;
+  supplierName?: string;
+  taxAmount?: number;
+  receiptNumber?: string;
   notes?: string;
   createdAt?: string;
 }

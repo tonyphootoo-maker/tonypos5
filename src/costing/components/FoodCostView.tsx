@@ -33,8 +33,11 @@ import {
 } from '../types';
 import {
   calculateVariantCostBreakdown,
-  calculateSuggestedPrices,
+  calculateChannelSuggestedPrices,
+  getEffectiveDeliveryGpPercent,
+  roundUpToStep,
 } from '../services/calculationEngine';
+import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
 import { NumericInput } from './common/NumericInput';
 import { MenuPricingSpreadsheetTable } from './MenuPricingSpreadsheetTable';
 
@@ -1593,16 +1596,28 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 const baseCost =
                   selectedBreakdown.breakdown.totalIngredientCost +
                   selectedBreakdown.breakdown.overheadCost;
-                const grabProfit =
-                  selectedBreakdown.variant.deliveryPrice -
-                  selectedBreakdown.variant.deliveryPrice * (grabCommissionPct / 100) -
-                  baseCost -
-                  pkgCostToUse;
-                const linemanProfit =
-                  selectedBreakdown.variant.deliveryPrice -
-                  selectedBreakdown.variant.deliveryPrice * (linemanCommissionPct / 100) -
-                  baseCost -
-                  pkgCostToUse;
+                const vatRate = settings.vatRatePercent ?? 7;
+                const isVatInclusive =
+                  selectedBreakdown.variant.taxType === 'INCLUSIVE' ||
+                  (selectedBreakdown.variant.taxType !== 'EXCLUSIVE' &&
+                    selectedBreakdown.variant.taxType !== 'NONE' &&
+                    Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive));
+                const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
+                const scRate = settings.serviceChargePercent ?? 0;
+                const deliveryGross = selectedBreakdown.variant.deliveryPrice || 0;
+                const deliveryNetExVat = extractNetPriceFromMenuPrice(
+                  deliveryGross,
+                  isVatInclusive,
+                  vatRate,
+                  scIncluded,
+                  scRate
+                );
+                const effectiveGrabPct = getEffectiveDeliveryGpPercent(settings, 'grab');
+                const effectiveLinemanPct = getEffectiveDeliveryGpPercent(settings, 'lineman');
+                const grabGpFee = deliveryGross * (effectiveGrabPct / 100);
+                const linemanGpFee = deliveryGross * (effectiveLinemanPct / 100);
+                const grabProfit = deliveryNetExVat - grabGpFee - baseCost - pkgCostToUse;
+                const linemanProfit = deliveryNetExVat - linemanGpFee - baseCost - pkgCostToUse;
 
                 return (
                   <div className="bg-stone-100 border border-stone-300 rounded-2xl p-3.5">
@@ -1614,23 +1629,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       <div className="p-3 rounded-xl bg-white border border-[#00B14F]/40 shadow-2xs">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-sans font-black text-[#00873e]">GrabFood</span>
-                          <span className="text-[10px] text-stone-500 font-bold">GP {grabCommissionPct}%</span>
+                          <span className="text-[10px] text-stone-500 font-bold">
+                            GP {grabCommissionPct}%{effectiveGrabPct > grabCommissionPct ? ` (${effectiveGrabPct.toFixed(1)}% รวม VAT)` : ''}
+                          </span>
                         </div>
                         <div className="space-y-1 text-xs">
                           <div className="flex justify-between">
-                            <span className="font-sans text-stone-600">ราคาขาย:</span>
+                            <span className="font-sans text-stone-600">ราคาขาย{isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:</span>
                             <span className="text-stone-900 font-bold">
-                              ฿{selectedBreakdown.variant.deliveryPrice}
+                              ฿{deliveryGross}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
-                            <span className="font-sans text-stone-600">หัก GP ({grabCommissionPct}%):</span>
+                            <span className="font-sans text-stone-600">หัก GP ({effectiveGrabPct.toFixed(1)}%):</span>
                             <span>
-                              -฿
-                              {(
-                                selectedBreakdown.variant.deliveryPrice *
-                                (grabCommissionPct / 100)
-                              ).toFixed(2)}
+                              -฿{grabGpFee.toFixed(2)}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
@@ -1650,23 +1663,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       <div className="p-3 rounded-xl bg-white border border-[#05963c]/40 shadow-2xs">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-sans font-black text-[#05963c]">LINE MAN</span>
-                          <span className="text-[10px] text-stone-500 font-bold">GP {linemanCommissionPct}%</span>
+                          <span className="text-[10px] text-stone-500 font-bold">
+                            GP {linemanCommissionPct}%{effectiveLinemanPct > linemanCommissionPct ? ` (${effectiveLinemanPct.toFixed(1)}% รวม VAT)` : ''}
+                          </span>
                         </div>
                         <div className="space-y-1 text-xs">
                           <div className="flex justify-between">
-                            <span className="font-sans text-stone-600">ราคาขาย:</span>
+                            <span className="font-sans text-stone-600">ราคาขาย{isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:</span>
                             <span className="text-stone-900 font-bold">
-                              ฿{selectedBreakdown.variant.deliveryPrice}
+                              ฿{deliveryGross}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
-                            <span className="font-sans text-stone-600">หัก GP ({linemanCommissionPct}%):</span>
+                            <span className="font-sans text-stone-600">หัก GP ({effectiveLinemanPct.toFixed(1)}%):</span>
                             <span>
-                              -฿
-                              {(
-                                selectedBreakdown.variant.deliveryPrice *
-                                (linemanCommissionPct / 100)
-                              ).toFixed(2)}
+                              -฿{linemanGpFee.toFixed(2)}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
@@ -1687,33 +1698,61 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               })()}
 
               {/* Dynamic Suggested Price by Target Food Cost */}
-              <div className="bg-stone-100 border border-stone-300 rounded-2xl p-3.5">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-black text-stone-900 font-sans">
-                    💡 เครื่องคำนวณราคาขายแนะนำ (Suggested Price Calculator)
-                  </span>
-                  <span className="font-mono text-amber-800 font-black">
-                    เป้าหมาย FC: {customTargetFcPercent}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="20"
-                  max="55"
-                  step="1"
-                  value={customTargetFcPercent}
-                  onChange={(e) => setCustomTargetFcPercent(Number(e.target.value))}
-                  className="w-full accent-[#F27D26]"
-                />
-                <div className="mt-2 flex items-center justify-between text-xs font-mono">
-                  <span className="font-sans text-stone-700 font-bold">
-                    ราคาขายหน้าร้านที่แนะนำ (เพื่อให้ได้ FC {customTargetFcPercent}%):
-                  </span>
-                  <span className="text-base font-black text-stone-950">
-                    ฿{(selectedBreakdown.breakdown.totalCost / (customTargetFcPercent / 100)).toFixed(0)} บาท
-                  </span>
-                </div>
-              </div>
+              {(() => {
+                const vatRate = settings.vatRatePercent ?? 7;
+                const isVatInclusive =
+                  selectedBreakdown.variant.taxType === 'INCLUSIVE' ||
+                  (selectedBreakdown.variant.taxType !== 'EXCLUSIVE' &&
+                    selectedBreakdown.variant.taxType !== 'NONE' &&
+                    Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive));
+                const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
+                const scRate = settings.serviceChargePercent ?? 0;
+                const roundingStep: 1 | 5 | 10 = settings.priceRounding ?? 1;
+                const suggestedPriceCalc = calculateChannelSuggestedPrices(
+                  selectedBreakdown.breakdown.totalIngredientCost,
+                  customTargetFcPercent,
+                  settings.targetProfitAmount ?? 25,
+                  selectedBreakdown.breakdown.overheadCost,
+                  grabCommissionPct,
+                  selectedBreakdown.breakdown.deliveryPackagingCost,
+                  {
+                    vatRatePercent: vatRate,
+                    pricesIncludeVat: isVatInclusive,
+                    serviceChargeIncludedInPrice: scIncluded,
+                    serviceChargePercent: scRate,
+                    roundingStep,
+                  }
+                );
+                return (
+                  <div className="bg-stone-100 border border-stone-300 rounded-2xl p-3.5">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-black text-stone-900 font-sans">
+                        💡 เครื่องคำนวณราคาขายแนะนำ (Suggested Price Calculator)
+                      </span>
+                      <span className="font-mono text-amber-800 font-black">
+                        เป้าหมาย FC: {customTargetFcPercent}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="20"
+                      max="55"
+                      step="1"
+                      value={customTargetFcPercent}
+                      onChange={(e) => setCustomTargetFcPercent(Number(e.target.value))}
+                      className="w-full accent-[#F27D26]"
+                    />
+                    <div className="mt-2 flex items-center justify-between text-xs font-mono">
+                      <span className="font-sans text-stone-700 font-bold">
+                        ราคาขายหน้าร้านที่แนะนำ (เพื่อให้ได้ FC {customTargetFcPercent}%{isVatInclusive ? ' รวม VAT' : ''}):
+                      </span>
+                      <span className="text-base font-black text-stone-950">
+                        ฿{suggestedPriceCalc.suggestedPriceByFc} บาท
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Action Buttons */}
               <div className="flex justify-between items-center pt-3 border-t border-stone-200">
@@ -2914,29 +2953,35 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 if (isSeafoodChoice) {
                   const shrimpIng = ingredients.find((i) => i.id === 'ing_shrimp_xl' || i.name.includes('กุ้ง'));
                   const squidIng = ingredients.find((i) => i.id === 'ing_squid_fresh' || i.name.includes('หมึก'));
-                  const sCost = (shrimpIng?.costPerBaseUnit || 8.5) * (Number(variantModalState.seafoodShrimpQty) || 4);
-                  const qCost = (squidIng?.costPerBaseUnit || 0.388) * (Number(variantModalState.seafoodSquidQty) || 40);
-                  meatCost = Math.round(sCost + qCost);
-                  costDetail = `กุ้ง ฿${Math.round(sCost)} + หมึก ฿${Math.round(qCost)}`;
+                  const sCost = (shrimpIng?.costPerBaseUnit || 0) * (Number(variantModalState.seafoodShrimpQty) || 0);
+                  const qCost = (squidIng?.costPerBaseUnit || 0) * (Number(variantModalState.seafoodSquidQty) || 0);
+                  meatCost = sCost + qCost;
+                  costDetail =
+                    shrimpIng || squidIng
+                      ? `กุ้ง ฿${sCost.toFixed(2)} + หมึก ฿${qCost.toFixed(2)}`
+                      : 'ยังไม่มีข้อมูลราคาวัตถุดิบ';
                 } else {
                   const linked = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
-                  const unitCost = linked?.costPerBaseUnit || 0.125;
-                  meatCost = Math.round(unitCost * (Number(variantModalState.meatQuantity) || 0));
-                  if (linked) {
+                  const unitCost = linked?.costPerBaseUnit || 0;
+                  meatCost = unitCost * (Number(variantModalState.meatQuantity) || 0);
+                  if (linked && unitCost > 0) {
                     costDetail = `฿${(unitCost * 1000).toFixed(0)}/กก.`;
+                  } else {
+                    costDetail = 'ยังไม่ได้เลือกวัตถุดิบหรือยังไม่มีราคา';
                   }
                 }
 
-                const sellPrice = Number(variantModalState.variant.sellingPrice) || 65;
-                const estTotalCost = meatCost + 6.0 + 9.0;
+                const sellPrice = Number(variantModalState.variant.sellingPrice) || 0;
+                const estOverhead = Number(variantModalState.variant.overheadCost ?? settings.defaultOverheadCostPerDish ?? 0);
+                const estTotalCost = meatCost + estOverhead;
                 const estProfit = sellPrice - estTotalCost;
-                const estFc = sellPrice > 0 ? Math.round((meatCost / sellPrice) * 100) : 0;
+                const estFc = sellPrice > 0 ? (meatCost / sellPrice) * 100 : 0;
 
                 return (
                   <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-mono">
                     <div>
                       <span className="text-emerald-900 font-bold">ต้นทุนเนื้อสัตว์: </span>
-                      <strong className="text-emerald-950 font-black">฿{meatCost}</strong>
+                      <strong className="text-emerald-950 font-black">฿{meatCost.toFixed(2)}</strong>
                       {costDetail && (
                         <span className="text-[10px] text-emerald-700 ml-1">
                           ({costDetail})
@@ -2944,11 +2989,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       )}
                     </div>
                     <div>
-                      <span className="text-stone-700 font-bold">กำไรหน้าร้าน: </span>
-                      <strong className="text-emerald-800 font-black">฿{estProfit}</strong>
-                      <span className="text-[10px] text-stone-600 ml-1.5 font-sans">
-                        (FC ~{estFc}%)
-                      </span>
+                      <span className="text-stone-700 font-bold">กำไรหน้าร้านเบื้องต้น: </span>
+                      {sellPrice > 0 ? (
+                        <>
+                          <strong className={`font-black ${estProfit < 0 ? 'text-rose-600' : 'text-emerald-800'}`}>
+                            ฿{estProfit.toFixed(2)}
+                          </strong>
+                          <span className="text-[10px] text-stone-600 ml-1.5 font-sans">
+                            (FC ~{estFc.toFixed(1)}%)
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-[10px] text-amber-700 font-sans font-bold">กรุณาระบุราคาขาย</span>
+                      )}
                     </div>
                   </div>
                 );

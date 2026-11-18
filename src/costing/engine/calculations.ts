@@ -3,7 +3,7 @@
  * Separated into pure, reusable, side-effect free mathematical functions.
  */
 
-import { convertUnit } from './units';
+import { convertUnit, normalizeUnitToken, isPieceLikeUnit } from './units';
 import {
   UnitType,
   RecipeItem,
@@ -147,20 +147,24 @@ export function calculatePortionCost(
 }
 
 /**
- * 8. Calculate Food Cost Percentage
+ * 8. Calculate Food Cost Percentage against a Menu Selling Price
  * Formula: (Food Cost / Selling Price) * 100
+ * Tax basis: `sellingPrice` should match the desired ratio basis (pass **ex-VAT** selling price
+ * for standard P&L / Food Cost % comparability).
  */
-export function calculateFoodCostPercent(foodCost: number, sellingPrice: number): number {
+export function calculateSellingPriceFoodCostPercent(foodCost: number, sellingPrice: number): number {
   if (sellingPrice <= 0) return 0;
   return (foodCost / sellingPrice) * 100;
 }
 
 /**
- * 9. Calculate Suggested Selling Price
- * Method A (Food Cost %): Food Cost / (Target Food Cost % / 100)
- * Method B (Gross Margin %): Total Direct Cost / (1 - (Target Gross Margin % / 100))
+ * 9. Calculate Tiered Suggested Selling Prices
+ * Method A (Food Cost %): Direct Cost / (Target Food Cost % / 100)
+ * Method B (Gross Margin %): Direct Cost / (1 - (Target Gross Margin % / 100))
+ * Tax basis: returns **ex-VAT** baseline menu price tiers matching ex-VAT `directCost`.
+ * Multiply by `(1 + vatRate)` afterwards if publishing VAT-inclusive menu prices.
  */
-export function calculateSuggestedPrice(
+export function calculateTieredSuggestedPrices(
   directCost: number,
   targetPercent: number,
   method: 'food_cost_target' | 'gross_margin_target' = 'food_cost_target'
@@ -585,13 +589,15 @@ export interface BreakEvenAnalysisResult {
 }
 
 /**
- * 16. Calculate Break-Even & Target Profit Analysis
+ * 16. Calculate Detailed Break-Even & Target Profit Analysis
+ * Tax basis: expects **ex-VAT** `actualNetSales` and **ex-VAT** `averageSellingPrice` (ticket);
+ * returns **ex-VAT** monthly/daily break-even and target-profit sales figures.
  * Standard definitions:
  * - Break-even monthly sales = fixed costs ÷ (1 − food cost % − variable %)
  * - Target-profit sales = fixed costs ÷ (1 − food cost % − variable % − target profit %)
- * - If denominator ≤ 0: show Thai message, never a negative or infinite number!
+ * - If denominator ≤ 0: returns `isValid: false` with Thai message (never negative or Infinity).
  */
-export function calculateBreakEven(
+export function calculateDetailedBreakEven(
   fixedCosts: number,
   contributionMarginPercent: number, // (1 - food cost % - variable %) * 100
   averageSellingPrice: number = 100,
@@ -695,18 +701,43 @@ export function calculateBreakEven(
 /**
  * 17. Menu Engineering Matrix (Kasavana & Smith Matrix)
  * Classifies items into STAR, PLOWHORSE, PUZZLE, DOG based on:
- * - Sales Volume (High/Low compared to average)
- * - Contribution Margin (High/Low compared to average)
+ * - Sales Volume: High if >= Popularity Threshold = 70% × (1 / N) × Σ(salesVolume)
+ * - Contribution Margin (CM): High if >= Weighted Average CM = Σ(CM × salesVolume) / Σ(salesVolume)
+ * - Item CM (ex-VAT) = sellingPriceExVat - foodCost - packagingCost - platformFeePerItem
  */
 export type MenuEngineeringCategory = 'STAR' | 'PLOWHORSE' | 'PUZZLE' | 'DOG';
+
+export interface MenuEngineeringInput {
+  id: string;
+  name: string;
+  salesVolume: number;
+  /** Menu selling price (ex-VAT by default; extracted when `isVatInclusive` is true). */
+  sellingPrice: number;
+  /** Optional explicit food cost (defaults to `totalDirectCost` when omitted). */
+  foodCost?: number;
+  /** Direct cost baseline (food cost, or food+pkg if `packagingCost` is omitted). */
+  totalDirectCost: number;
+  /** Packaging cost per item (if not already embedded in `totalDirectCost`). */
+  packagingCost?: number;
+  /** Delivery platform commission/GP fee per item (if sold on delivery). */
+  platformFeePerItem?: number;
+  /** Set true if `sellingPrice` includes VAT (and optional included service charge). */
+  isVatInclusive?: boolean;
+  vatRatePercent?: number;
+  serviceChargeIncludedInPrice?: boolean;
+  serviceChargePercent?: number;
+  /** Optional explicit ex-VAT contribution margin override. */
+  contributionMargin?: number;
+}
 
 export interface MenuEngineeringItem {
   id: string;
   name: string;
   salesVolume: number;
   sellingPrice: number;
+  sellingPriceExVat: number;
   totalDirectCost: number;
-  contributionMargin: number; // Selling Price - Direct Cost
+  contributionMargin: number; // sellingPriceExVat - foodCost - packagingCost - platformFeePerItem
   category: MenuEngineeringCategory;
   recommendationTh: string;
   recommendationEn: string;
@@ -714,17 +745,13 @@ export interface MenuEngineeringItem {
 }
 
 export function calculateMenuEngineering(
-  items: {
-    id: string;
-    name: string;
-    salesVolume: number;
-    sellingPrice: number;
-    totalDirectCost: number;
-  }[]
+  items: MenuEngineeringInput[]
 ): {
   classifiedItems: MenuEngineeringItem[];
   averageVolume: number;
+  popularityThreshold: number;
   averageMargin: number;
+  weightedAverageMargin: number;
   totalVolume: number;
   totalProfit: number;
 } {
@@ -732,74 +759,116 @@ export function calculateMenuEngineering(
     return {
       classifiedItems: [],
       averageVolume: 0,
+      popularityThreshold: 0,
       averageMargin: 0,
+      weightedAverageMargin: 0,
       totalVolume: 0,
       totalProfit: 0,
     };
   }
 
-  const totalVolume = items.reduce((sum, item) => sum + (item.salesVolume || 0), 0);
+  const totalVolume = items.reduce((sum, item) => sum + Math.max(0, item.salesVolume || 0), 0);
   const averageVolume = totalVolume / items.length;
+  // Kasavana & Smith 70% popularity rule: 0.70 × (1 / N) × Σ(salesVolume)
+  const popularityThreshold = 0.7 * (1 / items.length) * totalVolume;
 
-  const margins = items.map((item) => item.sellingPrice - item.totalDirectCost);
-  const totalMarginSum = margins.reduce((sum, m) => sum + m, 0);
-  const averageMargin = totalMarginSum / items.length;
+  const computedItems = items.map((item) => {
+    const qty = Math.max(0, item.salesVolume || 0);
+    const vatRate =
+      typeof item.vatRatePercent === 'number' && Number.isFinite(item.vatRatePercent)
+        ? Math.max(0, item.vatRatePercent)
+        : 7;
+    const scRate = item.serviceChargeIncludedInPrice
+      ? Math.max(0, item.serviceChargePercent ?? 0) / 100
+      : 0;
+    const vatFactor = item.isVatInclusive ? (1 + scRate) * (1 + vatRate / 100) : 1;
+    const sellingPriceExVat = vatFactor > 0 ? item.sellingPrice / vatFactor : item.sellingPrice;
 
-  const totalProfit = items.reduce(
-    (sum, item) => sum + (item.sellingPrice - item.totalDirectCost) * (item.salesVolume || 0),
-    0
-  );
+    const foodCost =
+      typeof item.foodCost === 'number' && Number.isFinite(item.foodCost)
+        ? item.foodCost
+        : item.totalDirectCost;
+    const packagingCost =
+      typeof item.packagingCost === 'number' && Number.isFinite(item.packagingCost)
+        ? Math.max(0, item.packagingCost)
+        : 0;
+    const platformFeePerItem =
+      typeof item.platformFeePerItem === 'number' && Number.isFinite(item.platformFeePerItem)
+        ? Math.max(0, item.platformFeePerItem)
+        : 0;
 
-  const classifiedItems: MenuEngineeringItem[] = items.map((item) => {
-    const margin = item.sellingPrice - item.totalDirectCost;
-    const isHighVolume = item.salesVolume >= averageVolume;
-    const isHighMargin = margin >= averageMargin;
-
-    let category: MenuEngineeringCategory = 'DOG';
-    let recommendationTh = '';
-    let recommendationEn = '';
-    let actionTh = '';
-
-    if (isHighVolume && isHighMargin) {
-      category = 'STAR';
-      recommendationTh = 'เมนูทำเงินยอดนิยม รักษามาตรฐานและคุณภาพ ไม่ควรเปลี่ยนสูตรเด็ดขาด วางในจุดเด่นของเมนู';
-      recommendationEn = 'High popularity & high profit. Maintain quality and promote visibility.';
-      actionTh = 'รักษาคุณภาพ & โปรโมทต่อเนื่อง';
-    } else if (isHighVolume && !isHighMargin) {
-      category = 'PLOWHORSE';
-      recommendationTh = 'ขายดีมากแต่กำไรบาง ควรปรับขึ้นราคาเล็กน้อย หรือปรับสัดส่วนวัตถุดิบต้นทุนสูงลง 5-10%';
-      recommendationEn = 'High popularity but low margin. Reprice slightly or optimize portion/recipe cost.';
-      actionTh = 'ปรับลดต้นทุน หรือ ปรับขึ้นราคา';
-    } else if (!isHighVolume && isHighMargin) {
-      category = 'PUZZLE';
-      recommendationTh = 'กำไรต่อจานสูงแต่ยอดขายต่ำ ควรทำโปรโมชั่น แนะนำโดยพนักงาน หรือปรับภาพถ่ายให้ดึงดูด';
-      recommendationEn = 'High profit but low sales. Promote actively, improve photos, or train staff to upsell.';
-      actionTh = 'จัดโปรโมชั่น & แนะนำลูกค้า';
-    } else {
-      category = 'DOG';
-      recommendationTh = 'ขายได้น้อยและกำไรต่ำ พิจารณาตัดออกจากเมนูเพื่อลดสต็อกของสด หรือปรับสูตรและราคาใหม่';
-      recommendationEn = 'Low popularity & low margin. Consider removing from menu or reinventing.';
-      actionTh = 'พิจารณาตัดทิ้ง หรือ รีแบรนด์สูตร';
-    }
+    const margin =
+      typeof item.contributionMargin === 'number' && Number.isFinite(item.contributionMargin)
+        ? item.contributionMargin
+        : sellingPriceExVat - foodCost - packagingCost - platformFeePerItem;
 
     return {
-      id: item.id,
-      name: item.name,
-      salesVolume: item.salesVolume,
-      sellingPrice: item.sellingPrice,
-      totalDirectCost: item.totalDirectCost,
-      contributionMargin: margin,
-      category,
-      recommendationTh,
-      recommendationEn,
-      actionTh,
+      item,
+      qty,
+      sellingPriceExVat,
+      margin,
     };
   });
+
+  const totalProfit = computedItems.reduce((sum, entry) => sum + entry.margin * entry.qty, 0);
+  // Kasavana & Smith sales-weighted average contribution margin: Σ(CM × qty) / Σ(qty)
+  const weightedAverageMargin = totalVolume > 0 ? totalProfit / totalVolume : 0;
+  const averageMargin = weightedAverageMargin;
+
+  const classifiedItems: MenuEngineeringItem[] = computedItems.map(
+    ({ item, qty, sellingPriceExVat, margin }) => {
+      const isHighVolume = qty >= popularityThreshold;
+      const isHighMargin = margin >= weightedAverageMargin;
+
+      let category: MenuEngineeringCategory = 'DOG';
+      let recommendationTh = '';
+      let recommendationEn = '';
+      let actionTh = '';
+
+      if (isHighVolume && isHighMargin) {
+        category = 'STAR';
+        recommendationTh = 'เมนูทำเงินยอดนิยม รักษามาตรฐานและคุณภาพ ไม่ควรเปลี่ยนสูตรเด็ดขาด วางในจุดเด่นของเมนู';
+        recommendationEn = 'High popularity & high profit. Maintain quality and promote visibility.';
+        actionTh = 'รักษาคุณภาพ & โปรโมทต่อเนื่อง';
+      } else if (isHighVolume && !isHighMargin) {
+        category = 'PLOWHORSE';
+        recommendationTh = 'ขายดีมากแต่กำไรบาง ควรปรับขึ้นราคาเล็กน้อย หรือปรับสัดส่วนวัตถุดิบต้นทุนสูงลง 5-10%';
+        recommendationEn = 'High popularity but low margin. Reprice slightly or optimize portion/recipe cost.';
+        actionTh = 'ปรับลดต้นทุน หรือ ปรับขึ้นราคา';
+      } else if (!isHighVolume && isHighMargin) {
+        category = 'PUZZLE';
+        recommendationTh = 'กำไรต่อจานสูงแต่ยอดขายต่ำ ควรทำโปรโมชั่น แนะนำโดยพนักงาน หรือปรับภาพถ่ายให้ดึงดูด';
+        recommendationEn = 'High profit but low sales. Promote actively, improve photos, or train staff to upsell.';
+        actionTh = 'จัดโปรโมชั่น & แนะนำลูกค้า';
+      } else {
+        category = 'DOG';
+        recommendationTh = 'ขายได้น้อยและกำไรต่ำ พิจารณาตัดออกจากเมนูเพื่อลดสต็อกของสด หรือปรับสูตรและราคาใหม่';
+        recommendationEn = 'Low popularity & low margin. Consider removing from menu or reinventing.';
+        actionTh = 'พิจารณาตัดทิ้ง หรือ รีแบรนด์สูตร';
+      }
+
+      return {
+        id: item.id,
+        name: item.name,
+        salesVolume: qty,
+        sellingPrice: item.sellingPrice,
+        sellingPriceExVat,
+        totalDirectCost: item.totalDirectCost,
+        contributionMargin: margin,
+        category,
+        recommendationTh,
+        recommendationEn,
+        actionTh,
+      };
+    }
+  );
 
   return {
     classifiedItems,
     averageVolume,
+    popularityThreshold,
     averageMargin,
+    weightedAverageMargin,
     totalVolume,
     totalProfit,
   };
@@ -1100,10 +1169,11 @@ export function calculateFoodCostMetrics(
 }
 
 /**
- * 26. Calculate Suggested Selling Price with Rounding UP (F8, F14, H-02)
- * Suggested price always rounds UP to the chosen 1/5/10 THB step.
+ * 26. Calculate Rounded Ex-VAT Suggested Selling Price (F8, F14, H-02)
+ * Tax basis: computes **ex-VAT** suggested selling price from `cost / (targetFoodCostPercent / 100)`,
+ * always rounded UP to the chosen 1 / 5 / 10 THB step.
  */
-export function calculateSuggestedPriceWithRounding(
+export function calculateRoundedExVatSuggestedPrice(
   cost: number,
   targetFoodCostPercent: number,
   roundingStep: 1 | 5 | 10 = 1
@@ -1187,13 +1257,14 @@ export function calculateDeliveryProfitability(
 
 /**
  * 29. Calculate Customer Bill with Service Charge & VAT (F9, F10)
- * Base 100, service charge 10%, VAT 7% on subtotal -> customer pays 117.70
+ * Supports both VAT-exclusive and VAT-inclusive menu pricing, including optional Service Charge.
  */
 export function calculateBillTotal(
   basePrice: number,
   serviceChargePercent: number = 0,
   vatRatePercent: number = 7,
-  isVatInclusive: boolean = false
+  isVatInclusive: boolean = false,
+  serviceChargeIncludedInPrice: boolean = false
 ): {
   basePrice: number;
   basePriceExVat: number;
@@ -1202,23 +1273,50 @@ export function calculateBillTotal(
   totalCustomerPays: number;
   customerPay: number;
 } {
+  const scRate = Math.max(0, serviceChargePercent || 0) / 100;
+  const vatRate = Math.max(0, vatRatePercent || 0) / 100;
+
   if (isVatInclusive) {
-    const basePriceExVat = Number((basePrice / (1 + vatRatePercent / 100)).toFixed(2));
-    const vatAmount = Number((basePrice - basePriceExVat).toFixed(2));
+    if (serviceChargeIncludedInPrice) {
+      const factor = (1 + scRate) * (1 + vatRate);
+      const netSales = factor > 0 ? basePrice / factor : basePrice;
+      const basePriceExVat = Number(netSales.toFixed(2));
+      const serviceChargeAmount = Number((netSales * scRate).toFixed(2));
+      const vatAmount = Number(((netSales + serviceChargeAmount) * vatRate).toFixed(2));
+      return {
+        basePrice,
+        basePriceExVat,
+        serviceChargeAmount,
+        vatAmount,
+        totalCustomerPays: basePrice,
+        customerPay: basePrice,
+      };
+    }
+
+    const netFood = vatRate > -1 ? basePrice / (1 + vatRate) : basePrice;
+    const basePriceExVat = Number(netFood.toFixed(2));
+    const vatFood = basePrice - netFood;
+    const rawServiceCharge = netFood * scRate;
+    const rawVatOnSc = rawServiceCharge * vatRate;
+    const serviceChargeAmount = Number(rawServiceCharge.toFixed(2));
+    const vatAmount = Number((vatFood + rawVatOnSc).toFixed(2));
+    const totalCustomerPays = Number((basePrice + rawServiceCharge + rawVatOnSc).toFixed(2));
     return {
       basePrice,
       basePriceExVat,
-      serviceChargeAmount: 0,
+      serviceChargeAmount,
       vatAmount,
-      totalCustomerPays: basePrice,
-      customerPay: basePrice,
+      totalCustomerPays,
+      customerPay: totalCustomerPays,
     };
   }
 
-  const serviceChargeAmount = Number((basePrice * (serviceChargePercent / 100)).toFixed(2));
-  const subtotalWithService = basePrice + serviceChargeAmount;
-  const vatAmount = Number((subtotalWithService * (vatRatePercent / 100)).toFixed(2));
-  const totalCustomerPays = Number((subtotalWithService + vatAmount).toFixed(2));
+  const rawServiceCharge = basePrice * scRate;
+  const subtotalWithService = basePrice + rawServiceCharge;
+  const rawVat = subtotalWithService * vatRate;
+  const serviceChargeAmount = Number(rawServiceCharge.toFixed(2));
+  const vatAmount = Number(rawVat.toFixed(2));
+  const totalCustomerPays = Number((subtotalWithService + rawVat).toFixed(2));
 
   return {
     basePrice,
@@ -1268,6 +1366,7 @@ export function calculateIngredientItemCost(params: {
   ingredientYield?: number; // Alias for yieldPercent
   lineYieldOverride?: number; // Optional recipe line yield override %
   piecesPerPurchaseUnit?: number; // e.g. 30 eggs per pack, 24 cans per case
+  piecesCountAlreadyYieldAdjusted?: boolean; // true if piece count already accounts for trim/shell loss
   density?: number;
 }): {
   unitCost: number;
@@ -1284,6 +1383,7 @@ export function calculateIngredientItemCost(params: {
     usageUnit,
     lineYieldOverride,
     piecesPerPurchaseUnit,
+    piecesCountAlreadyYieldAdjusted,
     density,
   } = params;
 
@@ -1306,12 +1406,29 @@ export function calculateIngredientItemCost(params: {
     ? lineYieldOverride
     : (rawYield > 0 ? rawYield : 100);
 
-  const pUnit = (purchaseUnit || '').toLowerCase();
-  const uUnit = (usageUnit || '').toLowerCase();
+  const normP = normalizeUnitToken(purchaseUnit);
+  const normU = normalizeUnitToken(usageUnit);
 
-  // Case A: Pieces / Pack / Egg count items
-  if (piecesPerPurchaseUnit && piecesPerPurchaseUnit > 0) {
-    const costPerPiece = purchasePrice / piecesPerPurchaseUnit;
+  // Case A: Pieces / Pack / Egg count items (e.g. 2 trays * 30 eggs/tray = 60 eggs)
+  if (piecesPerPurchaseUnit && piecesPerPurchaseUnit > 0 && isPieceLikeUnit(normU)) {
+    const isSameOrUnspecifiedUnit = !normP || normP === normU || isPieceLikeUnit(normP);
+    const totalPieces =
+      isSameOrUnspecifiedUnit && purchaseQuantity === piecesPerPurchaseUnit
+        ? piecesPerPurchaseUnit
+        : purchaseQuantity * piecesPerPurchaseUnit;
+    const effectivePieces = piecesCountAlreadyYieldAdjusted
+      ? totalPieces
+      : totalPieces * (effectiveYield / 100);
+    if (effectivePieces <= 0) {
+      return {
+        unitCost: 0,
+        lineCost: 0,
+        isValid: false,
+        missingPrice: false,
+        errorMessageTh: 'จำนวนชิ้นสุทธิหลังหัก Yield ต้องมากกว่า 0',
+      };
+    }
+    const costPerPiece = purchasePrice / effectivePieces;
     const cost = usageQuantity * costPerPiece;
     return {
       unitCost: costPerPiece,
@@ -1321,12 +1438,12 @@ export function calculateIngredientItemCost(params: {
     };
   }
 
-  // Direct piece matching
-  if (
-    (pUnit === 'can' || pUnit === 'egg' || pUnit === 'piece' || pUnit === 'กระป๋อง' || pUnit === 'ฟอง' || pUnit === 'ชิ้น' || pUnit === 'ตัว') &&
-    (uUnit === pUnit || uUnit === 'can' || uUnit === 'egg' || uUnit === 'piece' || uUnit === 'กระป๋อง' || uUnit === 'ฟอง' || uUnit === 'ชิ้น' || uUnit === 'ตัว')
-  ) {
-    const costPerPiece = purchasePrice / purchaseQuantity;
+  // Direct piece matching (only matching piece types or generic piece)
+  if (isPieceLikeUnit(normP) && isPieceLikeUnit(normU) && (normP === normU || normP === 'piece' || normU === 'piece')) {
+    const effectivePieces = piecesCountAlreadyYieldAdjusted
+      ? purchaseQuantity
+      : purchaseQuantity * (effectiveYield / 100);
+    const costPerPiece = purchasePrice / effectivePieces;
     const cost = usageQuantity * costPerPiece;
     return {
       unitCost: costPerPiece,
@@ -1337,7 +1454,7 @@ export function calculateIngredientItemCost(params: {
   }
 
   // Mass & Volume unit conversion
-  const conv = convertUnit(usageQuantity, uUnit as any, pUnit as any, density);
+  const conv = convertUnit(usageQuantity, normU, normP, density);
   if (!conv.success) {
     const isDensityNeeded = (conv.errorMessageTh || '').includes('ต้องระบุความหนาแน่น');
     return {
@@ -1537,22 +1654,103 @@ export function checkIngredientUsage(
 }
 
 /**
- * 38. Upsert Daily Sales Record (O14, E1)
- * If same date and channel already exist, update the existing row instead of duplicating.
+ * Normalizes sales channel ID for upsert deduplication while keeping empty channelId isolated.
+ * Empty string '' ONLY matches '', preventing cross-channel overwrites.
  */
-export function upsertDailySalesRecord<T extends { id: string; date: string; channelId?: string; netSales?: number; grossSales?: number }>(
-  records: T[],
-  newRecord: T
-): T[] {
+export function normalizeUpsertChannelId(channelId: string | null | undefined): string {
+  const raw = (channelId || '').trim().toLowerCase().replace(/-/g, '_');
+  if (!raw) return '';
+  if (raw === 'dinein') return 'dine_in';
+  if (raw === 'take_away') return 'takeaway';
+  if (raw === 'grabfood') return 'grab';
+  if (raw === 'line_man') return 'lineman';
+  return raw;
+}
+
+/**
+ * 38. Upsert Daily Sales Record (O14, E1)
+ * If exact same date AND channel already exist, update that channel row without affecting other channels.
+ */
+export function upsertDailySalesRecord<
+  T extends {
+    id: string;
+    date: string;
+    channelId?: string;
+    netSales?: number;
+    grossSales?: number;
+    replacesPosSync?: boolean;
+  }
+>(records: T[], newRecord: T): T[] {
+  const targetCh = normalizeUpsertChannelId(newRecord.channelId);
   const index = records.findIndex(
-    (r) => r.date === newRecord.date && (r.channelId === newRecord.channelId || !r.channelId || !newRecord.channelId)
+    (r) => r.date === newRecord.date && normalizeUpsertChannelId(r.channelId) === targetCh
   );
   if (index >= 0) {
     const updated = [...records];
-    updated[index] = { ...newRecord, id: records[index].id };
+    const existing = records[index];
+    const replacingPosWithManual =
+      existing.id?.startsWith('pos_sync_') && !newRecord.id?.startsWith('pos_sync_');
+    const resolvedId = replacingPosWithManual ? newRecord.id : existing.id;
+    updated[index] = {
+      ...newRecord,
+      id: resolvedId,
+      ...(replacingPosWithManual ? { replacesPosSync: true } : {}),
+    };
     return updated;
   }
   return [newRecord, ...records];
+}
+
+/**
+ * Computes delivery/channel GP fee based on configured gpBase ('gross_incl_vat' vs 'net_ex_vat').
+ */
+export function calculateChannelPlatformFees(params: {
+  grossSales: number;
+  discounts: number;
+  refunds: number;
+  isVatInclusive: boolean;
+  vatRatePercent: number;
+  channel?: {
+    commissionPercent?: number;
+    taxOnCommissionPercent?: number;
+    gpBase?: 'gross_incl_vat' | 'net_ex_vat';
+  };
+}): {
+  netSalesExVat: number;
+  gpFeeBase: number;
+  commission: number;
+  vatOnCommission: number;
+  platformFees: number;
+  actualPayout: number;
+} {
+  const nominalNet = Math.max(
+    0,
+    (params.grossSales || 0) - (params.discounts || 0) - (params.refunds || 0)
+  );
+  const netSalesExVat = calculateNormalizedNetSales(
+    params.grossSales || 0,
+    params.discounts || 0,
+    params.refunds || 0,
+    params.isVatInclusive,
+    params.vatRatePercent
+  );
+  const gpBase = params.channel?.gpBase || 'gross_incl_vat';
+  const gpFeeBase = gpBase === 'net_ex_vat' ? netSalesExVat : nominalNet;
+  const commRate = Math.max(0, params.channel?.commissionPercent || 0) / 100;
+  const taxOnCommRate = Math.max(0, params.channel?.taxOnCommissionPercent || 0) / 100;
+  const commission = gpFeeBase * commRate;
+  const vatOnCommission = commission * taxOnCommRate;
+  const platformFees = commission + vatOnCommission;
+  const actualPayout = Math.max(0, nominalNet - platformFees);
+
+  return {
+    netSalesExVat,
+    gpFeeBase,
+    commission,
+    vatOnCommission,
+    platformFees,
+    actualPayout,
+  };
 }
 
 /**

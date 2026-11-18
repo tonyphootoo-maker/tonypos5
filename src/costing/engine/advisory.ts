@@ -107,14 +107,24 @@ export function generateRestaurantAdvice(
     });
   }
 
-  // 4. Menu Engineering Plowhorses & Puzzles Opportunities
-  const meItems = menuItems.map((m) => ({
-    id: m.id,
-    name: m.thaiName,
-    salesVolume: m.salesVolumeMonthly || 120,
-    sellingPrice: m.portions[0]?.sellingPrice || 100,
-    totalDirectCost: m.portions[0]?.totalDirectCost || 35,
-  }));
+  // 4. Menu Engineering Plowhorses & Puzzles Opportunities (Kasavana & Smith weighted CM & 70% threshold)
+  const vatRatePercent = settings.vatRatePercent ?? 7;
+  const isVatInclusive = Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive);
+  const meItems = menuItems
+    .filter((m) => (m.portions[0]?.sellingPrice ?? 0) > 0 && (m.salesVolumeMonthly ?? 0) > 0)
+    .map((m) => ({
+      id: m.id,
+      name: m.thaiName,
+      salesVolume: m.salesVolumeMonthly || 0,
+      sellingPrice: m.portions[0]!.sellingPrice,
+      foodCost: m.portions[0]?.directFoodCost ?? 0,
+      totalDirectCost: m.portions[0]?.totalDirectCost ?? m.portions[0]?.directFoodCost ?? 0,
+      packagingCost: m.portions[0]?.packagingCost ?? m.packagingCost ?? 0,
+      isVatInclusive,
+      vatRatePercent,
+      serviceChargeIncludedInPrice: Boolean(settings.serviceChargeIncludedInPrice),
+      serviceChargePercent: settings.serviceChargePercent ?? 0,
+    }));
 
   const meResult = calculateMenuEngineering(meItems);
   const plowhorses = meResult.classifiedItems.filter((i) => i.category === 'PLOWHORSE');
@@ -126,13 +136,13 @@ export function generateRestaurantAdvice(
       category: 'Menu Engineering',
       titleTh: `โอกาสเพิ่มกำไรจากเมนูยอดนิยม "${topPlowhorse.name}" (Plowhorse)`,
       titleEn: `Profit enhancement opportunity on popular item "${topPlowhorse.name}"`,
-      descriptionTh: `เมนูนี้ขายดีมาก (ยอดขาย ${topPlowhorse.salesVolume} จาน/เดือน) แต่มีกำไรส่วนเกินต่อจานต่ำกว่าค่าเฉลี่ย`,
-      descriptionEn: `High volume (${topPlowhorse.salesVolume} dishes/mo) but below-average contribution margin.`,
-      actionRecommendationTh: `การปรับขึ้นราคาเพียง ฿5 - ฿10 ต่อจาน จะสร้างกำไรสุทธิเพิ่มขึ้นทันที +฿${((topPlowhorse.salesVolume || 100) * 8).toLocaleString()} ต่อเดือน โดยไม่กระทบความต้องการซื้อ`,
-      actionRecommendationEn: `A modest ฿5-10 price increase would generate +฿${((topPlowhorse.salesVolume || 100) * 8).toLocaleString()}/mo extra net profit.`,
+      descriptionTh: `เมนูนี้ขายดีมาก (ยอดขาย ${topPlowhorse.salesVolume} จาน/เดือน) แต่มีกำไรส่วนเกินต่อจานต่ำกว่าค่าเฉลี่ยถ่วงน้ำหนัก`,
+      descriptionEn: `High volume (${topPlowhorse.salesVolume} dishes/mo) but below weighted-average contribution margin.`,
+      actionRecommendationTh: `การปรับขึ้นราคาเพียง ฿5 - ฿10 ต่อจาน จะสร้างกำไรสุทธิเพิ่มขึ้นทันที +฿${((topPlowhorse.salesVolume || 0) * 8).toLocaleString()} ต่อเดือน โดยไม่กระทบความต้องการซื้อ`,
+      actionRecommendationEn: `A modest ฿5-10 price increase would generate +฿${((topPlowhorse.salesVolume || 0) * 8).toLocaleString()}/mo extra net profit.`,
       metricLabel: 'ยอดขายต่อเดือน',
       metricValue: `${topPlowhorse.salesVolume} จาน`,
-      impactAmountThb: (topPlowhorse.salesVolume || 100) * 8,
+      impactAmountThb: (topPlowhorse.salesVolume || 0) * 8,
       relatedEntityId: topPlowhorse.id,
       relatedEntityType: 'menu',
     });
