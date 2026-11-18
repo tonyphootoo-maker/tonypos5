@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   CreditCard,
   Store,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   DailySummaryDoc,
@@ -54,7 +55,9 @@ import {
   isExplicitPayrollExpense,
   calculateWeightedFoodCostPercent,
   isDateInPeriod,
+  buildPnlCsvRows,
 } from '../engine/calculations';
+import { auditDataHealth, DataHealthCheckId } from '../engine/dataHealth';
 import {
   subscribeCollection,
   subscribeDailySummariesInRange,
@@ -102,7 +105,8 @@ export type FinanceHubTab =
   | 'sales'
   | 'expenses'
   | 'labor'
-  | 'breakeven';
+  | 'breakeven'
+  | 'health';
 
 type PeriodType = 'day' | 'month' | 'year';
 
@@ -919,6 +923,66 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     return { dishesWithoutRecipe: noRecipe, dishesAboveTarget: aboveTarget, dishesWithMissingCost: missingCost };
   }, [dishes, posIngredients, subRecipes, packagings, settings]);
 
+  // 6-Point Data Health Audit
+  const dataHealthReport = useMemo(
+    () =>
+      auditDataHealth({
+        period,
+        dateParam,
+        todayDate: todayStr,
+        costIngredients,
+        posIngredients,
+        costMenus,
+        posDishes: dishes,
+        manualSales: costDailySales,
+        stockCountSnapshots: stockCounts,
+        expenses: unifiedExpenses,
+        employees: unifiedEmployees,
+        excludePayrollDuplicates,
+        costSauces,
+        posSubRecipes: subRecipes,
+      }),
+    [
+      period,
+      dateParam,
+      todayStr,
+      costIngredients,
+      posIngredients,
+      costMenus,
+      dishes,
+      costDailySales,
+      stockCounts,
+      unifiedExpenses,
+      unifiedEmployees,
+      excludePayrollDuplicates,
+      costSauces,
+      subRecipes,
+    ]
+  );
+
+  const handleResolveHealthIssue = (checkId: DataHealthCheckId) => {
+    switch (checkId) {
+      case 'zero_price_ingredients':
+        onNavigatePage('cost_ingredients');
+        break;
+      case 'menus_without_recipe':
+        onNavigatePage('cost_recipes');
+        break;
+      case 'uncosted_manual_sales':
+        setActiveTab('sales');
+        break;
+      case 'missing_stock_counts':
+        onNavigatePage('cost_inventory');
+        break;
+      case 'duplicate_payroll':
+        setActiveTab('expenses');
+        break;
+      case 'sauces_without_net_qty':
+        onNavigatePage('cost_sauces');
+        break;
+    }
+  };
+
   // Actionable Business Recommendations
   const advices = useMemo<WhatShouldIDoAdvice[]>(() => {
     const list: WhatShouldIDoAdvice[] = [];
@@ -1203,30 +1267,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
   };
 
   const handleExportCsv = () => {
-    const rows = [
-      ['Metric', 'Amount (THB)'],
-      ['Period', `${period}:${dateParam}`],
-      ['Net Sales (ex-VAT)', periodPnl.netSalesExVat.toFixed(2)],
-      ...(periodPnl.retainedServiceCharge > 0
-        ? [['Retained Service Charge', periodPnl.retainedServiceCharge.toFixed(2)]]
-        : []),
-      ['Food COGS', periodPnl.foodCogs.toFixed(2)],
-      ['Packaging COGS', periodPnl.packagingCogs.toFixed(2)],
-      ['Gross Profit', periodPnl.grossProfit.toFixed(2)],
-      ['Gross Margin %', `${periodPnl.grossMarginPercent.toFixed(1)}%`],
-      ['Channel / Platform Fees (GP)', periodPnl.channelFees.toFixed(2)],
-      ['Kitchen Labor', periodPnl.kitchenLabor.toFixed(2)],
-      ['FOH & Management Labor', periodPnl.fohLabor.toFixed(2)],
-      ['Total Labor (All Staff)', periodPnl.totalLabor.toFixed(2)],
-      ['Prime Cost (Total COGS + Total Labor)', periodPnl.primeCost.toFixed(2)],
-      ['Prime Cost %', `${periodPnl.primeCostPercent.toFixed(1)}%`],
-      ['Operating Expenses (OPEX)', periodPnl.opex.toFixed(2)],
-      ['Operating Profit (กำไรจากการดำเนินงาน)', periodPnl.operatingProfit.toFixed(2)],
-      ['Estimated Tax (Confirm with Accountant)', periodPnl.estimatedTax.toFixed(2)],
-      ['Net Profit', periodPnl.netProfit.toFixed(2)],
-      ['COGS Data Status', periodPnl.cogsStatus],
-      ['Monthly Break-Even Target', executiveBreakEven.breakEvenSales.toFixed(2)],
-    ];
+    const rows = buildPnlCsvRows(periodPnl, executiveBreakEven.breakEvenSales);
     const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((r) => r.join(',')).join('\n');
     const link = document.createElement('a');
     link.setAttribute('href', encodeURI(csvContent));
@@ -1236,6 +1277,8 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     document.body.removeChild(link);
   };
 
+  const healthIssueCount = dataHealthReport.checks.filter((c) => !c.passed).length;
+
   const tabs: { id: FinanceHubTab; labelTh: string; labelEn: string; icon: React.ReactNode }[] = [
     { id: 'overview', labelTh: 'ภาพรวมผู้บริหาร', labelEn: 'Overview', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'pnl', labelTh: 'งบกำไรขาดทุน P&L', labelEn: 'P&L Statement', icon: <PieChart className="w-4 h-4" /> },
@@ -1243,6 +1286,12 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     { id: 'expenses', labelTh: 'ค่าใช้จ่าย & โสหุ้ย', labelEn: 'Expenses', icon: <Receipt className="w-4 h-4" /> },
     { id: 'labor', labelTh: 'ค่าแรง & พนักงาน', labelEn: 'Labor', icon: <Users className="w-4 h-4" /> },
     { id: 'breakeven', labelTh: 'จุดคุ้มทุน & เป้าหมาย', labelEn: 'Break-Even', icon: <Scale className="w-4 h-4" /> },
+    {
+      id: 'health',
+      labelTh: healthIssueCount > 0 ? `ตรวจสุขภาพข้อมูล (${healthIssueCount})` : 'ตรวจสุขภาพข้อมูล',
+      labelEn: healthIssueCount > 0 ? `Data Health (${healthIssueCount})` : 'Data Health',
+      icon: <ShieldCheck className="w-4 h-4" />,
+    },
   ];
 
   const targetFoodCostPct = costSettings.defaultTargetFoodCostPercent || settings.targetFoodCostPercent || 30;
@@ -1332,7 +1381,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
             })}
           </nav>
 
-          {(activeTab === 'overview' || activeTab === 'pnl' || activeTab === 'labor' || activeTab === 'breakeven') && (
+          {(activeTab === 'overview' || activeTab === 'pnl' || activeTab === 'labor' || activeTab === 'breakeven' || activeTab === 'health') && (
             <div className="flex items-center gap-2 bg-white/85 border border-slate-200/90 px-2.5 py-1.5 rounded-2xl shrink-0">
               <div className="flex items-center gap-1">
                 {(['day', 'month', 'year'] as PeriodType[]).map((p) => (
@@ -2315,6 +2364,138 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               socialSecurityRatePercent={socialSecurityRatePercent}
               socialSecurityCapWage={socialSecurityCapWage}
             />
+          </div>
+        )}
+
+        {/* =========================================================
+            TAB 7: DATA HEALTH DIAGNOSTICS (ตรวจสุขภาพข้อมูล)
+           ========================================================= */}
+        {activeTab === 'health' && (
+          <div className="space-y-5">
+            {/* Summary Banner */}
+            <div
+              className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                dataHealthReport.isHealthy
+                  ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950'
+                  : 'bg-white/95 border-slate-200 text-slate-900'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                {dataHealthReport.isHealthy ? (
+                  <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <h2 className="text-base font-extrabold">
+                    {lang === 'th' ? 'ตรวจสุขภาพข้อมูลบัญชีและต้นทุนอาหาร' : 'Accounting & Costing Data Health Check'}
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    {dataHealthReport.isHealthy
+                      ? lang === 'th'
+                        ? `ผ่านการตรวจสอบครบทั้ง ${dataHealthReport.totalChecks} หัวข้อ ตัวเลข P&L และต้นทุนพร้อมใช้งาน`
+                        : `All ${dataHealthReport.totalChecks} data integrity checks passed.`
+                      : lang === 'th'
+                      ? `ผ่าน ${dataHealthReport.passedCount}/${dataHealthReport.totalChecks} หัวข้อ • พบจุดที่ควรตรวจสอบ ${dataHealthReport.totalIssueCount} รายการ (${period}:${dateParam})`
+                      : `${dataHealthReport.passedCount}/${dataHealthReport.totalChecks} checks passed • ${dataHealthReport.totalIssueCount} item(s) need attention (${period}:${dateParam})`}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <span
+                  className={`text-sm font-extrabold tabular-nums ${
+                    dataHealthReport.isHealthy ? 'text-emerald-700' : 'text-amber-700'
+                  }`}
+                >
+                  {dataHealthReport.passedCount} / {dataHealthReport.totalChecks}{' '}
+                  {lang === 'th' ? 'ผ่าน' : 'Passed'}
+                </span>
+              </div>
+            </div>
+
+            {/* 6 Check Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {dataHealthReport.checks.map((check) => {
+                const borderColor = check.passed
+                  ? 'border-emerald-200 bg-white/95'
+                  : check.severity === 'critical'
+                  ? 'border-rose-300 bg-rose-50/40'
+                  : 'border-amber-300 bg-amber-50/40';
+                const statusColor = check.passed
+                  ? 'text-emerald-700'
+                  : check.severity === 'critical'
+                  ? 'text-rose-700'
+                  : 'text-amber-700';
+
+                return (
+                  <div
+                    key={check.id}
+                    className={`rounded-2xl border p-5 flex flex-col justify-between gap-3 ${borderColor}`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          {check.passed ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          ) : (
+                            <AlertTriangle
+                              className={`w-4 h-4 shrink-0 ${
+                                check.severity === 'critical' ? 'text-rose-600' : 'text-amber-600'
+                              }`}
+                            />
+                          )}
+                          <h3 className="text-sm font-extrabold text-slate-900">
+                            {lang === 'th' ? check.titleTh : check.titleEn}
+                          </h3>
+                        </div>
+                        <span className={`text-xs font-bold tabular-nums whitespace-nowrap ${statusColor}`}>
+                          {check.passed
+                            ? lang === 'th' ? 'ปกติ' : 'OK'
+                            : lang === 'th' ? `${check.count} รายการ` : `${check.count} issue(s)`}
+                        </span>
+                      </div>
+
+                      <p className="text-xs text-slate-600">
+                        {lang === 'th' ? check.descriptionTh : check.descriptionEn}
+                      </p>
+
+                      <div className="text-xs font-semibold text-slate-800 pt-1">
+                        {lang === 'th' ? check.summaryTh : check.summaryEn}
+                      </div>
+
+                      {!check.passed && check.items.length > 0 && (
+                        <ul className="mt-2 space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                          {check.items.map((item) => (
+                            <li
+                              key={item.id}
+                              className="text-xs bg-white/90 border border-slate-200/80 rounded-xl px-3 py-2 flex flex-col gap-0.5"
+                            >
+                              <span className="font-bold text-slate-900">{item.label}</span>
+                              <span className="text-[11px] text-slate-600 tabular-nums">
+                                {lang === 'th' ? item.detailTh : item.detailEn}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    {!check.passed && (
+                      <div className="pt-2 border-t border-slate-200/70 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleResolveHealthIssue(check.id)}
+                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <span>{lang === 'th' ? 'ไปแก้ไขข้อมูล' : 'Review & Fix'}</span>
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

@@ -2286,3 +2286,39 @@ export function calculateChangeDue(tendered: number, due: number): number {
   if (tendered < due) return 0;
   return roundTo2(tendered - due);
 }
+
+/**
+ * Pure P&L CSV serializer used identically by UnifiedFinanceHubPage export and integration tests.
+ * Ensures CSV rows reflect the exact same PeriodPnlResult and Break-Even target shown in the UI.
+ */
+export function buildPnlCsvRows(
+  pnl: PeriodPnlResult,
+  monthlyBreakEvenSales: number = 0
+): string[][] {
+  return [
+    ['Metric', 'Amount (THB)'],
+    ['Period', `${pnl.period}:${pnl.dateParam}`],
+    ['Net Sales (ex-VAT)', roundTo2(pnl.netSalesExVat).toFixed(2)],
+    ...(pnl.retainedServiceCharge > 0
+      ? [['Retained Service Charge', roundTo2(pnl.retainedServiceCharge).toFixed(2)]]
+      : []),
+    ['Food COGS', roundTo2(pnl.foodCogs).toFixed(2)],
+    ['Packaging COGS', roundTo2(pnl.packagingCogs).toFixed(2)],
+    ['Gross Profit', roundTo2(pnl.grossProfit).toFixed(2)],
+    ['Gross Margin %', `${pnl.grossMarginPercent.toFixed(1)}%`],
+    ['Channel / Platform Fees (GP)', roundTo2(pnl.channelFees).toFixed(2)],
+    ['Kitchen Labor', roundTo2(pnl.kitchenLabor).toFixed(2)],
+    ['FOH & Management Labor', roundTo2(pnl.fohLabor).toFixed(2)],
+    ['Total Labor (All Staff)', roundTo2(pnl.totalLabor).toFixed(2)],
+    ['Prime Cost (Total COGS + Total Labor)', roundTo2(pnl.primeCost).toFixed(2)],
+    ['Prime Cost %', `${pnl.primeCostPercent.toFixed(1)}%`],
+    ['Operating Expenses (OPEX)', roundTo2(pnl.opex).toFixed(2)],
+    ['Operating Profit (กำไรจากการดำเนินงาน)', roundTo2(pnl.operatingProfit).toFixed(2)],
+    ['Estimated Tax (Confirm with Accountant)', roundTo2(pnl.estimatedTax).toFixed(2)],
+    ['Net Profit', roundTo2(pnl.netProfit).toFixed(2)],
+    ['COGS Data Status', pnl.cogsStatus],
+    ['Monthly Break-Even Target', roundTo2(monthlyBreakEvenSales).toFixed(2)],
+  ];
+}
+
+
