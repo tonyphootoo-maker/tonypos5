@@ -17,6 +17,8 @@ import {
 import { calculateIngredientCost } from '../services/calculationEngine';
 import { NumericInput } from './common/NumericInput';
 import { CategoryIngredientSelect } from './common/CategoryIngredientSelect';
+import { getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface PurchasesViewProps {
   ingredients: Ingredient[];
@@ -27,6 +29,7 @@ interface PurchasesViewProps {
   onSavePurchase: (purchase: PurchaseRecord) => void;
   onUpdateIngredientPrice: (ingredientId: string, newPrice: number) => void;
   onRecordPriceChange: (record: PriceHistoryRecord) => void;
+  lang?: 'th' | 'en';
 }
 
 export const PurchasesView: React.FC<PurchasesViewProps> = ({
@@ -38,7 +41,10 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
   onSavePurchase,
   onUpdateIngredientPrice,
   onRecordPriceChange,
+  lang: propLang,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [activeTab, setActiveTab] = useState<'PURCHASES' | 'PRICE_HISTORY'>('PURCHASES');
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
 
@@ -80,7 +86,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
       invoiceNumber,
       date: purchaseDate,
       supplierId,
-      supplierName: sup ? sup.name : 'ตลาดสด',
+      supplierName: sup ? sup.name : (lang === 'en' ? 'Fresh Market' : 'ตลาดสด'),
       ingredientId: selectedIngredient.id,
       ingredientName: selectedIngredient.name,
       quantity,
@@ -114,8 +120,10 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
         oldCostPerUnit: oldCalculated.costPerBaseUnit,
         newCostPerUnit: newCalculated.costPerBaseUnit,
         unit: selectedIngredient.usageUnit,
-        reason: `บิลซื้อ ${invoiceNumber} (${sup?.name || 'ตลาด'})`,
-        user: 'ระบบบัญชีอัตโนมัติ',
+        reason: lang === 'en'
+          ? `Purchase Invoice ${invoiceNumber} (${sup?.name || 'Market'})`
+          : `บิลซื้อ ${invoiceNumber} (${sup?.name || 'ตลาด'})`,
+        user: lang === 'en' ? 'Auto Accounting' : 'ระบบบัญชีอัตโนมัติ',
       };
       onRecordPriceChange(historyEntry);
     }
@@ -130,7 +138,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
       {/* Header */}
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <h1 className="text-2xl font-bold text-white tracking-tight">
-          การสั่งซื้อและประวัติราคา (Purchases & Price Audits)
+          {lang === 'en'
+            ? 'Purchases & Price Audit Log'
+            : 'การสั่งซื้อและประวัติราคา (Purchases & Price Audits)'}
         </h1>
 
         <button
@@ -139,11 +149,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           className="px-4 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl text-xs shadow-lg shadow-[#F27D26]/20 transition-all flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
-          <span>+ บันทึกการซื้อวัตถุดิบ</span>
+          <span>{lang === 'en' ? '+ Record Purchase' : '+ บันทึกการซื้อวัตถุดิบ'}</span>
         </button>
       </div>
-
-
 
       {/* Tabs Switcher */}
       <div className="flex items-center gap-2 border-b border-white/10">
@@ -156,7 +164,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
               : 'border-transparent text-white/50 hover:text-white'
           }`}
         >
-          รายการจัดซื้อวัตถุดิบ ({purchases.length})
+          {lang === 'en'
+            ? `Purchase Invoices (${purchases.length})`
+            : `รายการจัดซื้อวัตถุดิบ (${purchases.length})`}
         </button>
         <button
           type="button"
@@ -168,7 +178,11 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           }`}
         >
           <History className="w-3.5 h-3.5" />
-          <span>ประวัติการเปลี่ยนแปลงราคา ({priceHistory.length})</span>
+          <span>
+            {lang === 'en'
+              ? `Price Change History (${priceHistory.length})`
+              : `ประวัติการเปลี่ยนแปลงราคา (${priceHistory.length})`}
+          </span>
         </button>
       </div>
 
@@ -178,19 +192,21 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           {purchases.length === 0 ? (
             <div className="text-center py-12 text-white/40 text-xs">
               <ShoppingCart className="w-8 h-8 mx-auto mb-2 text-white/20" />
-              ยังไม่มีประวัติการซื้อวัตถุดิบในระบบ กด "+ บันทึกการซื้อวัตถุดิบ" เพื่อเริ่มต้น
+              {lang === 'en'
+                ? 'No purchase records yet. Click "+ Record Purchase" to begin.'
+                : 'ยังไม่มีประวัติการซื้อวัตถุดิบในระบบ กด "+ บันทึกการซื้อวัตถุดิบ" เพื่อเริ่มต้น'}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-white/5 border-b border-white/10 text-white/50 font-bold uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-4">วันที่ / บิล</th>
-                    <th className="py-3 px-3">ผู้จำหน่าย (Supplier)</th>
-                    <th className="py-3 px-3">วัตถุดิบ</th>
-                    <th className="py-3 px-3 text-right">จำนวน</th>
-                    <th className="py-3 px-3 text-right">ราคา/หน่วย</th>
-                    <th className="py-3 px-4 text-right">ยอดรวม (บาท)</th>
+                    <th className="py-3 px-4">{lang === 'en' ? 'Date / Invoice' : 'วันที่ / บิล'}</th>
+                    <th className="py-3 px-3">{lang === 'en' ? 'Supplier' : 'ผู้จำหน่าย (Supplier)'}</th>
+                    <th className="py-3 px-3">{lang === 'en' ? 'Ingredient' : 'วัตถุดิบ'}</th>
+                    <th className="py-3 px-3 text-right">{lang === 'en' ? 'Qty' : 'จำนวน'}</th>
+                    <th className="py-3 px-3 text-right">{lang === 'en' ? 'Unit Price' : 'ราคา/หน่วย'}</th>
+                    <th className="py-3 px-4 text-right">{lang === 'en' ? 'Total (THB)' : 'ยอดรวม (บาท)'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 font-mono">
@@ -203,19 +219,19 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                         </div>
                       </td>
                       <td className="py-3 px-3 font-sans text-white/70 font-medium">
-                        {p.supplierName}
+                        {getLocalizedText(lang, p.supplierName)}
                       </td>
                       <td className="py-3 px-3 font-sans font-bold text-white">
-                        {p.ingredientName}
+                        {getLocalizedText(lang, p.ingredientName)}
                       </td>
                       <td className="py-3 px-3 text-right text-white/80">
-                        {p.quantity} {p.unit}
+                        {p.quantity} {localizeUnit(p.unit, lang)}
                       </td>
                       <td className="py-3 px-3 text-right text-white/50">
                         ฿{(p.unitPrice ?? (p.quantity > 0 ? (p.totalPrice || 0) / p.quantity : 0)).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-right font-bold text-[#FFC107] text-sm">
-                        ฿{(p.totalPrice || 0).toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                        ฿{(p.totalPrice || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                       </td>
                     </tr>
                   ))}
@@ -223,10 +239,10 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                 <tfoot className="bg-white/5 border-t border-white/10 font-bold text-white">
                   <tr>
                     <td colSpan={5} className="py-3 px-4 text-right font-sans">
-                      รวมมูลค่าการซื้อทั้งหมด:
+                      {lang === 'en' ? 'Total Purchases:' : 'รวมมูลค่าการซื้อทั้งหมด:'}
                     </td>
                     <td className="py-3 px-4 text-right text-[#F27D26] text-base font-mono font-bold">
-                      ฿{totalPurchasesAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 })}
+                      ฿{totalPurchasesAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                     </td>
                   </tr>
                 </tfoot>
@@ -242,21 +258,21 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           {priceHistory.length === 0 ? (
             <div className="text-center py-12 text-white/40 text-xs">
               <History className="w-8 h-8 mx-auto mb-2 text-white/20" />
-              ยังไม่มีการบันทึกประวัติการเปลี่ยนแปลงราคาวัตถุดิบ
+              {lang === 'en' ? 'No price change history yet.' : 'ยังไม่มีการบันทึกประวัติการเปลี่ยนแปลงราคาวัตถุดิบ'}
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-white/5 border-b border-white/10 text-white/50 font-bold uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-4">วันที่ / เวลา</th>
-                    <th className="py-3 px-3">วัตถุดิบ</th>
-                    <th className="py-3 px-3 text-right">ราคาซื้อเดิม</th>
-                    <th className="py-3 px-3 text-center">ทิศทาง</th>
-                    <th className="py-3 px-3 text-right">ราคาซื้อใหม่</th>
-                    <th className="py-3 px-3 text-right">ต้นทุนใช้งานใหม่</th>
-                    <th className="py-3 px-3">เหตุผล</th>
-                    <th className="py-3 px-4">ผู้ทำรายการ</th>
+                    <th className="py-3 px-4">{lang === 'en' ? 'Date' : 'วันที่ / เวลา'}</th>
+                    <th className="py-3 px-3">{lang === 'en' ? 'Ingredient' : 'วัตถุดิบ'}</th>
+                    <th className="py-3 px-3 text-right">{lang === 'en' ? 'Old Price' : 'ราคาซื้อเดิม'}</th>
+                    <th className="py-3 px-3 text-center">{lang === 'en' ? 'Change' : 'ทิศทาง'}</th>
+                    <th className="py-3 px-3 text-right">{lang === 'en' ? 'New Price' : 'ราคาซื้อใหม่'}</th>
+                    <th className="py-3 px-3 text-right">{lang === 'en' ? 'New EP Cost' : 'ต้นทุนใช้งานใหม่'}</th>
+                    <th className="py-3 px-3">{lang === 'en' ? 'Reason' : 'เหตุผล'}</th>
+                    <th className="py-3 px-4">{lang === 'en' ? 'User' : 'ผู้ทำรายการ'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5 font-mono">
@@ -269,7 +285,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                           {h.date}
                         </td>
                         <td className="py-3 px-3 font-sans font-bold text-white">
-                          {h.ingredientName}
+                          {getLocalizedText(lang, h.ingredientName)}
                         </td>
                         <td className="py-3 px-3 text-right text-white/40">
                           ฿{h.oldPrice.toFixed(2)}
@@ -289,13 +305,13 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                           ฿{h.newPrice.toFixed(2)}
                         </td>
                         <td className="py-3 px-3 text-right font-bold text-[#FFC107]">
-                          ฿{h.newCostPerUnit.toFixed(4)} / {h.unit}
+                          ฿{h.newCostPerUnit.toFixed(4)} / {localizeUnit(h.unit, lang)}
                         </td>
                         <td className="py-3 px-3 font-sans text-white/60 text-[11px]">
-                          {h.reason || '-'}
+                          {h.reason ? getLocalizedText(lang, h.reason) : '-'}
                         </td>
                         <td className="py-3 px-4 font-sans text-white/40 text-[11px]">
-                          {h.user}
+                          {h.user ? getLocalizedText(lang, h.user) : '-'}
                         </td>
                       </tr>
                     );
@@ -313,7 +329,7 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
           <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-md w-full p-6 shadow-2xl border border-white/20 text-white">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h3 className="font-bold text-white text-base">
-                บันทึกการซื้อวัตถุดิบเข้าร้าน
+                {lang === 'en' ? 'Record Ingredient Purchase' : 'บันทึกการซื้อวัตถุดิบเข้าร้าน'}
               </h3>
               <button
                 type="button"
@@ -332,16 +348,19 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   setSelectedIngredientId(ingId);
                   if (ing) setTotalPrice(ing.purchasePrice);
                 }}
-                categoryLabel="1. เลือกหมวดหมู่วัตถุดิบก่อน"
-                ingredientLabel="2. เลือกวัตถุดิบย่อย"
+                categoryLabel={lang === 'en' ? '1. Select Category' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}
+                ingredientLabel={lang === 'en' ? '2. Select Ingredient' : '2. เลือกวัตถุดิบย่อย'}
                 theme="dark"
                 layout="row"
+                lang={lang}
                 required
               />
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-white/80 mb-1">ผู้จัดจำหน่าย</label>
+                  <label className="block font-bold text-white/80 mb-1">
+                    {lang === 'en' ? 'Supplier' : 'ผู้จัดจำหน่าย'}
+                  </label>
                   <select
                     value={supplierId}
                     onChange={(e) => setSupplierId(e.target.value)}
@@ -349,13 +368,15 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   >
                     {suppliers.map((s) => (
                       <option key={s.id} value={s.id} className="bg-[#1a1a1a] text-white">
-                        {s.name}
+                        {getLocalizedText(lang, s.name)}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block font-bold text-white/80 mb-1">วันที่ซื้อ</label>
+                  <label className="block font-bold text-white/80 mb-1">
+                    {lang === 'en' ? 'Purchase Date' : 'วันที่ซื้อ'}
+                  </label>
                   <input
                     type="date"
                     required
@@ -368,7 +389,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-white/80 mb-1">จำนวนที่ซื้อ</label>
+                  <label className="block font-bold text-white/80 mb-1">
+                    {lang === 'en' ? 'Quantity Purchased' : 'จำนวนที่ซื้อ'}
+                  </label>
                   <NumericInput
                     type="number"
                     step="any"
@@ -379,7 +402,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-white/80 mb-1">ยอดเงินรวม (บาท)</label>
+                  <label className="block font-bold text-white/80 mb-1">
+                    {lang === 'en' ? 'Total Amount (THB)' : 'ยอดเงินรวม (บาท)'}
+                  </label>
                   <NumericInput
                     type="number"
                     step="0.01"
@@ -392,13 +417,15 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-white/80 mb-1">เลขที่บิล / ใบเสร็จ</label>
+                <label className="block font-bold text-white/80 mb-1">
+                  {lang === 'en' ? 'Invoice / Receipt No.' : 'เลขที่บิล / ใบเสร็จ'}
+                </label>
                 <input
                   type="text"
                   value={invoiceNumber}
                   onChange={(e) => setInvoiceNumber(e.target.value)}
                   className="w-full p-2 bg-black/40 border border-white/15 rounded-xl font-mono text-white"
-                  placeholder="เช่น INV-00123"
+                  placeholder={lang === 'en' ? 'e.g. INV-00123' : 'เช่น INV-00123'}
                 />
               </div>
 
@@ -414,7 +441,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   htmlFor="autoUpdatePrice"
                   className="text-[11px] font-bold text-white/90 cursor-pointer"
                 >
-                  อัปเดตราคาซื้อในฐานข้อมูลวัตถุดิบทันที (หากราคาเปลี่ยน)
+                  {lang === 'en'
+                    ? 'Auto-update master ingredient purchase price if changed'
+                    : 'อัปเดตราคาซื้อในฐานข้อมูลวัตถุดิบทันที (หากราคาเปลี่ยน)'}
                 </label>
               </div>
 
@@ -424,13 +453,13 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                   onClick={() => setIsPurchaseModalOpen(false)}
                   className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold cursor-pointer"
                 >
-                  ยกเลิก
+                  {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black rounded-xl font-bold shadow-md shadow-[#F27D26]/20 cursor-pointer"
                 >
-                  บันทึกการซื้อ
+                  {lang === 'en' ? 'Save Purchase' : 'บันทึกการซื้อ'}
                 </button>
               </div>
             </form>

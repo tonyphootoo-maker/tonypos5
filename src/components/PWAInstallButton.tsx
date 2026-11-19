@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, Smartphone, Tablet, Share, PlusSquare, MoreVertical, CheckCircle2, X } from 'lucide-react';
 import { Language } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface Props {
-  lang: Language;
+  lang?: Language;
   variant?: 'header' | 'button' | 'card' | 'rider-banner';
   appName?: string;
   theme?: 'orange' | 'emerald';
@@ -13,12 +14,14 @@ interface Props {
 }
 
 export const PWAInstallButton: React.FC<Props> = ({
-  lang,
+  lang: propLang,
   variant = 'header',
   appName = 'KinPOS',
   theme = 'orange',
   onActionTaken,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const { isInstallable, isInstalled, isIOS, isAndroid, install } = usePWAInstall();
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [guideTab, setGuideTab] = useState<'ios' | 'android'>(() => (isIOS ? 'ios' : 'android'));

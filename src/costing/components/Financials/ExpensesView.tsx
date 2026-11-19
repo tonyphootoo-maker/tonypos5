@@ -4,6 +4,7 @@ import { ExpenseRecord, ExpenseCategory, ExpenseFrequency } from '../../types/do
 import { NumericInput } from '../common/NumericInput';
 import { convertExpenseToMonthly, calculateTotalMonthlyExpenses, validateExpenseInput } from '../../engine/calculations';
 import { isExplicitPayrollExpense } from '../../../engine/calculations';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 interface ExpensesViewProps {
   expenses: ExpenseRecord[];
@@ -11,7 +12,7 @@ interface ExpensesViewProps {
   onDeleteExpense: (id: string) => void;
   onUpdateExpense?: (expense: ExpenseRecord) => void;
   operatingDays?: number;
-  activeLanguage: 'th' | 'en';
+  activeLanguage?: 'th' | 'en';
   employeesCount?: number;
   excludePayrollDuplicates?: boolean;
   onToggleExcludePayrollDuplicates?: (exclude: boolean) => void;
@@ -23,11 +24,14 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
   onDeleteExpense,
   onUpdateExpense,
   operatingDays = 26,
-  activeLanguage,
+  activeLanguage: propActiveLanguage,
   employeesCount = 0,
   excludePayrollDuplicates = true,
   onToggleExcludePayrollDuplicates,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const activeLanguage = propActiveLanguage ?? ctxLang;
+  const isTh = activeLanguage === 'th';
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [isGuidanceOpen, setIsGuidanceOpen] = useState(false);
@@ -99,7 +103,10 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
       isInstallment: formData.isInstallment,
     });
     if (!validation.isValid) {
-      setValidationError(validation.errorMessageTh || 'ข้อมูลไม่ถูกต้อง');
+      setValidationError(
+        (isTh ? validation.errorMessageTh : validation.errorMessageEn) ||
+          (isTh ? 'ข้อมูลไม่ถูกต้อง' : 'Invalid input')
+      );
       return;
     }
 
@@ -224,11 +231,25 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
           <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-xs space-y-1">
             <div className="font-bold text-amber-950 flex items-center gap-1.5">
-              <span>คำเตือน: ยังไม่ได้ใส่อัตราเงินเดือนเจ้าของร้าน (Owner Salary)</span>
-              <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-semibold">แนะนำอย่างยิ่ง</span>
+              <span>
+                {isTh
+                  ? 'คำเตือน: ยังไม่ได้ใส่อัตราเงินเดือนเจ้าของร้าน (Owner Salary)'
+                  : 'Warning: Owner Salary Not Included'}
+              </span>
+              <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-semibold">
+                {isTh ? 'แนะนำอย่างยิ่ง' : 'Strongly Recommended'}
+              </span>
             </div>
             <p className="text-amber-800 leading-relaxed">
-              ในหลักการคิดต้นทุนร้านอาหาร SME หากไม่รวมเงินเดือนประจำของเจ้าของร้านลงในต้นทุนคงที่ (Fixed Labor) จะทำให้คำนวณอัตราโสหุ้ย (% Overhead) ต่ำกว่าความเป็นจริง ส่งผลให้ตั้งราคาอาหารต่ำเกินไปและเกิดภาวะขาดทุนแฝง แนะนำให้เพิ่มรายการ เช่น <span className="font-bold underline decoration-amber-400">"เงินเดือนเจ้าของร้าน"</span> ในหมวด "Labor (Salary & Wages)"
+              {isTh ? (
+                <>
+                  ในหลักการคิดต้นทุนร้านอาหาร SME หากไม่รวมเงินเดือนประจำของเจ้าของร้านลงในต้นทุนคงที่ (Fixed Labor) จะทำให้คำนวณอัตราโสหุ้ย (% Overhead) ต่ำกว่าความเป็นจริง ส่งผลให้ตั้งราคาอาหารต่ำเกินไปและเกิดภาวะขาดทุนแฝง แนะนำให้เพิ่มรายการ เช่น <span className="font-bold underline decoration-amber-400">"เงินเดือนเจ้าของร้าน"</span> ในหมวด "Labor (Salary & Wages)"
+                </>
+              ) : (
+                <>
+                  For accurate SME restaurant costing, including a regular owner salary in Fixed Labor prevents understating your Overhead % and underpricing dishes. Consider adding <span className="font-bold underline decoration-amber-400">"Owner Salary"</span> under "Labor (Salary & Wages)".
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -243,10 +264,22 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
         >
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-sky-600 shrink-0" />
-            <span>ข้อควรระวัง: 10 รายการที่ไม่ควรนำมาคิดเป็นค่าโสหุ้ย (What NOT to count as Overhead)</span>
+            <span>
+              {isTh
+                ? 'ข้อควรระวัง: 10 รายการที่ไม่ควรนำมาคิดเป็นค่าโสหุ้ย (What NOT to count as Overhead)'
+                : 'Guidance: 10 Items NOT to Count as Operating Overhead'}
+            </span>
           </div>
           <div className="flex items-center gap-1 text-[11px] font-medium text-sky-700">
-            <span>{isGuidanceOpen ? 'ซ่อนคำแนะนำ' : 'ดูรายการที่ไม่ควรใส่'}</span>
+            <span>
+              {isGuidanceOpen
+                ? isTh
+                  ? 'ซ่อนคำแนะนำ'
+                  : 'Hide Guide'
+                : isTh
+                ? 'ดูรายการที่ไม่ควรใส่'
+                : 'View Checklist'}
+            </span>
             {isGuidanceOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </div>
         </button>
@@ -254,48 +287,116 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
         {isGuidanceOpen && (
           <div className="p-4 pt-1 border-t border-sky-100 text-xs text-sky-900 bg-white/60 space-y-2">
             <p className="text-slate-600 mb-2">
-              การกรอกค่าใช้จ่ายซ้ำซ้อนจะทำให้ต้นทุนโสหุ้ยสูงเกินจริงจนตั้งราคาอาหารไม่ได้ รายการต่อไปนี้<strong>ห้ามใส่ในตารางโสหุ้ย</strong>:
+              {isTh ? (
+                <>
+                  การกรอกค่าใช้จ่ายซ้ำซ้อนจะทำให้ต้นทุนโสหุ้ยสูงเกินจริงจนตั้งราคาอาหารไม่ได้ รายการต่อไปนี้<strong>ห้ามใส่ในตารางโสหุ้ย</strong>:
+                </>
+              ) : (
+                <>
+                  Double-counting costs inflates your overhead % and distorts menu pricing. <strong>Do NOT add</strong> the following 10 items here:
+                </>
+              )}
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">1. วัตถุดิบอาหารและเครื่องดื่มหลัก (F&B Direct Cost)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">เป็น Direct COGS ที่คำนวณในสูตรอาหาร (Recipe) แล้ว ห้ามใส่ซ้ำในโสหุ้ย</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '1. วัตถุดิบอาหารและเครื่องดื่มหลัก (F&B Direct Cost)' : '1. Direct Food & Beverage Ingredients'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'เป็น Direct COGS ที่คำนวณในสูตรอาหาร (Recipe) แล้ว ห้ามใส่ซ้ำในโสหุ้ย'
+                    : 'Already counted as Direct COGS inside menu recipes.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">2. บรรจุภัณฑ์ใส่อาหารต่อจาน (Direct Packaging)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">กล่องข้าว ช้อนส้อม ถุงหิ้ว ให้คิดเป็นต้นทุนตรงต่อจานในเมนูสั่งกลับบ้าน/เดลิเวอรี</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '2. บรรจุภัณฑ์ใส่อาหารต่อจาน (Direct Packaging)' : '2. Per-Order Direct Packaging'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'กล่องข้าว ช้อนส้อม ถุงหิ้ว ให้คิดเป็นต้นทุนตรงต่อจานในเมนูสั่งกลับบ้าน/เดลิเวอรี'
+                    : 'Containers, cutlery, and bags should be costed directly per takeaway/delivery dish.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">3. ค่าคอมมิชชั่น GP เดลิเวอรี (Platform Commission)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">เป็นส่วนลดจากยอดขายหน้าแอป (Platform Deduction) ให้คำนวณแยกตามช่องทางขาย</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '3. ค่าคอมมิชชั่น GP เดลิเวอรี (Platform Commission)' : '3. Delivery Platform Commissions (GP)'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'เป็นส่วนลดจากยอดขายหน้าแอป (Platform Deduction) ให้คำนวณแยกตามช่องทางขาย'
+                    : 'Tracked as channel deductions per delivery platform.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">4. ภาษีมูลค่าเพิ่ม (VAT ซื้อ / VAT ขาย)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">ไม่ใช่ต้นทุนของร้าน เป็นเงินหมุนเวียนนำส่งสรรพากร ยอดขายต้องใช้แบบ Ex-VAT</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '4. ภาษีมูลค่าเพิ่ม (VAT ซื้อ / VAT ขาย)' : '4. Value Added Tax (Input / Output VAT)'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'ไม่ใช่ต้นทุนของร้าน เป็นเงินหมุนเวียนนำส่งสรรพากร ยอดขายต้องใช้แบบ Ex-VAT'
+                    : 'Pass-through tax remitted to authorities, not a store operating cost.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">5. เงินมัดจำ/เงินประกันสัญญาเช่า (Security Deposits)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">เป็นสินทรัพย์ (Asset) ที่ได้คืนเมื่อสิ้นสุดสัญญา ไม่ใช่ค่าใช้จ่ายดำเนินงาน</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '5. เงินมัดจำ/เงินประกันสัญญาเช่า (Security Deposits)' : '5. Lease Security Deposits'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'เป็นสินทรัพย์ (Asset) ที่ได้คืนเมื่อสิ้นสุดสัญญา ไม่ใช่ค่าใช้จ่ายดำเนินงาน'
+                    : 'Refundable balance-sheet asset, not an operating expense.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">6. เงินลงทุนตกแต่งก้อนแรกก่อนเปิดร้าน (CapEx / Initial Fitout)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">ให้ใส่เฉพาะ "ค่าเสื่อมราคา (Depreciation)" ตามอายุใช้งาน ไม่ใช่ใส่เงินก้อนใหญ่ทั้งก้อน</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '6. เงินลงทุนตกแต่งก้อนแรกก่อนเปิดร้าน (CapEx / Initial Fitout)' : '6. Initial Store CapEx / Renovation Fitout'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'ให้ใส่เฉพาะ "ค่าเสื่อมราคา (Depreciation)" ตามอายุใช้งาน ไม่ใช่ใส่เงินก้อนใหญ่ทั้งก้อน'
+                    : 'Record only monthly Depreciation over useful life rather than lump-sum CapEx.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">7. เงินต้นที่ชำระคืนเงินกู้ธนาคาร (Loan Principal)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">การผ่อนเงินต้นเป็นการลดหนี้สิน ไม่ใช่ค่าใช้จ่าย (คิดได้เฉพาะดอกเบี้ยเงินกู้หรือค่างวดเครื่องจักร)</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '7. เงินต้นที่ชำระคืนเงินกู้ธนาคาร (Loan Principal)' : '7. Bank Loan Principal Repayments'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'การผ่อนเงินต้นเป็นการลดหนี้สิน ไม่ใช่ค่าใช้จ่าย (คิดได้เฉพาะดอกเบี้ยเงินกู้หรือค่างวดเครื่องจักร)'
+                    : 'Debt principal reduction is not an expense (only interest or equipment lease applies).'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">8. เงินถอนส่วนตัวของเจ้าของ (Owner's Drawings)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">การเบิกถอนเงินสดไปใช้ส่วนตัวไม่ถือเป็นต้นทุนร้าน (ต้องแยกจากเงินเดือนประจำ)</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? "8. เงินถอนส่วนตัวของเจ้าของ (Owner's Drawings)" : "8. Owner's Personal Drawings"}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'การเบิกถอนเงินสดไปใช้ส่วนตัวไม่ถือเป็นต้นทุนร้าน (ต้องแยกจากเงินเดือนประจำ)'
+                    : 'Personal cash withdrawals are equity distributions, distinct from owner salary.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">9. ภาษีเงินได้นิติบุคคลหรือบุคคลธรรมดาสิ้นปี (Income Tax)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">คิดจากกำไรสุทธิหลังหักค่าใช้จ่ายทั้งหมดแล้ว ไม่ใช่ต้นทุนดำเนินงานของร้าน</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '9. ภาษีเงินได้นิติบุคคลหรือบุคคลธรรมดาสิ้นปี (Income Tax)' : '9. Corporate / Personal Income Tax'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'คิดจากกำไรสุทธิหลังหักค่าใช้จ่ายทั้งหมดแล้ว ไม่ใช่ต้นทุนดำเนินงานของร้าน'
+                    : 'Calculated below Operating Profit in P&L, not an operating overhead.'}
+                </div>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-sky-100">
-                <div className="font-bold text-slate-800">10. Service Charge ที่แบ่งจ่ายพนักงาน (Distributed Service Charge)</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">เป็นเงินที่เรียกเก็บแทนพนักงานและส่งต่อทั้งหมด ไม่ใช่ค่าใช้จ่ายดำเนินงานของร้าน</div>
+                <div className="font-bold text-slate-800">
+                  {isTh ? '10. Service Charge ที่แบ่งจ่ายพนักงาน (Distributed Service Charge)' : '10. Staff-Distributed Service Charge'}
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  {isTh
+                    ? 'เป็นเงินที่เรียกเก็บแทนพนักงานและส่งต่อทั้งหมด ไม่ใช่ค่าใช้จ่ายดำเนินงานของร้าน'
+                    : 'Collected on behalf of staff and passed through separately.'}
+                </div>
               </div>
             </div>
           </div>
@@ -305,35 +406,53 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
       {/* KPI Cards (Normalized Monthly) */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">ค่าใช้จ่ายรายเดือนรวม (Monthly)</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'ค่าใช้จ่ายรายเดือนรวม (Monthly)' : 'Total Monthly OPEX'}
+          </div>
           <div className="mt-1 text-2xl font-bold text-slate-900 font-mono">
             ฿{Math.round(monthlyTotals.totalMonthly).toLocaleString()}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">{expenses.filter(e => !e.isExcluded).length} รายการ (นับคำนวณ)</div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            {expenses.filter(e => !e.isExcluded).length}{' '}
+            {isTh ? 'รายการ (นับคำนวณ)' : 'items (included)'}
+          </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">ต้นทุนคงที่รายเดือน (Fixed)</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'ต้นทุนคงที่รายเดือน (Fixed)' : 'Monthly Fixed Costs'}
+          </div>
           <div className="mt-1 text-2xl font-bold text-slate-800 font-mono">
             ฿{Math.round(monthlyTotals.fixedMonthly).toLocaleString()}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">ค่าเช่า, ซอฟต์แวร์, ค่าเสื่อม</div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            {isTh ? 'ค่าเช่า, ซอฟต์แวร์, ค่าเสื่อม' : 'Rent, Software, Depreciation'}
+          </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">ต้นทุนผันแปรรายเดือน (Variable)</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'ต้นทุนผันแปรรายเดือน (Variable)' : 'Monthly Variable Costs'}
+          </div>
           <div className="mt-1 text-2xl font-bold text-slate-800 font-mono">
             ฿{Math.round(monthlyTotals.variableMonthly).toLocaleString()}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">ค่าน้ำ, ค่าไฟ, แก๊ส</div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            {isTh ? 'ค่าน้ำ, ค่าไฟ, แก๊ส' : 'Water, Electricity, Gas'}
+          </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">รายการที่ยกเว้น (Excluded)</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'รายการที่ยกเว้น (Excluded)' : 'Excluded Items'}
+          </div>
           <div className="mt-1 text-2xl font-bold text-slate-400 font-mono">
             ฿{Math.round(monthlyTotals.excludedMonthly).toLocaleString()}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">{expenses.filter(e => e.isExcluded).length} รายการ (ไม่นำมาคิดต้นทุน)</div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            {expenses.filter(e => e.isExcluded).length}{' '}
+            {isTh ? 'รายการ (ไม่นำมาคิดต้นทุน)' : 'items (excluded)'}
+          </div>
         </div>
       </div>
 
@@ -342,7 +461,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
             <Receipt className="h-4 w-4 text-slate-600" />
-            <span>รายการค่าใช้จ่ายทั้งหมด</span>
+            <span>{isTh ? 'รายการค่าใช้จ่ายทั้งหมด' : 'All Operating Expenses'}</span>
           </h2>
 
           <select
@@ -350,7 +469,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs bg-white"
           >
-            <option value="ALL">ทุกหมวดหมู่ (All Categories)</option>
+            <option value="ALL">{isTh ? 'ทุกหมวดหมู่' : 'All Categories'}</option>
             {categories.map((c) => (
               <option key={c} value={c}>
                 {c}
@@ -363,15 +482,15 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold">
-                <th className="py-2.5 px-3">วันที่</th>
-                <th className="py-2.5 px-3">หมวดหมู่</th>
-                <th className="py-2.5 px-3">รายการ</th>
-                <th className="py-2.5 px-3 text-center">ความถี่</th>
-                <th className="py-2.5 px-3 text-center">ประเภท</th>
-                <th className="py-2.5 px-3 text-right">จำนวนเดิม (฿)</th>
-                <th className="py-2.5 px-3 text-right">แปลงรายเดือน (฿/เดือน)</th>
-                <th className="py-2.5 px-3 text-center">สถานะ</th>
-                <th className="py-2.5 px-3 text-center">จัดการ</th>
+                <th className="py-2.5 px-3">{isTh ? 'วันที่' : 'Date'}</th>
+                <th className="py-2.5 px-3">{isTh ? 'หมวดหมู่' : 'Category'}</th>
+                <th className="py-2.5 px-3">{isTh ? 'รายการ' : 'Item'}</th>
+                <th className="py-2.5 px-3 text-center">{isTh ? 'ความถี่' : 'Frequency'}</th>
+                <th className="py-2.5 px-3 text-center">{isTh ? 'ประเภท' : 'Type'}</th>
+                <th className="py-2.5 px-3 text-right">{isTh ? 'จำนวนเดิม (฿)' : 'Original Amount (฿)'}</th>
+                <th className="py-2.5 px-3 text-right">{isTh ? 'แปลงรายเดือน (฿/เดือน)' : 'Monthly Equiv. (฿/mo)'}</th>
+                <th className="py-2.5 px-3 text-center">{isTh ? 'สถานะ' : 'Status'}</th>
+                <th className="py-2.5 px-3 text-center">{isTh ? 'จัดการ' : 'Actions'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -392,14 +511,18 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                       <span className={isExcluded ? 'line-through text-slate-400' : ''}>{exp.description}</span>
                       {isExplicitPayrollExpense(exp) && (
                         <span className="ml-1.5 text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-semibold">
-                          Payroll
+                          {isTh ? 'เงินเดือน' : 'Payroll'}
                         </span>
                       )}
                       {exp.isInstallment && (
-                        <span className="ml-1.5 text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded font-medium">ผ่อนชำระ</span>
+                        <span className="ml-1.5 text-[10px] bg-sky-50 text-sky-700 px-1.5 py-0.5 rounded font-medium">
+                          {isTh ? 'ผ่อนชำระ' : 'Installment'}
+                        </span>
                       )}
                       {exp.assetCost && !exp.isInstallment && (
-                        <span className="ml-1.5 text-[10px] bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-medium">ค่าเสื่อม {exp.usefulLifeYears}ปี</span>
+                        <span className="ml-1.5 text-[10px] bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-medium">
+                          {isTh ? `ค่าเสื่อม ${exp.usefulLifeYears}ปี` : `Depr. ${exp.usefulLifeYears}yr`}
+                        </span>
                       )}
                     </td>
                     <td className="py-2.5 px-3 text-center">
@@ -411,7 +534,13 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                       <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
                         exp.isFixed ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 text-amber-800'
                       }`}>
-                        {exp.isFixed ? 'Fixed Cost' : 'Variable Cost'}
+                        {exp.isFixed
+                          ? isTh
+                            ? 'คงที่ (Fixed)'
+                            : 'Fixed Cost'
+                          : isTh
+                          ? 'ผันแปร (Variable)'
+                          : 'Variable Cost'}
                       </span>
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-slate-600">
@@ -429,20 +558,34 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                         <button
                           type="button"
                           onClick={() => handleToggleExclude(exp)}
-                          title={isExcluded ? 'คลิกเพื่อรวมในต้นทุน' : 'คลิกเพื่อยกเว้นจากต้นทุน'}
+                          title={
+                            isExcluded
+                              ? isTh
+                                ? 'คลิกเพื่อรวมในต้นทุน'
+                                : 'Click to include in costing'
+                              : isTh
+                              ? 'คลิกเพื่อยกเว้นจากต้นทุน'
+                              : 'Click to exclude from costing'
+                          }
                           className={`px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer ${
                             isExcluded
                               ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
                               : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                           }`}
                         >
-                          {isExcluded ? 'ยกเว้น (Excluded)' : 'ใช้งาน (Included)'}
+                          {isExcluded
+                            ? isTh
+                              ? 'ยกเว้น (Excluded)'
+                              : 'Excluded'
+                            : isTh
+                            ? 'ใช้งาน (Included)'
+                            : 'Included'}
                         </button>
                       ) : (
                         <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
                           isExcluded ? 'bg-rose-100 text-rose-700' : 'bg-emerald-50 text-emerald-700'
                         }`}>
-                          {isExcluded ? 'ยกเว้น' : 'ใช้งาน'}
+                          {isExcluded ? (isTh ? 'ยกเว้น' : 'Excluded') : isTh ? 'ใช้งาน' : 'Included'}
                         </span>
                       )}
                     </td>
@@ -451,7 +594,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                         type="button"
                         onClick={() => onDeleteExpense(exp.id)}
                         className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
-                        title="ลบรายการ"
+                        title={isTh ? 'ลบรายการ' : 'Delete Record'}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -469,7 +612,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-              <h2 className="text-base font-bold text-slate-900">เพิ่มค่าใช้จ่ายดำเนินงาน</h2>
+              <h2 className="text-base font-bold text-slate-900">
+                {isTh ? 'เพิ่มค่าใช้จ่ายดำเนินงาน' : 'Add Operating Expense'}
+              </h2>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
@@ -487,7 +632,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">วันที่</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {isTh ? 'วันที่' : 'Date'}
+                  </label>
                   <input
                     type="date"
                     required
@@ -497,7 +644,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">หมวดหมู่</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {isTh ? 'หมวดหมู่' : 'Category'}
+                  </label>
                   <select
                     value={formData.category}
                     onChange={(e) => {
@@ -520,11 +669,17 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">ชื่อรายการค่าใช้จ่าย *</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  {isTh ? 'ชื่อรายการค่าใช้จ่าย *' : 'Expense Item Name *'}
+                </label>
                 <input
                   type="text"
                   required
-                  placeholder="เช่น ค่าเช่าพื้นที่ประจำเดือน หรือ เครื่องชงกาแฟ"
+                  placeholder={
+                    isTh
+                      ? 'เช่น ค่าเช่าพื้นที่ประจำเดือน หรือ เครื่องชงกาแฟ'
+                      : 'e.g. Monthly Store Rent or Espresso Machine'
+                  }
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
@@ -541,7 +696,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span className="text-xs font-semibold text-slate-800">
-                    เป็นสินทรัพย์ถาวร / เครื่องจักร (Asset Depreciation or Installment)
+                    {isTh
+                      ? 'เป็นสินทรัพย์ถาวร / เครื่องจักร (Asset Depreciation or Installment)'
+                      : 'Fixed Asset / Equipment (Depreciation or Installment)'}
                   </span>
                 </label>
 
@@ -555,7 +712,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                           checked={!formData.isInstallment}
                           onChange={() => setFormData({ ...formData, isInstallment: false })}
                         />
-                        <span>คิดค่าเสื่อมราคาเส้นตรง (Straight-Line)</span>
+                        <span>
+                          {isTh ? 'คิดค่าเสื่อมราคาเส้นตรง (Straight-Line)' : 'Straight-Line Depreciation'}
+                        </span>
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -564,13 +723,17 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                           checked={formData.isInstallment}
                           onChange={() => setFormData({ ...formData, isInstallment: true })}
                         />
-                        <span>ผ่อนชำระรายงวด (Monthly Installment)</span>
+                        <span>
+                          {isTh ? 'ผ่อนชำระรายงวด (Monthly Installment)' : 'Monthly Installment'}
+                        </span>
                       </label>
                     </div>
 
                     {formData.isInstallment ? (
                       <div>
-                        <label className="block text-xs text-slate-700 mb-1">ค่างวดผ่อนต่อเดือน (฿/เดือน)</label>
+                        <label className="block text-xs text-slate-700 mb-1">
+                          {isTh ? 'ค่างวดผ่อนต่อเดือน (฿/เดือน)' : 'Monthly Installment (฿/mo)'}
+                        </label>
                         <NumericInput
                           type="number"
                           step="any"
@@ -579,12 +742,18 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                           onChange={(e) => setFormData({ ...formData, monthlyInstallment: parseFloat(e.target.value) || 0 })}
                           className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-mono font-bold"
                         />
-                        <p className="text-[10px] text-slate-400 mt-0.5">ใช้ค่างวดแทนค่าเสื่อมราคา (ไม่คิดซ้ำซ้อน)</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {isTh
+                            ? 'ใช้ค่างวดแทนค่าเสื่อมราคา (ไม่คิดซ้ำซ้อน)'
+                            : 'Uses installment instead of depreciation (avoids double counting)'}
+                        </p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-xs text-slate-700 mb-1">มูลค่าทรัพย์สิน (฿)</label>
+                          <label className="block text-xs text-slate-700 mb-1">
+                            {isTh ? 'มูลค่าทรัพย์สิน (฿)' : 'Asset Cost (฿)'}
+                          </label>
                           <NumericInput
                             type="number"
                             step="any"
@@ -595,7 +764,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-700 mb-1">อายุการใช้งาน (ปี)</label>
+                          <label className="block text-xs text-slate-700 mb-1">
+                            {isTh ? 'อายุการใช้งาน (ปี)' : 'Useful Life (Years)'}
+                          </label>
                           <NumericInput
                             type="number"
                             min="1"
@@ -607,7 +778,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                         </div>
                         {formData.assetCost > 0 && formData.usefulLifeYears > 0 && (
                           <div className="col-span-2 text-xs text-emerald-700 font-medium">
-                            ค่าเสื่อมราคาต่อเดือน: ฿{(formData.assetCost / (formData.usefulLifeYears * 12)).toFixed(2)} / เดือน
+                            {isTh
+                              ? `ค่าเสื่อมราคาต่อเดือน: ฿${(formData.assetCost / (formData.usefulLifeYears * 12)).toFixed(2)} / เดือน`
+                              : `Monthly Depreciation: ฿${(formData.assetCost / (formData.usefulLifeYears * 12)).toFixed(2)} / month`}
                           </div>
                         )}
                       </div>
@@ -619,7 +792,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               {!formData.isAsset && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">จำนวนเงิน (฿) *</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {isTh ? 'จำนวนเงิน (฿) *' : 'Amount (฿) *'}
+                    </label>
                     <NumericInput
                       type="number"
                       step="any"
@@ -631,17 +806,27 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">ความถี่ (Frequency)</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {isTh ? 'ความถี่ (Frequency)' : 'Frequency'}
+                    </label>
                     <select
                       value={formData.frequency}
                       onChange={(e) => setFormData({ ...formData, frequency: e.target.value as ExpenseFrequency })}
                       className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs bg-white"
                     >
-                      <option value="monthly">รายเดือน (Monthly)</option>
-                      <option value="weekly">รายสัปดาห์ (Weekly: x 52 ÷ 12)</option>
-                      <option value="daily">รายวัน (Daily: x {operatingDays} วัน)</option>
-                      <option value="quarterly">รายไตรมาส (Quarterly: ÷ 3)</option>
-                      <option value="yearly">รายปี (Yearly: ÷ 12)</option>
+                      <option value="monthly">{isTh ? 'รายเดือน (Monthly)' : 'Monthly'}</option>
+                      <option value="weekly">
+                        {isTh ? 'รายสัปดาห์ (Weekly: x 52 ÷ 12)' : 'Weekly (× 52 ÷ 12)'}
+                      </option>
+                      <option value="daily">
+                        {isTh ? `รายวัน (Daily: x ${operatingDays} วัน)` : `Daily (× ${operatingDays} days)`}
+                      </option>
+                      <option value="quarterly">
+                        {isTh ? 'รายไตรมาส (Quarterly: ÷ 3)' : 'Quarterly (÷ 3)'}
+                      </option>
+                      <option value="yearly">
+                        {isTh ? 'รายปี (Yearly: ÷ 12)' : 'Yearly (÷ 12)'}
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -649,14 +834,16 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">ลักษณะต้นทุน</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {isTh ? 'ลักษณะต้นทุน' : 'Cost Behavior'}
+                  </label>
                   <select
                     value={formData.isFixed ? 'fixed' : 'variable'}
                     onChange={(e) => setFormData({ ...formData, isFixed: e.target.value === 'fixed' })}
                     className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs bg-white"
                   >
-                    <option value="fixed">Fixed Cost (คงที่)</option>
-                    <option value="variable">Variable Cost (ผันแปร)</option>
+                    <option value="fixed">{isTh ? 'Fixed Cost (คงที่)' : 'Fixed Cost'}</option>
+                    <option value="variable">{isTh ? 'Variable Cost (ผันแปร)' : 'Variable Cost'}</option>
                   </select>
                 </div>
                 <div className="flex items-center pt-5">
@@ -667,7 +854,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                       onChange={(e) => setFormData({ ...formData, isExcluded: e.target.checked })}
                       className="rounded border-slate-300 text-rose-600 focus:ring-rose-500"
                     />
-                    <span className="text-xs text-slate-700 font-medium">ยกเว้นไม่นำมาคิดต้นทุน</span>
+                    <span className="text-xs text-slate-700 font-medium">
+                      {isTh ? 'ยกเว้นไม่นำมาคิดต้นทุน' : 'Exclude from costing'}
+                    </span>
                   </label>
                 </div>
               </div>
@@ -681,7 +870,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                     className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                   />
                   <span className="text-xs text-indigo-950 font-semibold">
-                    {activeLanguage === 'th'
+                    {isTh
                       ? 'เป็นรายการเงินเดือน/ค่าแรงพนักงาน (Payroll) — ไม่รวมค่าแรงช่างซ่อมหรือจ้างเหมาภายนอก'
                       : 'Staff Payroll / Wages item (uncheck for external contractor fees)'}
                   </span>
@@ -691,7 +880,7 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               {formData.isFixed && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    {activeLanguage === 'th' ? 'วันที่สิ้นสุด (ถ้ามี)' : 'End Date (Optional)'}
+                    {isTh ? 'วันที่สิ้นสุด (ถ้ามี)' : 'End Date (Optional)'}
                   </label>
                   <input
                     type="date"
@@ -709,13 +898,13 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                   onClick={() => setIsModalOpen(false)}
                   className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                 >
-                  ยกเลิก
+                  {isTh ? 'ยกเลิก' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-5 py-2 text-xs font-bold text-white cursor-pointer"
                 >
-                  บันทึกค่าใช้จ่าย
+                  {isTh ? 'บันทึกค่าใช้จ่าย' : 'Save Expense'}
                 </button>
               </div>
             </form>

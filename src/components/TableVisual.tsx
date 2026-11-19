@@ -1,5 +1,6 @@
 import React from 'react';
-import { TableDoc } from '../types';
+import { TableDoc, Language } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 import { getTableDimensions, normalizeRotation } from '../utils/tablePresets';
 
 interface TableVisualProps {
@@ -23,6 +24,7 @@ interface TableVisualProps {
   compact?: boolean;
   showOccupiedBadge?: boolean;
   scaleFactor?: number;
+  lang?: Language;
 }
 
 /**
@@ -38,7 +40,10 @@ export const TableVisual: React.FC<TableVisualProps> = ({
   compact = false,
   showOccupiedBadge = true,
   scaleFactor = 1,
+  lang: propLang,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const dim = getTableDimensions(table);
   const minPx = table.itemKind === 'chair' ? 22 : 38;
   const w = Math.max(minPx, Math.round(dim.effWidth * scaleFactor));
@@ -171,7 +176,7 @@ export const TableVisual: React.FC<TableVisualProps> = ({
 
         {showOccupiedBadge && isOccupied && !compact && (
           <span className="text-[9px] font-black uppercase text-red-700 bg-red-100 px-1.5 py-0.5 rounded-sm mt-0.5 leading-none">
-            Occupied
+            {lang === 'th' ? 'มีลูกค้า' : 'Occupied'}
           </span>
         )}
       </div>

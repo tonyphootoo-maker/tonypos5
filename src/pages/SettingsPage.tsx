@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import {
   updateSettings,
   saveImageDoc,
@@ -32,15 +33,17 @@ import { ConfirmModal } from '../components/ConfirmModal';
 
 interface Props {
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
   onSettingsUpdated: (newSettings: SettingsDoc) => void;
 }
 
 export const SettingsPage: React.FC<Props> = ({
   settings,
-  lang,
+  lang: propLang,
   onSettingsUpdated,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
 
   const [form, setForm] = useState<SettingsDoc>({ ...settings });
@@ -102,6 +105,8 @@ export const SettingsPage: React.FC<Props> = ({
       setErrorMsg(
         err instanceof Error && err.message === 'VERSION_CONFLICT'
           ? t.common.versionConflict
+          : lang === 'th'
+          ? 'บันทึกการตั้งค่าไม่สำเร็จ'
           : 'Failed to save settings'
       );
     } finally {
@@ -129,7 +134,11 @@ export const SettingsPage: React.FC<Props> = ({
     setAuditResult(null);
     try {
       const res = await rebuildSummariesFromBills();
-      setRebuildResult(`Rebuilt ${res.rebuiltCount} daily summaries successfully.`);
+      setRebuildResult(
+        lang === 'th'
+          ? `ประมวลผลสรุปรายวันใหม่สำเร็จ ${res.rebuiltCount} วัน`
+          : `Rebuilt ${res.rebuiltCount} daily summaries successfully.`
+      );
     } catch (err) {
       console.error('Rebuild error:', err);
     } finally {
@@ -581,8 +590,8 @@ export const SettingsPage: React.FC<Props> = ({
                 <img src={qrDataUrl} alt="QR Code" className="w-32 h-32 object-contain rounded-lg" />
               </div>
             ) : (
-              <div className="w-32 h-32 rounded-2xl bg-neutral-100 border border-dashed border-neutral-300 flex items-center justify-center text-neutral-400 text-xs">
-                No QR uploaded
+              <div className="w-32 h-32 rounded-2xl bg-neutral-100 border border-dashed border-neutral-300 flex items-center justify-center text-neutral-400 text-xs text-center px-2">
+                {lang === 'th' ? 'ยังไม่ได้อัปโหลด QR' : 'No QR uploaded'}
               </div>
             )}
 
@@ -693,7 +702,7 @@ export const SettingsPage: React.FC<Props> = ({
             className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-xl text-xs font-bold border border-neutral-300 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>{isAuditing ? 'Auditing...' : t.settings.auditCheckBtn}</span>
+            <span>{isAuditing ? (lang === 'th' ? 'กำลังตรวจสอบ...' : 'Auditing...') : t.settings.auditCheckBtn}</span>
           </button>
 
           <button
@@ -703,7 +712,13 @@ export const SettingsPage: React.FC<Props> = ({
             className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-orange-500/20 hover:brightness-105 cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRebuilding ? 'animate-spin' : ''}`} />
-            <span>{isRebuilding ? 'Rebuilding...' : t.settings.rebuildSummariesBtn}</span>
+            <span>
+              {isRebuilding
+                ? lang === 'th'
+                  ? 'กำลังประมวลผลใหม่...'
+                  : 'Rebuilding...'
+                : t.settings.rebuildSummariesBtn}
+            </span>
           </button>
         </div>
       </div>

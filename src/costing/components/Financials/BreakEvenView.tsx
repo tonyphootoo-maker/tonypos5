@@ -12,13 +12,14 @@ import {
   roundTo2,
 } from '../../../engine/calculations';
 import { NumericInput } from '../common/NumericInput';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 interface BreakEvenViewProps {
   expenses: ExpenseRecord[];
   employees: Employee[];
   sales: DailySalesRecord[];
   settings: BusinessSettings;
-  activeLanguage: 'th' | 'en';
+  activeLanguage?: 'th' | 'en';
   period?: 'day' | 'month' | 'year';
   dateParam?: string;
   coveredMonths?: number;
@@ -37,7 +38,7 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
   employees,
   sales,
   settings,
-  activeLanguage,
+  activeLanguage: propActiveLanguage,
   period = 'month',
   dateParam,
   coveredMonths,
@@ -50,6 +51,9 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
   socialSecurityRatePercent,
   socialSecurityCapWage,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const activeLanguage = propActiveLanguage ?? ctxLang;
+  const isTh = activeLanguage === 'th';
   const initialOperatingDays = settings.operatingDaysPerMonth || 26;
   const [operatingDays, setOperatingDays] = useState<number>(initialOperatingDays);
   const [localExcludePayroll, setLocalExcludePayroll] = useState<boolean>(true);
@@ -279,21 +283,33 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
                 : 'Break-Even Analysis'}
             </span>
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">{effectivePeriodLabel} (ปรับเทียบฐานรายเดือน)</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {effectivePeriodLabel} ({isTh ? 'ปรับเทียบฐานรายเดือน' : 'Normalized to monthly basis'})
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
-            <span className="text-slate-500">อัตราโสหุ้ยจริง (Overhead %):</span>
+            <span className="text-slate-500">
+              {isTh ? 'อัตราโสหุ้ยจริง (Overhead %):' : 'Actual Overhead Rate:'}
+            </span>
             <span className="font-mono font-bold text-slate-900">
-              {monthlyNormalizedSales > 0 ? `${calculatedOverheadRate.toFixed(1)}%` : 'รอข้อมูลยอดขาย'}
+              {monthlyNormalizedSales > 0
+                ? `${calculatedOverheadRate.toFixed(1)}%`
+                : isTh
+                ? 'รอข้อมูลยอดขาย'
+                : 'Awaiting Sales'}
             </span>
           </div>
           {monthlyNormalizedSales > 0 && (
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-800">
-              <span className="text-emerald-700 font-medium">ตัวอย่างอาหาร 100 บาท:</span>
+              <span className="text-emerald-700 font-medium">
+                {isTh ? 'ตัวอย่างอาหาร 100 บาท:' : 'Per ฿100 Dish:'}
+              </span>
               <span className="font-mono font-bold text-emerald-950">
-                โสหุ้ย {((100 * calculatedOverheadRate) / 100).toFixed(1)} บาท
+                {isTh
+                  ? `โสหุ้ย ${((100 * calculatedOverheadRate) / 100).toFixed(1)} บาท`
+                  : `Overhead ฿${((100 * calculatedOverheadRate) / 100).toFixed(1)}`}
               </span>
             </div>
           )}
@@ -307,14 +323,18 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
             <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <div className="font-bold">
-                {activeLanguage === 'th'
+                {isTh
                   ? `พบรายจ่ายเงินเดือน/ค่าแรง (${payrollFlaggedExpenses.length} รายการ) ซ้อนกับข้อมูลพนักงาน (${activeEmployees.length} คน)`
                   : `Detected ${payrollFlaggedExpenses.length} payroll expense(s) alongside ${activeEmployees.length} employee(s)`}
               </div>
               <p className="text-amber-800 mt-0.5">
                 {effectiveExcludePayroll
-                  ? 'ระบบงดนับรายจ่ายเงินเดือนในค่าใช้จ่ายเพื่อป้องกันการนับซ้ำกับข้อมูลพนักงาน (กดปุ่มขวาหากต้องการนับรวม)'
-                  : 'กำลังนับรวมทั้งเงินเดือนจากรายการค่าใช้จ่ายและค่าแรงพนักงาน'}
+                  ? isTh
+                    ? 'ระบบงดนับรายจ่ายเงินเดือนในค่าใช้จ่ายเพื่อป้องกันการนับซ้ำกับข้อมูลพนักงาน (กดปุ่มขวาหากต้องการนับรวม)'
+                    : 'Payroll expense lines are excluded to avoid double counting with Staff payroll (click button to include).'
+                  : isTh
+                  ? 'กำลังนับรวมทั้งเงินเดือนจากรายการค่าใช้จ่ายและค่าแรงพนักงาน'
+                  : 'Currently including both payroll expense lines and employee salaries.'}
               </p>
             </div>
           </div>
@@ -323,7 +343,13 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
             onClick={() => handleTogglePayrollOverlap(!effectiveExcludePayroll)}
             className="px-3 py-1.5 rounded-lg border border-amber-400 bg-white hover:bg-amber-100 text-xs font-bold text-amber-900 shrink-0 cursor-pointer"
           >
-            {effectiveExcludePayroll ? 'นับรวมรายจ่ายด้วย' : 'งดนับซ้ำ (ใช้ยอดพนักงาน)'}
+            {effectiveExcludePayroll
+              ? isTh
+                ? 'นับรวมรายจ่ายด้วย'
+                : 'Include Expenses'
+              : isTh
+              ? 'งดนับซ้ำ (ใช้ยอดพนักงาน)'
+              : 'Deduplicate (Use Staff)'}
           </button>
         </div>
       )}
@@ -334,13 +360,25 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
           <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-xs space-y-1">
             <div className="font-bold flex items-center gap-2">
-              <span>ยังไม่มีข้อมูลยอดขายและต้นทุนผันแปรจริง 30 วันล่าสุด</span>
+              <span>
+                {isTh
+                  ? 'ยังไม่มีข้อมูลยอดขายและต้นทุนผันแปรจริง 30 วันล่าสุด'
+                  : 'No 30-Day Actual Sales & Variable Cost Data Yet'}
+              </span>
               <span className="text-[10px] bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded font-bold">
-                ค่าสมมติ
+                {isTh ? 'ค่าสมมติ' : 'Assumed'}
               </span>
             </div>
             <p className="text-amber-800 leading-relaxed">
-              ระบบจะไม่กำหนด % Contribution Margin เป็นค่าคงที่โดยอัตโนมัติ กรุณากรอกค่า <strong>"ค่าสมมติ CM%"</strong> ด้านล่างเพื่อจำลองจุดคุ้มทุน หรือรอข้อมูลยอดขายจริงจาก POS
+              {isTh ? (
+                <>
+                  ระบบจะไม่กำหนด % Contribution Margin เป็นค่าคงที่โดยอัตโนมัติ กรุณากรอกค่า <strong>"ค่าสมมติ CM%"</strong> ด้านล่างเพื่อจำลองจุดคุ้มทุน หรือรอข้อมูลยอดขายจริงจาก POS
+                </>
+              ) : (
+                <>
+                  Contribution Margin % is not auto-assumed. Enter an <strong>Assumed CM%</strong> below to simulate break-even or wait for live POS sales data.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -352,11 +390,19 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
           <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
           <div className="text-xs space-y-1">
             <div className="font-bold text-amber-950 flex items-center gap-1.5">
-              <span>คำเตือน: ยังไม่ได้ใส่อัตราเงินเดือนเจ้าของร้าน (Owner Salary)</span>
-              <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-semibold">แนะนำ</span>
+              <span>
+                {isTh
+                  ? 'คำเตือน: ยังไม่ได้ใส่อัตราเงินเดือนเจ้าของร้าน (Owner Salary)'
+                  : 'Warning: Owner Salary Not Included'}
+              </span>
+              <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-semibold">
+                {isTh ? 'แนะนำ' : 'Recommended'}
+              </span>
             </div>
             <p className="text-amber-800 leading-relaxed">
-              ต้นทุนคงที่ (Fixed Costs) ยังไม่พบรายการเงินเดือนของเจ้าของร้าน หากไม่รวมค่าตอบแทนของตนเอง จุดคุ้มทุนและราคาขายจะต่ำกว่าความเป็นจริง
+              {isTh
+                ? 'ต้นทุนคงที่ (Fixed Costs) ยังไม่พบรายการเงินเดือนของเจ้าของร้าน หากไม่รวมค่าตอบแทนของตนเอง จุดคุ้มทุนและราคาขายจะต่ำกว่าความเป็นจริง'
+                : 'No owner salary was detected in Fixed Costs. Omitting owner compensation understates break-even targets and menu pricing.'}
             </p>
           </div>
         </div>
@@ -366,12 +412,14 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
       {derivedMargin.hasRealData && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-xs text-emerald-950 flex flex-wrap items-center justify-between gap-2">
           <div className="font-semibold">
-            ข้อมูลจริง 30 วันล่าสุด: Food {derivedMargin.foodCostPercent.toFixed(2)}% + Pkg {derivedMargin.packagingPercent.toFixed(2)}% + GP {derivedMargin.platformFeePercent.toFixed(2)}%
+            {isTh ? 'ข้อมูลจริง 30 วันล่าสุด:' : '30-Day Actuals:'} Food {derivedMargin.foodCostPercent.toFixed(2)}% + Pkg{' '}
+            {derivedMargin.packagingPercent.toFixed(2)}% + GP {derivedMargin.platformFeePercent.toFixed(2)}%
             {derivedMargin.otherVariableCostPercent > 0 &&
-              ` + ผันแปรอื่น ${derivedMargin.otherVariableCostPercent.toFixed(2)}%`}
+              ` + ${isTh ? 'ผันแปรอื่น' : 'Other Var.'} ${derivedMargin.otherVariableCostPercent.toFixed(2)}%`}
           </div>
           <div className="font-mono font-bold">
-            ต้นทุนผันแปรรวม {derivedMargin.variableCostPercent.toFixed(2)}% → CM {derivedMargin.contributionMarginPercent.toFixed(2)}%
+            {isTh ? 'ต้นทุนผันแปรรวม' : 'Total Variable Cost'} {derivedMargin.variableCostPercent.toFixed(2)}% → CM{' '}
+            {derivedMargin.contributionMarginPercent.toFixed(2)}%
           </div>
         </div>
       )}
@@ -385,25 +433,36 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               <div className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-2">
                 <span>
                   {contributionMarginPercent <= 0 && !derivedMargin.hasRealData
-                    ? 'กรุณากรอกค่าสมมติ % Contribution Margin ด้านล่าง'
-                    : 'สถานะ: ไม่สามารถคำนวณจุดคุ้มทุนได้'}
+                    ? isTh
+                      ? 'กรุณากรอกค่าสมมติ % Contribution Margin ด้านล่าง'
+                      : 'Enter Assumed % Contribution Margin Below'
+                    : isTh
+                    ? 'สถานะ: ไม่สามารถคำนวณจุดคุ้มทุนได้'
+                    : 'Status: Unable to Calculate Break-Even'}
                 </span>
                 {isAssumedCM && (
                   <span className="text-[10px] bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded font-bold">
-                    ค่าสมมติ
+                    {isTh ? 'ค่าสมมติ' : 'Assumed'}
                   </span>
                 )}
               </div>
               <p className="text-sm font-semibold text-amber-800 mt-0.5">
                 {contributionMarginPercent <= 0 && !derivedMargin.hasRealData
-                  ? `ต้นทุนคงที่รายเดือน ฿${Math.round(fixedCosts).toLocaleString()} (ยอดขายเปรียบเทียบฐานเดือน ฿${Math.round(monthlyNormalizedSales).toLocaleString()})`
-                  : breakEven.errorMessageTh || 'ต้นทุนผันแปรรวมเกินหรือเท่ากับ 100% ของราคาขาย'}
+                  ? isTh
+                    ? `ต้นทุนคงที่รายเดือน ฿${Math.round(fixedCosts).toLocaleString()} (ยอดขายเปรียบเทียบฐานเดือน ฿${Math.round(monthlyNormalizedSales).toLocaleString()})`
+                    : `Monthly Fixed Costs ฿${Math.round(fixedCosts).toLocaleString()} (Normalized Monthly Sales ฿${Math.round(monthlyNormalizedSales).toLocaleString()})`
+                  : (isTh ? breakEven.errorMessageTh : breakEven.errorMessageEn) ||
+                    (isTh
+                      ? 'ต้นทุนผันแปรรวมเกินหรือเท่ากับ 100% ของราคาขาย'
+                      : 'Total variable costs equal or exceed 100% of selling price.')}
               </p>
               <p className="text-[11px] text-amber-700 mt-0.5">{effectivePeriodLabel}</p>
             </div>
           </div>
           <div className="text-xs text-amber-800 bg-white/80 px-3 py-1.5 rounded-lg border border-amber-200">
-            กรุณาใส่ % Contribution Margin มากกว่า 0% เพื่อดูยอดคุ้มทุน
+            {isTh
+              ? 'กรุณาใส่ % Contribution Margin มากกว่า 0% เพื่อดูยอดคุ้มทุน'
+              : 'Enter Contribution Margin > 0% to view break-even target'}
           </div>
         </div>
       ) : (
@@ -425,49 +484,65 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
                 }`}
               >
                 {isProfitable
-                  ? 'สถานะปัจจุบัน: เกินจุดคุ้มทุน (กำไรแล้ว)'
-                  : 'สถานะปัจจุบัน: ยังไม่ถึงจุดคุ้มทุน'}
+                  ? isTh
+                    ? 'สถานะปัจจุบัน: เกินจุดคุ้มทุน (กำไรแล้ว)'
+                    : 'Current Status: Above Break-Even (Profitable)'
+                  : isTh
+                  ? 'สถานะปัจจุบัน: ยังไม่ถึงจุดคุ้มทุน'
+                  : 'Current Status: Below Break-Even'}
               </span>
               {isAssumedCM && (
                 <span className="text-[10px] bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded font-bold">
-                  ค่าสมมติ (CM {contributionMarginPercent.toFixed(1)}%)
+                  {isTh ? 'ค่าสมมติ' : 'Assumed'} (CM {contributionMarginPercent.toFixed(1)}%)
                 </span>
               )}
             </div>
             <div className="text-3xl font-extrabold text-slate-900 font-mono">
               ฿{Math.round(breakEven.breakEvenSales).toLocaleString()}{' '}
-              <span className="text-sm font-sans font-normal text-slate-500">/ เดือน</span>
+              <span className="text-sm font-sans font-normal text-slate-500">
+                {isTh ? '/ เดือน' : '/ month'}
+              </span>
             </div>
             <p className="text-xs text-slate-600">
-              {activeLanguage === 'th'
+              {isTh
                 ? `ยอดขายเทียบฐานรายเดือน (ex-VAT) ฿${Math.round(monthlyNormalizedSales).toLocaleString()} (${
                     safetyMarginPercent > 0
                       ? `ส่วนปลอดภัย +${safetyMarginPercent.toFixed(1)}%`
                       : `ขาดอีก ฿${Math.round(Math.max(0, breakEven.breakEvenSales - monthlyNormalizedSales)).toLocaleString()}`
                   })`
-                : `Normalized Monthly Sales: ฿${Math.round(monthlyNormalizedSales).toLocaleString()} (${safetyMarginPercent.toFixed(1)}% safety margin)`}
+                : `Normalized Monthly Sales: ฿${Math.round(monthlyNormalizedSales).toLocaleString()} (${
+                    safetyMarginPercent > 0
+                      ? `+${safetyMarginPercent.toFixed(1)}% safety margin`
+                      : `฿${Math.round(Math.max(0, breakEven.breakEvenSales - monthlyNormalizedSales)).toLocaleString()} short`
+                  })`}
             </p>
             <p className="text-[11px] text-slate-500">{effectivePeriodLabel}</p>
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-center font-mono">
             <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <div className="text-[10px] text-slate-400 font-sans">ยอดขายขั้นต่ำต่อวัน</div>
+              <div className="text-[10px] text-slate-400 font-sans">
+                {isTh ? 'ยอดขายขั้นต่ำต่อวัน' : 'Min. Daily Sales'}
+              </div>
               <div className="text-xl font-bold text-slate-900 mt-1">
                 ฿{Math.round(breakEven.breakEvenDailySales).toLocaleString()}
               </div>
               <div className="text-[10px] text-slate-400 font-sans mt-0.5">
-                {operatingDays} วันทำการ/เดือน
+                {operatingDays} {isTh ? 'วันทำการ/เดือน' : 'operating days/mo'}
               </div>
             </div>
 
             <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-              <div className="text-[10px] text-slate-400 font-sans">จำนวนออเดอร์ขั้นต่ำต่อวัน</div>
+              <div className="text-[10px] text-slate-400 font-sans">
+                {isTh ? 'จำนวนออเดอร์ขั้นต่ำต่อวัน' : 'Min. Daily Orders'}
+              </div>
               <div className="text-xl font-bold text-emerald-700 mt-1">
                 {breakEven.breakEvenDailyOrders}{' '}
-                <span className="text-xs text-slate-400 font-sans">จาน/วัน</span>
+                <span className="text-xs text-slate-400 font-sans">{isTh ? 'จาน/วัน' : 'orders/day'}</span>
               </div>
-              <div className="text-[10px] text-slate-400 font-sans mt-0.5">บิลเฉลี่ย ฿{averageTicket}</div>
+              <div className="text-[10px] text-slate-400 font-sans mt-0.5">
+                {isTh ? 'บิลเฉลี่ย' : 'Avg Ticket'} ฿{averageTicket}
+              </div>
             </div>
           </div>
         </div>
@@ -480,19 +555,26 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
             <Target className="h-5 w-5 text-amber-600 shrink-0" />
             <div>
               <div className="text-xs font-bold text-amber-900">
-                เป้าหมายกำไรสุทธิ (Target Profit: {targetProfitPercent}%)
+                {isTh
+                  ? `เป้าหมายกำไรสุทธิ (Target Profit: ${targetProfitPercent}%)`
+                  : `Target Net Profit (${targetProfitPercent}%)`}
               </div>
               {breakEven.targetProfitValid ? (
                 <div className="text-xl font-bold font-mono text-amber-900 mt-0.5">
-                  ยอดขายที่ต้องทำได้: ฿{Math.round(breakEven.targetProfitSales).toLocaleString()}{' '}
+                  {isTh ? 'ยอดขายที่ต้องทำได้:' : 'Required Sales:'} ฿
+                  {Math.round(breakEven.targetProfitSales).toLocaleString()}{' '}
                   <span className="text-xs font-normal text-amber-700 font-sans">
-                    / เดือน ({Math.round(breakEven.targetProfitDailySales).toLocaleString()} ฿/วัน ·{' '}
-                    {breakEven.targetProfitDailyOrders} จาน/วัน)
+                    {isTh
+                      ? `/ เดือน (${Math.round(breakEven.targetProfitDailySales).toLocaleString()} ฿/วัน · ${breakEven.targetProfitDailyOrders} จาน/วัน)`
+                      : `/ month (฿${Math.round(breakEven.targetProfitDailySales).toLocaleString()}/day · ${breakEven.targetProfitDailyOrders} orders/day)`}
                   </span>
                 </div>
               ) : (
                 <div className="text-xs font-semibold text-rose-700 mt-0.5">
-                  {breakEven.targetProfitErrorMessageTh || 'เป้าหมายกำไรสูงเกินกว่ามาร์จิ้นที่เป็นไปได้'}
+                  {(isTh ? breakEven.targetProfitErrorMessageTh : breakEven.targetProfitErrorMessageEn) ||
+                    (isTh
+                      ? 'เป้าหมายกำไรสูงเกินกว่ามาร์จิ้นที่เป็นไปได้'
+                      : 'Target profit exceeds achievable contribution margin.')}
                 </div>
               )}
             </div>
@@ -504,7 +586,9 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <h2 className="text-sm font-bold text-slate-900">
-            ปรับแต่งตัวแปรเพื่อทดสอบจุดคุ้มทุน (Sensitivity Parameters)
+            {isTh
+              ? 'ปรับแต่งตัวแปรเพื่อทดสอบจุดคุ้มทุน (Sensitivity Parameters)'
+              : 'Break-Even Sensitivity Parameters'}
           </h2>
           {(isFixedEdited || isCmEdited) && (
             <button
@@ -520,7 +604,7 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               className="inline-flex items-center gap-1 text-xs font-semibold text-orange-600 hover:text-orange-700 cursor-pointer"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span>รีเซ็ตเป็นค่าจริงจากระบบ</span>
+              <span>{isTh ? 'รีเซ็ตเป็นค่าจริงจากระบบ' : 'Reset to Actual Data'}</span>
             </button>
           )}
         </div>
@@ -528,7 +612,7 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              1. ต้นทุนคงที่รายเดือน (Fixed ฿)
+              {isTh ? '1. ต้นทุนคงที่รายเดือน (Fixed ฿)' : '1. Monthly Fixed Costs (฿)'}
             </label>
             <NumericInput
               type="number"
@@ -542,7 +626,9 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold"
             />
             <p className="text-[10px] text-slate-500 mt-1">
-              คงที่ ฿{Math.round(fixedExpensesMonthly).toLocaleString()} + พนักงาน {activeEmployees.length} คน ฿{Math.round(totalStaffLaborMonthly).toLocaleString()}
+              {isTh
+                ? `คงที่ ฿${Math.round(fixedExpensesMonthly).toLocaleString()} + พนักงาน ${activeEmployees.length} คน ฿${Math.round(totalStaffLaborMonthly).toLocaleString()}`
+                : `Fixed ฿${Math.round(fixedExpensesMonthly).toLocaleString()} + ${activeEmployees.length} staff ฿${Math.round(totalStaffLaborMonthly).toLocaleString()}`}
             </p>
           </div>
 
@@ -553,11 +639,11 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
           >
             <div className="flex items-center justify-between gap-1 mb-1">
               <label className="block text-xs font-semibold text-slate-700">
-                2. % Contribution Margin (%)
+                {isTh ? '2. % Contribution Margin (%)' : '2. Contribution Margin (%)'}
               </label>
               {isAssumedCM && (
                 <span className="text-[10px] bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded font-bold">
-                  ค่าสมมติ
+                  {isTh ? 'ค่าสมมติ' : 'Assumed'}
                 </span>
               )}
             </div>
@@ -575,14 +661,18 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
             />
             <p className="text-[10px] text-slate-500 mt-1">
               {derivedMargin.hasRealData
-                ? '100% - (อาหาร + กล่อง + GP + ผันแปรอื่น)'
-                : 'ค่าสมมติ (กรอกเพื่อจำลองเมื่อยังไม่มีข้อมูล 30 วัน)'}
+                ? isTh
+                  ? '100% - (อาหาร + กล่อง + GP + ผันแปรอื่น)'
+                  : '100% - (Food + Pkg + GP + Other Var.)'
+                : isTh
+                ? 'ค่าสมมติ (กรอกเพื่อจำลองเมื่อยังไม่มีข้อมูล 30 วัน)'
+                : 'Assumed value (used when 30-day data is unavailable)'}
             </p>
           </div>
 
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              3. เป้าหมายกำไรสุทธิ (%)
+              {isTh ? '3. เป้าหมายกำไรสุทธิ (%)' : '3. Target Net Profit (%)'}
             </label>
             <NumericInput
               type="number"
@@ -592,12 +682,14 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               onValueChange={(val) => setTargetProfitPercent(val)}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold"
             />
-            <p className="text-[10px] text-slate-400 mt-1">Target Profit %</p>
+            <p className="text-[10px] text-slate-400 mt-1">
+              {isTh ? 'สัดส่วนกำไรเป้าหมายต่อยอดขาย' : 'Target Profit % of Sales'}
+            </p>
           </div>
 
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              4. ราคาบิลเฉลี่ยต่อจาน (฿)
+              {isTh ? '4. ราคาบิลเฉลี่ยต่อจาน (฿)' : '4. Average Ticket Size (฿)'}
             </label>
             <NumericInput
               type="number"
@@ -606,12 +698,14 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               onValueChange={(val) => setAverageTicket(val)}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold"
             />
-            <p className="text-[10px] text-slate-400 mt-1">Average Ticket Size (ex-VAT)</p>
+            <p className="text-[10px] text-slate-400 mt-1">
+              {isTh ? 'ยอดขายเฉลี่ยต่อบิล (ex-VAT)' : 'Average Ticket Size (ex-VAT)'}
+            </p>
           </div>
 
           <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              5. วันเปิดทำการต่อเดือน (วัน)
+              {isTh ? '5. วันเปิดทำการต่อเดือน (วัน)' : '5. Operating Days / Month'}
             </label>
             <NumericInput
               type="number"
@@ -621,7 +715,9 @@ export const BreakEvenView: React.FC<BreakEvenViewProps> = ({
               onValueChange={(val) => setOperatingDays(Math.round(val))}
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-mono font-bold"
             />
-            <p className="text-[10px] text-slate-400 mt-1">Operating Days / Month</p>
+            <p className="text-[10px] text-slate-400 mt-1">
+              {isTh ? 'จำนวนวันเปิดร้านต่อเดือน' : 'Operating Days / Month'}
+            </p>
           </div>
         </div>
       </div>

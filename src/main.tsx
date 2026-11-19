@@ -2,6 +2,7 @@ import {createRoot} from 'react-dom/client';
 import {registerSW} from 'virtual:pwa-register';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
+import { LanguageProvider } from './contexts/LanguageContext.tsx';
 import './index.css';
 
 // Register Tier 1 Google Maps Platform Demo Key quota & auth failure guard before render
@@ -29,7 +30,9 @@ if (bootMsg) {
 }
 
 createRoot(document.getElementById('root')!).render(
-  <ErrorBoundary>
-    <App />
-  </ErrorBoundary>
+  <LanguageProvider>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </LanguageProvider>
 );

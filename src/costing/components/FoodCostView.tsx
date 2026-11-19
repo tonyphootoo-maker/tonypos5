@@ -38,7 +38,8 @@ import {
   roundUpToStep,
 } from '../services/calculationEngine';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
-import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
+import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { convertUnit, isPieceLikeUnit } from '../engine/units';
 import { NumericInput } from './common/NumericInput';
 import { MenuPricingSpreadsheetTable } from './MenuPricingSpreadsheetTable';
@@ -61,11 +62,17 @@ const DEFAULT_PORTION_UNITS = [
   'กล่อง',
   'ช้อนโต๊ะ',
 ];
-const PORTION_UNIT_LABELS: Record<string, string> = {
+const PORTION_UNIT_LABELS_TH: Record<string, string> = {
   g: 'กรัม (g)',
   kg: 'กิโลกรัม (kg)',
   ml: 'มิลลิลิตร (ml)',
   l: 'ลิตร (L)',
+};
+const PORTION_UNIT_LABELS_EN: Record<string, string> = {
+  g: 'Grams (g)',
+  kg: 'Kilograms (kg)',
+  ml: 'Milliliters (ml)',
+  l: 'Litres (L)',
 };
 
 interface FoodCostViewProps {
@@ -73,6 +80,7 @@ interface FoodCostViewProps {
   ingredients: Ingredient[];
   sauces: Sauce[];
   settings: RestaurantSettings;
+  lang?: 'th' | 'en';
   initialServingMode?: 'ON_RICE' | 'A_LA_CARTE';
   onSaveMenu: (menu: MenuItem) => void;
   onDeleteMenu?: (menuId: string) => void;
@@ -90,6 +98,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   ingredients,
   sauces,
   settings,
+  lang: propLang,
   initialServingMode,
   onSaveMenu,
   onDeleteMenu,
@@ -97,6 +106,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   onUpdateVariantPrice,
   onNavigateToRecipeBuilder,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
+  const isEn = lang === 'en';
+  const getPortionUnitLabel = (u: string) =>
+    isEn ? (PORTION_UNIT_LABELS_EN[u] || localizeUnit(u, 'en')) : (PORTION_UNIT_LABELS_TH[u] || u);
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -337,11 +351,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     e.preventDefault();
     const trimmed = newCategoryInput.trim();
     if (!trimmed) {
-      setCategoryError('กรุณากรอกชื่อหมวดหมู่');
+      setCategoryError(isEn ? 'Please enter a category name' : 'กรุณากรอกชื่อหมวดหมู่');
       return;
     }
     if (categories.includes(trimmed)) {
-      setCategoryError('มีหมวดหมู่นี้อยู่ในระบบแล้ว');
+      setCategoryError(isEn ? 'This category already exists' : 'มีหมวดหมู่นี้อยู่ในระบบแล้ว');
       return;
     }
 
@@ -376,11 +390,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     e.preventDefault();
     const trimmed = editingCategoryNewName.trim();
     if (!trimmed) {
-      setEditCategoryError('กรุณากรอกชื่อหมวดหมู่');
+      setEditCategoryError(isEn ? 'Please enter a category name' : 'กรุณากรอกชื่อหมวดหมู่');
       return;
     }
     if (trimmed !== editingCategoryOldName && categories.includes(trimmed)) {
-      setEditCategoryError('มีหมวดหมู่นี้อยู่ในระบบแล้ว');
+      setEditCategoryError(isEn ? 'This category already exists' : 'มีหมวดหมู่นี้อยู่ในระบบแล้ว');
       return;
     }
 
@@ -478,13 +492,16 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   });
 
   // Filter & Search
+  const qLower = searchTerm.toLowerCase();
   const filteredRows = allRows.filter(({ menu, variant }) => {
     const matchesCategory =
       selectedCategory === 'ALL' || menu.category === selectedCategory;
     const matchesSearch =
-      menu.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      variant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      variant.proteinType.toLowerCase().includes(searchTerm.toLowerCase());
+      menu.name.toLowerCase().includes(qLower) ||
+      (menu.englishName || '').toLowerCase().includes(qLower) ||
+      variant.name.toLowerCase().includes(qLower) ||
+      (variant.englishName || '').toLowerCase().includes(qLower) ||
+      variant.proteinType.toLowerCase().includes(qLower);
     return matchesCategory && matchesSearch;
   });
 
@@ -504,28 +521,52 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       .map((r) => {
         const reasons: string[] = [];
         if (r.breakdown.restaurantFoodCostPercent > 40) {
-          reasons.push(`Food Cost สูงมาก (${r.breakdown.restaurantFoodCostPercent.toFixed(1)}% > 40%)`);
+          reasons.push(
+            isEn
+              ? `Very High Food Cost (${r.breakdown.restaurantFoodCostPercent.toFixed(1)}% > 40%)`
+              : `Food Cost สูงมาก (${r.breakdown.restaurantFoodCostPercent.toFixed(1)}% > 40%)`
+          );
         } else if (r.breakdown.restaurantFoodCostPercent > target) {
-          reasons.push(`Food Cost เกินเป้า (${r.breakdown.restaurantFoodCostPercent.toFixed(1)}% > ${target}%)`);
+          reasons.push(
+            isEn
+              ? `Food Cost Above Target (${r.breakdown.restaurantFoodCostPercent.toFixed(1)}% > ${target}%)`
+              : `Food Cost เกินเป้า (${r.breakdown.restaurantFoodCostPercent.toFixed(1)}% > ${target}%)`
+          );
         }
         if (r.breakdown.restaurantProfit < 0) {
-          reasons.push(`กำไรหน้าร้านติดลบ (${r.breakdown.restaurantProfit.toFixed(1)} ฿)`);
+          reasons.push(
+            isEn
+              ? `Negative Dine-in Profit (${r.breakdown.restaurantProfit.toFixed(1)} ฿)`
+              : `กำไรหน้าร้านติดลบ (${r.breakdown.restaurantProfit.toFixed(1)} ฿)`
+          );
         }
         if (r.breakdown.deliveryProfit < 0) {
-          reasons.push(`กำไรเดลิเวอรี่ติดลบ (${r.breakdown.deliveryProfit.toFixed(1)} ฿)`);
+          reasons.push(
+            isEn
+              ? `Negative Delivery Profit (${r.breakdown.deliveryProfit.toFixed(1)} ฿)`
+              : `กำไรเดลิเวอรี่ติดลบ (${r.breakdown.deliveryProfit.toFixed(1)} ฿)`
+          );
         }
         if (r.breakdown.hasMissingPrice || r.breakdown.missingPrice) {
-          reasons.push('ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง');
+          reasons.push(
+            isEn
+              ? 'Missing ingredient price — cost may be understated'
+              : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'
+          );
         }
         if (r.breakdown.hasReviewIssue && !r.breakdown.hasMissingPrice) {
-          reasons.push(r.breakdown.reviewMessage || 'ต้องทบทวนสูตรหรือวัตถุดิบ');
+          reasons.push(
+            isEn
+              ? getLocalizedText('en', r.breakdown.reviewMessage) || 'Needs recipe or ingredient review'
+              : r.breakdown.reviewMessage || 'ต้องทบทวนสูตรหรือวัตถุดิบ'
+          );
         }
         return {
           ...r,
           reasons,
         };
       });
-  }, [allRows, settings.targetFoodCostPercent]);
+  }, [allRows, settings.targetFoodCostPercent, isEn]);
 
   // Set of menu IDs that have high cost (> 40% or > target) or review issue or negative margin
   const warningMenuIds = useMemo(() => {
@@ -536,8 +577,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const matchesCategory = selectedCategory === 'ALL' || m.category === selectedCategory;
     const matchesSearch =
       !searchTerm ||
-      m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      m.variants.some((v) => v.name.toLowerCase().includes(searchTerm.toLowerCase()));
+      m.name.toLowerCase().includes(qLower) ||
+      (m.englishName || '').toLowerCase().includes(qLower) ||
+      m.variants.some(
+        (v) =>
+          v.name.toLowerCase().includes(qLower) ||
+          (v.englishName || '').toLowerCase().includes(qLower)
+      );
     const matchesWarning = !filterHighCostOnly || warningMenuIds.has(m.id);
     return matchesCategory && matchesSearch && matchesWarning;
   });
@@ -936,7 +982,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const currentItems = variant.packagingItems ? [...variant.packagingItems] : [];
     const newLine = {
       id: `pkg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      name: 'กล่องข้าว',
+      name: isEn ? 'Food Box' : 'กล่องข้าว',
       cost: 5.0,
     };
     const updatedItems = [...currentItems, newLine];
@@ -1158,17 +1204,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 font-black text-stone-900 text-sm sm:text-base mr-1">
               <UtensilsCrossed className="w-4 h-4 text-[#F27D26]" />
-              <span>ต้นทุนอาหาร</span>
+              <span>{isEn ? 'Food Cost & Pricing' : 'ต้นทุนอาหาร'}</span>
             </div>
 
             {/* Metric 1: Avg Food Cost (Compact) */}
             <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 border border-amber-300 rounded-xl text-xs text-stone-900">
-              <span className="text-stone-700 font-bold">Food Cost เฉลี่ย:</span>
+              <span className="text-stone-700 font-bold">{isEn ? 'Avg Food Cost:' : 'Food Cost เฉลี่ย:'}</span>
               <span className="font-mono font-black text-amber-800">
                 {avgFoodCostPercent.toFixed(1)}%
               </span>
               <span className="text-[10px] text-stone-500 hidden md:inline">
-                (เป้า {settings.targetFoodCostPercent || 35}%)
+                ({isEn ? 'Target' : 'เป้า'} {settings.targetFoodCostPercent || 35}%)
               </span>
             </div>
 
@@ -1185,24 +1231,24 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               }`}
               title={
                 filterHighCostOnly
-                  ? "คลิกเพื่อยกเลิกการกรอง และแสดงเมนูทั้งหมด"
-                  : "คลิกเพื่อแสดงเฉพาะเมนูต้นทุนสูง / ควรทบทวน ทันที"
+                  ? (isEn ? "Click to clear filter and show all menus" : "คลิกเพื่อยกเลิกการกรอง และแสดงเมนูทั้งหมด")
+                  : (isEn ? "Click to show only high-cost / needs-review items" : "คลิกเพื่อแสดงเฉพาะเมนูต้นทุนสูง / ควรทบทวน ทันที")
               }
             >
               <AlertTriangle className={`w-3.5 h-3.5 ${filterHighCostOnly ? "text-white" : "text-rose-600"}`} />
-              <span className="whitespace-nowrap">เมนูต้นทุนสูง / ควรทบทวน:</span>
+              <span className="whitespace-nowrap">{isEn ? 'High Cost / Needs Review:' : 'เมนูต้นทุนสูง / ควรทบทวน:'}</span>
               <span className={`px-1.5 py-0.2 rounded-md font-mono font-black text-xs ${
                 filterHighCostOnly ? "bg-white text-rose-700" : "bg-rose-600 text-white"
               }`}>
-                {warningCount} รายการ
+                {warningCount} {isEn ? 'items' : 'รายการ'}
               </span>
               {filterHighCostOnly ? (
                 <span className="ml-1 text-[10px] px-1 py-0.5 rounded bg-white text-rose-700 font-extrabold">
-                  ✕ ยกเลิกกรอง
+                  {isEn ? '✕ Clear Filter' : '✕ ยกเลิกกรอง'}
                 </span>
               ) : (
                 <span className="text-[10px] text-rose-700 font-bold hidden sm:inline underline underline-offset-2">
-                  (คลิกดูทันที)
+                  {isEn ? '(View Now)' : '(คลิกดูทันที)'}
                 </span>
               )}
             </button>
@@ -1216,7 +1262,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               className="px-3 py-1 bg-[#F27D26] hover:bg-[#d96817] !text-white font-black rounded-xl text-xs shadow-xs transition-all flex items-center gap-1 cursor-pointer shrink-0 border border-[#c2580e]"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ เพิ่มเมนูใหม่</span>
+              <span>{isEn ? '+ Add Menu' : '+ เพิ่มเมนูใหม่'}</span>
             </button>
           </div>
         </div>
@@ -1229,7 +1275,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
             <span className="font-bold">
-              กำลังแสดงเฉพาะเมนูที่มีการแจ้งเตือน ({warningMenuIds.size} เมนู, {warningRows.length} รายการตัวเลือก)
+              {isEn
+                ? `Showing only flagged menus (${warningMenuIds.size} menus, ${warningRows.length} variants)`
+                : `กำลังแสดงเฉพาะเมนูที่มีการแจ้งเตือน (${warningMenuIds.size} เมนู, ${warningRows.length} รายการตัวเลือก)`}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -1238,14 +1286,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               onClick={() => setIsWarningModalOpen(true)}
               className="px-2.5 py-1 bg-white hover:bg-rose-100 border border-rose-300 text-rose-900 font-black rounded-lg cursor-pointer"
             >
-              ดูรายการแจ้งเตือนทั้งหมด ({warningRows.length})
+              {isEn ? `View All Alerts (${warningRows.length})` : `ดูรายการแจ้งเตือนทั้งหมด (${warningRows.length})`}
             </button>
             <button
               type="button"
               onClick={() => setFilterHighCostOnly(false)}
               className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-lg cursor-pointer"
             >
-              ✕ ยกเลิกกรอง (แสดงทุกเมนู)
+              {isEn ? '✕ Clear Filter (Show All)' : '✕ ยกเลิกกรอง (แสดงทุกเมนู)'}
             </button>
           </div>
         </div>
@@ -1257,8 +1305,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           {/* Menu names only — one per row */}
           <div className="bg-white border border-stone-200 rounded-2xl shadow-xs overflow-hidden">
             <div className="px-4 py-3 border-b border-stone-200 bg-stone-50 flex items-center justify-between">
-              <h2 className="text-sm font-black text-stone-900">รายการเมนูอาหาร</h2>
-              <span className="text-xs font-mono font-bold text-stone-600">{filteredMenus.length} เมนู</span>
+              <h2 className="text-sm font-black text-stone-900">{isEn ? 'Menu List' : 'รายการเมนูอาหาร'}</h2>
+              <span className="text-xs font-mono font-bold text-stone-600">
+                {filteredMenus.length} {isEn ? 'menus' : 'เมนู'}
+              </span>
             </div>
 
             <div className="divide-y divide-stone-200">
@@ -1267,6 +1317,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 const hasWarning = warningMenuIds.has(menu.id);
                 const isDragging = draggedMenuId === menu.id;
                 const isDragOver = dragOverMenuId === menu.id;
+                const primaryMenuTitle = getLocalizedText(lang, menu.thaiName || menu.name, menu.englishName);
+                const secondaryMenuTitle = isEn
+                  ? (menu.thaiName || menu.name || '').trim()
+                  : (menu.englishName || translateThaiToEnglish(menu.name) || '').trim();
 
                 return (
                   <React.Fragment key={menu.id}>
@@ -1286,7 +1340,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       <div className="flex items-center gap-0.5 shrink-0">
                         <div
                           className="p-1 text-stone-400 hover:text-stone-700 cursor-grab active:cursor-grabbing rounded hover:bg-stone-200 transition-colors"
-                          title="กดเมาส์ค้างไว้เพื่อลากย้ายตำแหน่งเมนู"
+                          title={isEn ? 'Drag to reorder menu' : 'กดเมาส์ค้างไว้เพื่อลากย้ายตำแหน่งเมนู'}
                         >
                           <GripVertical className="w-4 h-4" />
                         </div>
@@ -1299,7 +1353,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               handleMoveMenu(menu.id, 'up');
                             }}
                             className="p-0.5 text-stone-400 hover:text-stone-800 disabled:opacity-20 disabled:hover:text-stone-400 rounded cursor-pointer"
-                            title="ย้ายขึ้น"
+                            title={isEn ? 'Move Up' : 'ย้ายขึ้น'}
                           >
                             <ChevronUp className="w-3.5 h-3.5" />
                           </button>
@@ -1311,7 +1365,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               handleMoveMenu(menu.id, 'down');
                             }}
                             className="p-0.5 text-stone-400 hover:text-stone-800 disabled:opacity-20 disabled:hover:text-stone-400 rounded cursor-pointer"
-                            title="ย้ายลง"
+                            title={isEn ? 'Move Down' : 'ย้ายลง'}
                           >
                             <ChevronDown className="w-3.5 h-3.5" />
                           </button>
@@ -1349,26 +1403,23 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               }
                               handleOpenEditMenu(menu);
                             }}
-                            title="ดับเบิลคลิกที่ชื่อเมนูเพื่อแก้ไข"
+                            title={isEn ? 'Double-click menu name to edit' : 'ดับเบิลคลิกที่ชื่อเมนูเพื่อแก้ไข'}
                             className="text-sm font-bold text-stone-900 hover:text-[#F27D26] transition-colors truncate cursor-pointer"
                           >
-                            {menu.name}
+                            {primaryMenuTitle}
                           </span>
-                          {(() => {
-                            const enSubtitle = (menu.englishName || translateThaiToEnglish(menu.name) || '').trim();
-                            return enSubtitle && enSubtitle !== menu.name ? (
-                              <span className="text-[11px] text-stone-500 font-medium truncate">
-                                ({enSubtitle})
-                              </span>
-                            ) : null;
-                          })()}
+                          {secondaryMenuTitle && secondaryMenuTitle !== primaryMenuTitle && (
+                            <span className="text-[11px] text-stone-500 font-medium truncate">
+                              ({secondaryMenuTitle})
+                            </span>
+                          )}
                           <span className="text-[11px] text-stone-500 font-medium">
-                            {menu.variants.length} ตัวเลือก
+                            {menu.variants.length} {isEn ? 'variants' : 'ตัวเลือก'}
                           </span>
                           {hasWarning && (
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-rose-600 !text-white shadow-2xs flex items-center gap-1">
                               <AlertTriangle className="w-3 h-3 text-white" />
-                              <span>ต้นทุนสูง / ควรทบทวน</span>
+                              <span>{isEn ? 'High Cost / Review' : 'ต้นทุนสูง / ควรทบทวน'}</span>
                             </span>
                           )}
                         </div>
@@ -1381,7 +1432,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         type="button"
                         onClick={() => handleOpenEditMenu(menu)}
                         className="p-1.5 rounded-xl text-stone-400 hover:text-stone-800 hover:bg-stone-200 cursor-pointer shrink-0 transition-colors"
-                        title="แก้ไขเมนู"
+                        title={isEn ? 'Edit menu' : 'แก้ไขเมนู'}
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -1389,7 +1440,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         type="button"
                         onClick={() => setMenuToDelete(menu)}
                         className="p-1.5 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer shrink-0 transition-colors"
-                        title="ลบเมนู"
+                        title={isEn ? 'Delete menu' : 'ลบเมนู'}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1403,6 +1454,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           ingredientsMap={ingredientsMap}
                           saucesMap={saucesMap}
                           settings={settings}
+                          lang={lang}
                           onSaveMenu={onSaveMenu}
                           onSelectBreakdown={handleSelectBreakdown}
                           onOpenAddVariant={handleOpenAddVariant}
@@ -1429,12 +1481,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           <div className="bg-[#FFFDF9] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917] max-h-[90vh] overflow-y-auto scrollbar-thin">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-stone-200 pb-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-black text-stone-900 text-lg">
-                  {selectedBreakdown.menu.name} ({selectedBreakdown.variant.name})
+                  {getLocalizedText(lang, selectedBreakdown.menu.thaiName || selectedBreakdown.menu.name, selectedBreakdown.menu.englishName)}{' '}
+                  ({getLocalizedText(lang, selectedBreakdown.variant.thaiName || selectedBreakdown.variant.name, selectedBreakdown.variant.englishName)})
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-stone-100 text-stone-700 border border-stone-300">
-                  {selectedBreakdown.menu.category}
+                  {getLocalizedText(lang, selectedBreakdown.menu.category)}
                 </span>
               </div>
               <button
@@ -1452,35 +1505,48 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5">
                   <div className="flex items-center gap-2 text-sm font-black text-amber-900 mb-1.5">
                     <Sparkles className="w-4 h-4 text-amber-600" />
-                    <span>Seafood Rule: คำนวณกุ้งและปลาหมึกแยกจากกันเด็ดขาด</span>
+                    <span>
+                      {isEn
+                        ? 'Seafood Rule: Calculate Shrimp and Squid Strictly Separately'
+                        : 'Seafood Rule: คำนวณกุ้งและปลาหมึกแยกจากกันเด็ดขาด'}
+                    </span>
                   </div>
                   <p className="text-[11px] text-stone-700 mb-3">
-                    ตามกฎความถูกต้องทางบัญชีของร้าน: กุ้งต้องคำนวณเป็น 'ตัว' และปลาหมึกต้องคำนวณเป็น 'กรัม'
-                    (ห้ามรวมเป็น 'ทะเล' รายการเดียว หรือใช้การประมาณ)
+                    {isEn
+                      ? 'Per store accounting accuracy rules: Shrimp is counted per piece (pc) and Squid is weighed in grams (g) — never combined as generic "Seafood" or estimated.'
+                      : "ตามกฎความถูกต้องทางบัญชีของร้าน: กุ้งต้องคำนวณเป็น 'ตัว' และปลาหมึกต้องคำนวณเป็น 'กรัม' (ห้ามรวมเป็น 'ทะเล' รายการเดียว หรือใช้การประมาณ)"}
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
                     <div className="bg-white p-3 rounded-xl border border-stone-300 shadow-2xs">
-                      <span className="text-[11px] font-sans text-stone-700 block font-bold">🦐 กุ้งสด</span>
+                      <span className="text-[11px] font-sans text-stone-700 block font-bold">
+                        {isEn ? '🦐 Fresh Shrimp' : '🦐 กุ้งสด'}
+                      </span>
                       <span className="text-base font-black text-stone-950 mt-1 block">
                         ฿{selectedBreakdown.breakdown.shrimpCost.toFixed(2)}
                       </span>
-                      <span className="text-[10px] text-stone-500">คิดเป็นตัว (ไม่แปลงเป็นกรัม)</span>
+                      <span className="text-[10px] text-stone-500">
+                        {isEn ? 'Counted per piece (not grams)' : 'คิดเป็นตัว (ไม่แปลงเป็นกรัม)'}
+                      </span>
                     </div>
 
                     <div className="bg-white p-3 rounded-xl border border-stone-300 shadow-2xs">
-                      <span className="text-[11px] font-sans text-stone-700 block font-bold">🦑 ปลาหมึกสด</span>
+                      <span className="text-[11px] font-sans text-stone-700 block font-bold">
+                        {isEn ? '🦑 Fresh Squid' : '🦑 ปลาหมึกสด'}
+                      </span>
                       <span className="text-base font-black text-stone-950 mt-1 block">
                         ฿{selectedBreakdown.breakdown.squidCost.toFixed(2)}
                       </span>
                       <span className="text-[10px] text-stone-500">
-                        คิดเป็นกรัม (คำนวณ Yield ลอกหนัง 65%)
+                        {isEn ? 'Weighed in grams (65% cleaned yield)' : 'คิดเป็นกรัม (คำนวณ Yield ลอกหนัง 65%)'}
                       </span>
                     </div>
                   </div>
 
                   <div className="mt-2 pt-2 border-t border-amber-200 flex justify-between font-mono text-xs">
-                    <span className="font-sans text-stone-800 font-bold">รวมต้นทุนอาหารทะเลทั้งจาน:</span>
+                    <span className="font-sans text-stone-800 font-bold">
+                      {isEn ? 'Total Seafood Cost per Dish:' : 'รวมต้นทุนอาหารทะเลทั้งจาน:'}
+                    </span>
                     <span className="font-black text-stone-950 text-sm">
                       ฿{selectedBreakdown.breakdown.seafoodTotalCost.toFixed(2)}
                     </span>
@@ -1491,17 +1557,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               {/* Recipe Items Breakdown Table */}
               <div>
                 <span className="font-black text-stone-900 block mb-1.5">
-                  ส่วนประกอบและวัตถุดิบในจาน (Recipe Items)
+                  {isEn ? 'Recipe Ingredients & Components' : 'ส่วนประกอบและวัตถุดิบในจาน (Recipe Items)'}
                 </span>
                 <div className="bg-white border border-stone-300 rounded-2xl overflow-hidden shadow-2xs">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-stone-100 border-b border-stone-300 text-stone-700 text-[10px] uppercase font-bold">
-                        <th className="py-2 px-3">วัตถุดิบ / ส่วนประกอบ</th>
-                        <th className="py-2 px-2">ประเภท</th>
-                        <th className="py-2 px-2 text-right">ปริมาณ</th>
-                        <th className="py-2 px-2 text-right">ต้นทุน/หน่วย</th>
-                        <th className="py-2 px-3 text-right">รวมเงิน (฿)</th>
+                        <th className="py-2 px-3">{isEn ? 'Ingredient / Item' : 'วัตถุดิบ / ส่วนประกอบ'}</th>
+                        <th className="py-2 px-2">{isEn ? 'Type' : 'ประเภท'}</th>
+                        <th className="py-2 px-2 text-right">{isEn ? 'Qty' : 'ปริมาณ'}</th>
+                        <th className="py-2 px-2 text-right">{isEn ? 'Unit Cost' : 'ต้นทุน/หน่วย'}</th>
+                        <th className="py-2 px-3 text-right">{isEn ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-200 font-mono">
@@ -1523,7 +1589,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             (it) => it.proteinCategory === 'SQUID' || it.name.includes('หมึก')
                           );
 
-                          // If shrimp is missing from items but has cost or default, add it
                           if (!hasShrimp) {
                             const shrimpCost = selectedBreakdown.breakdown.shrimpCost || 34.0;
                             const shrimpQty = Math.round(shrimpCost / 8.5) || 4;
@@ -1539,7 +1604,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             });
                           }
 
-                          // If squid is missing from items but has cost or default, add it
                           if (!hasSquid) {
                             const squidCost = selectedBreakdown.breakdown.squidCost || 15.52;
                             const squidQty = Math.round(squidCost / 0.388) || 40;
@@ -1563,7 +1627,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             }
                           }
 
-                          // Remove single generic "ทะเล" if it exists
                           displayItems = displayItems.filter(
                             (it) => it.proteinCategory === 'SHRIMP' || it.proteinCategory === 'SQUID' || (it.name !== 'ทะเล' && it.name !== selectedBreakdown.variant.proteinType)
                           );
@@ -1573,19 +1636,23 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         <tr key={idx} className="hover:bg-stone-50">
                           <td className="py-2 px-3 font-sans text-stone-900 font-bold">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span>{item.name}</span>
+                              <span>{getLocalizedText(lang, item.name)}</span>
                               {((item as any).missingPrice || !(item.calculatedUnitCost && item.calculatedUnitCost > 0)) && (
                                 <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-700 border border-amber-500/30">
-                                  ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง
+                                  {isEn
+                                    ? 'Missing ingredient price — cost may be understated'
+                                    : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'}
                                 </span>
                               )}
                             </div>
                           </td>
                           <td className="py-2 px-2 font-sans text-stone-600 text-[10px]">
-                            {item.type === 'SAUCE' ? 'ซอส' : 'วัตถุดิบ'}
+                            {item.type === 'SAUCE'
+                              ? (isEn ? 'Sauce' : 'ซอส')
+                              : (isEn ? 'Ingredient' : 'วัตถุดิบ')}
                           </td>
                           <td className="py-2 px-2 text-right text-stone-800 font-semibold">
-                            {item.quantity} {item.unit}
+                            {item.quantity} {localizeUnit(item.unit, lang)}
                           </td>
                           <td className="py-2 px-2 text-right text-stone-700">
                             ฿{(item.calculatedUnitCost || 0).toFixed(4)}
@@ -1603,14 +1670,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
               {/* Packaging Line Items Card */}
               <div className="bg-white border border-stone-300 rounded-2xl p-3.5 space-y-2.5 shadow-2xs">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-1.5">
                     <Package className="w-4 h-4 text-cyan-700" />
                     <span className="font-black text-stone-900 text-xs">
-                      ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items)
+                      {isEn ? 'Box & Packaging Cost (Packaging Items)' : 'ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items)'}
                     </span>
                     <span className="text-[10px] text-stone-500">
-                      (กำหนดเฉพาะตัวเลือกนี้)
+                      {isEn ? '(Specific to this variant)' : '(กำหนดเฉพาะตัวเลือกนี้)'}
                     </span>
                   </div>
                   <button
@@ -1619,13 +1686,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     className="px-2.5 py-1 bg-cyan-700 hover:bg-cyan-800 !text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>+ เพิ่มแพ็กเกจจิ้ง</span>
+                    <span>{isEn ? 'Add Packaging' : '+ เพิ่มแพ็กเกจจิ้ง'}</span>
                   </button>
                 </div>
 
                 {(!selectedBreakdown.variant.packagingItems || selectedBreakdown.variant.packagingItems.length === 0) ? (
                   <div className="p-3 text-center text-stone-500 text-xs border border-dashed border-stone-300 rounded-xl bg-stone-50">
-                    ยังไม่มีรายการแพ็กเกจจิ้ง (กดปุ่ม "+ เพิ่มแพ็กเกจจิ้ง" ด้านบนเพื่อระบุ เช่น กล่องข้าว, ถุงพลาสติก, ช้อนส้อม)
+                    {isEn
+                      ? 'No packaging items yet (click "Add Packaging" above to specify e.g. Food Box, Plastic Bag, Cutlery)'
+                      : 'ยังไม่มีรายการแพ็กเกจจิ้ง (กดปุ่ม "+ เพิ่มแพ็กเกจจิ้ง" ด้านบนเพื่อระบุ เช่น กล่องข้าว, ถุงพลาสติก, ช้อนส้อม)'}
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -1637,18 +1706,18 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             type="text"
                             list={`pkg-common-${pIdx}`}
                             value={pkg.name}
-                            placeholder="ชื่อแพ็กเกจจิ้ง เช่น กล่องข้าว, ถุงหิ้ว"
+                            placeholder={isEn ? 'Packaging name e.g. Food Box, Bag' : 'ชื่อแพ็กเกจจิ้ง เช่น กล่องข้าว, ถุงหิ้ว'}
                             onChange={(e) => handleUpdatePackagingLine(pIdx, 'name', e.target.value)}
                             className="w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-lg text-xs text-stone-900 placeholder-stone-400 focus:outline-none focus:border-[#F27D26]"
                           />
                           <datalist id={`pkg-common-${pIdx}`}>
-                            <option value="กล่องข้าว" />
-                            <option value="กล่องกระดาษรักษ์โลก" />
-                            <option value="ถุงพลาสติกหิ้ว" />
-                            <option value="ถุงกระดาษ" />
-                            <option value="ชุดช้อนส้อมพลาสติก" />
-                            <option value="กระปุกน้ำจิ้ม / ถ้วยซอส" />
-                            <option value="กระดาษทิชชู่ / สติกเกอร์" />
+                            <option value={isEn ? 'Food Box' : 'กล่องข้าว'} />
+                            <option value={isEn ? 'Eco Paper Box' : 'กล่องกระดาษรักษ์โลก'} />
+                            <option value={isEn ? 'Plastic Carrier Bag' : 'ถุงพลาสติกหิ้ว'} />
+                            <option value={isEn ? 'Paper Bag' : 'ถุงกระดาษ'} />
+                            <option value={isEn ? 'Cutlery Set' : 'ชุดช้อนส้อมพลาสติก'} />
+                            <option value={isEn ? 'Sauce Cup' : 'กระปุกน้ำจิ้ม / ถ้วยซอส'} />
+                            <option value={isEn ? 'Napkin / Sticker' : 'กระดาษทิชชู่ / สติกเกอร์'} />
                           </datalist>
                         </div>
 
@@ -1661,10 +1730,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             value={pkg.cost || ''}
                             placeholder="0.00"
                             onChange={(e) => handleUpdatePackagingLine(pIdx, 'cost', parseFloat(e.target.value) || 0)}
-                            className="w-full pl-2 pr-6 py-1.5 bg-white border border-stone-300 rounded-lg text-xs font-mono font-bold text-stone-900 text-right focus:outline-none focus:border-[#F27D26]"
+                            className="w-full pl-2 pr-8 py-1.5 bg-white border border-stone-300 rounded-lg text-xs font-mono font-bold text-stone-900 text-right focus:outline-none focus:border-[#F27D26]"
                           />
                           <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-stone-500 font-bold">
-                            บาท
+                            {isEn ? 'THB' : 'บาท'}
                           </span>
                         </div>
 
@@ -1673,7 +1742,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           type="button"
                           onClick={() => handleDeletePackagingLine(pIdx)}
                           className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="ลบรายการนี้"
+                          title={isEn ? 'Delete item' : 'ลบรายการนี้'}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1681,7 +1750,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     ))}
 
                     <div className="flex justify-between items-center px-3 py-2 bg-cyan-50 border border-cyan-200 rounded-xl text-xs font-mono">
-                      <span className="font-sans text-stone-800 font-bold">โสหุ้ยแพ็กเกจจิ้งรวม (Total packaging cost):</span>
+                      <span className="font-sans text-stone-800 font-bold">
+                        {isEn ? 'Total Packaging Cost:' : 'โสหุ้ยแพ็กเกจจิ้งรวม (Total packaging cost):'}
+                      </span>
                       <span className="font-black text-cyan-900 text-sm">
                         ฿{(selectedBreakdown.breakdown.packagingCost || 0).toFixed(2)}
                       </span>
@@ -1693,35 +1764,45 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               {/* Cost Summary Breakdown */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 font-mono">
                 <div className="bg-stone-100 p-2.5 rounded-xl border border-stone-300">
-                  <span className="text-[10px] font-sans text-stone-600 block font-bold">ต้นทุนวัตถุดิบรวม</span>
+                  <span className="text-[10px] font-sans text-stone-600 block font-bold">
+                    {isEn ? 'Ingredient Cost' : 'ต้นทุนวัตถุดิบรวม'}
+                  </span>
                   <span className="text-base font-black text-stone-950 block mt-0.5">
                     ฿{selectedBreakdown.breakdown.totalIngredientCost.toFixed(2)}
                   </span>
                 </div>
 
                 <div className="bg-stone-100 p-2.5 rounded-xl border border-stone-300">
-                  <span className="text-[10px] font-sans text-stone-600 block font-bold">ค่าโสหุ้ยต่อจาน</span>
+                  <span className="text-[10px] font-sans text-stone-600 block font-bold">
+                    {isEn ? 'Overhead / Dish' : 'ค่าโสหุ้ยต่อจาน'}
+                  </span>
                   <span className="text-base font-black text-stone-950 block mt-0.5">
                     ฿{selectedBreakdown.breakdown.overheadCost.toFixed(2)}
                   </span>
                 </div>
 
                 <div className="bg-cyan-50 p-2.5 rounded-xl border border-cyan-300">
-                  <span className="text-[10px] font-sans text-cyan-900 block font-bold">แพ็กเกจจิ้งรวม</span>
+                  <span className="text-[10px] font-sans text-cyan-900 block font-bold">
+                    {isEn ? 'Total Packaging' : 'แพ็กเกจจิ้งรวม'}
+                  </span>
                   <span className="text-base font-black text-cyan-900 block mt-0.5">
                     ฿{(selectedBreakdown.breakdown.packagingCost || 0).toFixed(2)}
                   </span>
                 </div>
 
                 <div className="bg-amber-50 p-2.5 rounded-xl border border-amber-300">
-                  <span className="text-[10px] font-sans text-amber-900 block font-bold">ต้นทุนรวมสุทธิ</span>
+                  <span className="text-[10px] font-sans text-amber-900 block font-bold">
+                    {isEn ? 'Net Total Cost' : 'ต้นทุนรวมสุทธิ'}
+                  </span>
                   <span className="text-base font-black text-amber-950 block mt-0.5">
                     ฿{selectedBreakdown.breakdown.totalCost.toFixed(2)}
                   </span>
                 </div>
 
                 <div className="bg-stone-100 p-2.5 rounded-xl border border-stone-300">
-                  <span className="text-[10px] font-sans text-stone-600 block font-bold">Food Cost หน้าร้าน</span>
+                  <span className="text-[10px] font-sans text-stone-600 block font-bold">
+                    {isEn ? 'Dine-in FC%' : 'Food Cost หน้าร้าน'}
+                  </span>
                   <span
                     className={`text-base font-black block mt-0.5 ${
                       selectedBreakdown.breakdown.restaurantFoodCostPercent > 40
@@ -1769,7 +1850,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 return (
                   <div className="bg-stone-100 border border-stone-300 rounded-2xl p-3.5">
                     <span className="font-black text-stone-900 block mb-2 font-sans">
-                      เปรียบเทียบกำไรสุทธิแยกตามช่องทาง Delivery
+                      {isEn
+                        ? 'Net Profit Comparison by Delivery Channel'
+                        : 'เปรียบเทียบกำไรสุทธิแยกตามช่องทาง Delivery'}
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
                       {/* GrabFood Card */}
@@ -1777,28 +1860,40 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-sans font-black text-[#00873e]">GrabFood</span>
                           <span className="text-[10px] text-stone-500 font-bold">
-                            GP {grabCommissionPct}%{effectiveGrabPct > grabCommissionPct ? ` (${effectiveGrabPct.toFixed(1)}% รวม VAT)` : ''}
+                            GP {grabCommissionPct}%
+                            {effectiveGrabPct > grabCommissionPct
+                              ? ` (${effectiveGrabPct.toFixed(1)}% ${isEn ? 'incl. VAT' : 'รวม VAT'})`
+                              : ''}
                           </span>
                         </div>
                         <div className="space-y-1 text-xs">
                           <div className="flex justify-between">
-                            <span className="font-sans text-stone-600">ราคาขาย{isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:</span>
+                            <span className="font-sans text-stone-600">
+                              {isEn ? 'Selling Price' : 'ราคาขาย'}
+                              {isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:
+                            </span>
                             <span className="text-stone-900 font-bold">
                               ฿{deliveryGross}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
-                            <span className="font-sans text-stone-600">หัก GP ({effectiveGrabPct.toFixed(1)}%):</span>
+                            <span className="font-sans text-stone-600">
+                              {isEn ? `GP Fee (${effectiveGrabPct.toFixed(1)}%):` : `หัก GP (${effectiveGrabPct.toFixed(1)}%):`}
+                            </span>
                             <span>
                               -฿{grabGpFee.toFixed(2)}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
-                            <span className="font-sans text-stone-600">ค่ากล่อง Delivery:</span>
+                            <span className="font-sans text-stone-600">
+                              {isEn ? 'Delivery Packaging:' : 'ค่ากล่อง Delivery:'}
+                            </span>
                             <span>-฿{pkgCostToUse.toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between pt-1 border-t border-stone-200 font-bold">
-                            <span className="font-sans text-stone-800">กำไรสุทธิหลัง GP:</span>
+                            <span className="font-sans text-stone-800">
+                              {isEn ? 'Net Profit After GP:' : 'กำไรสุทธิหลัง GP:'}
+                            </span>
                             <span className={`font-black ${grabProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
                               ฿{grabProfit.toFixed(2)}
                             </span>
@@ -1811,28 +1906,40 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-sans font-black text-[#05963c]">LINE MAN</span>
                           <span className="text-[10px] text-stone-500 font-bold">
-                            GP {linemanCommissionPct}%{effectiveLinemanPct > linemanCommissionPct ? ` (${effectiveLinemanPct.toFixed(1)}% รวม VAT)` : ''}
+                            GP {linemanCommissionPct}%
+                            {effectiveLinemanPct > linemanCommissionPct
+                              ? ` (${effectiveLinemanPct.toFixed(1)}% ${isEn ? 'incl. VAT' : 'รวม VAT'})`
+                              : ''}
                           </span>
                         </div>
                         <div className="space-y-1 text-xs">
                           <div className="flex justify-between">
-                            <span className="font-sans text-stone-600">ราคาขาย{isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:</span>
+                            <span className="font-sans text-stone-600">
+                              {isEn ? 'Selling Price' : 'ราคาขาย'}
+                              {isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:
+                            </span>
                             <span className="text-stone-900 font-bold">
                               ฿{deliveryGross}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
-                            <span className="font-sans text-stone-600">หัก GP ({effectiveLinemanPct.toFixed(1)}%):</span>
+                            <span className="font-sans text-stone-600">
+                              {isEn ? `GP Fee (${effectiveLinemanPct.toFixed(1)}%):` : `หัก GP (${effectiveLinemanPct.toFixed(1)}%):`}
+                            </span>
                             <span>
                               -฿{linemanGpFee.toFixed(2)}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
-                            <span className="font-sans text-stone-600">ค่ากล่อง Delivery:</span>
+                            <span className="font-sans text-stone-600">
+                              {isEn ? 'Delivery Packaging:' : 'ค่ากล่อง Delivery:'}
+                            </span>
                             <span>-฿{pkgCostToUse.toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between pt-1 border-t border-stone-200 font-bold">
-                            <span className="font-sans text-stone-800">กำไรสุทธิหลัง GP:</span>
+                            <span className="font-sans text-stone-800">
+                              {isEn ? 'Net Profit After GP:' : 'กำไรสุทธิหลัง GP:'}
+                            </span>
                             <span className={`font-black ${linemanProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
                               ฿{linemanProfit.toFixed(2)}
                             </span>
@@ -1874,10 +1981,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   <div className="bg-stone-100 border border-stone-300 rounded-2xl p-3.5">
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-black text-stone-900 font-sans">
-                        💡 เครื่องคำนวณราคาขายแนะนำ (Suggested Price Calculator)
+                        {isEn ? '💡 Suggested Price Calculator' : '💡 เครื่องคำนวณราคาขายแนะนำ (Suggested Price Calculator)'}
                       </span>
                       <span className="font-mono text-amber-800 font-black">
-                        เป้าหมาย FC: {customTargetFcPercent}%
+                        {isEn ? `Target FC: ${customTargetFcPercent}%` : `เป้าหมาย FC: ${customTargetFcPercent}%`}
                       </span>
                     </div>
                     <input
@@ -1891,10 +1998,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     />
                     <div className="mt-2 flex items-center justify-between text-xs font-mono">
                       <span className="font-sans text-stone-700 font-bold">
-                        ราคาขายหน้าร้านที่แนะนำ (เพื่อให้ได้ FC {customTargetFcPercent}%{isVatInclusive ? ' รวม VAT' : ''}):
+                        {isEn
+                          ? `Recommended Dine-in Price (for FC ${customTargetFcPercent}%${isVatInclusive ? ' incl. VAT' : ''}):`
+                          : `ราคาขายหน้าร้านที่แนะนำ (เพื่อให้ได้ FC ${customTargetFcPercent}%${isVatInclusive ? ' รวม VAT' : ''}):`}
                       </span>
                       <span className="text-base font-black text-stone-950">
-                        ฿{suggestedPriceCalc.suggestedPriceByFc} บาท
+                        ฿{suggestedPriceCalc.suggestedPriceByFc} {isEn ? 'THB' : 'บาท'}
                       </span>
                     </div>
                   </div>
@@ -1913,7 +2022,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   className="px-3.5 py-2 bg-stone-200 hover:bg-stone-300 text-stone-900 font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
                 >
                   <SlidersHorizontal className="w-4 h-4 text-stone-700" />
-                  <span>ไปที่หน้าปรับแต่งสูตรอาหาร</span>
+                  <span>{isEn ? 'Customize Recipe' : 'ไปที่หน้าปรับแต่งสูตรอาหาร'}</span>
                 </button>
 
                 <button
@@ -1921,7 +2030,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   onClick={() => setSelectedBreakdown(null)}
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] !text-white font-black rounded-xl cursor-pointer shadow-xs"
                 >
-                  ปิดหน้าต่าง
+                  {isEn ? 'Close' : 'ปิดหน้าต่าง'}
                 </button>
               </div>
             </div>
@@ -1936,8 +2045,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             <div className="flex items-center justify-between border-b border-[#EAE4D9] pb-3">
               <h3 className="font-bold text-[#1C1917] text-base">
                 {editingMenu.id?.startsWith('menu_') && !menus.find((m) => m.id === editingMenu.id)
-                  ? 'เพิ่มเมนูใหม่'
-                  : 'แก้ไขข้อมูลเมนู'}
+                  ? (isEn ? 'Add New Menu' : 'เพิ่มเมนูใหม่')
+                  : (isEn ? 'Edit Menu Information' : 'แก้ไขข้อมูลเมนู')}
               </h3>
               <button
                 type="button"
@@ -1952,13 +2061,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <div className="space-y-3">
                 <div>
                   <label className="block text-stone-700 mb-1.5 font-bold text-sm">
-                    ชื่อเมนูอาหาร (ไทย) <span className="text-rose-500">*</span>
+                    {isEn ? 'Menu Name (Thai)' : 'ชื่อเมนูอาหาร (ไทย)'} <span className="text-rose-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     autoFocus
-                    placeholder="เช่น ข้าวกะเพราโบราณ, ข้าวผัดพริกเผา"
+                    placeholder={isEn ? 'e.g. Classic Holy Basil Rice, Chili Paste Fried Rice' : 'เช่น ข้าวกะเพราโบราณ, ข้าวผัดพริกเผา'}
                     value={editingMenu.name || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
@@ -1981,7 +2090,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-stone-700 font-bold text-xs">
-                      ชื่อเมนูภาษาอังกฤษ (English Name — แปลอัตโนมัติ)
+                      {isEn
+                        ? 'Menu Name (English — Auto-translated)'
+                        : 'ชื่อเมนูภาษาอังกฤษ (English Name — แปลอัตโนมัติ)'}
                     </label>
                     <button
                       type="button"
@@ -1993,12 +2104,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       }
                       className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                     >
-                      แปลใหม่จากภาษาไทย
+                      {isEn ? 'Re-translate from Thai' : 'แปลใหม่จากภาษาไทย'}
                     </button>
                   </div>
                   <input
                     type="text"
-                    placeholder="Auto-translated English name (editable)"
+                    placeholder={isEn ? 'Auto-translated English name (editable)' : 'ชื่อเมนูภาษาอังกฤษที่แปลอัตโนมัติ (แก้ไขได้)'}
                     value={editingMenu.englishName || ''}
                     onChange={(e) => setEditingMenu({ ...editingMenu, englishName: e.target.value })}
                     className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
@@ -2009,11 +2120,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-stone-700 mb-1 font-bold text-xs">
-                    รหัสเมนู / SKU (เชื่อม POS)
+                    {isEn ? 'Menu Code / SKU (POS Sync)' : 'รหัสเมนู / SKU (เชื่อม POS)'}
                   </label>
                   <input
                     type="text"
-                    placeholder="เช่น MK-01, KPR"
+                    placeholder={isEn ? 'e.g. MK-01, KPR' : 'เช่น MK-01, KPR'}
                     value={editingMenu.code || editingMenu.sku || ''}
                     onChange={(e) => setEditingMenu({ ...editingMenu, code: e.target.value, sku: e.target.value })}
                     className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-mono font-semibold focus:outline-none focus:border-[#F27D26]"
@@ -2021,11 +2132,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </div>
                 <div>
                   <label className="block text-stone-700 mb-1 font-bold text-xs">
-                    บาร์โค้ด (Barcode)
+                    {isEn ? 'Barcode' : 'บาร์โค้ด (Barcode)'}
                   </label>
                   <input
                     type="text"
-                    placeholder="เช่น 885001234567"
+                    placeholder={isEn ? 'e.g. 885001234567' : 'เช่น 885001234567'}
                     value={editingMenu.barcode || ''}
                     onChange={(e) => setEditingMenu({ ...editingMenu, barcode: e.target.value })}
                     className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-mono focus:outline-none focus:border-[#F27D26]"
@@ -2043,7 +2154,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     className="w-4 h-4 text-rose-600 rounded border-stone-300 focus:ring-rose-500 cursor-pointer"
                   />
                   <span className="text-xs font-bold text-stone-800">
-                    ⚠️ วัตถุดิบหมด / งดขายเมนูนี้ชั่วคราว (Out of Stock สำหรับ POS)
+                    {isEn
+                      ? '⚠️ Out of Stock / Temporarily Unavailable (POS Sync)'
+                      : '⚠️ วัตถุดิบหมด / งดขายเมนูนี้ชั่วคราว (Out of Stock สำหรับ POS)'}
                   </span>
                 </label>
               </div>
@@ -2054,13 +2167,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   onClick={() => setIsMenuModalOpen(false)}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {isEn ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer"
                 >
-                  บันทึกเมนู
+                  {isEn ? 'Save Menu' : 'บันทึกเมนู'}
                 </button>
               </div>
             </form>
@@ -2077,7 +2190,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   <FolderPlus className="w-4 h-4" />
                 </span>
                 <h3 className="font-bold text-[#1C1917] text-base">
-                  เพิ่มหมวดหมู่อาหารใหม่
+                  {isEn ? 'Add New Food Category' : 'เพิ่มหมวดหมู่อาหารใหม่'}
                 </h3>
               </div>
               <button
@@ -2098,13 +2211,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <div className="space-y-3">
                 <div>
                   <label className="block text-stone-700 mb-1.5 font-semibold">
-                    ชื่อหมวดหมู่ใหม่ (ไทย)
+                    {isEn ? 'New Category Name (Thai)' : 'ชื่อหมวดหมู่ใหม่ (ไทย)'}
                   </label>
                   <input
                     type="text"
                     required
                     autoFocus
-                    placeholder="เช่น ของหวาน, เครื่องดื่ม, กับแกล้ม, สเต็ก"
+                    placeholder={isEn ? 'e.g. Desserts, Beverages, Steaks' : 'เช่น ของหวาน, เครื่องดื่ม, กับแกล้ม, สเต็ก'}
                     value={newCategoryInput}
                     onChange={(e) => {
                       const nextTh = e.target.value;
@@ -2129,11 +2242,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                 <div>
                   <label className="block text-stone-700 mb-1 font-semibold">
-                    ชื่อหมวดหมู่ภาษาอังกฤษ (แปลอัตโนมัติ)
+                    {isEn ? 'Category Name (English — Auto-translated)' : 'ชื่อหมวดหมู่ภาษาอังกฤษ (แปลอัตโนมัติ)'}
                   </label>
                   <input
                     type="text"
-                    placeholder="Auto-translated category name"
+                    placeholder={isEn ? 'Auto-translated category name' : 'ชื่อหมวดหมู่ภาษาอังกฤษที่แปลอัตโนมัติ'}
                     value={newCategoryEnglishInput}
                     onChange={(e) => setNewCategoryEnglishInput(e.target.value)}
                     className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-800 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
@@ -2144,7 +2257,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               {/* Quick Suggestions Chips */}
               <div>
                 <span className="text-[10px] text-stone-500 font-semibold block mb-1.5">
-                  หรือเลือกจากหมวดหมู่แนะนำ:
+                  {isEn ? 'Or choose from suggested categories:' : 'หรือเลือกจากหมวดหมู่แนะนำ:'}
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {[
@@ -2165,7 +2278,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       }}
                       className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-lg text-[11px] text-stone-700 font-medium transition-colors cursor-pointer"
                     >
-                      + {preset}
+                      + {getLocalizedText(lang, preset)}
                     </button>
                   ))}
                 </div>
@@ -2182,13 +2295,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   }}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {isEn ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl shadow-md shadow-[#F27D26]/20 cursor-pointer"
                 >
-                  บันทึกหมวดหมู่
+                  {isEn ? 'Save Category' : 'บันทึกหมวดหมู่'}
                 </button>
               </div>
             </form>
@@ -2206,7 +2319,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   <Edit2 className="w-4 h-4" />
                 </span>
                 <h3 className="font-bold text-[#1C1917] text-base">
-                  แก้ไขชื่อหมวดหมู่
+                  {isEn ? 'Edit Category Name' : 'แก้ไขชื่อหมวดหมู่'}
                 </h3>
               </div>
               <button
@@ -2225,7 +2338,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <div className="space-y-3">
                 <div>
                   <label className="block text-stone-700 mb-1.5 font-semibold">
-                    ชื่อหมวดหมู่ (ไทย)
+                    {isEn ? 'Category Name (Thai)' : 'ชื่อหมวดหมู่ (ไทย)'}
                   </label>
                   <input
                     type="text"
@@ -2255,11 +2368,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                 <div>
                   <label className="block text-stone-700 mb-1 font-semibold">
-                    ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)
+                    {isEn ? 'English Name (Auto-translated)' : 'ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)'}
                   </label>
                   <input
                     type="text"
-                    placeholder="Auto-translated English name"
+                    placeholder={isEn ? 'Auto-translated English name' : 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ'}
                     value={editCategoryEnglishInput}
                     onChange={(e) => setEditCategoryEnglishInput(e.target.value)}
                     className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-800 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
@@ -2268,7 +2381,16 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </div>
 
               <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-[11px] text-amber-900 leading-relaxed">
-                เมนูอาหารในหมวดหมู่เดิม <strong>"{editingCategoryOldName}"</strong> (จำนวน {menus.filter((m) => m.category === editingCategoryOldName).length} รายการ) จะถูกเปลี่ยนเป็นชื่อหมวดหมู่ใหม่นี้โดยอัตโนมัติ
+                {isEn ? (
+                  <>
+                    Menus in <strong>"{getLocalizedText('en', editingCategoryOldName)}"</strong> (
+                    {menus.filter((m) => m.category === editingCategoryOldName).length} items) will automatically update to this new category name.
+                  </>
+                ) : (
+                  <>
+                    เมนูอาหารในหมวดหมู่เดิม <strong>"{editingCategoryOldName}"</strong> (จำนวน {menus.filter((m) => m.category === editingCategoryOldName).length} รายการ) จะถูกเปลี่ยนเป็นชื่อหมวดหมู่ใหม่นี้โดยอัตโนมัติ
+                  </>
+                )}
               </div>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t border-[#EAE4D9]">
@@ -2280,13 +2402,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   }}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {isEn ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl shadow-md shadow-[#F27D26]/20 cursor-pointer"
                 >
-                  บันทึกการแก้ไข
+                  {isEn ? 'Save Changes' : 'บันทึกการแก้ไข'}
                 </button>
               </div>
             </form>
@@ -2304,7 +2426,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   <Trash2 className="w-4 h-4" />
                 </span>
                 <h3 className="font-bold text-[#1C1917] text-base">
-                  ยืนยันการลบหมวดหมู่
+                  {isEn ? 'Confirm Delete Category' : 'ยืนยันการลบหมวดหมู่'}
                 </h3>
               </div>
               <button
@@ -2321,15 +2443,27 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="font-bold text-xs">
-                    ต้องการลบหมวดหมู่ "{deletingCategoryName}" ใช่หรือไม่?
+                    {isEn
+                      ? `Delete category "${getLocalizedText('en', deletingCategoryName)}"?`
+                      : `ต้องการลบหมวดหมู่ "${deletingCategoryName}" ใช่หรือไม่?`}
                   </p>
                   {menus.filter((m) => m.category === deletingCategoryName).length > 0 ? (
                     <p className="text-[11px] text-rose-700 leading-relaxed">
-                      มีเมนูอาหารในหมวดหมู่นี้อยู่ <strong>{menus.filter((m) => m.category === deletingCategoryName).length} รายการ</strong> ซึ่งเมนูเหล่านี้จะถูกย้ายไปยังหมวดหมู่ <strong>"ทั่วไป / อื่นๆ"</strong> โดยอัตโนมัติ (เมนูจะไม่สูญหาย)
+                      {isEn ? (
+                        <>
+                          There are <strong>{menus.filter((m) => m.category === deletingCategoryName).length} items</strong> in this category. They will automatically move to <strong>"General / Other"</strong> without being lost.
+                        </>
+                      ) : (
+                        <>
+                          มีเมนูอาหารในหมวดหมู่นี้อยู่ <strong>{menus.filter((m) => m.category === deletingCategoryName).length} รายการ</strong> ซึ่งเมนูเหล่านี้จะถูกย้ายไปยังหมวดหมู่ <strong>"ทั่วไป / อื่นๆ"</strong> โดยอัตโนมัติ (เมนูจะไม่สูญหาย)
+                        </>
+                      )}
                     </p>
                   ) : (
                     <p className="text-[11px] text-rose-700 leading-relaxed">
-                      ไม่มีเมนูอาหารในหมวดหมู่นี้ ระบบจะลบหมวดหมู่นี้ออกจากตัวเลือกทั้งหมดทันที
+                      {isEn
+                        ? 'No menus in this category. It will be removed from all options immediately.'
+                        : 'ไม่มีเมนูอาหารในหมวดหมู่นี้ ระบบจะลบหมวดหมู่นี้ออกจากตัวเลือกทั้งหมดทันที'}
                     </p>
                   )}
                 </div>
@@ -2341,7 +2475,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   onClick={() => setIsDeleteCategoryModalOpen(false)}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {isEn ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="button"
@@ -2349,7 +2483,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>ยืนยันการลบหมวดหมู่</span>
+                  <span>{isEn ? 'Confirm Delete Category' : 'ยืนยันการลบหมวดหมู่'}</span>
                 </button>
               </div>
             </div>
@@ -2368,9 +2502,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   <AlertTriangle className="w-5 h-5" />
                 </span>
                 <h3 className="font-black text-stone-950 text-base sm:text-lg flex items-center gap-2">
-                  <span>รายการเมนูต้นทุนสูง / ควรทบทวน</span>
+                  <span>{isEn ? 'High-Cost / Needs Review Items' : 'รายการเมนูต้นทุนสูง / ควรทบทวน'}</span>
                   <span className="px-2 py-0.5 rounded-full bg-rose-600 text-white text-xs font-mono font-black">
-                    {warningRows.length} รายการ
+                    {warningRows.length} {isEn ? 'items' : 'รายการ'}
                   </span>
                 </h3>
               </div>
@@ -2388,7 +2522,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               {warningRows.length === 0 ? (
                 <div className="text-center py-10 text-stone-500">
                   <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500 mb-2" />
-                  <p className="font-bold text-stone-800">ยอดเยี่ยมมาก! ไม่มีเมนูที่ต้นทุนสูงเกินเกณฑ์ในขณะนี้</p>
+                  <p className="font-bold text-stone-800">
+                    {isEn ? 'Great job! No high-cost menu items right now.' : 'ยอดเยี่ยมมาก! ไม่มีเมนูที่ต้นทุนสูงเกินเกณฑ์ในขณะนี้'}
+                  </p>
                 </div>
               ) : (
                 warningRows.map((item, idx) => (
@@ -2399,13 +2535,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-black text-stone-950 text-sm">
-                          {item.menu.name}
+                          {getLocalizedText(lang, item.menu.thaiName || item.menu.name, item.menu.englishName)}
                         </span>
                         <span className="text-xs px-2 py-0.5 bg-stone-100 border border-stone-200 text-stone-800 font-bold rounded-lg">
-                          {item.variant.name}
+                          {getLocalizedText(lang, item.variant.thaiName || item.variant.name, item.variant.englishName)}
                         </span>
                         <span className="text-[11px] px-2 py-0.5 bg-stone-50 border border-stone-200 text-stone-600 rounded-md">
-                          {item.menu.category}
+                          {getLocalizedText(lang, item.menu.category)}
                         </span>
                       </div>
 
@@ -2424,10 +2560,16 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                       {/* Metrics bar */}
                       <div className="flex items-center gap-3 text-xs text-stone-600 mt-2 font-mono flex-wrap">
-                        <span>ราคาขาย: <strong className="text-stone-950 font-black">{item.breakdown.sellingPrice} ฿</strong></span>
-                        <span>ต้นทุนรวม: <strong className="text-stone-950 font-black">{item.breakdown.totalCost.toFixed(1)} ฿</strong></span>
                         <span>
-                          กำไรหน้าร้าน:{' '}
+                          {isEn ? 'Price:' : 'ราคาขาย:'}{' '}
+                          <strong className="text-stone-950 font-black">{item.breakdown.sellingPrice} ฿</strong>
+                        </span>
+                        <span>
+                          {isEn ? 'Total Cost:' : 'ต้นทุนรวม:'}{' '}
+                          <strong className="text-stone-950 font-black">{item.breakdown.totalCost.toFixed(1)} ฿</strong>
+                        </span>
+                        <span>
+                          {isEn ? 'Dine-in Profit:' : 'กำไรหน้าร้าน:'}{' '}
                           <strong className={item.breakdown.restaurantProfit < 0 ? 'text-rose-600 font-black' : 'text-emerald-700 font-black'}>
                             {item.breakdown.restaurantProfit.toFixed(1)} ฿
                           </strong>
@@ -2457,7 +2599,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         }}
                         className="w-full sm:w-auto px-3 py-1.5 bg-[#F27D26] hover:bg-[#d96817] !text-white text-xs font-black rounded-xl shadow-xs cursor-pointer flex items-center justify-center gap-1"
                       >
-                        <span>ดูสูตรและต้นทุน</span>
+                        <span>{isEn ? 'View Recipe & Cost' : 'ดูสูตรและต้นทุน'}</span>
                         <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -2469,7 +2611,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             {/* Footer */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 mt-3 border-t border-stone-200 shrink-0 text-xs">
               <span className="font-mono font-bold text-stone-600">
-                พบทั้งหมด {warningRows.length} รายการที่เข้าเกณฑ์
+                {isEn ? `Found ${warningRows.length} flagged items` : `พบทั้งหมด ${warningRows.length} รายการที่เข้าเกณฑ์`}
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -2480,14 +2622,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   }}
                   className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl shadow-xs cursor-pointer"
                 >
-                  กรองเฉพาะเมนูเตือนในหน้านี้
+                  {isEn ? 'Filter Alerted Menus Only' : 'กรองเฉพาะเมนูเตือนในหน้านี้'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsWarningModalOpen(false)}
                   className="px-3.5 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold rounded-xl cursor-pointer"
                 >
-                  ปิด
+                  {isEn ? 'Close' : 'ปิด'}
                 </button>
               </div>
             </div>
@@ -2504,7 +2646,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <span className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
                   <Trash2 className="w-4 h-4" />
                 </span>
-                <h3 className="font-bold text-[#1C1917] text-base">ยืนยันการลบเมนูอาหาร</h3>
+                <h3 className="font-bold text-[#1C1917] text-base">
+                  {isEn ? 'Confirm Delete Menu' : 'ยืนยันการลบเมนูอาหาร'}
+                </h3>
               </div>
               <button
                 type="button"
@@ -2519,10 +2663,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="font-bold text-xs">
-                    ต้องการลบเมนู "{menuToDelete.name}" ใช่หรือไม่?
+                    {isEn
+                      ? `Delete menu "${getLocalizedText('en', menuToDelete.thaiName || menuToDelete.name, menuToDelete.englishName)}"?`
+                      : `ต้องการลบเมนู "${menuToDelete.name}" ใช่หรือไม่?`}
                   </p>
                   <p className="text-[11px] text-rose-700 leading-relaxed">
-                    ตัวเลือกเนื้อสัตว์และข้อมูลต้นทุนทั้งหมด ({menuToDelete.variants.length} รายการ) ในเมนูนี้จะถูกลบออกด้วย
+                    {isEn
+                      ? `All meat variants and cost records (${menuToDelete.variants.length} items) in this menu will also be deleted.`
+                      : `ตัวเลือกเนื้อสัตว์และข้อมูลต้นทุนทั้งหมด (${menuToDelete.variants.length} รายการ) ในเมนูนี้จะถูกลบออกด้วย`}
                   </p>
                 </div>
               </div>
@@ -2532,7 +2680,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   onClick={() => setMenuToDelete(null)}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {isEn ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="button"
@@ -2548,7 +2696,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>ยืนยันการลบเมนู</span>
+                  <span>{isEn ? 'Confirm Delete Menu' : 'ยืนยันการลบเมนู'}</span>
                 </button>
               </div>
             </div>
@@ -2568,10 +2716,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </span>
                 <div>
                   <h3 className="font-black text-stone-950 text-base">
-                    + เพิ่มตัวเลือก
+                    {isEn ? '+ Add Option / Variant' : '+ เพิ่มตัวเลือก'}
                   </h3>
                   <p className="text-xs text-stone-500 font-medium">
-                    เมนู: <strong className="text-stone-800">{variantModalState.menu.name}</strong>
+                    {isEn ? 'Menu:' : 'เมนู:'}{' '}
+                    <strong className="text-stone-800">
+                      {getLocalizedText(lang, variantModalState.menu.thaiName || variantModalState.menu.name, variantModalState.menu.englishName)}
+                    </strong>
                   </p>
                 </div>
               </div>
@@ -2599,17 +2750,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <div className="p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-2xl space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="block text-stone-900 font-black text-xs">
-                    เลือกวัตถุดิบจากฐานข้อมูล <span className="text-[#F27D26]">*</span>
+                    {isEn ? 'Select Ingredient from Database' : 'เลือกวัตถุดิบจากฐานข้อมูล'}{' '}
+                    <span className="text-[#F27D26]">*</span>
                   </label>
                   <span className="text-[10px] text-amber-800 font-bold bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300">
-                    เชื่อมโยงต้นทุนจริงอัตโนมัติ
+                    {isEn ? 'Auto-linked to Real Cost' : 'เชื่อมโยงต้นทุนจริงอัตโนมัติ'}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                      1. เลือกวัตถุดิบ / เนื้อสัตว์จากฐานข้อมูล <span className="text-[#F27D26]">*</span>
+                      {isEn ? '1. Choose Ingredient / Protein from Database' : '1. เลือกวัตถุดิบ / เนื้อสัตว์จากฐานข้อมูล'}{' '}
+                      <span className="text-[#F27D26]">*</span>
                     </label>
                     <select
                       required
@@ -2673,15 +2826,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       }}
                       className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26] cursor-pointer"
                     >
-                      <option value="">-- เลือกวัตถุดิบจากฐานข้อมูล ({ingredients.length} รายการ) --</option>
+                      <option value="">
+                        {isEn
+                          ? `-- Select Ingredient (${ingredients.length} items) --`
+                          : `-- เลือกวัตถุดิบจากฐานข้อมูล (${ingredients.length} รายการ) --`}
+                      </option>
                       <option value="seafood_combo" className="font-bold text-[#F27D26]">
-                        🌊 ทะเล (กุ้งสด + ปลาหมึกสด คู่กัน)
+                        {isEn
+                          ? '🌊 Seafood Combo (Fresh Shrimp + Fresh Squid)'
+                          : '🌊 ทะเล (กุ้งสด + ปลาหมึกสด คู่กัน)'}
                       </option>
                       {groupedIngredients.map(([cat, catIngs]) => (
-                        <optgroup key={cat} label={cat}>
+                        <optgroup key={cat} label={getLocalizedText(lang, cat)}>
                           {catIngs.map((ing) => (
                             <option key={ing.id} value={ing.id}>
-                              {ing.name} ({ing.usageUnit || ing.baseUnit || 'g'})
+                              {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)} ({localizeUnit(ing.usageUnit || ing.baseUnit || 'g', lang)})
                             </option>
                           ))}
                         </optgroup>
@@ -2694,7 +2853,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 {variantModalState.variant?.name && (
                   <div className="px-2.5 py-1.5 bg-white/80 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
                     <span className="text-stone-700 font-bold">
-                      ชื่อตัวเลือก: <strong className="text-stone-950">{variantModalState.variant.name}</strong>
+                      {isEn ? 'Option Name (TH):' : 'ชื่อตัวเลือก:'}{' '}
+                      <strong className="text-stone-950">{variantModalState.variant.name}</strong>
                     </span>
                     <span className="text-amber-800 font-semibold">
                       EN: {variantModalState.variant.englishName || translateThaiToEnglish(variantModalState.variant.name)}
@@ -2703,7 +2863,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 )}
               </div>
 
-              {/* 2. ปริมาณเนื้อสัตว์ที่ใช้ (รองรับทั้งเนื้อสัตว์เดี่ยว และ ทะเล กุ้ง+หมึก + เลือก/เพิ่ม/ลบหน่วยวัด) */}
+              {/* 2. ปริมาณเนื้อสัตว์ที่ใช้ */}
               {(() => {
                 const pType = (variantModalState.variant?.proteinType || '').toLowerCase();
                 const isSeafoodChoice =
@@ -2716,16 +2876,20 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <div className="p-3 bg-sky-50 border border-sky-300 rounded-2xl space-y-2.5">
                       <div className="flex items-center justify-between">
                         <span className="font-black text-sky-950 text-xs flex items-center gap-1.5">
-                          <span>🌊 สัดส่วนวัตถุดิบทะเล (กุ้งสด + ปลาหมึกสด ต้องมีทั้งคู่):</span>
+                          <span>
+                            {isEn
+                              ? '🌊 Seafood Ratio (Shrimp + Squid required):'
+                              : '🌊 สัดส่วนวัตถุดิบทะเล (กุ้งสด + ปลาหมึกสด ต้องมีทั้งคู่):'}
+                          </span>
                         </span>
                         <span className="text-[10px] text-sky-800 bg-sky-100 px-2 py-0.5 rounded-md font-bold border border-sky-300">
-                          Seafood Rule (แยกชิ้น/กรัม)
+                          {isEn ? 'Seafood Rule (pc / g)' : 'Seafood Rule (แยกชิ้น/กรัม)'}
                         </span>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="bg-white p-2.5 rounded-xl border border-amber-300 shadow-2xs space-y-1">
                           <label className="block text-amber-950 font-bold text-xs">
-                            🦐 กุ้งสด (XL):
+                            {isEn ? '🦐 Fresh Shrimp (XL):' : '🦐 กุ้งสด (XL):'}
                           </label>
                           <div className="flex items-center gap-1.5">
                             <NumericInput
@@ -2740,15 +2904,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               }
                               className="w-24 p-2 bg-amber-50/50 border border-amber-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-amber-600"
                             />
-                            <span className="text-xs text-stone-700 font-bold">ตัว</span>
+                            <span className="text-xs text-stone-700 font-bold">{isEn ? 'pc' : 'ตัว'}</span>
                             <span className="text-[10px] text-stone-500 ml-auto">
-                              (@ ฿8.50/ตัว)
+                              (@ ฿8.50/{isEn ? 'pc' : 'ตัว'})
                             </span>
                           </div>
                         </div>
                         <div className="bg-white p-2.5 rounded-xl border border-sky-300 shadow-2xs space-y-1">
                           <label className="block text-sky-950 font-bold text-xs">
-                            🦑 ปลาหมึกกล้วยสด:
+                            {isEn ? '🦑 Fresh Squid:' : '🦑 ปลาหมึกกล้วยสด:'}
                           </label>
                           <div className="flex items-center gap-1.5">
                             <NumericInput
@@ -2763,7 +2927,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               }
                               className="w-24 p-2 bg-sky-50/50 border border-sky-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-sky-600"
                             />
-                            <span className="text-xs text-stone-700 font-bold">กรัม (g)</span>
+                            <span className="text-xs text-stone-700 font-bold">{isEn ? 'g' : 'กรัม (g)'}</span>
                             <span className="text-[10px] text-stone-500 ml-auto">
                               (@ ฿0.388/g)
                             </span>
@@ -2789,9 +2953,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   <div className="space-y-2 p-3 bg-white border border-[#EAE4D9] rounded-2xl">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <label className="block text-stone-800 font-bold text-xs">
-                        ปริมาณเนื้อสัตว์ที่ใช้ต่อจาน{' '}
+                        {isEn ? 'Protein Portion per Dish' : 'ปริมาณเนื้อสัตว์ที่ใช้ต่อจาน'}{' '}
                         <span className="text-stone-500 font-normal">
-                          ({PORTION_UNIT_LABELS[activeUnit] || activeUnit})
+                          ({getPortionUnitLabel(activeUnit)})
                         </span>
                       </label>
                       <button
@@ -2800,7 +2964,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         className="text-[11px] font-bold text-[#F27D26] hover:underline flex items-center gap-0.5 cursor-pointer"
                       >
                         <Plus className="w-3 h-3" />
-                        <span>เพิ่มหน่วยเอง</span>
+                        <span>{isEn ? 'Add Custom Unit' : 'เพิ่มหน่วยเอง'}</span>
                       </button>
                     </div>
 
@@ -2828,11 +2992,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           }))
                         }
                         className="p-2.5 bg-stone-50 border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-bold focus:outline-none focus:border-[#F27D26] cursor-pointer"
-                        title="เลือกหน่วยวัดปริมาณ"
+                        title={isEn ? 'Select portion unit' : 'เลือกหน่วยวัดปริมาณ'}
                       >
                         {portionUnits.map((u) => (
                           <option key={u} value={u}>
-                            {PORTION_UNIT_LABELS[u] || u}
+                            {getPortionUnitLabel(u)}
                           </option>
                         ))}
                       </select>
@@ -2843,7 +3007,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         disabled={portionUnits.length <= 1}
                         onClick={() => handleDeleteCustomUnit(activeUnit)}
                         className="p-2 rounded-xl border border-stone-200 text-stone-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 disabled:opacity-30 cursor-pointer transition-colors"
-                        title={`ลบหน่วย "${activeUnit}" ออกจากรายการ`}
+                        title={isEn ? `Remove unit "${activeUnit}"` : `ลบหน่วย "${activeUnit}" ออกจากรายการ`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -2863,7 +3027,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                                 : 'bg-stone-100 text-stone-700 border-stone-200 hover:bg-stone-200'
                             }`}
                           >
-                            {w} {activeUnit}
+                            {w} {localizeUnit(activeUnit, lang)}
                           </button>
                         ))}
                       </div>
@@ -2882,7 +3046,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               handleAddCustomUnit();
                             }
                           }}
-                          placeholder="พิมพ์ชื่อหน่วยใหม่ เช่น ทัพพี, ห่อ, กล่องเล็ก"
+                          placeholder={isEn ? 'New unit name e.g. scoop, pack, cup' : 'พิมพ์ชื่อหน่วยใหม่ เช่น ทัพพี, ห่อ, กล่องเล็ก'}
                           className="flex-1 p-2 bg-stone-50 border border-[#D6CEBE] rounded-xl text-xs font-semibold text-stone-900 focus:outline-none focus:border-[#F27D26]"
                         />
                         <button
@@ -2890,7 +3054,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           onClick={handleAddCustomUnit}
                           className="px-3 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl text-[11px] cursor-pointer"
                         >
-                          เพิ่มหน่วย
+                          {isEn ? 'Add Unit' : 'เพิ่มหน่วย'}
                         </button>
                         <button
                           type="button"
@@ -2900,7 +3064,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           }}
                           className="px-2.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-600 font-semibold rounded-xl text-[11px] cursor-pointer"
                         >
-                          ยกเลิก
+                          {isEn ? 'Cancel' : 'ยกเลิก'}
                         </button>
                       </div>
                     )}
@@ -2910,11 +3074,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
               {/* 4. ราคาขายแต่ละช่องทาง */}
               <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl space-y-3">
-                <div className="font-black text-stone-900 text-xs">การตั้งราคาขายแต่ละช่องทาง (บาท)</div>
+                <div className="font-black text-stone-900 text-xs">
+                  {isEn ? 'Channel Selling Prices (THB)' : 'การตั้งราคาขายแต่ละช่องทาง (บาท)'}
+                </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      ราคาหน้าร้าน (Dine-in) <span className="text-rose-500">*</span>
+                      {isEn ? 'Dine-in Price' : 'ราคาหน้าร้าน (Dine-in)'} <span className="text-rose-500">*</span>
                     </label>
                     <NumericInput
                       min="0"
@@ -2938,7 +3104,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      ราคาใส่กล่อง (Takeaway)
+                      {isEn ? 'Takeaway Price' : 'ราคาใส่กล่อง (Takeaway)'}
                     </label>
                     <NumericInput
                       min="0"
@@ -2955,7 +3121,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      ราคา Grab Food
+                      {isEn ? 'GrabFood Price' : 'ราคา Grab Food'}
                     </label>
                     <NumericInput
                       min="0"
@@ -2972,7 +3138,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      ราคา Line Man
+                      {isEn ? 'LINE MAN Price' : 'ราคา Line Man'}
                     </label>
                     <NumericInput
                       min="0"
@@ -2989,7 +3155,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      ราคา Robinhood
+                      {isEn ? 'Robinhood Price' : 'ราคา Robinhood'}
                     </label>
                     <NumericInput
                       min="0"
@@ -3006,7 +3172,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      ค่ากล่อง/แพ็กเกจจิ้ง (บาท)
+                      {isEn ? 'Box / Packaging Cost (THB)' : 'ค่ากล่อง/แพ็กเกจจิ้ง (บาท)'}
                     </label>
                     <NumericInput
                       min="0"
@@ -3027,21 +3193,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-stone-900 text-xs flex items-center gap-1.5">
-                    <span>📡 ข้อมูลเชื่อมต่อระบบ POS (POS Integration)</span>
+                    <span>{isEn ? '📡 POS Integration Data' : '📡 ข้อมูลเชื่อมต่อระบบ POS (POS Integration)'}</span>
                   </span>
                   <span className="text-[10px] text-stone-500 font-mono">
-                    SKU & Channel Availability
+                    {isEn ? 'SKU & Channel Availability' : 'SKU และช่องทางจำหน่าย'}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      รหัสตัวเลือก / SKU (เชื่อม POS)
+                      {isEn ? 'Option Code / SKU (POS Sync)' : 'รหัสตัวเลือก / SKU (เชื่อม POS)'}
                     </label>
                     <input
                       type="text"
-                      placeholder="เช่น KPR-PORK, MK01-1"
+                      placeholder={isEn ? 'e.g. KPR-PORK, MK01-1' : 'เช่น KPR-PORK, MK01-1'}
                       value={variantModalState.variant?.code || variantModalState.variant?.sku || ''}
                       onChange={(e) =>
                         setVariantModalState((prev) => ({
@@ -3059,11 +3225,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      บาร์โค้ด (Barcode)
+                      {isEn ? 'Barcode' : 'บาร์โค้ด (Barcode)'}
                     </label>
                     <input
                       type="text"
-                      placeholder="เช่น 885001234567"
+                      placeholder={isEn ? 'e.g. 885001234567' : 'เช่น 885001234567'}
                       value={variantModalState.variant?.barcode || ''}
                       onChange={(e) =>
                         setVariantModalState((prev) => ({
@@ -3091,7 +3257,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       className="w-4 h-4 text-rose-600 rounded border-stone-300 focus:ring-rose-500 cursor-pointer"
                     />
                     <span className="text-xs font-bold text-rose-700">
-                      ⚠️ วัตถุดิบหมด / งดขายชั่วคราว (Out of Stock)
+                      {isEn ? '⚠️ Out of Stock / Unavailable' : '⚠️ วัตถุดิบหมด / งดขายชั่วคราว (Out of Stock)'}
                     </span>
                   </label>
 
@@ -3108,7 +3274,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       className="w-4 h-4 text-[#F27D26] rounded border-stone-300 focus:ring-[#F27D26] cursor-pointer"
                     />
                     <span className="text-xs font-bold text-stone-700">
-                      เปิดใช้งานในระบบ (Active)
+                      {isEn ? 'Active in System' : 'เปิดใช้งานในระบบ (Active)'}
                     </span>
                   </label>
                 </div>
@@ -3116,12 +3282,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 {/* Channel selection */}
                 <div className="pt-1 border-t border-stone-200">
                   <label className="block text-stone-700 mb-1.5 font-bold text-[11px]">
-                    ช่องทางจำหน่ายที่เปิดขาย (Available Channels):
+                    {isEn ? 'Available Channels:' : 'ช่องทางจำหน่ายที่เปิดขาย (Available Channels):'}
                   </label>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { id: 'DINE_IN', label: 'หน้าร้าน (Dine-in)' },
-                      { id: 'TAKEAWAY', label: 'ใส่กล่อง (Takeaway)' },
+                      { id: 'DINE_IN', label: isEn ? 'Dine-in' : 'หน้าร้าน (Dine-in)' },
+                      { id: 'TAKEAWAY', label: isEn ? 'Takeaway' : 'ใส่กล่อง (Takeaway)' },
                       { id: 'GRAB', label: 'GrabFood' },
                       { id: 'LINEMAN', label: 'LINE MAN' },
                     ].map((ch) => {
@@ -3185,8 +3351,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   meatCost = sCost + qCost;
                   costDetail =
                     shrimpIng || squidIng
-                      ? `กุ้ง ฿${sCost.toFixed(2)} + หมึก ฿${qCost.toFixed(2)}`
-                      : 'ยังไม่มีข้อมูลราคาวัตถุดิบ';
+                      ? (isEn
+                          ? `Shrimp ฿${sCost.toFixed(2)} + Squid ฿${qCost.toFixed(2)}`
+                          : `กุ้ง ฿${sCost.toFixed(2)} + หมึก ฿${qCost.toFixed(2)}`)
+                      : (isEn ? 'Missing ingredient price' : 'ยังไม่มีข้อมูลราคาวัตถุดิบ');
                 } else {
                   const linked = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
                   const unitCost = linked?.costPerBaseUnit || 0;
@@ -3204,10 +3372,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     const baseU = linked.baseUnit || linked.usageUnit || 'g';
                     costDetail =
                       baseU === 'g'
-                        ? `฿${(unitCost * 1000).toFixed(0)}/กก.`
-                        : `฿${unitCost.toFixed(2)}/${baseU}`;
+                        ? (isEn ? `฿${(unitCost * 1000).toFixed(0)}/kg` : `฿${(unitCost * 1000).toFixed(0)}/กก.`)
+                        : `฿${unitCost.toFixed(2)}/${localizeUnit(baseU, lang)}`;
                   } else {
-                    costDetail = 'ยังไม่ได้เลือกวัตถุดิบหรือยังไม่มีราคา';
+                    costDetail = isEn ? 'No ingredient selected or missing price' : 'ยังไม่ได้เลือกวัตถุดิบหรือยังไม่มีราคา';
                   }
                 }
 
@@ -3218,9 +3386,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 const estFc = sellPrice > 0 ? (meatCost / sellPrice) * 100 : 0;
 
                 return (
-                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-mono">
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-mono flex-wrap gap-2">
                     <div>
-                      <span className="text-emerald-900 font-bold">ต้นทุนเนื้อสัตว์: </span>
+                      <span className="text-emerald-900 font-bold">
+                        {isEn ? 'Protein Cost: ' : 'ต้นทุนเนื้อสัตว์: '}
+                      </span>
                       <strong className="text-emerald-950 font-black">฿{meatCost.toFixed(2)}</strong>
                       {costDetail && (
                         <span className="text-[10px] text-emerald-700 ml-1">
@@ -3229,7 +3399,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       )}
                     </div>
                     <div>
-                      <span className="text-stone-700 font-bold">กำไรหน้าร้านเบื้องต้น: </span>
+                      <span className="text-stone-700 font-bold">
+                        {isEn ? 'Est. Dine-in Profit: ' : 'กำไรหน้าร้านเบื้องต้น: '}
+                      </span>
                       {sellPrice > 0 ? (
                         <>
                           <strong className={`font-black ${estProfit < 0 ? 'text-rose-600' : 'text-emerald-800'}`}>
@@ -3240,7 +3412,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           </span>
                         </>
                       ) : (
-                        <span className="text-[10px] text-amber-700 font-sans font-bold">กรุณาระบุราคาขาย</span>
+                        <span className="text-[10px] text-amber-700 font-sans font-bold">
+                          {isEn ? 'Enter selling price' : 'กรุณาระบุราคาขาย'}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -3264,13 +3438,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   }
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {isEn ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer"
                 >
-                  {variantModalState.mode === 'ADD' ? 'บันทึกตัวเลือกใหม่' : 'บันทึกการแก้ไข'}
+                  {variantModalState.mode === 'ADD'
+                    ? (isEn ? 'Save New Option' : 'บันทึกตัวเลือกใหม่')
+                    : (isEn ? 'Save Changes' : 'บันทึกการแก้ไข')}
                 </button>
               </div>
             </form>
@@ -3288,8 +3464,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   <Trash2 className="w-4 h-4" />
                 </span>
                 <div>
-                  <h3 className="font-bold text-[#1C1917] text-base">ยืนยันการลบตัวเลือกเนื้อสัตว์</h3>
-                  <p className="text-xs text-stone-500 font-medium">เมนู: {variantToDelete.menu.name}</p>
+                  <h3 className="font-bold text-[#1C1917] text-base">
+                    {isEn ? 'Confirm Delete Meat Variant' : 'ยืนยันการลบตัวเลือกเนื้อสัตว์'}
+                  </h3>
+                  <p className="text-xs text-stone-500 font-medium">
+                    {isEn ? 'Menu:' : 'เมนู:'}{' '}
+                    {getLocalizedText(lang, variantToDelete.menu.thaiName || variantToDelete.menu.name, variantToDelete.menu.englishName)}
+                  </p>
                 </div>
               </div>
               <button
@@ -3305,10 +3486,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="font-bold text-xs">
-                    ต้องการลบตัวเลือก "{variantToDelete.variant.name || variantToDelete.variant.proteinType}" ใช่หรือไม่?
+                    {isEn
+                      ? `Delete option "${getLocalizedText('en', variantToDelete.variant.thaiName || variantToDelete.variant.name || variantToDelete.variant.proteinType, variantToDelete.variant.englishName)}"?`
+                      : `ต้องการลบตัวเลือก "${variantToDelete.variant.name || variantToDelete.variant.proteinType}" ใช่หรือไม่?`}
                   </p>
                   <p className="text-[11px] text-rose-700 leading-relaxed">
-                    ตัวเลือกเนื้อสัตว์นี้จะถูกลบออกจากตารางต้นทุนและการตั้งราคาของเมนู {variantToDelete.menu.name} ทันที
+                    {isEn
+                      ? `This meat option will be removed from the cost & pricing table of ${getLocalizedText('en', variantToDelete.menu.thaiName || variantToDelete.menu.name, variantToDelete.menu.englishName)} immediately.`
+                      : `ตัวเลือกเนื้อสัตว์นี้จะถูกลบออกจากตารางต้นทุนและการตั้งราคาของเมนู ${variantToDelete.menu.name} ทันที`}
                   </p>
                 </div>
               </div>
@@ -3318,7 +3503,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   onClick={() => setVariantToDelete(null)}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {isEn ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="button"
@@ -3326,7 +3511,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>ยืนยันการลบตัวเลือก</span>
+                  <span>{isEn ? 'Confirm Delete Option' : 'ยืนยันการลบตัวเลือก'}</span>
                 </button>
               </div>
             </div>

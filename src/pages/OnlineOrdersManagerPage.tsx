@@ -661,7 +661,15 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                   ) : (
                     <Copy className="w-3.5 h-3.5" />
                   )}
-                  <span>{copiedKey === 'customer' ? 'คัดลอกแล้ว' : 'คัดลอก'}</span>
+                  <span>
+                    {copiedKey === 'customer'
+                      ? lang === 'th'
+                        ? 'คัดลอกแล้ว'
+                        : 'Copied'
+                      : lang === 'th'
+                      ? 'คัดลอก'
+                      : 'Copy'}
+                  </span>
                 </button>
                 <a
                   href={customerUrl}
@@ -669,7 +677,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                   rel="noopener noreferrer"
                   className="px-2.5 py-1 rounded-lg bg-orange-600 text-white text-[11px] font-bold inline-flex items-center gap-1"
                 >
-                  <span>เปิด</span>
+                  <span>{lang === 'th' ? 'เปิด' : 'Open'}</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
@@ -693,7 +701,15 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                   ) : (
                     <Copy className="w-3.5 h-3.5" />
                   )}
-                  <span>{copiedKey === 'rider' ? 'คัดลอกแล้ว' : 'คัดลอก'}</span>
+                  <span>
+                    {copiedKey === 'rider'
+                      ? lang === 'th'
+                        ? 'คัดลอกแล้ว'
+                        : 'Copied'
+                      : lang === 'th'
+                      ? 'คัดลอก'
+                      : 'Copy'}
+                  </span>
                 </button>
                 <a
                   href={riderUrl}
@@ -701,7 +717,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                   rel="noopener noreferrer"
                   className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 text-[11px] font-bold inline-flex items-center gap-1"
                 >
-                  <span>เปิด</span>
+                  <span>{lang === 'th' ? 'เปิด' : 'Open'}</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               </div>

@@ -35,7 +35,8 @@ import {
   calculateIngredientCost,
   analyzePriceChangeImpact,
 } from '../services/calculationEngine';
-import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
+import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { NumericInput } from './common/NumericInput';
 
 interface IngredientsViewProps {
@@ -45,6 +46,7 @@ interface IngredientsViewProps {
   menuNamesMap: Map<string, string>;
   settings: RestaurantSettings;
   priceHistory: PriceHistoryRecord[];
+  lang?: 'th' | 'en';
   onSaveIngredient: (ingredient: Ingredient) => void;
   onDeleteIngredient?: (id: string) => void;
   onReorderIngredients?: (reordered: Ingredient[]) => void;
@@ -58,11 +60,14 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   menuNamesMap,
   settings,
   priceHistory,
+  lang: propLang,
   onSaveIngredient,
   onDeleteIngredient,
   onReorderIngredients,
   onRecordPriceChange,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -236,23 +241,28 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
 
   // Filtered ingredients
   const filteredIngredients = ingredients.filter((ing) => {
+    const q = searchTerm.toLowerCase();
     const matchesSearch =
-      ing.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (ing.notes && ing.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+      ing.name.toLowerCase().includes(q) ||
+      (ing.englishName && ing.englishName.toLowerCase().includes(q)) ||
+      getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName).toLowerCase().includes(q) ||
+      (ing.notes && ing.notes.toLowerCase().includes(q));
     const matchesCategory = selectedCategory === 'ALL' || ing.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
-  // Sorted ingredients (Ascending / Descending by name, supporting Thai locale)
+  // Sorted ingredients (Ascending / Descending by display name)
   const displayedIngredients = React.useMemo(() => {
     if (sortOrder === 'default') {
       return filteredIngredients;
     }
     return [...filteredIngredients].sort((a, b) => {
-      const cmp = a.name.localeCompare(b.name, 'th', { sensitivity: 'base', numeric: true });
+      const nameA = getLocalizedText(lang, a.thaiName || a.name, a.englishName);
+      const nameB = getLocalizedText(lang, b.thaiName || b.name, b.englishName);
+      const cmp = nameA.localeCompare(nameB, lang === 'en' ? 'en' : 'th', { sensitivity: 'base', numeric: true });
       return sortOrder === 'asc' ? cmp : -cmp;
     });
-  }, [filteredIngredients, sortOrder]);
+  }, [filteredIngredients, sortOrder, lang]);
 
   // Drag & drop and reorder state
   const [draggedIngredientId, setDraggedIngredientId] = useState<string | null>(null);
@@ -439,8 +449,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       newCostPerUnit: calc.costPerBaseUnit,
       unit: simulatingIngredient.usageUnit,
       date: new Date().toISOString().slice(0, 10),
-      reason: priceChangeReason || 'ปรับราคาจากโปรแกรมจำลองผลกระทบ',
-      user: `${settings.userRole} (Tony)`,
+      reason: priceChangeReason || (lang === 'th' ? 'ปรับราคาจากโปรแกรมจำลองผลกระทบ' : 'Price adjusted from Impact Simulator'),
+      user: `${settings.userRole}`,
     };
 
     onRecordPriceChange(historyRecord);
@@ -464,12 +474,12 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
 
   return (
     <div className="flex flex-col h-[calc(100vh-5.5rem)] min-h-[500px] overflow-hidden -mb-8">
-      {/* LOCKED TOP SECTION (Title, Action buttons, Search & Category filters) */}
+      {/* LOCKED TOP SECTION */}
       <div className="shrink-0 z-20 space-y-3 pb-3 bg-stone-900/40 backdrop-blur-md pt-1">
         {/* Title & Actions */}
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 shadow-sm">
           <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-            ฐานข้อมูลวัตถุดิบและต้นทุน Yield
+            {lang === 'th' ? 'ฐานข้อมูลวัตถุดิบและต้นทุน Yield' : 'Ingredients & Yield Database'}
           </h1>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -479,7 +489,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               className="px-3.5 py-2 bg-white/10 hover:bg-white/15 border border-white/15 text-white font-bold rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-4 h-4 text-[#F27D26]" />
-              <span>+ เพิ่มหมวดหมู่</span>
+              <span>{lang === 'th' ? '+ เพิ่มหมวดหมู่' : '+ Add Category'}</span>
             </button>
 
             <button
@@ -488,7 +498,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               className="px-4 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl text-xs shadow-lg shadow-[#F27D26]/20 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>+ เพิ่มวัตถุดิบใหม่</span>
+              <span>{lang === 'th' ? '+ เพิ่มวัตถุดิบใหม่' : '+ Add Ingredient'}</span>
             </button>
           </div>
         </div>
@@ -503,7 +513,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               <input
                 type="text"
                 autoFocus
-                placeholder="ค้นหาวัตถุดิบ..."
+                placeholder={lang === 'th' ? 'ค้นหาวัตถุดิบ...' : 'Search ingredients...'}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-9 pr-8 py-1.5 bg-black/40 border border-[#F27D26]/60 rounded-xl text-xs text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-[#F27D26]"
@@ -515,7 +525,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   setIsSearchExpanded(false);
                 }}
                 className="absolute right-2.5 text-white/40 hover:text-white p-0.5 cursor-pointer"
-                title="ปิดค้นหา"
+                title={lang === 'th' ? 'ปิดค้นหา' : 'Close search'}
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -529,7 +539,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   ? 'bg-[#F27D26]/20 border-[#F27D26] text-[#F27D26]'
                   : 'bg-white/5 hover:bg-white/10 border-white/10 text-white/60 hover:text-white'
               }`}
-              title="ค้นหาวัตถุดิบ"
+              title={lang === 'th' ? 'ค้นหาวัตถุดิบ' : 'Search ingredients'}
             >
               <Search className="w-4 h-4" />
               {searchTerm && (
@@ -555,9 +565,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 ? 'bg-[#F27D26] text-black font-bold shadow-md shadow-[#F27D26]/20'
                 : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/5'
             } ${dragOverCategory === 'ALL' ? 'ring-2 ring-[#F27D26] bg-[#F27D26]/20 border-[#F27D26]' : ''}`}
-            title="แสดงวัตถุดิบทั้งหมด (หรือลากหมวดหมู่อื่นมาวางที่นี่เพื่อย้ายไปอันดับแรก)"
+            title={lang === 'th' ? 'แสดงวัตถุดิบทั้งหมด (หรือลากหมวดหมู่อื่นมาวางที่นี่เพื่อย้ายไปอันดับแรก)' : 'Show all ingredients (or drop category here to move first)'}
           >
-            ทั้งหมด
+            {lang === 'th' ? 'ทั้งหมด' : 'All'}
           </button>
 
           {/* Reorderable Categories */}
@@ -567,6 +577,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
             const isDragOver = dragOverCategory === cat;
             const isFirst = index === 0;
             const isLast = index === allCategories.length - 1;
+            const catLabel = getLocalizedText(lang, cat);
 
             return (
               <div
@@ -583,7 +594,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 } ${isDragged ? 'opacity-40 scale-95 ring-2 ring-[#F27D26]' : ''} ${
                   isDragOver ? 'ring-2 ring-[#F27D26] bg-[#F27D26]/20 border-[#F27D26]' : ''
                 }`}
-                title={`คลิกเลือก | กดค้างแล้วลากวาง หรือใช้ปุ่มลูกศร ซ้าย-ขวา เพื่อย้ายตำแหน่ง`}
+                title={lang === 'th' ? 'คลิกเลือก | กดค้างแล้วลากวาง หรือใช้ปุ่มลูกศร ซ้าย-ขวา เพื่อย้ายตำแหน่ง' : 'Click to filter | Drag or use arrows to reorder'}
               >
                 {/* Move Left Button */}
                 <button
@@ -600,7 +611,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       ? 'hover:bg-black/15 text-black/70 hover:text-black cursor-pointer'
                       : 'text-white/40 hover:text-white hover:bg-white/10 cursor-pointer'
                   }`}
-                  title={`ย้ายหมวดหมู่ "${cat}" ไปทางซ้าย`}
+                  title={lang === 'th' ? `ย้ายหมวดหมู่ "${catLabel}" ไปทางซ้าย` : `Move "${catLabel}" left`}
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
@@ -617,7 +628,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         : 'text-white/30 group-hover:text-white/70'
                     }`}
                   />
-                  <span>{cat}</span>
+                  <span>{catLabel}</span>
                 </div>
 
                 {/* Move Right Button */}
@@ -635,7 +646,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       ? 'hover:bg-black/15 text-black/70 hover:text-black cursor-pointer'
                       : 'text-white/40 hover:text-white hover:bg-white/10 cursor-pointer'
                   }`}
-                  title={`ย้ายหมวดหมู่ "${cat}" ไปทางขวา`}
+                  title={lang === 'th' ? `ย้ายหมวดหมู่ "${catLabel}" ไปทางขวา` : `Move "${catLabel}" right`}
                 >
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
@@ -652,7 +663,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
           <table className="w-full text-left border-collapse text-xs">
             <thead className="sticky top-0 z-20 bg-[#161618] border-b border-white/15 shadow-sm">
               <tr className="text-white/70 font-bold uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-3 w-12 text-center">ลำดับ</th>
+                <th className="py-3 px-3 w-12 text-center">{lang === 'th' ? 'ลำดับ' : 'Order'}</th>
                 <th className="py-3 px-4 select-none">
                   <div className="flex items-center gap-2">
                     <button
@@ -661,9 +672,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         setSortOrder((prev) => (prev === 'default' ? 'asc' : prev === 'asc' ? 'desc' : 'default'));
                       }}
                       className="flex items-center gap-1 font-bold uppercase tracking-wider text-[10px] text-white/70 hover:text-white transition-colors cursor-pointer group"
-                      title="คลิกเพื่อสลับ: ลำดับปกติ -> น้อยไปมาก (ก-ฮ) -> มากไปน้อย (ฮ-ก)"
+                      title={lang === 'th' ? 'คลิกเพื่อสลับ: ลำดับปกติ -> น้อยไปมาก (ก-ฮ) -> มากไปน้อย (ฮ-ก)' : 'Toggle sort order'}
                     >
-                      <span>วัตถุดิบ</span>
+                      <span>{lang === 'th' ? 'วัตถุดิบ' : 'Ingredient'}</span>
                       {sortOrder === 'asc' ? (
                         <ArrowUp className="w-2.5 h-2.5 text-[#F27D26]" />
                       ) : sortOrder === 'desc' ? (
@@ -685,10 +696,10 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                             ? 'bg-[#F27D26] text-black font-bold shadow-xs'
                             : 'text-white/60 hover:text-white hover:bg-white/10'
                         }`}
-                        title="เรียงลำดับจากน้อยไปมาก (ก-ฮ)"
+                        title={lang === 'th' ? 'เรียงลำดับจากน้อยไปมาก (ก-ฮ)' : 'Sort A-Z'}
                       >
                         <ArrowUp className="w-2.5 h-2.5" />
-                        <span>ก-ฮ</span>
+                        <span>{lang === 'th' ? 'ก-ฮ' : 'A-Z'}</span>
                       </button>
 
                       <button
@@ -702,21 +713,21 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                             ? 'bg-[#F27D26] text-black font-bold shadow-xs'
                             : 'text-white/60 hover:text-white hover:bg-white/10'
                         }`}
-                        title="เรียงลำดับจากมากไปน้อย (ฮ-ก)"
+                        title={lang === 'th' ? 'เรียงลำดับจากมากไปน้อย (ฮ-ก)' : 'Sort Z-A'}
                       >
                         <ArrowDown className="w-2.5 h-2.5" />
-                        <span>ฮ-ก</span>
+                        <span>{lang === 'th' ? 'ฮ-ก' : 'Z-A'}</span>
                       </button>
                     </div>
                   </div>
                 </th>
-                <th className="py-3 px-3">ปริมาณที่ซื้อ</th>
-                <th className="py-3 px-3">ราคาซื้อ</th>
+                <th className="py-3 px-3">{lang === 'th' ? 'ปริมาณที่ซื้อ' : 'Purchase Qty'}</th>
+                <th className="py-3 px-3">{lang === 'th' ? 'ราคาซื้อ' : 'Purchase Price'}</th>
                 <th className="py-3 px-3">Yield (%)</th>
-                <th className="py-3 px-3">น้ำหนักสุทธิ</th>
-                <th className="py-3 px-3">ต้นทุนจริงหลัง Yield</th>
-                <th className="py-3 px-3">ต้นทุนต่อหน่วยใช้งาน</th>
-                <th className="py-3 px-4 text-right">จัดการ</th>
+                <th className="py-3 px-3">{lang === 'th' ? 'น้ำหนักสุทธิ' : 'Net Yield Qty'}</th>
+                <th className="py-3 px-3">{lang === 'th' ? 'ต้นทุนจริงหลัง Yield' : 'Yield Cost'}</th>
+                <th className="py-3 px-3">{lang === 'th' ? 'ต้นทุนต่อหน่วยใช้งาน' : 'Cost / Usage Unit'}</th>
+                <th className="py-3 px-4 text-right">{lang === 'th' ? 'จัดการ' : 'Actions'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -727,6 +738,11 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 const globalIndex = ingredients.findIndex((i) => i.id === ing.id);
                 const isFirst = globalIndex <= 0;
                 const isLast = globalIndex === -1 || globalIndex >= ingredients.length - 1;
+                const primaryName = getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName);
+                const secondaryName =
+                  lang === 'en'
+                    ? ing.thaiName || ing.name
+                    : (ing.englishName || translateThaiToEnglish(ing.name) || '').trim();
 
                 return (
                   <tr
@@ -751,7 +767,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                           onDragStart={(e) => handleDragStart(e, ing.id)}
                           onDragEnd={handleDragEnd}
                           className="p-1 text-white/40 hover:text-[#F27D26] cursor-grab active:cursor-grabbing hover:bg-white/10 rounded transition-colors"
-                          title="กดค้างแล้วลากเพื่อย้ายตำแหน่ง"
+                          title={lang === 'th' ? 'กดค้างแล้วลากเพื่อย้ายตำแหน่ง' : 'Drag to reorder'}
                         >
                           <GripVertical className="w-4 h-4" />
                         </div>
@@ -765,7 +781,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                                 ? 'text-white/15 cursor-not-allowed'
                                 : 'text-white/50 hover:text-white hover:bg-white/10 cursor-pointer'
                             }`}
-                            title="ย้ายขึ้น"
+                            title={lang === 'th' ? 'ย้ายขึ้น' : 'Move up'}
                           >
                             <ChevronUp className="w-3.5 h-3.5" />
                           </button>
@@ -778,7 +794,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                                 ? 'text-white/15 cursor-not-allowed'
                                 : 'text-white/50 hover:text-white hover:bg-white/10 cursor-pointer'
                             }`}
-                            title="ย้ายลง"
+                            title={lang === 'th' ? 'ย้ายลง' : 'Move down'}
                           >
                             <ChevronDown className="w-3.5 h-3.5" />
                           </button>
@@ -789,26 +805,23 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     <td
                       className="py-3.5 px-4 font-semibold text-white cursor-pointer select-none"
                       onDoubleClick={() => handleOpenEdit(ing)}
-                      title="ดับเบิลคลิกเพื่อแก้ไขข้อมูลวัตถุดิบ"
+                      title={lang === 'th' ? 'ดับเบิลคลิกเพื่อแก้ไขข้อมูลวัตถุดิบ' : 'Double-click to edit ingredient'}
                     >
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="hover:text-[#F27D26] hover:underline transition-colors">
-                          {ing.name}
+                          {primaryName}
                         </span>
-                        {(() => {
-                          const enName = (ing.englishName || translateThaiToEnglish(ing.name) || '').trim();
-                          return enName && enName !== ing.name ? (
-                            <span className="text-[10px] font-normal text-white/50">
-                              ({enName})
-                            </span>
-                          ) : null;
-                        })()}
+                        {lang === 'th' && secondaryName && secondaryName !== primaryName && (
+                          <span className="text-[10px] font-normal text-white/50">
+                            ({secondaryName})
+                          </span>
+                        )}
                         {(!ing.purchasePrice || ing.purchasePrice <= 0) && (
                           <span
                             className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                            title="ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง"
+                            title={lang === 'th' ? 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง' : 'Purchase price missing — cost may be understated'}
                           >
-                            ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง
+                            {lang === 'th' ? 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง' : 'Missing Purchase Price'}
                           </span>
                         )}
                         {ing.isReviewRequired && (!ing.purchasePrice || ing.purchasePrice > 0) && (
@@ -816,18 +829,18 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                             className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/30"
                             title={ing.reviewReason}
                           >
-                            รอตรวจทาน
+                            {lang === 'th' ? 'รอตรวจทาน' : 'Review Required'}
                           </span>
                         )}
                         {!ing.active && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/10 text-white/40">
-                            ระงับ
+                            {lang === 'th' ? 'ระงับ' : 'Inactive'}
                           </span>
                         )}
                       </div>
                     </td>
                     <td className="py-3.5 px-3 text-white/70 font-mono">
-                      {ing.purchaseQuantity.toLocaleString()} {ing.purchaseUnit}
+                      {ing.purchaseQuantity.toLocaleString()} {localizeUnit(ing.purchaseUnit, lang)}
                     </td>
                     <td className="py-3.5 px-3 font-mono text-white font-bold">
                       ฿{ing.purchasePrice.toLocaleString()}
@@ -846,37 +859,35 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       </span>
                     </td>
                     <td className="py-3.5 px-3 text-white/70 font-mono">
-                      {ing.actualQuantity} {ing.actualUnit}
+                      {ing.actualQuantity} {localizeUnit(ing.actualUnit, lang)}
                     </td>
                     <td className="py-3.5 px-3 font-mono font-semibold text-white/80">
                       ฿{ing.actualCost.toFixed(2)}
                     </td>
                     <td className="py-3.5 px-3">
                       <div className="font-mono font-bold text-[#FFC107] text-xs">
-                        ฿{ing.costPerBaseUnit.toFixed(4)} / {ing.usageUnit}
+                        ฿{ing.costPerBaseUnit.toFixed(4)} / {localizeUnit(ing.usageUnit, lang)}
                       </div>
                       {isShrimp && ing.piecesPerPurchaseUnit && (
                         <div className="text-[10px] text-white/40 font-normal">
-                          ({ing.piecesPerPurchaseUnit} ตัว/กล่อง)
+                          ({ing.piecesPerPurchaseUnit} {lang === 'th' ? 'ตัว/กล่อง' : 'pcs/box'})
                         </div>
                       )}
                     </td>
                     <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
-                      {/* Edit button */}
                       <button
                         type="button"
                         onClick={() => handleOpenEdit(ing)}
                         className="p-1.5 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer"
-                        title="แก้ไขวัตถุดิบ"
+                        title={lang === 'th' ? 'แก้ไขวัตถุดิบ' : 'Edit ingredient'}
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      {/* Delete button */}
                       <button
                         type="button"
                         onClick={() => onDeleteIngredient?.(ing.id)}
                         className="p-1.5 rounded-lg hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors cursor-pointer"
-                        title="ลบวัตถุดิบ"
+                        title={lang === 'th' ? 'ลบวัตถุดิบ' : 'Delete ingredient'}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -887,7 +898,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               {displayedIngredients.length === 0 && (
                 <tr>
                   <td colSpan={9} className="py-12 text-center text-white/40 text-xs">
-                    ไม่พบรายการวัตถุดิบ
+                    {lang === 'th' ? 'ไม่พบรายการวัตถุดิบ' : 'No ingredients found'}
                   </td>
                 </tr>
               )}
@@ -901,7 +912,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
           <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-white/20 text-white">
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <h2 className="text-lg font-bold text-white">
-                {editingIngredient.id ? 'แก้ไขข้อมูลวัตถุดิบ' : 'เพิ่มวัตถุดิบใหม่'}
+                {editingIngredient.id
+                  ? lang === 'th' ? 'แก้ไขข้อมูลวัตถุดิบ' : 'Edit Ingredient'
+                  : lang === 'th' ? 'เพิ่มวัตถุดิบใหม่' : 'Add New Ingredient'}
               </h2>
               <button
                 type="button"
@@ -917,7 +930,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-white/80 mb-1">
-                    ชื่อวัตถุดิบ (ไทย) <span className="text-rose-400">*</span>
+                    {lang === 'th' ? 'ชื่อวัตถุดิบ (ไทย)' : 'Ingredient Name (Thai)'}{' '}
+                    <span className="text-rose-400">*</span>
                   </label>
                   <input
                     type="text"
@@ -938,12 +952,14 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       });
                     }}
                     className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none"
-                    placeholder="เช่น หมูหมัก, กุ้งสด XL"
+                    placeholder={lang === 'th' ? 'เช่น หมูหมัก, กุ้งสด XL' : 'e.g. Marinated Pork, Fresh Shrimp XL'}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-white/80 mb-1">หมวดหมู่</label>
+                  <label className="block font-bold text-white/80 mb-1">
+                    {lang === 'th' ? 'หมวดหมู่' : 'Category'}
+                  </label>
                   <select
                     value={editingIngredient.category || 'เนื้อสัตว์และอาหารทะเล'}
                     onChange={(e) =>
@@ -958,7 +974,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       .filter((c) => c !== 'ALL')
                       .map((cat) => (
                         <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
-                          {cat}
+                          {getLocalizedText(lang, cat)}
                         </option>
                       ))}
                   </select>
@@ -968,7 +984,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block font-bold text-white/80">
-                    ชื่อวัตถุดิบภาษาอังกฤษ (English Name — แปลอัตโนมัติ)
+                    {lang === 'th'
+                      ? 'ชื่อวัตถุดิบภาษาอังกฤษ (English Name — แปลอัตโนมัติ)'
+                      : 'English Name (Auto-translated)'}
                   </label>
                   <button
                     type="button"
@@ -980,7 +998,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     }
                     className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                   >
-                    แปลใหม่จากภาษาไทย
+                    {lang === 'th' ? 'แปลใหม่จากภาษาไทย' : 'Re-translate from Thai'}
                   </button>
                 </div>
                 <input
@@ -990,18 +1008,20 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     setEditingIngredient({ ...editingIngredient, englishName: e.target.value })
                   }
                   className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 font-medium focus:border-[#F27D26] focus:outline-none placeholder-white/30"
-                  placeholder="Auto-translated English name (editable)"
+                  placeholder={lang === 'th' ? 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ (แก้ไขได้)' : 'Auto-translated English name (editable)'}
                 />
               </div>
 
               {/* Purchase Details */}
               <div className="p-3.5 bg-white/5 rounded-2xl border border-white/10 space-y-3">
                 <div className="font-bold text-[#F27D26] text-xs uppercase tracking-wider">
-                  ข้อมูลการซื้อ (Purchase Specs)
+                  {lang === 'th' ? 'ข้อมูลการซื้อ (Purchase Specs)' : 'Purchase Specs'}
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-white/60 mb-1">ปริมาณที่ซื้อ</label>
+                    <label className="block text-white/60 mb-1">
+                      {lang === 'th' ? 'ปริมาณที่ซื้อ' : 'Purchase Qty'}
+                    </label>
                     <NumericInput
                       type="number"
                       step="any"
@@ -1021,12 +1041,14 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         });
                       }}
                       className="w-full p-2 bg-black/40 border border-white/15 rounded-xl font-mono text-white"
-                      placeholder="เช่น 1000"
+                      placeholder={lang === 'th' ? 'เช่น 1000' : 'e.g. 1000'}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-white/60 mb-1">หน่วยซื้อ</label>
+                    <label className="block text-white/60 mb-1">
+                      {lang === 'th' ? 'หน่วยซื้อ' : 'Purchase Unit'}
+                    </label>
                     <select
                       value={editingIngredient.purchaseUnit || 'g'}
                       onChange={(e) => {
@@ -1040,18 +1062,20 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       }}
                       className="w-full p-2 bg-black/40 border border-white/15 rounded-xl text-white cursor-pointer"
                     >
-                      <option value="g" className="bg-[#1a1a1a]">g (กรัม)</option>
-                      <option value="kg" className="bg-[#1a1a1a]">kg (กิโลกรัม)</option>
-                      <option value="ml" className="bg-[#1a1a1a]">ml (มิลลิลิตร)</option>
-                      <option value="L" className="bg-[#1a1a1a]">L (ลิตร)</option>
-                      <option value="ชิ้น" className="bg-[#1a1a1a]">ชิ้น</option>
-                      <option value="กล่อง" className="bg-[#1a1a1a]">กล่อง</option>
-                      <option value="ถุง" className="bg-[#1a1a1a]">ถุง</option>
+                      <option value="g" className="bg-[#1a1a1a]">{lang === 'th' ? 'g (กรัม)' : 'g (Gram)'}</option>
+                      <option value="kg" className="bg-[#1a1a1a]">{lang === 'th' ? 'kg (กิโลกรัม)' : 'kg (Kilogram)'}</option>
+                      <option value="ml" className="bg-[#1a1a1a]">{lang === 'th' ? 'ml (มิลลิลิตร)' : 'ml (Milliliter)'}</option>
+                      <option value="L" className="bg-[#1a1a1a]">{lang === 'th' ? 'L (ลิตร)' : 'L (Liter)'}</option>
+                      <option value="ชิ้น" className="bg-[#1a1a1a]">{lang === 'th' ? 'ชิ้น' : 'pc'}</option>
+                      <option value="กล่อง" className="bg-[#1a1a1a]">{lang === 'th' ? 'กล่อง' : 'box'}</option>
+                      <option value="ถุง" className="bg-[#1a1a1a]">{lang === 'th' ? 'ถุง' : 'bag'}</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-white/60 mb-1">ราคาซื้อ (บาท)</label>
+                    <label className="block text-white/60 mb-1">
+                      {lang === 'th' ? 'ราคาซื้อ (บาท)' : 'Purchase Price (THB)'}
+                    </label>
                     <NumericInput
                       type="number"
                       step="any"
@@ -1068,11 +1092,11 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   </div>
                 </div>
 
-                {/* Row 2: Actual Quantity after trimming & Yield Auto-calculation comparison */}
+                {/* Row 2: Actual Quantity after trimming */}
                 <div className="grid grid-cols-3 gap-3 pt-2.5 border-t border-white/10">
                   <div>
                     <label className="block text-emerald-400 font-bold mb-1">
-                      ปริมาณที่ได้จริง(หลังตัดแต่ง)
+                      {lang === 'th' ? 'ปริมาณที่ได้จริง(หลังตัดแต่ง)' : 'Usable Qty (After Trim)'}
                     </label>
                     <NumericInput
                       type="number"
@@ -1090,20 +1114,24 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         });
                       }}
                       className="w-full p-2 bg-black/40 border border-emerald-500/40 focus:border-emerald-400 rounded-xl font-mono font-bold text-emerald-300"
-                      placeholder="เช่น 950"
+                      placeholder={lang === 'th' ? 'เช่น 950' : 'e.g. 950'}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-white/60 mb-1">หน่วยที่ได้จริง</label>
+                    <label className="block text-white/60 mb-1">
+                      {lang === 'th' ? 'หน่วยที่ได้จริง' : 'Actual Unit'}
+                    </label>
                     <div className="w-full p-2 bg-black/20 border border-white/10 rounded-xl text-white/80 font-mono text-sm flex items-center justify-between">
-                      <span>{editingIngredient.actualUnit || editingIngredient.purchaseUnit || 'g'}</span>
-                      <span className="text-[10px] text-white/40">พร้อมปรุง</span>
+                      <span>{localizeUnit(editingIngredient.actualUnit || editingIngredient.purchaseUnit || 'g', lang)}</span>
+                      <span className="text-[10px] text-white/40">{lang === 'th' ? 'พร้อมปรุง' : 'Ready to cook'}</span>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-white/60 mb-1">Yield (%) คำนวณอัตโนมัติ</label>
+                    <label className="block text-white/60 mb-1">
+                      {lang === 'th' ? 'Yield (%) คำนวณอัตโนมัติ' : 'Auto-Calculated Yield (%)'}
+                    </label>
                     <div className="w-full p-2 bg-black/40 border border-emerald-500/30 rounded-xl font-mono flex items-center justify-between">
                       <span className="font-bold text-emerald-400 text-sm">
                         {editingIngredient.yieldPercent ?? 100}%
@@ -1111,7 +1139,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       {editingIngredient.purchaseQuantity && editingIngredient.actualQuantity !== undefined && (
                         <span className="text-[10px] text-rose-300">
                           {Number(editingIngredient.purchaseQuantity) > Number(editingIngredient.actualQuantity)
-                            ? `สูญเสีย -${(Number(editingIngredient.purchaseQuantity) - Number(editingIngredient.actualQuantity)).toFixed(1)} ${editingIngredient.purchaseUnit || 'g'}`
+                            ? `${lang === 'th' ? 'สูญเสีย' : 'Loss'} -${(Number(editingIngredient.purchaseQuantity) - Number(editingIngredient.actualQuantity)).toFixed(1)} ${localizeUnit(editingIngredient.purchaseUnit || 'g', lang)}`
                             : 'Yield 100%'}
                         </span>
                       )}
@@ -1123,11 +1151,13 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               {/* Yield & Preparation Specs */}
               <div className="p-3.5 bg-white/5 rounded-2xl border border-white/10 space-y-3">
                 <div className="font-bold text-[#FFC107] text-xs uppercase tracking-wider">
-                  การเตรียมและ Yield (Preparation & Yield %)
+                  {lang === 'th' ? 'การเตรียมและ Yield (Preparation & Yield %)' : 'Preparation & Yield %'}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-white/60 mb-1">Yield (%) หลังตัดแต่ง</label>
+                    <label className="block text-white/60 mb-1">
+                      {lang === 'th' ? 'Yield (%) หลังตัดแต่ง' : 'Yield (%) After Prep'}
+                    </label>
                     <NumericInput
                       type="number"
                       step="any"
@@ -1149,7 +1179,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-white/60 mb-1">หน่วยใช้งานในสูตร</label>
+                    <label className="block text-white/60 mb-1">
+                      {lang === 'th' ? 'หน่วยใช้งานในสูตร' : 'Recipe Usage Unit'}
+                    </label>
                     <select
                       value={editingIngredient.usageUnit || 'g'}
                       onChange={(e) =>
@@ -1160,26 +1192,32 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       }
                       className="w-full p-2 bg-black/40 border border-white/15 rounded-xl text-white cursor-pointer"
                     >
-                      <option value="g" className="bg-[#1a1a1a]">g (กรัม)</option>
-                      <option value="ตัว" className="bg-[#1a1a1a]">ตัว (คิดเป็นตัว เช่น กุ้ง)</option>
-                      <option value="ฟอง" className="bg-[#1a1a1a]">ฟอง (ไข่ไก่)</option>
-                      <option value="ml" className="bg-[#1a1a1a]">ml (มิลลิลิตร)</option>
-                      <option value="ชิ้น" className="bg-[#1a1a1a]">ชิ้น</option>
-                      <option value="จาน" className="bg-[#1a1a1a]">จาน</option>
+                      <option value="g" className="bg-[#1a1a1a]">{lang === 'th' ? 'g (กรัม)' : 'g (Gram)'}</option>
+                      <option value="ตัว" className="bg-[#1a1a1a]">{lang === 'th' ? 'ตัว (คิดเป็นตัว เช่น กุ้ง)' : 'pc (Counted item e.g. Shrimp)'}</option>
+                      <option value="ฟอง" className="bg-[#1a1a1a]">{lang === 'th' ? 'ฟอง (ไข่ไก่)' : 'egg (Egg)'}</option>
+                      <option value="ml" className="bg-[#1a1a1a]">{lang === 'th' ? 'ml (มิลลิลิตร)' : 'ml (Milliliter)'}</option>
+                      <option value="ชิ้น" className="bg-[#1a1a1a]">{lang === 'th' ? 'ชิ้น' : 'pc'}</option>
+                      <option value="จาน" className="bg-[#1a1a1a]">{lang === 'th' ? 'จาน' : 'plate'}</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Piece-based definition (กุ้ง/ไข่/ชิ้น/ลูก) */}
+                {/* Piece-based definition */}
                 {(['ตัว', 'ฟอง', 'ชิ้น', 'ลูก'].includes(editingIngredient.usageUnit || '') ||
                   (editingIngredient.piecesPerPurchaseUnit ?? 0) > 0) && (
                   <div className="mt-2 p-2.5 bg-[#FFC107]/10 rounded-xl border border-[#FFC107]/30 text-[11px] text-white/90 space-y-2">
                     <div>
-                      <span className="font-bold text-[#FFC107]">ของคิดเป็น{editingIngredient.usageUnit || 'ชิ้น'}:</span>{' '}
-                      ระบุจำนวนต่อ 1 หน่วยซื้อ (เช่น 30 ฟอง/แผง หรือ 60 ตัว/กล่อง)
+                      <span className="font-bold text-[#FFC107]">
+                        {lang === 'th'
+                          ? `ของคิดเป็น${editingIngredient.usageUnit || 'ชิ้น'}:`
+                          : `Counted by ${localizeUnit(editingIngredient.usageUnit || 'ชิ้น', lang)}:`}
+                      </span>{' '}
+                      {lang === 'th'
+                        ? 'ระบุจำนวนต่อ 1 หน่วยซื้อ (เช่น 30 ฟอง/แผง หรือ 60 ตัว/กล่อง)'
+                        : 'Specify pieces per 1 purchase unit (e.g. 30 eggs/tray or 60 pcs/box)'}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span>จำนวนต่อหน่วยซื้อ:</span>
+                      <span>{lang === 'th' ? 'จำนวนต่อหน่วยซื้อ:' : 'Count per purchase unit:'}</span>
                       <NumericInput
                         type="number"
                         value={editingIngredient.piecesPerPurchaseUnit || ''}
@@ -1190,9 +1228,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                           })
                         }
                         className="w-24 p-1 bg-black/40 border border-white/20 rounded font-bold text-white"
-                        placeholder="เช่น 30"
+                        placeholder={lang === 'th' ? 'เช่น 30' : 'e.g. 30'}
                       />
-                      <span>{editingIngredient.usageUnit || 'ชิ้น'}</span>
+                      <span>{localizeUnit(editingIngredient.usageUnit || 'ชิ้น', lang)}</span>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer text-white/80">
                       <input
@@ -1206,7 +1244,11 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         }
                         className="w-3.5 h-3.5 accent-[#FFC107] rounded"
                       />
-                      <span>จำนวนนี้หักเปลือก/หัวแล้ว (ไม่ต้องหัก Yield % ซ้ำ)</span>
+                      <span>
+                        {lang === 'th'
+                          ? 'จำนวนนี้หักเปลือก/หัวแล้ว (ไม่ต้องหัก Yield % ซ้ำ)'
+                          : 'Count is already trimmed/cleaned (do not deduct Yield % again)'}
+                      </span>
                     </label>
                   </div>
                 )}
@@ -1219,11 +1261,17 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   <div className="space-y-2">
                     <div className="p-3 bg-black/40 border border-white/10 rounded-2xl flex items-center justify-between font-mono">
                       <div>
-                        <div className="text-[10px] text-white/40">ต้นทุนจริงหลังหัก Yield</div>
+                        <div className="text-[10px] text-white/40">
+                          {lang === 'th' ? 'ต้นทุนจริงหลังหัก Yield' : 'Actual Cost (After Yield)'}
+                        </div>
                         <div className="font-bold text-sm text-white">฿{previewCalc.actualCost.toFixed(2)}</div>
                       </div>
                       <div className="text-right">
-                        <div className="text-[10px] text-[#F27D26]">ต้นทุนต่อหน่วยใช้งาน ({editingIngredient.usageUnit})</div>
+                        <div className="text-[10px] text-[#F27D26]">
+                          {lang === 'th'
+                            ? `ต้นทุนต่อหน่วยใช้งาน (${localizeUnit(editingIngredient.usageUnit, lang)})`
+                            : `Cost / Usage Unit (${localizeUnit(editingIngredient.usageUnit, lang)})`}
+                        </div>
                         <div className="font-bold text-base text-[#FFC107]">
                           ฿{previewCalc.costPerBaseUnit.toFixed(6)}
                         </div>
@@ -1231,7 +1279,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     </div>
                     {!previewCalc.isValid && previewCalc.errorMessage && (
                       <div className="p-2 bg-rose-500/15 border border-rose-500/30 rounded-xl text-[11px] text-rose-300 font-semibold">
-                        {previewCalc.errorMessage}
+                        {getLocalizedText(lang, previewCalc.errorMessage)}
                       </div>
                     )}
                   </div>
@@ -1245,13 +1293,13 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   onClick={() => setIsEditingModalOpen(false)}
                   className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  ยกเลิก
+                  {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  บันทึกข้อมูล
+                  {lang === 'th' ? 'บันทึกข้อมูล' : 'Save Ingredient'}
                 </button>
               </div>
             </form>
@@ -1267,10 +1315,14 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               <div>
                 <div className="flex items-center gap-1.5 text-xs font-bold text-[#F27D26] uppercase">
                   <Sparkles className="w-4 h-4" />
-                  <span>โปรแกรมจำลองผลกระทบการปรับราคา (Impact Engine)</span>
+                  <span>
+                    {lang === 'th'
+                      ? 'โปรแกรมจำลองผลกระทบการปรับราคา (Impact Engine)'
+                      : 'Price Change Impact Simulator'}
+                  </span>
                 </div>
                 <h2 className="text-xl font-bold text-white mt-1">
-                  {simulatingIngredient.name}
+                  {getLocalizedText(lang, simulatingIngredient.thaiName || simulatingIngredient.name, simulatingIngredient.englishName)}
                 </h2>
               </div>
               <button
@@ -1286,17 +1338,21 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               {/* Price inputs */}
               <div className="grid grid-cols-2 gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
                 <div>
-                  <span className="text-white/50 font-medium">ราคาซื้อเดิม:</span>
+                  <span className="text-white/50 font-medium">
+                    {lang === 'th' ? 'ราคาซื้อเดิม:' : 'Previous Price:'}
+                  </span>
                   <div className="text-base font-bold text-white font-mono mt-0.5">
                     ฿{simulatingIngredient.purchasePrice.toLocaleString()}
                   </div>
                   <div className="text-[11px] text-white/50">
-                    (฿{simulatingIngredient.costPerBaseUnit.toFixed(4)} / {simulatingIngredient.usageUnit})
+                    (฿{simulatingIngredient.costPerBaseUnit.toFixed(4)} / {localizeUnit(simulatingIngredient.usageUnit, lang)})
                   </div>
                 </div>
 
                 <div>
-                  <span className="text-[#F27D26] font-bold">ราคาซื้อใหม่ที่จำลอง:</span>
+                  <span className="text-[#F27D26] font-bold">
+                    {lang === 'th' ? 'ราคาซื้อใหม่ที่จำลอง:' : 'Simulated New Price:'}
+                  </span>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="font-bold text-white/70">฿</span>
                     <NumericInput
@@ -1308,19 +1364,21 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     />
                   </div>
                   <div className="text-[11px] text-[#FFC107] font-semibold mt-0.5">
-                    (฿{impactAnalysis.newCostPerBaseUnit.toFixed(4)} / {simulatingIngredient.usageUnit})
+                    (฿{impactAnalysis.newCostPerBaseUnit.toFixed(4)} / {localizeUnit(simulatingIngredient.usageUnit, lang)})
                   </div>
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold text-white/80 mb-1">เหตุผลในการปรับราคา:</label>
+                <label className="block font-bold text-white/80 mb-1">
+                  {lang === 'th' ? 'เหตุผลในการปรับราคา:' : 'Reason for Price Adjustment:'}
+                </label>
                 <input
                   type="text"
                   value={priceChangeReason}
                   onChange={(e) => setPriceChangeReason(e.target.value)}
                   className="w-full p-2 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none"
-                  placeholder="เช่น ราคาหน้าฟาร์มขยับขึ้น, น้ำมันแพง..."
+                  placeholder={lang === 'th' ? 'เช่น ราคาหน้าฟาร์มขยับขึ้น, น้ำมันแพง...' : 'e.g. Supplier price increase...'}
                 />
               </div>
 
@@ -1328,7 +1386,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               {impactAnalysis.affectedSauces.length > 0 && (
                 <div className="p-3.5 bg-[#FFC107]/10 border border-[#FFC107]/20 rounded-2xl space-y-2">
                   <div className="font-bold text-[#FFC107] text-[11px] uppercase">
-                    ซอสที่ได้รับผลกระทบ ({impactAnalysis.affectedSauces.length} รายการ)
+                    {lang === 'th'
+                      ? `ซอสที่ได้รับผลกระทบ (${impactAnalysis.affectedSauces.length} รายการ)`
+                      : `Affected Sauces (${impactAnalysis.affectedSauces.length})`}
                   </div>
                   <div className="space-y-1.5">
                     {impactAnalysis.affectedSauces.map((s) => (
@@ -1336,7 +1396,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         key={s.sauceId}
                         className="flex items-center justify-between bg-black/30 p-2.5 rounded-xl border border-white/5 font-mono text-xs"
                       >
-                        <span className="font-bold text-white">{s.sauceName}</span>
+                        <span className="font-bold text-white">{getLocalizedText(lang, s.sauceName)}</span>
                         <div className="text-right">
                           <span className="text-white/50">฿{s.oldCostPerGram.toFixed(4)}</span>
                           <span className="mx-1.5 text-white/40">→</span>
@@ -1354,11 +1414,13 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               {/* Affected Menu Variants */}
               <div className="space-y-2">
                 <div className="font-bold text-white text-sm">
-                  เมนูที่ได้รับผลกระทบ (Affected Menus) ({impactAnalysis.affectedVariants.length} เมนู)
+                  {lang === 'th'
+                    ? `เมนูที่ได้รับผลกระทบ (Affected Menus) (${impactAnalysis.affectedVariants.length} เมนู)`
+                    : `Affected Menus (${impactAnalysis.affectedVariants.length})`}
                 </div>
                 {impactAnalysis.affectedVariants.length === 0 ? (
                   <div className="p-4 text-center text-white/50 bg-white/5 rounded-xl">
-                    ไม่มีเมนูใดในระบบที่ใช้หรืออิงวัตถุดิบชิ้นนี้
+                    {lang === 'th' ? 'ไม่มีเมนูใดในระบบที่ใช้หรืออิงวัตถุดิบชิ้นนี้' : 'No menu items use this ingredient'}
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
@@ -1369,15 +1431,15 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       >
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-white text-sm">
-                            {v.menuName} - {v.variantName}
+                            {getLocalizedText(lang, v.menuName)} - {getLocalizedText(lang, v.variantName)}
                           </span>
                           <span className="font-mono font-bold text-white/80">
-                            ราคาขาย ฿{v.sellingPrice}
+                            {lang === 'th' ? 'ราคาขาย' : 'Price'} ฿{v.sellingPrice}
                           </span>
                         </div>
                         <div className="grid grid-cols-3 gap-2 font-mono text-[11px] pt-1 border-t border-white/10">
                           <div>
-                            <span className="text-white/50">ต้นทุนรวมใหม่:</span>
+                            <span className="text-white/50">{lang === 'th' ? 'ต้นทุนรวมใหม่:' : 'New Total Cost:'}</span>
                             <div className="font-bold text-[#FFC107]">
                               ฿{v.newTotalCost.toFixed(2)}{' '}
                               <span className="text-[10px] text-red-400">
@@ -1386,7 +1448,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                             </div>
                           </div>
                           <div>
-                            <span className="text-white/50">กำไรสุทธิใหม่:</span>
+                            <span className="text-white/50">{lang === 'th' ? 'กำไรสุทธิใหม่:' : 'New Net Profit:'}</span>
                             <div className="font-bold text-green-400">
                               ฿{v.newProfit.toFixed(2)}{' '}
                               <span className="text-[10px] text-red-400">
@@ -1395,7 +1457,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                             </div>
                           </div>
                           <div>
-                            <span className="text-white/50">ราคาแนะนำใหม่:</span>
+                            <span className="text-white/50">{lang === 'th' ? 'ราคาแนะนำใหม่:' : 'Suggested Price:'}</span>
                             <div className="font-bold text-blue-400">
                               ฿{v.newSuggestedPrice.toFixed(0)}
                             </div>
@@ -1414,7 +1476,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   onClick={() => setIsImpactModalOpen(false)}
                   className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  ปิดหน้าต่าง
+                  {lang === 'th' ? 'ปิดหน้าต่าง' : 'Close'}
                 </button>
 
                 <button
@@ -1422,7 +1484,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   onClick={handleApplySimulatedPrice}
                   className="px-5 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black rounded-xl font-bold shadow-md shadow-[#F27D26]/20 transition-colors cursor-pointer"
                 >
-                  อนุมัติและปรับใช้ราคาใหม่นี้ (฿{simulatedNewPrice})
+                  {lang === 'th'
+                    ? `อนุมัติและปรับใช้ราคาใหม่นี้ (฿${simulatedNewPrice})`
+                    : `Approve & Apply New Price (฿${simulatedNewPrice})`}
                 </button>
               </div>
             </div>
@@ -1437,7 +1501,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <Plus className="w-4 h-4 text-[#F27D26]" />
-                <span>เพิ่มหมวดหมู่วัตถุดิบใหม่</span>
+                <span>{lang === 'th' ? 'เพิ่มหมวดหมู่วัตถุดิบใหม่' : 'Add New Ingredient Category'}</span>
               </h2>
               <button
                 type="button"
@@ -1454,7 +1518,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
             <form onSubmit={handleAddCategory} className="space-y-4 mt-4 text-xs">
               <div>
                 <label className="block font-bold text-white/80 mb-1.5">
-                  ชื่อหมวดหมู่ใหม่ (ไทย) <span className="text-rose-400">*</span>
+                  {lang === 'th' ? 'ชื่อหมวดหมู่ใหม่ (ไทย)' : 'New Category Name (Thai)'}{' '}
+                  <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="text"
@@ -1473,20 +1538,20 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     setNewCategoryName(nextTh);
                   }}
                   className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none placeholder-white/30"
-                  placeholder="เช่น เครื่องดื่ม, ของหวาน, เบเกอรี่, อาหารแปรรูป"
+                  placeholder={lang === 'th' ? 'เช่น เครื่องดื่ม, ของหวาน, เบเกอรี่, อาหารแปรรูป' : 'e.g. Beverages, Desserts, Bakery'}
                 />
               </div>
 
               <div>
                 <label className="block font-bold text-white/80 mb-1.5">
-                  ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)
+                  {lang === 'th' ? 'ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)' : 'English Name (Auto-translated)'}
                 </label>
                 <input
                   type="text"
                   value={newCategoryEnglishName}
                   onChange={(e) => setNewCategoryEnglishName(e.target.value)}
                   className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 font-medium focus:border-[#F27D26] focus:outline-none placeholder-white/30"
-                  placeholder="Auto-translated category name"
+                  placeholder={lang === 'th' ? 'ชื่อหมวดหมู่ภาษาอังกฤษที่แปลอัตโนมัติ' : 'Auto-translated category name'}
                 />
               </div>
 
@@ -1500,13 +1565,13 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   }}
                   className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-colors cursor-pointer"
                 >
-                  ยกเลิก
+                  {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl shadow-md shadow-[#F27D26]/20 transition-all cursor-pointer"
                 >
-                  บันทึกหมวดหมู่
+                  {lang === 'th' ? 'บันทึกหมวดหมู่' : 'Save Category'}
                 </button>
               </div>
             </form>

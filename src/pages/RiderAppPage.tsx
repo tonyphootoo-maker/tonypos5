@@ -14,6 +14,7 @@ import {
   PackageCheck,
 } from 'lucide-react';
 import { Language, OnlineOrderDoc, PublicStoreDoc } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 import {
   loadSavedRiderName,
   resolveCustomerOrRiderSession,
@@ -42,8 +43,9 @@ const RIDER_STATUS_LABELS: Record<string, { th: string; en: string; cls: string 
   cancelled: { th: 'ยกเลิกแล้ว', en: 'Cancelled', cls: 'bg-rose-500/20 text-rose-300' },
 };
 
-export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
-  const [lang, setLang] = useState<Language>(initialLang);
+export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
+  const { lang: ctxLang, toggleLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [storeId, setStoreId] = useState<string | null>(null);
   const [store, setStore] = useState<PublicStoreDoc | null>(null);
   const [riderUid, setRiderUid] = useState<string | null>(null);
@@ -63,7 +65,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
   // Keep dedicated Rider PWA manifest & iOS touch icon synchronized in document head
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    document.title = 'KinPOS Rider - งานจัดส่ง';
+    document.title = lang === 'th' ? 'KinPOS Rider - งานจัดส่ง' : 'KinPOS Rider - Delivery Dispatch';
 
     const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (appleTitle) appleTitle.setAttribute('content', 'KinPOS Rider');
@@ -80,7 +82,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
       ml.href = './manifest-rider.webmanifest';
       document.head.appendChild(ml);
     }
-  }, []);
+  }, [lang]);
 
   useEffect(() => {
     let mounted = true;
@@ -223,7 +225,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
               <PWAInstallButton lang={lang} variant="button" appName="KinPOS Rider" theme="emerald" />
               <button
                 type="button"
-                onClick={() => setLang((p) => (p === 'th' ? 'en' : 'th'))}
+                onClick={toggleLang}
                 className="px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 cursor-pointer"
               >
                 {lang === 'th' ? 'TH' : 'EN'}
@@ -332,7 +334,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
                       <Clock className="w-3.5 h-3.5" />
                       <span>
                         {created
-                          ? created.toLocaleTimeString('th-TH', {
+                          ? created.toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', {
                               hour: '2-digit',
                               minute: '2-digit',
                             })

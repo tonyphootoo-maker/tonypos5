@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, Trash2, X } from 'lucide-react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -7,6 +8,7 @@ interface ConfirmModalProps {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  lang?: 'th' | 'en';
   variant?: 'danger' | 'warning' | 'primary';
   isLoading?: boolean;
   onConfirm: () => void | Promise<void>;
@@ -17,14 +19,21 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   isOpen,
   title,
   message,
-  confirmLabel = 'ยืนยันลบ',
-  cancelLabel = 'ยกเลิก',
+  confirmLabel,
+  cancelLabel,
+  lang: propLang,
   variant = 'danger',
   isLoading = false,
   onConfirm,
   onCancel,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   if (!isOpen) return null;
+
+  const resolvedConfirm = confirmLabel || (lang === 'en' ? 'Confirm Delete' : 'ยืนยันลบ');
+  const resolvedCancel = cancelLabel || (lang === 'en' ? 'Cancel' : 'ยกเลิก');
+  const loadingText = lang === 'en' ? 'Processing...' : 'กำลังดำเนินการ...';
 
   const isDanger = variant === 'danger';
   const isWarning = variant === 'warning';
@@ -74,7 +83,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
             onClick={onCancel}
             className="px-3.5 py-2 bg-white hover:bg-neutral-100 text-neutral-700 border border-neutral-300 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
           >
-            {cancelLabel}
+            {resolvedCancel}
           </button>
           <button
             type="button"
@@ -89,7 +98,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
             }`}
           >
             {isDanger && <Trash2 className="w-3.5 h-3.5" />}
-            <span>{isLoading ? 'กำลังดำเนินการ...' : confirmLabel}</span>
+            <span>{isLoading ? loadingText : resolvedConfirm}</span>
           </button>
         </div>
       </div>

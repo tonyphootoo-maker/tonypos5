@@ -48,6 +48,7 @@ import {
 } from '../data/onlineDb';
 import { formatMoney } from '../engine/calculations';
 import { toDateSafe } from '../engine/onlineOrdering';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface CartEntry {
   key: string;
@@ -79,8 +80,9 @@ const STATUS_BADGE: Record<
   cancelled: { th: 'ยกเลิกแล้ว', en: 'Cancelled', color: 'bg-rose-100 text-rose-800 border-rose-200' },
 };
 
-export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', onToggleLang }) => {
-  const [lang, setLang] = useState<Language>(initialLang);
+export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLang }) => {
+  const { lang: ctxLang, toggleLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [storeId, setStoreId] = useState<string | null>(null);
   const [store, setStore] = useState<PublicStoreDoc | null>(null);
   const [customerUid, setCustomerUid] = useState<string | null>(null);
@@ -126,8 +128,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
   const loadedImageIdsRef = useRef<Set<string>>(new Set());
 
   const handleSwitchLang = () => {
-    setLang((prev) => (prev === 'th' ? 'en' : 'th'));
-    onToggleLang?.();
+    if (onToggleLang) {
+      onToggleLang();
+    } else {
+      toggleLang();
+    }
   };
 
   useEffect(() => {
@@ -1292,7 +1297,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
                           <div className="font-extrabold text-sm text-slate-900">{ord.orderNumber}</div>
                           <div className="text-[11px] text-slate-500">
                             {created
-                              ? created.toLocaleString('th-TH', {
+                              ? created.toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', {
                                   hour: '2-digit',
                                   minute: '2-digit',
                                   day: '2-digit',

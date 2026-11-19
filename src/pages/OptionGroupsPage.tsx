@@ -235,7 +235,11 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
           >
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">
-                {editingGroup.id ? 'Edit Option Group' : t.menuCost.addOptionGroup}
+                {editingGroup.id
+                  ? lang === 'th'
+                    ? 'แก้ไขกลุ่มตัวเลือก'
+                    : 'Edit Option Group'
+                  : t.menuCost.addOptionGroup}
               </h3>
               <button
                 type="button"
@@ -250,7 +254,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    ชื่อกลุ่มไทย *
+                    {lang === 'th' ? 'ชื่อกลุ่ม (ภาษาไทย) *' : 'Group Name (Thai) *'}
                   </label>
                   <input
                     type="text"
@@ -267,13 +271,13 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                       setEditingGroup({ ...editingGroup, nameTh: nextTh, name: nextEn });
                     }}
                     className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                    placeholder="เช่น ระดับความเผ็ด, ท็อปปิ้ง"
+                    placeholder={lang === 'th' ? 'เช่น ระดับความเผ็ด, ท็อปปิ้ง' : 'e.g. ระดับความเผ็ด, ท็อปปิ้ง'}
                   />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-xs font-bold text-neutral-700">
-                      Group Name EN
+                      {lang === 'th' ? 'ชื่อกลุ่ม (อังกฤษ)' : 'Group Name (EN)'}
                     </label>
                     {editingGroup.nameTh && (
                       <button
@@ -287,7 +291,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                         }}
                         className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
                       >
-                        แปลใหม่
+                        {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                       </button>
                     )}
                   </div>
@@ -405,7 +409,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                             setEditingGroup({ ...editingGroup, choices: updated });
                           }}
                           className="w-full px-2 py-1 bg-white border border-orange-300 rounded-lg text-xs"
-                          placeholder="ชื่อไทย (เช่น เผ็ดน้อย)"
+                          placeholder={lang === 'th' ? 'ชื่อไทย (เช่น เผ็ดน้อย)' : 'Thai name (e.g. เผ็ดน้อย)'}
                         />
                         <input
                           type="text"
@@ -423,7 +427,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                             setEditingGroup({ ...editingGroup, choices: updated });
                           }}
                           className="w-full px-2 py-1 bg-neutral-100/70 border border-neutral-300 rounded-lg text-xs"
-                          placeholder="English (auto)"
+                          placeholder={lang === 'th' ? 'ภาษาอังกฤษ (แปลอัตโนมัติ)' : 'English (auto)'}
                         />
                       </div>
 

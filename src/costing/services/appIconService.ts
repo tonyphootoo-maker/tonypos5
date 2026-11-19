@@ -9,6 +9,7 @@ export interface AppIconPreset {
   nameTh: string;
   nameEn: string;
   descriptionTh: string;
+  descriptionEn: string;
   category: 'culinary' | 'minimal' | 'custom';
   svgDataUri: string;
   themeColor: string;
@@ -120,6 +121,7 @@ export const APP_ICON_PRESETS: AppIconPreset[] = [
     nameTh: "Tony's Signature (หมวกเชฟ & เครื่องคิดเลข)",
     nameEn: "Tony's Signature Chef Hat & Calculator",
     descriptionTh: 'ไอคอนต้นตำรับ หมวกเชฟสีขาวพร้อมเครื่องคิดคำนวณต้นทุน และสัญลักษณ์เงินบาท ฿',
+    descriptionEn: 'Signature white chef hat with food cost calculator & THB ฿ badge.',
     category: 'culinary',
     svgDataUri: `data:image/svg+xml;utf8,${encodeURIComponent(DEFAULT_ICON_SVG)}`,
     themeColor: '#F27D26',
@@ -129,6 +131,7 @@ export const APP_ICON_PRESETS: AppIconPreset[] = [
     nameTh: 'กระทะผัด & เปลวไฟทอง (Wok & Flame)',
     nameEn: 'Wok & Golden Flame Master',
     descriptionTh: 'เปลวไฟผัดอาหารสีทองและกระทะเหล็กสะท้อนความเชี่ยวชาญในครัว',
+    descriptionEn: 'Golden wok flames representing fast stir-fry culinary craft.',
     category: 'culinary',
     svgDataUri: `data:image/svg+xml;utf8,${encodeURIComponent(WOK_FLAME_SVG)}`,
     themeColor: '#DC2626',
@@ -138,6 +141,7 @@ export const APP_ICON_PRESETS: AppIconPreset[] = [
     nameTh: 'มีดเชฟ & เขียงควบคุม (Precision Green)',
     nameEn: 'Chef Precision Cutting Board',
     descriptionTh: 'ความแม่นยำในการแล่และจัดการ Yield ทุกกรัมอย่างคุ้มค่า',
+    descriptionEn: 'Precision knife & cutting board for accurate gram-level yield control.',
     category: 'culinary',
     svgDataUri: `data:image/svg+xml;utf8,${encodeURIComponent(CHEF_PRECISION_SVG)}`,
     themeColor: '#059669',
@@ -147,6 +151,7 @@ export const APP_ICON_PRESETS: AppIconPreset[] = [
     nameTh: 'ชามข้าวสวย & ตะเกียบ (Steaming Rice Bowl)',
     nameEn: 'Steaming Rice Bowl',
     descriptionTh: 'ชามข้าวหอมมะลิร้อนๆ สื่อถึงอาหารจานเดียวและกับข้าวรสเลิศ',
+    descriptionEn: 'Steaming jasmine rice bowl symbolizing hearty single-plate Thai dishes.',
     category: 'culinary',
     svgDataUri: `data:image/svg+xml;utf8,${encodeURIComponent(RICE_BOWL_SVG)}`,
     themeColor: '#EA580C',

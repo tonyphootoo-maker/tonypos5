@@ -35,6 +35,7 @@ import {
   Route as RouteIcon,
 } from 'lucide-react';
 import { Language, OnlineOrderDoc, PublicStoreDoc } from '../types';
+import { useLanguage } from '../contexts/LanguageContext';
 import { formatMoney } from '../engine/calculations';
 import {
   LatLngLiteralSimple,
@@ -70,7 +71,7 @@ export interface RouteSummaryState {
 interface Props {
   order: OnlineOrderDoc;
   store?: PublicStoreDoc | null;
-  lang: Language;
+  lang?: Language;
   busy: boolean;
   onBack: () => void;
   onCompleteDelivery: (order: OnlineOrderDoc) => Promise<void>;
@@ -297,11 +298,13 @@ const ActiveRouteController: React.FC<ActiveRouteControllerProps> = ({
 export const RiderNavigationOverlay: React.FC<Props> = ({
   order,
   store,
-  lang,
+  lang: propLang,
   busy,
   onBack,
   onCompleteDelivery,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const initialDestCoords = useMemo<LatLngLiteralSimple | null>(() => {
     if (
       typeof order.deliveryLat === 'number' &&
@@ -638,7 +641,7 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
           <div className="w-full h-full">
             <APIProvider
               apiKey={MAPS_API_KEY}
-              language="th"
+              language={lang}
               region="TH"
               libraries={['routes', 'marker']}
             >

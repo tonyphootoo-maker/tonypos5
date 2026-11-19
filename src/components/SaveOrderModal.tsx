@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TableDoc, ZoneDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import { TableVisual } from './TableVisual';
 import { FLOOR_CANVAS_MIN_WIDTH, FLOOR_CANVAS_MIN_HEIGHT, getDynamicCanvasSize } from '../utils/tablePresets';
 import { X } from 'lucide-react';
@@ -12,7 +13,7 @@ interface Props {
   onSelectTable: (tableId: string) => void;
   onConfirm: () => void;
   onClose: () => void;
-  lang: Language;
+  lang?: Language;
 }
 
 export const SaveOrderModal: React.FC<Props> = ({
@@ -22,11 +23,13 @@ export const SaveOrderModal: React.FC<Props> = ({
   onSelectTable,
   onConfirm,
   onClose,
-  lang,
+  lang: propLang,
 }) => {
   const [activeZoneId, setActiveZoneId] = useState<string>(() => zones[0]?.id || '');
   const [modalFloorScale, setModalFloorScale] = useState<number>(0.65);
   const floorBoxRef = useRef<HTMLDivElement>(null);
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
 
   useEffect(() => {
@@ -105,7 +108,7 @@ export const SaveOrderModal: React.FC<Props> = ({
               }}
             >
               <div className="text-[11px] font-bold text-neutral-400 absolute top-2 left-3 select-none pointer-events-none">
-                Floor Plan View
+                {lang === 'th' ? 'แผนผังโต๊ะ' : 'Floor Plan View'}
               </div>
               {visibleTables.map((tbl) => {
                 const isOccupied = !!tbl.currentBillId;
@@ -129,6 +132,7 @@ export const SaveOrderModal: React.FC<Props> = ({
                       isOccupied={isOccupied}
                       showOccupiedBadge={false}
                       scaleFactor={modalFloorScale}
+                      lang={lang}
                     />
                   </div>
                 );

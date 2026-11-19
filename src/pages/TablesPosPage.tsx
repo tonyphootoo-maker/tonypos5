@@ -44,7 +44,7 @@ import {
   getImageDoc,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
-import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
+import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText } from '../utils/thaiToEnglish';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import {
   MenuItem as CostMenuItem,
@@ -2795,7 +2795,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    ชื่อเมนู (ภาษาไทย) *
+                    {lang === 'th' ? 'ชื่อเมนู (ภาษาไทย) *' : 'Menu Name (Thai) *'}
                   </label>
                   <input
                     type="text"
@@ -2811,7 +2811,11 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       });
                       setEditingDishInPos({ ...editingDishInPos, nameTh: nextTh, name: nextEn });
                     }}
-                    placeholder="เช่น กะเพรา, ผัดกะเพรา, ข้าวผัด"
+                    placeholder={
+                      lang === 'th'
+                        ? 'เช่น กะเพรา, ผัดกะเพรา, ข้าวผัด'
+                        : 'e.g. กะเพรา, ผัดกะเพรา, ข้าวผัด'
+                    }
                     className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
@@ -2832,7 +2836,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                         }}
                         className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
                       >
-                        แปลใหม่
+                        {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                       </button>
                     )}
                   </div>
@@ -2947,8 +2951,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
                         <CheckCircle2 className="w-3 h-3 shrink-0" />
                         <span>
-                          ดึงข้อมูลจริงจากต้นทุนอาหาร: {matchedEditingPosCostMenu.name} (
-                          {getActiveCostVariants(matchedEditingPosCostMenu).length} รายการ)
+                          {lang === 'th'
+                            ? `ดึงข้อมูลจริงจากต้นทุนอาหาร: ${getLocalizedText(lang, matchedEditingPosCostMenu.name, matchedEditingPosCostMenu.englishName)} (${getActiveCostVariants(matchedEditingPosCostMenu).length} รายการ)`
+                            : `Synced with Food Cost: ${getLocalizedText(lang, matchedEditingPosCostMenu.name, matchedEditingPosCostMenu.englishName)} (${getActiveCostVariants(matchedEditingPosCostMenu).length} items)`}
                         </span>
                       </span>
                     )}
@@ -2967,7 +2972,13 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       >
                         <Link2 className="w-3.5 h-3.5" />
                         <span>
-                          {matchedEditingPosCostMenu ? 'เปลี่ยนเมนูต้นทุน' : '+ เชื่อมข้อมูลจากต้นทุนอาหาร'}
+                          {matchedEditingPosCostMenu
+                            ? lang === 'th'
+                              ? 'เปลี่ยนเมนูต้นทุน'
+                              : 'Change Cost Menu'
+                            : lang === 'th'
+                            ? '+ เชื่อมข้อมูลจากต้นทุนอาหาร'
+                            : '+ Link Food Cost Menu'}
                         </span>
                       </button>
                     )}
@@ -3007,17 +3018,20 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                           <table className="w-full min-w-[560px] text-left border-collapse text-xs">
                             <thead>
                               <tr className="bg-neutral-100 border-b border-neutral-200 text-[10.5px] font-extrabold text-neutral-700">
-                                <th className="py-2 px-2.5">ชื่อรายการ</th>
-                                <th className="py-2 px-2 text-right w-28">ราคาตั้งขาย (฿)</th>
-                                <th className="py-2 px-2 text-right">ต้นทุนรวม</th>
-                                <th className="py-2 px-2 text-right">%ต้นทุน</th>
-                                <th className="py-2 px-2 text-right">กำไรกินที่ร้าน</th>
-                                <th className="py-2 px-2.5 text-right">กำไรใส่กล่อง</th>
+                                <th className="py-2 px-2.5">{lang === 'th' ? 'ชื่อรายการ' : 'Item'}</th>
+                                <th className="py-2 px-2 text-right w-28">
+                                  {lang === 'th' ? 'ราคาตั้งขาย (฿)' : 'Selling Price (฿)'}
+                                </th>
+                                <th className="py-2 px-2 text-right">{lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}</th>
+                                <th className="py-2 px-2 text-right">{lang === 'th' ? '%ต้นทุน' : '% Cost'}</th>
+                                <th className="py-2 px-2 text-right">{lang === 'th' ? 'กำไรกินที่ร้าน' : 'Dine-in Profit'}</th>
+                                <th className="py-2 px-2.5 text-right">{lang === 'th' ? 'กำไรใส่กล่อง' : 'Takeaway Profit'}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-neutral-100">
                               {costVars.map((cv) => {
                                 const labelTh = getCostVariantLabel(cv);
+                                const displayLabel = getLocalizedText(lang, labelTh, cv.englishName);
                                 const existingMatched = findExistingPosVariantForCostVariant(
                                   cv,
                                   editingDishInPos.variants || []
@@ -3039,9 +3053,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                                   <tr key={cv.id} className="hover:bg-orange-50/40 transition-colors">
                                     <td className="py-2 px-2.5">
                                       <div className="font-black text-neutral-900 text-xs leading-tight">
-                                        {labelTh}
+                                        {displayLabel}
                                       </div>
-                                      {cv.name && cv.name !== labelTh && (
+                                      {cv.name && cv.name !== labelTh && lang === 'th' && (
                                         <div className="text-[10px] text-neutral-400 truncate max-w-[160px]">
                                           {cv.name}
                                         </div>
@@ -3103,7 +3117,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                           </table>
                         </div>
                         <p className="text-[10.5px] text-neutral-500">
-                          ยึดตามตัวเลือกที่สร้างไว้ใน &quot;ต้นทุนอาหาร&quot; • แก้ไขราคาตั้งขายเพื่อคำนวณ %ต้นทุน และกำไรแบบเรียลไทม์ทันที
+                          {lang === 'th'
+                            ? 'ยึดตามตัวเลือกที่สร้างไว้ใน "ต้นทุนอาหาร" • แก้ไขราคาตั้งขายเพื่อคำนวณ %ต้นทุน และกำไรแบบเรียลไทม์ทันที'
+                            : 'Synced with variants configured in Food Cost • Edit selling price to recalculate % cost and profit in real time.'}
                         </p>
                       </div>
                     );
@@ -3133,7 +3149,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                                   updated[vIdx] = { ...prev, nameTh: nextTh, name: nextEn };
                                   setEditingDishInPos({ ...editingDishInPos, variants: updated });
                                 }}
-                                placeholder="ชื่อตัวเลือก (TH)"
+                                placeholder={lang === 'th' ? 'ชื่อตัวเลือก (TH)' : 'Option Name (TH)'}
                                 className="w-full px-2 py-1 text-xs border border-neutral-300 rounded-lg"
                               />
                             </div>
@@ -3187,10 +3203,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                             <div className="px-2.5 py-1.5 rounded-lg bg-emerald-50/80 border border-emerald-200 text-[10.5px] flex flex-wrap items-center justify-between gap-2 text-emerald-900">
                               <span className="font-bold flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                                <span>ต้นทุน: ฿{formatMoney(varMetrics.cost)} ({varMetrics.foodCostPercent.toFixed(1)}%)</span>
+                                <span>
+                                  {lang === 'th' ? 'ต้นทุน' : 'Cost'}: ฿{formatMoney(varMetrics.cost)} ({varMetrics.foodCostPercent.toFixed(1)}%)
+                                </span>
                               </span>
                               <span className="font-black">
-                                ที่ร้าน: {varMetrics.dineInProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.dineInProfit)} • กล่อง: {varMetrics.takeawayProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.takeawayProfit)}
+                                {lang === 'th' ? 'ที่ร้าน' : 'Dine-in'}: {varMetrics.dineInProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.dineInProfit)} • {lang === 'th' ? 'กล่อง' : 'Box'}: {varMetrics.takeawayProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.takeawayProfit)}
                               </span>
                             </div>
                           )}
@@ -3217,7 +3235,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>เพิ่มตัวเลือกย่อย</span>
+                      <span>{lang === 'th' ? 'เพิ่มตัวเลือกย่อย' : 'Add Sub-Options'}</span>
                     </button>
                   )}
                 </div>
@@ -3394,8 +3412,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                   <ChefHat className="w-5 h-5" />
                   <h3 className="font-extrabold text-base">
                     {selectedCostMenu
-                      ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
-                      : 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'}
+                      ? lang === 'th'
+                        ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
+                        : `Select Primary Option for "${getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)}"`
+                      : lang === 'th'
+                      ? 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'
+                      : 'Select Primary Option from Food Cost'}
                   </h3>
                 </div>
                 <button
@@ -3419,7 +3441,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
-                      <span>เปลี่ยนรายการเมนูอาหาร</span>
+                      <span>{lang === 'th' ? 'เปลี่ยนรายการเมนูอาหาร' : 'Change Menu Item'}</span>
                     </button>
                     <button
                       type="button"
@@ -3432,7 +3454,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                       }}
                       className="px-3 py-1 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer hover:brightness-105"
                     >
-                      เชื่อมตัวเลือกทั้งหมด ({selectedMenuVariants.length})
+                      {lang === 'th'
+                        ? `เชื่อมตัวเลือกทั้งหมด (${selectedMenuVariants.length})`
+                        : `Link All Options (${selectedMenuVariants.length})`}
                     </button>
                   </div>
                 ) : (
@@ -3449,7 +3473,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                           : 'bg-white border border-neutral-300 text-neutral-700'
                       }`}
                     >
-                      เลือกจากรายการเมนู ({sortedCostMenus.length})
+                      {lang === 'th'
+                        ? `เลือกจากรายการเมนู (${sortedCostMenus.length})`
+                        : `From Food Cost Menus (${sortedCostMenus.length})`}
                     </button>
                     {proteinIngredients.length > 0 && (
                       <button
@@ -3464,7 +3490,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                             : 'bg-white border border-neutral-300 text-neutral-700'
                         }`}
                       >
-                        เลือกจากวัตถุดิบเนื้อสัตว์เดี่ยว
+                        {lang === 'th' ? 'เลือกจากวัตถุดิบเนื้อสัตว์เดี่ยว' : 'From Single Protein Ingredients'}
                       </button>
                     )}
                   </div>
@@ -3477,7 +3503,11 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                     autoFocus
                     value={posPrimaryOptionSearch}
                     onChange={(e) => setPosPrimaryOptionSearch(e.target.value)}
-                    placeholder="ค้นหาเมนูหรือวัตถุดิบ..."
+                    placeholder={
+                      lang === 'th'
+                        ? 'ค้นหาเมนูหรือวัตถุดิบ...'
+                        : 'Search menus or protein ingredients...'
+                    }
                     className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                   />
                 </div>
@@ -3497,9 +3527,14 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                         className="p-3 rounded-2xl border bg-white border-neutral-200 hover:border-orange-400 text-left cursor-pointer flex items-center justify-between gap-2"
                       >
                         <div className="min-w-0">
-                          <div className="font-black text-sm text-neutral-900 truncate">{menu.name}</div>
+                          <div className="font-black text-sm text-neutral-900 truncate">
+                            {getLocalizedText(lang, menu.name, menu.englishName)}
+                          </div>
                           <div className="text-[11px] text-neutral-500">
-                            {menu.category || 'เมนูอาหาร'} • {(menu.variants || []).length} ตัวเลือกหลัก
+                            {getLocalizedText(lang, menu.category || 'เมนูอาหาร')} •{' '}
+                            {lang === 'th'
+                              ? `${(menu.variants || []).length} ตัวเลือกหลัก`
+                              : `${(menu.variants || []).length} options`}
                           </div>
                         </div>
                         <ChevronRight className="w-4 h-4 text-orange-500 shrink-0" />
@@ -3541,8 +3576,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                           className="p-3 rounded-2xl border bg-white border-neutral-200 hover:border-orange-400 text-left cursor-pointer flex items-center justify-between gap-2"
                         >
                           <div className="min-w-0">
-                            <div className="font-black text-sm text-neutral-900 truncate">{displayProtein}</div>
-                            <div className="text-[11px] text-neutral-500">ต้นทุน ฿{formatMoney(cost)}</div>
+                            <div className="font-black text-sm text-neutral-900 truncate">
+                              {getLocalizedText(lang, displayProtein, variant.englishName)}
+                            </div>
+                            <div className="text-[11px] text-neutral-500">
+                              {lang === 'th' ? 'ต้นทุน' : 'Cost'} ฿{formatMoney(cost)}
+                            </div>
                           </div>
                           <span className="text-xs font-black text-orange-600 shrink-0">
                             ฿{formatMoney(sellingPrice || 0)}
@@ -3573,12 +3612,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                         className="p-2.5 bg-neutral-50 hover:bg-orange-50 rounded-xl border border-neutral-200 hover:border-orange-300 text-left cursor-pointer flex items-center justify-between gap-2"
                       >
                         <div className="min-w-0">
-                          <div className="text-xs font-bold text-neutral-900 truncate">{ing.name}</div>
+                          <div className="text-xs font-bold text-neutral-900 truncate">
+                            {getLocalizedText(lang, ing.name, ing.englishName)}
+                          </div>
                           <div className="text-[10px] text-neutral-500">
                             ฿{formatMoney(ing.costPerBaseUnit)} / {ing.baseUnit}
                           </div>
                         </div>
-                        <span className="text-[10px] font-bold text-orange-600 shrink-0">+ เลือกใช้</span>
+                        <span className="text-[10px] font-bold text-orange-600 shrink-0">
+                          {lang === 'th' ? '+ เลือกใช้' : '+ Select'}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -3606,7 +3649,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sliders className="w-5 h-5" />
-                <h3 className="font-extrabold text-base">เลือกตัวเลือกย่อยที่ใช้งาน</h3>
+                <h3 className="font-extrabold text-base">
+                  {lang === 'th' ? 'เลือกตัวเลือกย่อยที่ใช้งาน' : 'Select Active Sub-Option Groups'}
+                </h3>
               </div>
               <button
                 type="button"
@@ -3625,7 +3670,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                   autoFocus
                   value={posOptionGroupSearch}
                   onChange={(e) => setPosOptionGroupSearch(e.target.value)}
-                  placeholder="ค้นหากลุ่มตัวเลือกย่อย..."
+                  placeholder={lang === 'th' ? 'ค้นหากลุ่มตัวเลือกย่อย...' : 'Search sub-option groups...'}
                   className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl"
                 />
               </div>
@@ -3662,10 +3707,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                     >
                       <div className="min-w-0">
                         <div className="font-extrabold text-xs text-neutral-900">
-                          {grp.nameTh || grp.name}
+                          {lang === 'th' ? grp.nameTh || grp.name : grp.name || grp.nameTh}
                         </div>
                         <div className="text-[11px] text-neutral-500 mt-0.5">
-                          {grp.choices.map((c) => c.nameTh || c.name).join(' • ')}
+                          {grp.choices
+                            .map((c) => (lang === 'th' ? c.nameTh || c.name : c.name || c.nameTh))
+                            .join(' • ')}
                         </div>
                       </div>
                       <span
@@ -3688,7 +3735,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 onClick={() => setIsPosOptionGroupPickerOpen(false)}
                 className="px-5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
               >
-                ตกลง ({(editingDishInPos.optionGroupIds || []).length})
+                {lang === 'th'
+                  ? `ตกลง (${(editingDishInPos.optionGroupIds || []).length})`
+                  : `Done (${(editingDishInPos.optionGroupIds || []).length})`}
               </button>
             </div>
           </div>

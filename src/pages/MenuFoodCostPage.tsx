@@ -26,7 +26,7 @@ import {
   getImageDoc,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
-import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
+import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText } from '../utils/thaiToEnglish';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import {
   MenuItem as CostMenuItem,
@@ -1368,7 +1368,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    ชื่อเมนู (ภาษาไทย) *
+                    {lang === 'th' ? 'ชื่อเมนู (ภาษาไทย) *' : 'Menu Name (Thai) *'}
                   </label>
                   <input
                     type="text"
@@ -1385,7 +1385,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                       setEditingDish({ ...editingDish, nameTh: nextTh, name: nextEn });
                     }}
                     className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-                    placeholder="เช่น กะเพรา, ผัดกะเพรา, ข้าวผัด"
+                    placeholder={
+                      lang === 'th'
+                        ? 'เช่น กะเพรา, ผัดกะเพรา, ข้าวผัด'
+                        : 'e.g. กะเพรา, ผัดกะเพรา, ข้าวผัด'
+                    }
                   />
                 </div>
                 <div>
@@ -1405,7 +1409,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                         }}
                         className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
                       >
-                        แปลใหม่
+                        {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                       </button>
                     )}
                   </div>
@@ -1542,8 +1546,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
                         <CheckCircle2 className="w-3 h-3 shrink-0" />
                         <span>
-                          ดึงข้อมูลจริงจากต้นทุนอาหาร: {matchedEditingCostMenu.name} (
-                          {getActiveCostVariants(matchedEditingCostMenu).length} รายการ)
+                          {lang === 'th'
+                            ? `ดึงข้อมูลจริงจากต้นทุนอาหาร: ${getLocalizedText(lang, matchedEditingCostMenu.name, matchedEditingCostMenu.englishName)} (${getActiveCostVariants(matchedEditingCostMenu).length} รายการ)`
+                            : `Synced with Food Cost: ${getLocalizedText(lang, matchedEditingCostMenu.name, matchedEditingCostMenu.englishName)} (${getActiveCostVariants(matchedEditingCostMenu).length} items)`}
                         </span>
                       </span>
                     )}
@@ -1561,7 +1566,13 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   >
                     <Link2 className="w-3.5 h-3.5" />
                     <span>
-                      {matchedEditingCostMenu ? 'เปลี่ยนเมนูต้นทุน' : '+ เชื่อมข้อมูลจากต้นทุนอาหาร'}
+                      {matchedEditingCostMenu
+                        ? lang === 'th'
+                          ? 'เปลี่ยนเมนูต้นทุน'
+                          : 'Change Cost Menu'
+                        : lang === 'th'
+                        ? '+ เชื่อมข้อมูลจากต้นทุนอาหาร'
+                        : '+ Link Food Cost Menu'}
                     </span>
                   </button>
                 </div>
@@ -1575,17 +1586,20 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                           <table className="w-full min-w-[560px] text-left border-collapse text-xs">
                             <thead>
                               <tr className="bg-neutral-100 border-b border-neutral-200 text-[10.5px] font-extrabold text-neutral-700">
-                                <th className="py-2 px-2.5">ชื่อรายการ</th>
-                                <th className="py-2 px-2 text-right w-28">ราคาตั้งขาย (฿)</th>
-                                <th className="py-2 px-2 text-right">ต้นทุนรวม</th>
-                                <th className="py-2 px-2 text-right">%ต้นทุน</th>
-                                <th className="py-2 px-2 text-right">กำไรกินที่ร้าน</th>
-                                <th className="py-2 px-2.5 text-right">กำไรใส่กล่อง</th>
+                                <th className="py-2 px-2.5">{lang === 'th' ? 'ชื่อรายการ' : 'Item'}</th>
+                                <th className="py-2 px-2 text-right w-28">
+                                  {lang === 'th' ? 'ราคาตั้งขาย (฿)' : 'Selling Price (฿)'}
+                                </th>
+                                <th className="py-2 px-2 text-right">{lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}</th>
+                                <th className="py-2 px-2 text-right">{lang === 'th' ? '%ต้นทุน' : '% Cost'}</th>
+                                <th className="py-2 px-2 text-right">{lang === 'th' ? 'กำไรกินที่ร้าน' : 'Dine-in Profit'}</th>
+                                <th className="py-2 px-2.5 text-right">{lang === 'th' ? 'กำไรใส่กล่อง' : 'Takeaway Profit'}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-neutral-100">
                               {costVars.map((cv) => {
                                 const labelTh = getCostVariantLabel(cv);
+                                const displayLabel = getLocalizedText(lang, labelTh, cv.englishName);
                                 const existingMatched = findExistingPosVariantForCostVariant(
                                   cv,
                                   editingDish.variants || []
@@ -1610,9 +1624,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                   >
                                     <td className="py-2 px-2.5">
                                       <div className="font-black text-neutral-900 text-xs leading-tight">
-                                        {labelTh}
+                                        {displayLabel}
                                       </div>
-                                      {cv.name && cv.name !== labelTh && (
+                                      {cv.name && cv.name !== labelTh && lang === 'th' && (
                                         <div className="text-[10px] text-neutral-400 truncate max-w-[160px]">
                                           {cv.name}
                                         </div>
@@ -1680,7 +1694,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                           </table>
                         </div>
                         <p className="text-[10.5px] text-neutral-500">
-                          ยึดตามตัวเลือกที่สร้างไว้ใน &quot;ต้นทุนอาหาร&quot; • แก้ไขราคาตั้งขายเพื่อคำนวณ %ต้นทุน และกำไรแบบเรียลไทม์ทันที
+                          {lang === 'th'
+                            ? 'ยึดตามตัวเลือกที่สร้างไว้ใน "ต้นทุนอาหาร" • แก้ไขราคาตั้งขายเพื่อคำนวณ %ต้นทุน และกำไรแบบเรียลไทม์ทันที'
+                            : 'Synced with variants configured in Food Cost • Edit selling price to recalculate % cost and profit in real time.'}
                         </p>
                       </div>
                     );
@@ -1701,7 +1717,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                 : 'bg-white border border-neutral-300 text-neutral-700'
                             }`}
                           >
-                            <span>{v.nameTh || v.name}</span>
+                            <span>{lang === 'th' ? v.nameTh || v.name : v.name || v.nameTh}</span>
                             <span className="opacity-90">(฿{formatMoney(v.price)})</span>
                           </button>
                         ))}
@@ -1724,7 +1740,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                         }}
                         className="px-2 py-1 bg-white hover:bg-orange-50 border border-neutral-300 text-neutral-700 rounded-lg text-[11px] font-bold cursor-pointer shrink-0"
                       >
-                        + เพิ่มตัวเลือกเอง
+                        {lang === 'th' ? '+ เพิ่มตัวเลือกเอง' : '+ Add Option'}
                       </button>
                     </div>
 
@@ -1738,7 +1754,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <div>
                               <label className="block text-[11px] font-bold text-neutral-600 mb-1">
-                                ชื่อตัวเลือกหลัก (ภาษาไทย) *
+                                {lang === 'th' ? 'ชื่อตัวเลือกหลัก (ภาษาไทย) *' : 'Option Name (Thai) *'}
                               </label>
                               <input
                                 type="text"
@@ -1762,14 +1778,14 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                   setEditingDish({ ...editingDish, variants: updated });
                                 }}
                                 className="w-full px-2.5 py-1 text-xs bg-white border border-orange-300 rounded-lg"
-                                placeholder="เช่น ธรรมดา, พิเศษ"
+                                placeholder={lang === 'th' ? 'เช่น ธรรมดา, พิเศษ' : 'e.g. ธรรมดา, พิเศษ'}
                               />
                             </div>
 
                             <div>
                               <div className="flex items-center justify-between mb-1">
                                 <label className="block text-[11px] font-bold text-neutral-600">
-                                  ชื่อ EN
+                                  {lang === 'th' ? 'ชื่อ EN' : 'Name (EN)'}
                                 </label>
                                 {currVar.nameTh && (
                                   <button
@@ -1785,7 +1801,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                     }}
                                     className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
                                   >
-                                    แปลใหม่
+                                    {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                                   </button>
                                 )}
                               </div>
@@ -1812,7 +1828,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                             <div>
                               <div className="flex items-center justify-between mb-1">
                                 <label className="block text-[11px] font-bold text-neutral-600">
-                                  ราคาตั้งขาย (บาท)
+                                  {lang === 'th' ? 'ราคาตั้งขาย (บาท)' : 'Selling Price (THB)'}
                                 </label>
                                 {(editingDish.variants?.length || 0) > 1 && (
                                   <button
@@ -1827,7 +1843,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                     className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer flex items-center gap-0.5"
                                   >
                                     <Trash2 className="w-3 h-3" />
-                                    <span>ลบตัวเลือกนี้</span>
+                                    <span>{lang === 'th' ? 'ลบตัวเลือกนี้' : 'Remove Option'}</span>
                                   </button>
                                 )}
                               </div>
@@ -1862,15 +1878,19 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                     <span>
                                       {varMetrics.source === 'food_cost'
-                                        ? `เชื่อมข้อมูลจริงจากต้นทุนอาหาร (${varMetrics.matchedMenuName} • ${varMetrics.matchedVariantName})`
-                                        : 'เชื่อมข้อมูลต้นทุนจากสูตรเมนู'}
+                                        ? lang === 'th'
+                                          ? `เชื่อมข้อมูลจริงจากต้นทุนอาหาร (${varMetrics.matchedMenuName} • ${varMetrics.matchedVariantName})`
+                                          : `Linked to Food Cost (${getLocalizedText(lang, varMetrics.matchedMenuName)} • ${getLocalizedText(lang, varMetrics.matchedVariantName)})`
+                                        : lang === 'th'
+                                        ? 'เชื่อมข้อมูลต้นทุนจากสูตรเมนู'
+                                        : 'Linked to Menu Recipe Cost'}
                                     </span>
                                   </>
                                 ) : (
                                   <span className="text-neutral-500">
                                     {lang === 'th'
                                       ? 'ยังไม่พบชื่อเมนูตรงกันในส่วนต้นทุนอาหาร (กด "เชื่อมข้อมูลจากต้นทุนอาหาร" เพื่อเลือกเมนู)'
-                                      : 'No matching Food Cost item found yet'}
+                                      : 'No matching Food Cost item found yet (click "Link Food Cost Menu" to select)'}
                                   </span>
                                 )}
                               </span>
@@ -1879,19 +1899,25 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                             {varMetrics.hasData && (
                               <div className="grid grid-cols-4 gap-2 pt-1.5 border-t border-emerald-200/70 text-center">
                                 <div>
-                                  <span className="text-[10px] text-neutral-600 block">ต้นทุนรวม</span>
+                                  <span className="text-[10px] text-neutral-600 block">
+                                    {lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}
+                                  </span>
                                   <span className="font-black text-neutral-900">
                                     ฿{formatMoney(varMetrics.cost)}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] text-neutral-600 block">%ต้นทุน</span>
+                                  <span className="text-[10px] text-neutral-600 block">
+                                    {lang === 'th' ? '%ต้นทุน' : '% Cost'}
+                                  </span>
                                   <span className="font-black text-neutral-900">
                                     {varMetrics.foodCostPercent.toFixed(1)}%
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] text-neutral-600 block">กำไรกินที่ร้าน</span>
+                                  <span className="text-[10px] text-neutral-600 block">
+                                    {lang === 'th' ? 'กำไรกินที่ร้าน' : 'Dine-in Profit'}
+                                  </span>
                                   <span
                                     className={`font-black ${
                                       varMetrics.dineInProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'
@@ -1902,7 +1928,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-[10px] text-neutral-600 block">กำไรใส่กล่อง</span>
+                                  <span className="text-[10px] text-neutral-600 block">
+                                    {lang === 'th' ? 'กำไรใส่กล่อง' : 'Takeaway Profit'}
+                                  </span>
                                   <span
                                     className={`font-black ${
                                       varMetrics.takeawayProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'
@@ -1937,7 +1965,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>เพิ่มตัวเลือกย่อย</span>
+                    <span>{lang === 'th' ? 'เพิ่มตัวเลือกย่อย' : 'Add Sub-Options'}</span>
                   </button>
                 </div>
 
@@ -1948,7 +1976,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   if (selectedGroups.length === 0) {
                     return (
                       <div className="p-2.5 bg-white rounded-xl border border-dashed border-neutral-300 text-[11px] text-neutral-500 text-center">
-                        ยังไม่ได้เลือกตัวเลือกย่อย กดปุ่ม &quot;+ เพิ่มตัวเลือกย่อย&quot; เพื่อเลือกจากกลุ่มที่สร้างไว้
+                        {lang === 'th'
+                          ? 'ยังไม่ได้เลือกตัวเลือกย่อย กดปุ่ม "+ เพิ่มตัวเลือกย่อย" เพื่อเลือกจากกลุ่มที่สร้างไว้'
+                          : 'No sub-options attached yet. Click "+ Add Sub-Options" to choose from existing groups.'}
                       </div>
                     );
                   }
@@ -1961,15 +1991,17 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                         >
                           <div className="min-w-0">
                             <div className="text-xs font-extrabold text-neutral-900 truncate">
-                              {grp.nameTh || grp.name}
-                              {grp.nameTh && grp.name && grp.name !== grp.nameTh && (
+                              {lang === 'th' ? grp.nameTh || grp.name : grp.name || grp.nameTh}
+                              {grp.nameTh && grp.name && grp.name !== grp.nameTh && lang === 'th' && (
                                 <span className="ml-1 text-[10px] font-medium text-neutral-400">
                                   ({grp.name})
                                 </span>
                               )}
                             </div>
                             <div className="text-[10px] text-neutral-500 truncate mt-0.5">
-                              {grp.choices.map((c) => c.nameTh || c.name).join(', ')}
+                              {grp.choices
+                                .map((c) => (lang === 'th' ? c.nameTh || c.name : c.name || c.nameTh))
+                                .join(', ')}
                             </div>
                           </div>
                           <button
@@ -1983,7 +2015,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                               });
                             }}
                             className="p-1 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer shrink-0"
-                            title="นำออก"
+                            title={lang === 'th' ? 'นำออก' : 'Remove'}
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
@@ -2056,7 +2088,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             <div className="p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  ชื่อหมวดหมู่ (ภาษาไทย) *
+                  {lang === 'th' ? 'ชื่อหมวดหมู่ (ภาษาไทย) *' : 'Category Name (Thai) *'}
                 </label>
                 <input
                   type="text"
@@ -2073,7 +2105,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     setEditingCategory({ ...editingCategory, nameTh: nextTh, name: nextEn });
                   }}
                   className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
-                  placeholder="เช่น อาหารจานหลัก, เครื่องดื่ม"
+                  placeholder={lang === 'th' ? 'เช่น อาหารจานหลัก, เครื่องดื่ม' : 'e.g. Main Dishes, Drinks'}
                 />
               </div>
               <div>
@@ -2093,7 +2125,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                       }}
                       className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
                     >
-                      แปลใหม่
+                      {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                     </button>
                   )}
                 </div>
@@ -2176,7 +2208,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             <div className="p-4 space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
-                  ชื่อช่องทางขาย (ภาษาไทย) *
+                  {lang === 'th' ? 'ชื่อช่องทางขาย (ภาษาไทย) *' : 'Channel Name (Thai) *'}
                 </label>
                 <input
                   type="text"
@@ -2193,7 +2225,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     setEditingChannel({ ...editingChannel, nameTh: nextTh, name: nextEn });
                   }}
                   className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
-                  placeholder="เช่น หน้าร้าน, กลับบ้าน, GrabFood"
+                  placeholder={lang === 'th' ? 'เช่น หน้าร้าน, กลับบ้าน, GrabFood' : 'e.g. Dine-In, Takeaway, GrabFood'}
                 />
               </div>
 
@@ -2214,7 +2246,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                       }}
                       className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
                     >
-                      แปลใหม่
+                      {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                     </button>
                   )}
                 </div>
@@ -2397,8 +2429,12 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   <ChefHat className="w-5 h-5" />
                   <h3 className="font-extrabold text-base">
                     {selectedCostMenu
-                      ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
-                      : 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'}
+                      ? lang === 'th'
+                        ? `เลือกตัวเลือกหลักของเมนู "${selectedCostMenu.name}"`
+                        : `Select Primary Option for "${getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)}"`
+                      : lang === 'th'
+                      ? 'เลือกตัวเลือกหลักจากต้นทุนอาหาร'
+                      : 'Select Primary Option from Food Cost'}
                   </h3>
                 </div>
                 <button
@@ -2423,11 +2459,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                       className="px-2.5 py-1 bg-white hover:bg-orange-50 border border-orange-300 text-orange-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
-                      <span>เปลี่ยนรายการเมนูอาหาร</span>
+                      <span>{lang === 'th' ? 'เปลี่ยนรายการเมนูอาหาร' : 'Change Menu Item'}</span>
                     </button>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-extrabold text-neutral-700">
-                        เมนูที่เลือก: <span className="text-orange-600">{selectedCostMenu.name}</span> ({selectedMenuVariants.length} ตัวเลือก)
+                        {lang === 'th' ? 'เมนูที่เลือก: ' : 'Selected Menu: '}
+                        <span className="text-orange-600">
+                          {getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)}
+                        </span>{' '}
+                        ({selectedMenuVariants.length} {lang === 'th' ? 'ตัวเลือก' : 'options'})
                       </span>
                       <button
                         type="button"
@@ -2440,7 +2480,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                         }}
                         className="px-3 py-1 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer hover:brightness-105"
                       >
-                        เชื่อมตัวเลือกทั้งหมด ({selectedMenuVariants.length})
+                        {lang === 'th'
+                          ? `เชื่อมตัวเลือกทั้งหมด (${selectedMenuVariants.length})`
+                          : `Link All Options (${selectedMenuVariants.length})`}
                       </button>
                     </div>
                   </div>
@@ -2458,7 +2500,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                           : 'bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-100'
                       }`}
                     >
-                      เลือกจากรายการเมนู ({sortedCostMenus.length})
+                      {lang === 'th'
+                        ? `เลือกจากรายการเมนู (${sortedCostMenus.length})`
+                        : `From Food Cost Menus (${sortedCostMenus.length})`}
                     </button>
                     {proteinIngredients.length > 0 && (
                       <button
@@ -2473,7 +2517,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                             : 'bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-100'
                         }`}
                       >
-                        เลือกจากวัตถุดิบเนื้อสัตว์เดี่ยว
+                        {lang === 'th' ? 'เลือกจากวัตถุดิบเนื้อสัตว์เดี่ยว' : 'From Single Protein Ingredients'}
                       </button>
                     )}
                   </div>
@@ -2488,10 +2532,16 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     onChange={(e) => setPrimaryOptionSearch(e.target.value)}
                     placeholder={
                       selectedCostMenu
-                        ? `ค้นหาตัวเลือกในเมนู "${selectedCostMenu.name}" (เช่น หมู, ไก่, ทะเล)...`
+                        ? lang === 'th'
+                          ? `ค้นหาตัวเลือกในเมนู "${selectedCostMenu.name}" (เช่น หมู, ไก่, ทะเล)...`
+                          : `Search options in "${getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)}"...`
                         : pickerSourceTab === 'menus'
-                          ? 'ค้นหารายการเมนูอาหาร (เช่น ข้าวผัด, กะเพรา, ผัดไทย)...'
-                          : 'ค้นหาวัตถุดิบเนื้อสัตว์...'
+                          ? lang === 'th'
+                            ? 'ค้นหารายการเมนูอาหาร (เช่น ข้าวผัด, กะเพรา, ผัดไทย)...'
+                            : 'Search Food Cost menus (e.g. Fried Rice, Basil, Pad Thai)...'
+                          : lang === 'th'
+                            ? 'ค้นหาวัตถุดิบเนื้อสัตว์...'
+                            : 'Search protein ingredients...'
                     }
                     className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                   />
@@ -2501,24 +2551,28 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {isImportingCostOption && (
                   <div className="p-2 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-700 font-bold text-center">
-                    กำลังนำเข้าข้อมูลต้นทุน...
+                    {lang === 'th' ? 'กำลังนำเข้าข้อมูลต้นทุน...' : 'Importing Food Cost data...'}
                   </div>
                 )}
 
                 {pickerSourceTab === 'menus' && !selectedCostMenu && (
                   <div className="space-y-2">
                     <div className="text-xs font-extrabold text-neutral-800">
-                      เลือกรายการเมนูอาหารที่ต้องการ ({filteredMenus.length} เมนู)
+                      {lang === 'th'
+                        ? `เลือกรายการเมนูอาหารที่ต้องการ (${filteredMenus.length} เมนู)`
+                        : `Select Menu Item (${filteredMenus.length} menus)`}
                     </div>
 
                     {filteredMenus.length === 0 ? (
                       <div className="p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
-                        ไม่พบรายการเมนูอาหารในระบบต้นทุนที่ตรงกับคำค้นหา
+                        {lang === 'th'
+                          ? 'ไม่พบรายการเมนูอาหารในระบบต้นทุนที่ตรงกับคำค้นหา'
+                          : 'No matching Food Cost menus found'}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {filteredMenus.map((menu) => {
-                          const mNameLower = menu.name.toLowerCase();
+                          const mNameLower = `${menu.name} ${menu.englishName || ''}`.toLowerCase();
                           const isDishMatch = Boolean(
                             (dishThLower && (mNameLower.includes(dishThLower) || dishThLower.includes(mNameLower))) ||
                               (dishEnLower && mNameLower.includes(dishEnLower))
@@ -2542,16 +2596,19 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-black text-sm text-neutral-900 truncate">
-                                    {menu.name}
+                                    {getLocalizedText(lang, menu.name, menu.englishName)}
                                   </span>
                                   {isDishMatch && (
                                     <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0">
-                                      ตรงกับเมนูนี้
+                                      {lang === 'th' ? 'ตรงกับเมนูนี้' : 'Matches Dish'}
                                     </span>
                                   )}
                                 </div>
                                 <div className="text-[11px] text-neutral-500 mt-0.5">
-                                  {menu.category || 'เมนูอาหาร'} • มี {activeVarCount} ตัวเลือกหลัก
+                                  {getLocalizedText(lang, menu.category || 'เมนูอาหาร')} •{' '}
+                                  {lang === 'th'
+                                    ? `มี ${activeVarCount} ตัวเลือกหลัก`
+                                    : `${activeVarCount} primary options`}
                                 </div>
                               </div>
                               <ChevronRight className="w-4 h-4 text-orange-500 shrink-0" />
@@ -2566,12 +2623,16 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 {pickerSourceTab === 'menus' && selectedCostMenu && (
                   <div className="space-y-2">
                     <div className="text-xs font-extrabold text-neutral-800">
-                      ตัวเลือกที่มีใน "{selectedCostMenu.name}" ({selectedMenuVariants.length} รายการ)
+                      {lang === 'th'
+                        ? `ตัวเลือกที่มีใน "${selectedCostMenu.name}" (${selectedMenuVariants.length} รายการ)`
+                        : `Options in "${getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)}" (${selectedMenuVariants.length} items)`}
                     </div>
 
                     {selectedMenuVariants.length === 0 ? (
                       <div className="p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
-                        ไม่พบตัวเลือกที่ตรงกับคำค้นหาในเมนู "{selectedCostMenu.name}"
+                        {lang === 'th'
+                          ? `ไม่พบตัวเลือกที่ตรงกับคำค้นหาในเมนู "${selectedCostMenu.name}"`
+                          : `No matching options in "${getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)}"`}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -2613,10 +2674,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                   <div className="font-black text-sm text-neutral-900 truncate">
-                                    {displayProtein}
+                                    {getLocalizedText(lang, displayProtein, variant.englishName)}
                                   </div>
                                   <div className="text-[11px] text-neutral-500 truncate">
-                                    {selectedCostMenu.name} • {variant.name}
+                                    {getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)} •{' '}
+                                    {getLocalizedText(lang, variant.name, variant.englishName)}
                                   </div>
                                 </div>
                                 <span className="text-xs font-black text-orange-600 shrink-0">
@@ -2626,13 +2688,17 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
                               <div className="mt-2 pt-1.5 border-t border-neutral-200/70 grid grid-cols-3 gap-1.5 text-center text-[10px]">
                                 <div>
-                                  <span className="text-neutral-500 block">ต้นทุน</span>
+                                  <span className="text-neutral-500 block">
+                                    {lang === 'th' ? 'ต้นทุน' : 'Cost'}
+                                  </span>
                                   <span className="font-black text-neutral-900">
                                     ฿{formatMoney(cost)}
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-neutral-500 block">กำไรต่อจาน</span>
+                                  <span className="text-neutral-500 block">
+                                    {lang === 'th' ? 'กำไรต่อจาน' : 'Dine-in Profit'}
+                                  </span>
                                   <span
                                     className={`font-extrabold ${
                                       dineInProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'
@@ -2642,7 +2708,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                   </span>
                                 </div>
                                 <div>
-                                  <span className="text-neutral-500 block">กำไรใส่กล่อง</span>
+                                  <span className="text-neutral-500 block">
+                                    {lang === 'th' ? 'กำไรใส่กล่อง' : 'Takeaway Profit'}
+                                  </span>
                                   <span
                                     className={`font-extrabold ${
                                       takeawayProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'
@@ -2663,11 +2731,13 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 {pickerSourceTab === 'ingredients' && !selectedCostMenu && (
                   <div className="space-y-2">
                     <div className="text-xs font-extrabold text-neutral-800">
-                      เลือกจากวัตถุดิบเนื้อสัตว์ในคลังต้นทุน ({proteinIngredients.length})
+                      {lang === 'th'
+                        ? `เลือกจากวัตถุดิบเนื้อสัตว์ในคลังต้นทุน (${proteinIngredients.length})`
+                        : `Select from Protein Ingredients (${proteinIngredients.length})`}
                     </div>
                     {proteinIngredients.length === 0 ? (
                       <div className="p-6 bg-neutral-50 rounded-2xl border border-dashed border-neutral-300 text-xs text-neutral-500 text-center">
-                        ไม่พบวัตถุดิบเนื้อสัตว์ที่ตรงกับคำค้นหา
+                        {lang === 'th' ? 'ไม่พบวัตถุดิบเนื้อสัตว์ที่ตรงกับคำค้นหา' : 'No matching protein ingredients found'}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -2689,13 +2759,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                             className="p-2.5 bg-neutral-50 hover:bg-orange-50 rounded-xl border border-neutral-200 hover:border-orange-300 text-left cursor-pointer flex items-center justify-between gap-2"
                           >
                             <div className="min-w-0">
-                              <div className="text-xs font-bold text-neutral-900 truncate">{ing.name}</div>
+                              <div className="text-xs font-bold text-neutral-900 truncate">
+                                {getLocalizedText(lang, ing.name, ing.englishName)}
+                              </div>
                               <div className="text-[10px] text-neutral-500">
                                 ฿{formatMoney(ing.costPerBaseUnit)} / {ing.baseUnit}
                               </div>
                             </div>
                             <span className="text-[10px] font-bold text-orange-600 shrink-0">
-                              + เลือกใช้
+                              {lang === 'th' ? '+ เลือกใช้' : '+ Select'}
                             </span>
                           </button>
                         ))}
@@ -2725,7 +2797,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   }}
                   className="px-3.5 py-1.5 bg-white hover:bg-neutral-50 text-orange-700 border border-orange-300 rounded-xl text-xs font-bold cursor-pointer"
                 >
-                  + สร้างตัวเลือกหลักใหม่เอง
+                  {lang === 'th' ? '+ สร้างตัวเลือกหลักใหม่เอง' : '+ Create Custom Option'}
                 </button>
                 <button
                   type="button"
@@ -2749,7 +2821,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sliders className="w-5 h-5" />
-                <h3 className="font-extrabold text-base">เลือกตัวเลือกย่อยที่ใช้งาน</h3>
+                <h3 className="font-extrabold text-base">
+                  {lang === 'th' ? 'เลือกตัวเลือกย่อยที่ใช้งาน' : 'Select Active Sub-Option Groups'}
+                </h3>
               </div>
               <button
                 type="button"
@@ -2768,7 +2842,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   autoFocus
                   value={optionGroupSearch}
                   onChange={(e) => setOptionGroupSearch(e.target.value)}
-                  placeholder="ค้นหากลุ่มตัวเลือกย่อย..."
+                  placeholder={lang === 'th' ? 'ค้นหากลุ่มตัวเลือกย่อย...' : 'Search sub-option groups...'}
                   className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-neutral-300 rounded-xl"
                 />
               </div>
@@ -2777,7 +2851,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             <div className="flex-1 overflow-y-auto p-4 space-y-2">
               {optionGroups.length === 0 ? (
                 <div className="p-4 text-center text-xs text-neutral-500">
-                  ยังไม่มีกลุ่มตัวเลือกย่อย กรุณาสร้างในเมนู &quot;กลุ่มตัวเลือกเสริม&quot; ก่อน
+                  {lang === 'th'
+                    ? 'ยังไม่มีกลุ่มตัวเลือกย่อย กรุณาสร้างในเมนู "กลุ่มตัวเลือกเสริม" ก่อน'
+                    : 'No sub-option groups yet. Create one in Option Groups first.'}
                 </div>
               ) : (
                 optionGroups
@@ -2810,15 +2886,17 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                       >
                         <div className="min-w-0">
                           <div className="font-extrabold text-xs text-neutral-900">
-                            {grp.nameTh || grp.name}
-                            {grp.nameTh && grp.name && grp.name !== grp.nameTh && (
+                            {lang === 'th' ? grp.nameTh || grp.name : grp.name || grp.nameTh}
+                            {grp.nameTh && grp.name && grp.name !== grp.nameTh && lang === 'th' && (
                               <span className="ml-1.5 text-[10px] font-medium text-neutral-400">
                                 ({grp.name})
                               </span>
                             )}
                           </div>
                           <div className="text-[11px] text-neutral-500 mt-0.5">
-                            {grp.choices.map((c) => c.nameTh || c.name).join(' • ')}
+                            {grp.choices
+                              .map((c) => (lang === 'th' ? c.nameTh || c.name : c.name || c.nameTh))
+                              .join(' • ')}
                           </div>
                         </div>
                         <span
@@ -2842,7 +2920,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 onClick={() => setIsOptionGroupPickerOpen(false)}
                 className="px-5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
               >
-                ตกลง ({(editingDish.optionGroupIds || []).length})
+                {lang === 'th'
+                  ? `ตกลง (${(editingDish.optionGroupIds || []).length})`
+                  : `Done (${(editingDish.optionGroupIds || []).length})`}
               </button>
             </div>
           </div>

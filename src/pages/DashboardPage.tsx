@@ -11,6 +11,7 @@ import {
   Language,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import {
   formatMoney,
   formatPercent,
@@ -32,11 +33,13 @@ import {
 
 interface Props {
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
   onNavigate: (page: AppPage) => void;
 }
 
-export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) => {
+export const DashboardPage: React.FC<Props> = ({ settings, lang: propLang, onNavigate }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
   const todayStr = getBusinessWorkDate(new Date(), settings.dailyClosingTime);
 
@@ -142,7 +145,9 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
             <span>{t.dashboard.title}</span>
           </h2>
           <p className="text-xs text-neutral-500">
-            Work Date: <strong className="text-neutral-800">{todayStr}</strong> (Cutoff: {settings.dailyClosingTime})
+            {lang === 'th' ? 'วันทำการ:' : 'Work Date:'}{' '}
+            <strong className="text-neutral-800">{todayStr}</strong> (
+            {lang === 'th' ? 'เวลาตัดรอบ:' : 'Cutoff:'} {settings.dailyClosingTime})
             {isLoading ? ` • ${t.common.loading}` : ''}
           </p>
         </div>
@@ -152,7 +157,7 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
           onClick={() => onNavigate('pos')}
           className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105 active:scale-95"
         >
-          <span>Open POS Register</span>
+          <span>{lang === 'th' ? 'เปิดหน้าขาย (POS)' : 'Open POS Register'}</span>
           <ArrowRight className="w-4 h-4" />
         </button>
       </div>
@@ -178,7 +183,9 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
           >
             {formatPercent(todayPnl.theoreticalFoodCostPercent)}
           </div>
-          <div className="text-[10px] text-neutral-400 mt-0.5">Target: {settings.targetFoodCostPercent}%</div>
+          <div className="text-[10px] text-neutral-400 mt-0.5">
+            {lang === 'th' ? 'เป้าหมาย:' : 'Target:'} {settings.targetFoodCostPercent}%
+          </div>
         </div>
 
         <div className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs">
@@ -187,7 +194,7 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
             ฿{formatMoney(todayPnl.grossProfit)}
           </div>
           <div className="text-[10px] text-neutral-400 mt-0.5">
-            Food COGS: ฿{formatMoney(todayPnl.totalFoodCost)} ({formatPercent(todayPnl.grossProfitMarginPercent)})
+            {lang === 'th' ? 'ต้นทุนวัตถุดิบ:' : 'Food COGS:'} ฿{formatMoney(todayPnl.totalFoodCost)} ({formatPercent(todayPnl.grossProfitMarginPercent)})
           </div>
         </div>
 
@@ -205,7 +212,9 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
             ฿{formatMoney(todayPnl.netOperatingProfit)}
           </div>
           <div className="text-[10px] text-neutral-600 mt-0.5">
-            USALI NOP (OpEx &amp; Labor allocated/day)
+            {lang === 'th'
+              ? 'กำไรดำเนินงาน USALI (ปันส่วน OpEx & ค่าแรงรายวัน)'
+              : 'USALI NOP (OpEx & Labor allocated/day)'}
           </div>
         </div>
       </div>
@@ -248,14 +257,16 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
           <div className="space-y-1.5 text-xs">
             {dishesAboveTarget.length === 0 ? (
               <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-semibold text-center">
-                All dishes are currently within target food cost!
+                {lang === 'th'
+                  ? 'ทุกเมนูมีต้นทุนอาหารอยู่ในเกณฑ์เป้าหมายแล้ว!'
+                  : 'All dishes are currently within target food cost!'}
               </div>
             ) : (
               dishesAboveTarget.map(({ dish, costPct }) => (
                 <div key={dish.id} className="p-2.5 bg-rose-50/50 rounded-xl flex items-center justify-between">
                   <span className="font-bold text-neutral-900">{dish.name}</span>
                   <span className="font-black text-rose-700 bg-rose-100 px-2 py-0.5 rounded-md">
-                    {formatPercent(costPct)} (Target {settings.targetFoodCostPercent}%)
+                    {formatPercent(costPct)} ({lang === 'th' ? 'เป้า' : 'Target'} {settings.targetFoodCostPercent}%)
                   </span>
                 </div>
               ))
@@ -281,7 +292,9 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
           <div className="space-y-1.5 text-xs">
             {dishesWithoutRecipe.length === 0 ? (
               <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-semibold text-center">
-                All menu items have recipes linked!
+                {lang === 'th'
+                  ? 'ทุกเมนูเชื่อมโยงสูตรอาหารเรียบร้อยแล้ว!'
+                  : 'All menu items have recipes linked!'}
               </div>
             ) : (
               dishesWithoutRecipe.map((dish) => (
@@ -319,7 +332,7 @@ export const DashboardPage: React.FC<Props> = ({ settings, lang, onNavigate }) =
                 </div>
                 <div className="text-right">
                   <div className="font-black text-xs text-orange-600">
-                    {dishStat.quantity} orders
+                    {dishStat.quantity} {lang === 'th' ? 'ออเดอร์' : 'orders'}
                   </div>
                   <div className="text-[10px] text-neutral-500">
                     ฿{formatMoney(dishStat.revenue)}

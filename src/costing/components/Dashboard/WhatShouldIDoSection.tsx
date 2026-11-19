@@ -1,18 +1,21 @@
 import React from 'react';
 import { AlertCircle, AlertTriangle, Lightbulb, Info, ArrowUpRight, Sparkles } from 'lucide-react';
 import { WhatShouldIDoAdvice } from '../../types/domain';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 interface WhatShouldIDoSectionProps {
   advices?: WhatShouldIDoAdvice[];
-  activeLanguage: 'th' | 'en';
+  activeLanguage?: 'th' | 'en';
   onNavigate: (view: string) => void;
 }
 
 export const WhatShouldIDoSection: React.FC<WhatShouldIDoSectionProps> = ({
   advices = [],
-  activeLanguage,
+  activeLanguage: propActiveLanguage,
   onNavigate,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const activeLanguage = propActiveLanguage ?? ctxLang;
   const safeAdvices = advices || [];
 
   const getStatusIndicator = (type: WhatShouldIDoAdvice['type']) => {

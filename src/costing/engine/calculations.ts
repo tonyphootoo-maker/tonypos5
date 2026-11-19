@@ -572,6 +572,7 @@ export function calculateOverheadCostPerDish(
 export interface BreakEvenAnalysisResult {
   isValid: boolean;
   errorMessageTh?: string;
+  errorMessageEn?: string;
   breakEvenSales: number;
   breakEvenDailySales: number;
   breakEvenOrders: number;
@@ -586,6 +587,7 @@ export interface BreakEvenAnalysisResult {
   targetProfitDailyOrders: number;
   targetProfitValid: boolean;
   targetProfitErrorMessageTh?: string;
+  targetProfitErrorMessageEn?: string;
 }
 
 /**
@@ -613,6 +615,7 @@ export function calculateDetailedBreakEven(
     return {
       isValid: false,
       errorMessageTh: 'ไม่สามารถคุ้มทุนได้เนื่องจากต้นทุนผันแปรรวมเกินหรือเท่ากับ 100% ของราคาขาย',
+      errorMessageEn: 'Break-even cannot be reached because total variable costs equal or exceed 100% of selling price.',
       breakEvenSales: 0,
       breakEvenDailySales: 0,
       breakEvenOrders: 0,
@@ -626,6 +629,7 @@ export function calculateDetailedBreakEven(
       targetProfitDailyOrders: 0,
       targetProfitValid: false,
       targetProfitErrorMessageTh: 'ไม่สามารถทำกำไรตามเป้าหมายได้เนื่องจากต้นทุนผันแปรรวมเกินหรือเท่ากับ 100% ของราคาขาย',
+      targetProfitErrorMessageEn: 'Target profit cannot be reached because total variable costs equal or exceed 100% of selling price.',
     };
   }
 
@@ -633,6 +637,7 @@ export function calculateDetailedBreakEven(
     return {
       isValid: false,
       errorMessageTh: 'ต้นทุนคงที่ไม่ถูกต้อง (ต้องไม่ติดลบ)',
+      errorMessageEn: 'Invalid fixed costs (must not be negative).',
       breakEvenSales: 0,
       breakEvenDailySales: 0,
       breakEvenOrders: 0,
@@ -665,12 +670,14 @@ export function calculateDetailedBreakEven(
   let targetProfitDailyOrders = 0;
   let targetProfitValid = true;
   let targetProfitErrorMessageTh: string | undefined = undefined;
+  let targetProfitErrorMessageEn: string | undefined = undefined;
 
   if (targetProfitPercent > 0) {
     const tpDenominator = (contributionMarginPercent - targetProfitPercent) / 100;
     if (tpDenominator <= 0) {
       targetProfitValid = false;
       targetProfitErrorMessageTh = 'ไม่สามารถทำกำไรตามเป้าหมายได้เนื่องจากต้นทุนผันแปรรวมและเป้าหมายกำไรเกินหรือเท่ากับ 100% ของราคาขาย';
+      targetProfitErrorMessageEn = 'Target profit cannot be achieved because total variable costs plus target profit equal or exceed 100% of selling price.';
       targetProfitSales = 0;
     } else {
       targetProfitSales = fixedCosts / tpDenominator;
@@ -695,6 +702,7 @@ export function calculateDetailedBreakEven(
     targetProfitDailyOrders,
     targetProfitValid,
     targetProfitErrorMessageTh,
+    targetProfitErrorMessageEn,
   };
 }
 
@@ -1763,24 +1771,40 @@ export function validateExpenseInput(input: {
   usefulLifeYears?: number;
   isAsset?: boolean;
   isInstallment?: boolean;
-}): { isValid: boolean; errorMessageTh?: string } {
+}): { isValid: boolean; errorMessageTh?: string; errorMessageEn?: string } {
   if (input.amount !== undefined && input.amount < 0) {
-    return { isValid: false, errorMessageTh: 'จำนวนเงินต้องไม่ติดลบ (ต้องมากกว่าหรือเท่ากับ 0)' };
+    return {
+      isValid: false,
+      errorMessageTh: 'จำนวนเงินต้องไม่ติดลบ (ต้องมากกว่าหรือเท่ากับ 0)',
+      errorMessageEn: 'Amount must not be negative (must be 0 or greater).',
+    };
   }
   if (input.isAsset && !input.isInstallment) {
     if (input.assetCost !== undefined && input.assetCost < 0) {
-      return { isValid: false, errorMessageTh: 'มูลค่าสินทรัพย์ต้องไม่ติดลบ' };
+      return {
+        isValid: false,
+        errorMessageTh: 'มูลค่าสินทรัพย์ต้องไม่ติดลบ',
+        errorMessageEn: 'Asset cost must not be negative.',
+      };
     }
     if (input.usefulLifeYears !== undefined && input.usefulLifeYears <= 0) {
-      return { isValid: false, errorMessageTh: 'อายุการใช้งานสินทรัพย์ต้องมากกว่า 0 ปี' };
+      return {
+        isValid: false,
+        errorMessageTh: 'อายุการใช้งานสินทรัพย์ต้องมากกว่า 0 ปี',
+        errorMessageEn: 'Asset useful life must be greater than 0 years.',
+      };
     }
   }
   return { isValid: true };
 }
 
-export function validatePercentage(percent: number): { isValid: boolean; errorMessageTh?: string } {
+export function validatePercentage(percent: number): { isValid: boolean; errorMessageTh?: string; errorMessageEn?: string } {
   if (percent < 0 || percent > 100) {
-    return { isValid: false, errorMessageTh: 'ค่าเปอร์เซ็นต์ต้องอยู่ระหว่าง 0 ถึง 100%' };
+    return {
+      isValid: false,
+      errorMessageTh: 'ค่าเปอร์เซ็นต์ต้องอยู่ระหว่าง 0 ถึง 100%',
+      errorMessageEn: 'Percentage value must be between 0 and 100%.',
+    };
   }
   return { isValid: true };
 }

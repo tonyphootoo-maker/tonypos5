@@ -12,14 +12,23 @@ import {
 import { RestaurantSettings } from '../types';
 import { NumericInput } from './common/NumericInput';
 import { AppIconService } from '../services/appIconService';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface SettingsViewProps {
   settings: RestaurantSettings;
   onSaveSettings: (settings: RestaurantSettings) => void;
   onOpenIconModal?: () => void;
+  lang?: 'th' | 'en';
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSettings, onOpenIconModal }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({
+  settings,
+  onSaveSettings,
+  onOpenIconModal,
+  lang: propLang,
+}) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [localSettings, setLocalSettings] = useState<RestaurantSettings>(() => ({
     ...settings,
     restaurantName: settings.restaurantName || '',
@@ -67,7 +76,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
       {/* Header */}
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <h1 className="text-2xl font-bold text-white tracking-tight">
-          ตั้งค่าระบบร้าน (Restaurant System Settings)
+          {lang === 'en' ? 'Costing & Benchmark Settings' : 'ตั้งค่าระบบร้าน (Restaurant System Settings)'}
         </h1>
 
         <button
@@ -76,14 +85,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
           className="px-5 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black rounded-xl text-xs font-bold shadow-lg shadow-[#F27D26]/20 transition-all flex items-center gap-2 cursor-pointer self-start sm:self-auto"
         >
           <Save className="w-4 h-4" />
-          <span>บันทึกการตั้งค่า</span>
+          <span>{lang === 'en' ? 'Save Settings' : 'บันทึกการตั้งค่า'}</span>
         </button>
       </div>
 
       {savedSuccess && (
         <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-xs text-white font-bold flex items-center gap-2">
           <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-          <span>บันทึกการตั้งค่าระบบเรียบร้อยแล้ว การคำนวณทั้งหมดได้รับการปรับปรุงทันที</span>
+          <span>
+            {lang === 'en'
+              ? 'Settings saved. All costing calculations have been updated.'
+              : 'บันทึกการตั้งค่าระบบเรียบร้อยแล้ว การคำนวณทั้งหมดได้รับการปรับปรุงทันที'}
+          </span>
         </div>
       )}
 
@@ -92,13 +105,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
         <div className="bg-white/5 backdrop-blur-xl p-6 rounded-3xl border border-white/10 shadow-xl space-y-4">
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <Store className="w-5 h-5 text-[#F27D26]" />
-            <h2 className="text-base font-bold text-white">ข้อมูลร้านและเป้าหมายต้นทุน</h2>
+            <h2 className="text-base font-bold text-white">
+              {lang === 'en' ? 'Restaurant Profile & Cost Targets' : 'ข้อมูลร้านและเป้าหมายต้นทุน'}
+            </h2>
           </div>
 
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
             <div>
-              <label className="block font-bold text-white/80 mb-1">ชื่อร้านอาหาร</label>
+              <label className="block font-bold text-white/80 mb-1">
+                {lang === 'en' ? 'Restaurant Name' : 'ชื่อร้านอาหาร'}
+              </label>
               <input
                 type="text"
                 required
@@ -112,7 +129,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
 
             <div>
               <label className="block font-bold text-white/80 mb-1">
-                เป้าหมาย Food Cost % (Target FC %)
+                {lang === 'en' ? 'Target Food Cost %' : 'เป้าหมาย Food Cost % (Target FC %)'}
               </label>
               <div className="relative">
                 <NumericInput
@@ -136,7 +153,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
 
             <div>
               <label className="block font-bold text-white/80 mb-1">
-                อัตราโสหุ้ย (%) / Overhead rate (%)
+                {lang === 'en' ? 'Overhead Rate (%)' : 'อัตราโสหุ้ย (%) / Overhead rate (%)'}
               </label>
               <div className="relative">
                 <NumericInput
@@ -163,7 +180,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
 
             <div>
               <label className="block font-bold text-white/80 mb-1">
-                คิดโสหุ้ยจาก / Calculate overhead based on
+                {lang === 'en' ? 'Calculate Overhead Based On' : 'คิดโสหุ้ยจาก / Calculate overhead based on'}
               </label>
               <select
                 value={localSettings.overheadCalculationBase || 'SELLING_PRICE'}
@@ -176,20 +193,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl font-medium text-white focus:outline-none focus:border-[#F27D26]"
               >
                 <option value="SELLING_PRICE" className="bg-[#1a1a1a] text-white">
-                  ราคาขายสุทธิ / Selling price ex-VAT (มาตรฐานสากล - DEFAULT)
+                  {lang === 'en'
+                    ? 'Net Selling Price ex-VAT (Standard - DEFAULT)'
+                    : 'ราคาขายสุทธิ / Selling price ex-VAT (มาตรฐานสากล - DEFAULT)'}
                 </option>
                 <option value="FOOD_COST" className="bg-[#1a1a1a] text-white">
-                  ต้นทุนวัตถุดิบ / Food Cost (ไม่แนะนำ)
+                  {lang === 'en'
+                    ? 'Food Cost Basis (Not Recommended)'
+                    : 'ต้นทุนวัตถุดิบ / Food Cost (ไม่แนะนำ)'}
                 </option>
               </select>
               <p className="text-[10px] text-white/40 mt-1">
-                มาตรฐานบัญชีร้านอาหารสากลกำหนดให้คำนวณโสหุ้ยเป็น % ของราคาขายสุทธิ (ex-VAT)
+                {lang === 'en'
+                  ? 'International restaurant accounting calculates overhead as % of ex-VAT selling price.'
+                  : 'มาตรฐานบัญชีร้านอาหารสากลกำหนดให้คำนวณโสหุ้ยเป็น % ของราคาขายสุทธิ (ex-VAT)'}
               </p>
             </div>
 
             <div>
               <label className="block font-bold text-white/80 mb-1">
-                อัตรา VAT (%)
+                {lang === 'en' ? 'VAT Rate (%)' : 'อัตรา VAT (%)'}
               </label>
               <div className="relative">
                 <NumericInput
@@ -213,13 +236,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 </span>
               </div>
               <p className="text-[10px] text-white/40 mt-1">
-                ใช้คำนวณราคาขายสุทธิ (ex-VAT) และค่า GP
+                {lang === 'en'
+                  ? 'Used for ex-VAT net price and delivery GP calculations'
+                  : 'ใช้คำนวณราคาขายสุทธิ (ex-VAT) และค่า GP'}
               </p>
             </div>
 
             <div>
               <label className="block font-bold text-white/80 mb-1">
-                อัตราภาษีเงินได้ (ประมาณการ) (%)
+                {lang === 'en' ? 'Estimated Income Tax Rate (%)' : 'อัตราภาษีเงินได้ (ประมาณการ) (%)'}
               </label>
               <div className="relative">
                 <NumericInput
@@ -243,7 +268,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 </span>
               </div>
               <p className="text-[10px] text-white/40 mt-1">
-                ตัวเลขนี้เป็นการประมาณการเพื่อดูภาพรวม ไม่ใช่ตัวเลขสำหรับยื่นภาษี กรุณาปรึกษานักบัญชี
+                {lang === 'en'
+                  ? 'For internal profit estimation only; consult your accountant for tax filing.'
+                  : 'ตัวเลขนี้เป็นการประมาณการเพื่อดูภาพรวม ไม่ใช่ตัวเลขสำหรับยื่นภาษี กรุณาปรึกษานักบัญชี'}
               </p>
             </div>
 
@@ -265,10 +292,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 />
                 <div>
                   <span className="font-bold text-white block">
-                    รวมเงินสมทบประกันสังคมนายจ้าง (Employer Social Security)
+                    {lang === 'en'
+                      ? 'Include Employer Social Security (SSO)'
+                      : 'รวมเงินสมทบประกันสังคมนายจ้าง (Employer Social Security)'}
                   </span>
                   <span className="text-[10px] text-white/50 block">
-                    คำนวณอัตโนมัติในต้นทุนพนักงาน (ค่าเริ่มต้น 5% เพดานฐานเงินเดือน 15,000 บาท = สูงสุด 750 บาท/เดือน)
+                    {lang === 'en'
+                      ? 'Auto-calculated in labor cost (default 5%, wage cap 15,000 THB = max 750 THB/month)'
+                      : 'คำนวณอัตโนมัติในต้นทุนพนักงาน (ค่าเริ่มต้น 5% เพดานฐานเงินเดือน 15,000 บาท = สูงสุด 750 บาท/เดือน)'}
                   </span>
                 </div>
               </label>
@@ -276,7 +307,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
               {localSettings.socialSecurityEnabled && (
                 <div className="grid grid-cols-2 gap-3 pl-6 pt-1">
                   <div>
-                    <label className="block text-[10px] font-bold text-white/70 mb-1">อัตราประกันสังคม (%)</label>
+                    <label className="block text-[10px] font-bold text-white/70 mb-1">
+                      {lang === 'en' ? 'SSO Rate (%)' : 'อัตราประกันสังคม (%)'}
+                    </label>
                     <NumericInput
                       type="number"
                       step="0.5"
@@ -294,7 +327,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-white/70 mb-1">เพดานค่าจ้าง (บาท)</label>
+                    <label className="block text-[10px] font-bold text-white/70 mb-1">
+                      {lang === 'en' ? 'Salary Cap (THB)' : 'เพดานค่าจ้าง (บาท)'}
+                    </label>
                     <NumericInput
                       type="number"
                       step="500"
@@ -322,7 +357,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <Package className="w-5 h-5 text-[#F27D26]" />
             <h2 className="text-base font-bold text-white">
-              Sales Channels & ค่า GP เดลิเวอรี (Owner-Defined GP%)
+              {lang === 'en'
+                ? 'Sales Channels & Delivery GP (%)'
+                : 'Sales Channels & ค่า GP เดลิเวอรี (Owner-Defined GP%)'}
             </h2>
           </div>
 
@@ -333,7 +370,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 <label className="font-bold text-emerald-400">
                   GrabFood GP %
                 </label>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-900 font-bold">Active</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-900 font-bold">
+                  {lang === 'en' ? 'Active' : 'เปิดใช้งาน'}
+                </span>
               </div>
               <div className="relative">
                 <NumericInput
@@ -361,7 +400,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 </span>
               </div>
               <span className="text-[11px] text-white/40 mt-1.5 block">
-                สูตร: GP = ยอดขาย Grab × GP%
+                {lang === 'en' ? 'Formula: GP = Grab Sales × GP%' : 'สูตร: GP = ยอดขาย Grab × GP%'}
               </span>
             </div>
 
@@ -371,7 +410,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 <label className="font-bold text-green-400">
                   LINE MAN GP %
                 </label>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-950 font-bold">Active</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-950 font-bold">
+                  {lang === 'en' ? 'Active' : 'เปิดใช้งาน'}
+                </span>
               </div>
               <div className="relative">
                 <NumericInput
@@ -399,7 +440,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 </span>
               </div>
               <span className="text-[11px] text-white/40 mt-1.5 block">
-                สูตร: GP = ยอดขาย LINE MAN × GP%
+                {lang === 'en' ? 'Formula: GP = LINE MAN Sales × GP%' : 'สูตร: GP = ยอดขาย LINE MAN × GP%'}
               </span>
             </div>
           </div>
@@ -422,17 +463,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
               />
               <div>
                 <span className="font-bold text-white block">
-                  รวม VAT {localSettings.vatRatePercent ?? 7}% บนค่า GP เดลิเวอรีเป็นต้นทุน
+                  {lang === 'en'
+                    ? `Include ${localSettings.vatRatePercent ?? 7}% VAT on delivery GP as cost`
+                    : `รวม VAT ${localSettings.vatRatePercent ?? 7}% บนค่า GP เดลิเวอรีเป็นต้นทุน`}
                 </span>
                 <span className="text-[10px] text-white/50 block mt-0.5">
-                  เช่น GP 30% จะคิดเป็น Effective GP {((localSettings.grabFoodCommissionPercent ?? 30) * (1 + (localSettings.vatRatePercent ?? 7) / 100)).toFixed(1)}% ในราคาแนะนำและ P&L
+                  {lang === 'en'
+                    ? `e.g. 30% GP becomes ${((localSettings.grabFoodCommissionPercent ?? 30) * (1 + (localSettings.vatRatePercent ?? 7) / 100)).toFixed(1)}% effective GP in pricing & P&L`
+                    : `เช่น GP 30% จะคิดเป็น Effective GP ${((localSettings.grabFoodCommissionPercent ?? 30) * (1 + (localSettings.vatRatePercent ?? 7) / 100)).toFixed(1)}% ในราคาแนะนำและ P&L`}
                 </span>
               </div>
             </label>
 
             <div className="p-3.5 bg-black/30 rounded-2xl border border-white/10">
               <label className="block font-bold text-white/80 mb-1.5">
-                การปัดเศษราคาขายแนะนำ (Price Rounding Step)
+                {lang === 'en'
+                  ? 'Suggested Price Rounding Step'
+                  : 'การปัดเศษราคาขายแนะนำ (Price Rounding Step)'}
               </label>
               <select
                 value={localSettings.priceRounding ?? 1}
@@ -442,9 +489,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 }}
                 className="w-full p-2 bg-black/60 border border-white/15 rounded-xl font-bold text-white cursor-pointer"
               >
-                <option value={1} className="bg-[#1a1a1a]">ปัดขึ้นเป็น 1 บาท (เช่น 148)</option>
-                <option value={5} className="bg-[#1a1a1a]">ปัดขึ้นเป็น 5 บาท (เช่น 150)</option>
-                <option value={10} className="bg-[#1a1a1a]">ปัดขึ้นเป็น 10 บาท (เช่น 150)</option>
+                <option value={1} className="bg-[#1a1a1a]">
+                  {lang === 'en' ? 'Round up to 1 THB (e.g. 148)' : 'ปัดขึ้นเป็น 1 บาท (เช่น 148)'}
+                </option>
+                <option value={5} className="bg-[#1a1a1a]">
+                  {lang === 'en' ? 'Round up to 5 THB (e.g. 150)' : 'ปัดขึ้นเป็น 5 บาท (เช่น 150)'}
+                </option>
+                <option value={10} className="bg-[#1a1a1a]">
+                  {lang === 'en' ? 'Round up to 10 THB (e.g. 150)' : 'ปัดขึ้นเป็น 10 บาท (เช่น 150)'}
+                </option>
               </select>
             </div>
           </div>
@@ -455,7 +508,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
           <div className="flex items-center gap-2 border-b border-white/10 pb-3">
             <ShieldCheck className="w-5 h-5 text-[#F27D26]" />
             <h2 className="text-base font-bold text-white">
-              สิทธิ์การใช้งาน (Role-Based Access Control)
+              {lang === 'en'
+                ? 'Role-Based Access Control'
+                : 'สิทธิ์การใช้งาน (Role-Based Access Control)'}
             </h2>
           </div>
 
@@ -468,9 +523,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                   : 'bg-white/5 border-white/10 hover:border-white/20'
               }`}
             >
-              <div className="font-bold text-white text-sm">OWNER (เจ้าของร้าน)</div>
+              <div className="font-bold text-white text-sm">
+                {lang === 'en' ? 'OWNER' : 'OWNER (เจ้าของร้าน)'}
+              </div>
               <p className="text-[11px] text-white/60 mt-1">
-                เข้าถึงได้ทุกส่วน: ดูงบ P&L, แก้ไขสูตรอาหาร, ปรับราคาขาย, ลบ/รีเซ็ตข้อมูล, จัดการผู้ใช้
+                {lang === 'en'
+                  ? 'Full access: View P&L, edit recipes, set prices, reset data & manage users.'
+                  : 'เข้าถึงได้ทุกส่วน: ดูงบ P&L, แก้ไขสูตรอาหาร, ปรับราคาขาย, ลบ/รีเซ็ตข้อมูล, จัดการผู้ใช้'}
               </p>
             </div>
 
@@ -482,9 +541,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                   : 'bg-white/5 border-white/10 hover:border-white/20'
               }`}
             >
-              <div className="font-bold text-white text-sm">MANAGER (ผู้จัดการ)</div>
+              <div className="font-bold text-white text-sm">
+                {lang === 'en' ? 'MANAGER' : 'MANAGER (ผู้จัดการ)'}
+              </div>
               <p className="text-[11px] text-white/60 mt-1">
-                จัดการวัตถุดิบ, ดูต้นทุนต่อจาน และบันทึกค่าใช้จ่ายร้าน
+                {lang === 'en'
+                  ? 'Manage ingredients, inspect plate costs, and record operating expenses.'
+                  : 'จัดการวัตถุดิบ, ดูต้นทุนต่อจาน และบันทึกค่าใช้จ่ายร้าน'}
               </p>
             </div>
 
@@ -496,9 +559,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                   : 'bg-white/5 border-white/10 hover:border-white/20'
               }`}
             >
-              <div className="font-bold text-white text-sm">STAFF (พนักงานหน้าร้าน)</div>
+              <div className="font-bold text-white text-sm">
+                {lang === 'en' ? 'STAFF' : 'STAFF (พนักงานหน้าร้าน)'}
+              </div>
               <p className="text-[11px] text-white/60 mt-1">
-                บันทึกยอดขายหน้าร้าน และตรวจดูสูตรตวงชั่งตามมาตรฐาน
+                {lang === 'en'
+                  ? 'Record front-of-house sales and check standardized recipes.'
+                  : 'บันทึกยอดขายหน้าร้าน และตรวจดูสูตรตวงชั่งตามมาตรฐาน'}
               </p>
             </div>
           </div>
@@ -512,7 +579,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 <Smartphone className="w-4 h-4" />
               </div>
               <h2 className="text-base font-bold text-white">
-                แอปมือถือ & แท็บเล็ต และไอคอนแอป (Mobile PWA & App Icon)
+                {lang === 'en'
+                  ? 'Mobile PWA & App Icon'
+                  : 'แอปมือถือ & แท็บเล็ต และไอคอนแอป (Mobile PWA & App Icon)'}
               </h2>
             </div>
           </div>
@@ -521,13 +590,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
             <div className="flex items-center gap-3">
               <img
                 src={AppIconService.getCurrentIcon()}
-                alt="Current App Icon"
+                alt={lang === 'en' ? 'Current App Icon' : 'ไอคอนแอปปัจจุบัน'}
                 className="w-14 h-14 rounded-2xl shadow-lg ring-2 ring-[#F27D26]/40 object-cover bg-white shrink-0"
               />
               <div>
-                <div className="text-xs font-bold text-white">รูปไอคอนแอปปัจจุบัน (Active Icon)</div>
+                <div className="text-xs font-bold text-white">
+                  {lang === 'en' ? 'Active App Icon' : 'รูปไอคอนแอปปัจจุบัน (Active Icon)'}
+                </div>
                 <div className="text-[11px] text-white/60 mt-0.5">
-                  ไอคอนที่แสดงบนแท็บเบราว์เซอร์ และหน้าจอโฮมเมื่อติดตั้งลงบนมือถือ/แท็บเล็ต
+                  {lang === 'en'
+                    ? 'Displayed on browser tabs and mobile/tablet Home Screens'
+                    : 'ไอคอนที่แสดงบนแท็บเบราว์เซอร์ และหน้าจอโฮมเมื่อติดตั้งลงบนมือถือ/แท็บเล็ต'}
                 </div>
               </div>
             </div>
@@ -539,7 +612,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ settings, onSaveSett
                 className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold border border-white/20 transition-all flex items-center gap-2 cursor-pointer shrink-0 shadow-xs"
               >
                 <ImageIcon className="w-4 h-4 text-[#F27D26]" />
-                <span>เปลี่ยนรูปไอคอนแอป...</span>
+                <span>{lang === 'en' ? 'Customize App Icon...' : 'เปลี่ยนรูปไอคอนแอป...'}</span>
               </button>
             )}
           </div>

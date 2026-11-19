@@ -1704,7 +1704,9 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                 </div>
                 {isExecutiveCmAssumed && avgFoodCostPercent === null && (
                   <div className="mt-2 flex items-center gap-2 text-[11px]">
-                    <span className="text-amber-700 font-semibold">CM% สมมติ:</span>
+                    <span className="text-amber-700 font-semibold">
+                      {lang === 'th' ? 'CM% สมมติ:' : 'Assumed CM%:'}
+                    </span>
                     <input
                       type="number"
                       min={0}
@@ -1994,7 +1996,9 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                   </span>
                 ) : (
                   <span className="text-amber-700 font-semibold">
-                    Variance: ยังไม่มีผลนับสต็อกปิดงวด
+                    {lang === 'th'
+                      ? 'Variance: ยังไม่มีผลนับสต็อกปิดงวด'
+                      : 'Variance: No closing stock count yet'}
                   </span>
                 )}
                 {periodPnl.wasteMemo > 0 && (
@@ -2010,15 +2014,31 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-sky-600 shrink-0" />
                   <span>
-                    <strong>ประมาณการจากสูตร ยังไม่มีการนับสต็อก</strong> — แนะนำให้ไปที่คลังสินค้าแล้วกด{' '}
-                    <button
-                      type="button"
-                      onClick={() => onNavigatePage('cost_inventory')}
-                      className="underline font-bold text-sky-700 hover:text-sky-900 cursor-pointer"
-                    >
-                      นับสต็อกใหม่หนึ่งครั้ง
-                    </button>{' '}
-                    เพื่อบันทึกสต็อกปิดงวดและเปรียบเทียบ Actual COGS
+                    {lang === 'th' ? (
+                      <>
+                        <strong>ประมาณการจากสูตร ยังไม่มีการนับสต็อก</strong> — แนะนำให้ไปที่คลังสินค้าแล้วกด{' '}
+                        <button
+                          type="button"
+                          onClick={() => onNavigatePage('cost_inventory')}
+                          className="underline font-bold text-sky-700 hover:text-sky-900 cursor-pointer"
+                        >
+                          นับสต็อกใหม่หนึ่งครั้ง
+                        </button>{' '}
+                        เพื่อบันทึกสต็อกปิดงวดและเปรียบเทียบ Actual COGS
+                      </>
+                    ) : (
+                      <>
+                        <strong>Recipe-estimated COGS (no physical stock count yet)</strong> — Go to Inventory and click{' '}
+                        <button
+                          type="button"
+                          onClick={() => onNavigatePage('cost_inventory')}
+                          className="underline font-bold text-sky-700 hover:text-sky-900 cursor-pointer"
+                        >
+                          New Stock Count
+                        </button>{' '}
+                        once to record closing inventory and compare Actual COGS.
+                      </>
+                    )}
                   </span>
                 </div>
               </div>
@@ -2038,7 +2058,15 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
               <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>
-                  <strong>ข้อมูลช่องทางบางส่วนเป็นการประมาณการตามสัดส่วน</strong> — สรุปยอด POS เดิมไม่มีข้อมูลส่วนลด/ค่า GP/Service Charge แยกต่อช่องทาง แนะนำกด Rebuild Daily Summaries ในหน้าตั้งค่าเมื่อต้องการแยกยอดจริงระดับบิล
+                  {lang === 'th' ? (
+                    <>
+                      <strong>ข้อมูลช่องทางบางส่วนเป็นการประมาณการตามสัดส่วน</strong> — สรุปยอด POS เดิมไม่มีข้อมูลส่วนลด/ค่า GP/Service Charge แยกต่อช่องทาง แนะนำกด Rebuild Daily Summaries ในหน้าตั้งค่าเมื่อต้องการแยกยอดจริงระดับบิล
+                    </>
+                  ) : (
+                    <>
+                      <strong>Partial channel allocation estimated proportionally</strong> — Legacy POS summaries lack per-channel discount/GP/service charge breakdowns. Run Rebuild Daily Summaries in Settings to split exact bill-level totals.
+                    </>
+                  )}
                 </span>
               </div>
             )}

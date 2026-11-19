@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SettingsDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import { exportFullDatabase, importFullDatabase } from '../data/db';
 import {
   DatabaseBackup,
@@ -15,10 +16,12 @@ import { ConfirmModal } from '../components/ConfirmModal';
 
 interface Props {
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
 }
 
-export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
+export const BackupPage: React.FC<Props> = ({ settings, lang: propLang }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
 
   const [isExporting, setIsExporting] = useState(false);
@@ -52,7 +55,13 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
       setExportSuccess(true);
     } catch (err: unknown) {
       console.error('Export error:', err);
-      setErrorMessage(err instanceof Error ? err.message : 'Export failed');
+      setErrorMessage(
+        err instanceof Error
+          ? err.message
+          : lang === 'th'
+          ? 'ส่งออกข้อมูลไม่สำเร็จ'
+          : 'Export failed'
+      );
     } finally {
       setIsExporting(false);
     }
@@ -75,7 +84,7 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
 
     const reader = new FileReader();
     reader.onerror = () => {
-      setErrorMessage('Failed to read file');
+      setErrorMessage(lang === 'th' ? 'ไม่สามารถอ่านไฟล์ได้' : 'Failed to read file');
       setIsImporting(false);
     };
     reader.onload = async (event) => {
@@ -86,7 +95,13 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
         setImportSuccess(true);
       } catch (err: unknown) {
         console.error('Import error:', err);
-        setErrorMessage(err instanceof Error ? err.message : 'Invalid JSON backup format');
+        setErrorMessage(
+          err instanceof Error
+            ? err.message
+            : lang === 'th'
+            ? 'รูปแบบไฟล์สำรอง JSON ไม่ถูกต้อง'
+            : 'Invalid JSON backup format'
+        );
       } finally {
         setIsImporting(false);
       }
@@ -146,7 +161,7 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
             {isExporting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Exporting...</span>
+                <span>{lang === 'th' ? 'กำลังส่งออกข้อมูล...' : 'Exporting...'}</span>
               </>
             ) : (
               <>
@@ -173,7 +188,7 @@ export const BackupPage: React.FC<Props> = ({ settings, lang }) => {
               {isImporting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-                  <span>Restoring Database...</span>
+                  <span>{lang === 'th' ? 'กำลังกู้คืนฐานข้อมูล...' : 'Restoring Database...'}</span>
                 </>
               ) : (
                 <>

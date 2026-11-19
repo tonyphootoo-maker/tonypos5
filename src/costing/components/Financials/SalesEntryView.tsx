@@ -6,6 +6,7 @@ import {
   calculateChannelPlatformFees,
   normalizeUpsertChannelId,
 } from '../../engine/calculations';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 interface SalesEntryViewProps {
   sales: DailySalesRecord[];
@@ -14,7 +15,7 @@ interface SalesEntryViewProps {
   onDeleteSalesRecord: (id: string) => void;
   onUpdateChannels?: (channels: SalesChannel[]) => void;
   defaultVatRate?: number;
-  activeLanguage: 'th' | 'en';
+  activeLanguage?: 'th' | 'en';
 }
 
 export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
@@ -24,8 +25,11 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
   onDeleteSalesRecord,
   onUpdateChannels,
   defaultVatRate = 7,
-  activeLanguage,
+  activeLanguage: propActiveLanguage,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const activeLanguage = propActiveLanguage ?? ctxLang;
+  const isTh = activeLanguage === 'th';
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [localGpBases, setLocalGpBases] = useState<Record<string, 'gross_incl_vat' | 'net_ex_vat'>>({});
   const [formData, setFormData] = useState<{
@@ -102,7 +106,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       id: existingManualDuplicate?.id || `sales-${Date.now()}`,
       date: formData.date,
       channelId: formData.channelId,
-      channelName: selectedChannelRaw?.name || 'ทั่วไป',
+      channelName: selectedChannelRaw?.name || (isTh ? 'ทั่วไป' : 'General'),
       grossSales: formData.grossSales,
       discounts: formData.discounts,
       refunds: formData.refunds,
@@ -154,31 +158,41 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">ยอดขายรวมก่อนหัก (Gross)</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'ยอดขายรวมก่อนหัก (Gross)' : 'Total Gross Sales'}
+          </div>
           <div className="mt-1 text-xl font-bold text-slate-900 font-mono">
             ฿{Math.round(totalGross).toLocaleString()}
           </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">ส่วนลดที่ร้านออกเอง</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'ส่วนลดที่ร้านออกเอง' : 'Store Discounts'}
+          </div>
           <div className="mt-1 text-xl font-bold text-amber-600 font-mono">
             -฿{Math.round(totalDiscounts).toLocaleString()}
           </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">ยอดขายสุทธิ (Net Sales ex-VAT)</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'ยอดขายสุทธิ (Net Sales ex-VAT)' : 'Total Net Sales (ex-VAT)'}
+          </div>
           <div className="mt-1 text-xl font-bold text-emerald-700 font-mono">
             ฿{Math.round(totalNet).toLocaleString()}
           </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">ไม่รวมภาษีมูลค่าเพิ่ม VAT</div>
+          <div className="text-[10px] text-slate-400 mt-0.5">
+            {isTh ? 'ไม่รวมภาษีมูลค่าเพิ่ม VAT' : 'Excluding VAT'}
+          </div>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <div className="text-slate-500 text-xs font-medium">จำนวนออเดอร์ทั้งหมด</div>
+          <div className="text-slate-500 text-xs font-medium">
+            {isTh ? 'จำนวนออเดอร์ทั้งหมด' : 'Total Orders'}
+          </div>
           <div className="mt-1 text-xl font-bold text-slate-900 font-mono">
-            {totalOrders.toLocaleString()} <span className="text-xs text-slate-400 font-sans">orders</span>
+            {totalOrders.toLocaleString()} <span className="text-xs text-slate-400 font-sans">{isTh ? 'บิล' : 'orders'}</span>
           </div>
         </div>
       </div>
@@ -187,22 +201,22 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs overflow-hidden">
         <h2 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
           <Calendar className="h-4 w-4 text-slate-600" />
-          <span>ประวัติยอดขายรายวัน</span>
+          <span>{isTh ? 'ประวัติยอดขายรายวัน' : 'Daily Sales History'}</span>
         </h2>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold">
-                <th className="py-2.5 px-3">วันที่</th>
-                <th className="py-2.5 px-3">ช่องทางขาย</th>
-                <th className="py-2.5 px-3 text-right">ยอดรวม (Gross ฿)</th>
-                <th className="py-2.5 px-3 text-right">ส่วนลด (฿)</th>
+                <th className="py-2.5 px-3">{isTh ? 'วันที่' : 'Date'}</th>
+                <th className="py-2.5 px-3">{isTh ? 'ช่องทางขาย' : 'Channel'}</th>
+                <th className="py-2.5 px-3 text-right">{isTh ? 'ยอดรวม (Gross ฿)' : 'Gross (฿)'}</th>
+                <th className="py-2.5 px-3 text-right">{isTh ? 'ส่วนลด (฿)' : 'Discounts (฿)'}</th>
                 <th className="py-2.5 px-3 text-center">VAT</th>
-                <th className="py-2.5 px-3 text-right">ค่า GP (฿)</th>
-                <th className="py-2.5 px-3 text-right">ยอดสุทธิ (ex-VAT ฿)</th>
-                <th className="py-2.5 px-3 text-right">ออเดอร์</th>
-                <th className="py-2.5 px-3 text-center">จัดการ</th>
+                <th className="py-2.5 px-3 text-right">{isTh ? 'ค่า GP (฿)' : 'GP Fees (฿)'}</th>
+                <th className="py-2.5 px-3 text-right">{isTh ? 'ยอดสุทธิ (ex-VAT ฿)' : 'Net Sales (ex-VAT ฿)'}</th>
+                <th className="py-2.5 px-3 text-right">{isTh ? 'ออเดอร์' : 'Orders'}</th>
+                <th className="py-2.5 px-3 text-center">{isTh ? 'จัดการ' : 'Actions'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -217,7 +231,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                     <td className="py-2.5 px-3">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-semibold text-slate-900">
-                          {channel?.name || rec.channelName || 'ทั่วไป'}
+                          {channel?.name || rec.channelName || (isTh ? 'ทั่วไป' : 'General')}
                         </span>
                         {isPosSync && (
                           <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 text-[10px] font-bold">
@@ -226,15 +240,19 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                         )}
                         {rec.replacesPosSync && (
                           <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
-                            แทนที่ POS
+                            {isTh ? 'แทนที่ POS' : 'POS Override'}
                           </span>
                         )}
                         {rec.estimatedAllocation && (
                           <span
                             className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-semibold"
-                            title="ข้อมูล POS เดิมไม่มี breakdown แยกช่องทาง ระบบจัดสรรส่วนลด/ค่า GP ตามสัดส่วนยอดขาย"
+                            title={
+                              isTh
+                                ? 'ข้อมูล POS เดิมไม่มี breakdown แยกช่องทาง ระบบจัดสรรส่วนลด/ค่า GP ตามสัดส่วนยอดขาย'
+                                : 'Legacy POS summary lacked channel breakdown; discounts & GP were allocated proportionally by revenue'
+                            }
                           >
-                            ประมาณการตามสัดส่วน
+                            {isTh ? 'ประมาณการตามสัดส่วน' : 'Proportional Est.'}
                           </span>
                         )}
                       </div>
@@ -244,7 +262,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                       {rec.discounts > 0 ? `-฿${rec.discounts.toLocaleString()}` : '-'}
                     </td>
                     <td className="py-2.5 px-3 text-center font-mono text-[11px] text-slate-500">
-                      {rec.isVatInclusive ? `รวม VAT ${rec.vatRatePercent || 7}%` : 'ex-VAT'}
+                      {rec.isVatInclusive
+                        ? `${isTh ? 'รวม VAT' : 'Incl. VAT'} ${rec.vatRatePercent || 7}%`
+                        : 'ex-VAT'}
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono text-rose-700">
                       {rec.platformFees > 0 ? `-฿${rec.platformFees.toLocaleString()}` : '-'}
@@ -258,7 +278,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                         type="button"
                         onClick={() => onDeleteSalesRecord(rec.id)}
                         className="p-1 text-slate-400 hover:text-rose-600 rounded cursor-pointer"
-                        title="ลบรายการ"
+                        title={isTh ? 'ลบรายการ' : 'Delete Record'}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -276,7 +296,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-              <h2 className="text-base font-bold text-slate-900">บันทึกยอดขายรายวัน</h2>
+              <h2 className="text-base font-bold text-slate-900">
+                {isTh ? 'บันทึกยอดขายรายวัน' : 'Log Daily Sales'}
+              </h2>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
@@ -288,7 +310,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
 
             <form onSubmit={handleSave} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">วันที่ขาย</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  {isTh ? 'วันที่ขาย' : 'Sales Date'}
+                </label>
                 <input
                   type="date"
                   required
@@ -299,7 +323,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">ช่องทางขาย</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  {isTh ? 'ช่องทางขาย' : 'Sales Channel'}
+                </label>
                 <select
                   value={formData.channelId}
                   onChange={(e) => setFormData({ ...formData, channelId: e.target.value })}
@@ -318,14 +344,29 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                   <div className="flex items-start gap-2 font-bold">
                     <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
                     <span>
-                      พบยอดขายจาก POS สำหรับวันที่ {formData.date} ช่องทาง{' '}
-                      {selectedChannelRaw?.name || existingPosDuplicate.channelName} อยู่แล้ว (฿
-                      {Math.round(existingPosDuplicate.netSales).toLocaleString()} ·{' '}
-                      {existingPosDuplicate.orderCount} ออเดอร์)
+                      {isTh
+                        ? `พบยอดขายจาก POS สำหรับวันที่ ${formData.date} ช่องทาง ${
+                            selectedChannelRaw?.name || existingPosDuplicate.channelName
+                          } อยู่แล้ว (฿${Math.round(existingPosDuplicate.netSales).toLocaleString()} · ${
+                            existingPosDuplicate.orderCount
+                          } ออเดอร์)`
+                        : `POS sales already exist for ${formData.date} (${
+                            selectedChannelRaw?.name || existingPosDuplicate.channelName
+                          }: ฿${Math.round(existingPosDuplicate.netSales).toLocaleString()} · ${
+                            existingPosDuplicate.orderCount
+                          } orders).`}
                     </span>
                   </div>
                   <p className="text-[11px] text-rose-800 pl-6">
-                    เพื่อป้องกันการนับยอดขายซ้ำซ้อน กรุณาเลือกว่าต้องการ <strong>แทนที่ข้อมูล POS ด้วยยอดนี้</strong> หรือ <strong>เก็บเฉพาะข้อมูลจาก POS</strong>
+                    {isTh ? (
+                      <>
+                        เพื่อป้องกันการนับยอดขายซ้ำซ้อน กรุณาเลือกว่าต้องการ <strong>แทนที่ข้อมูล POS ด้วยยอดนี้</strong> หรือ <strong>เก็บเฉพาะข้อมูลจาก POS</strong>
+                      </>
+                    ) : (
+                      <>
+                        To prevent double counting, choose whether to <strong>Replace POS Data</strong> with this entry or <strong>Keep POS Only</strong>.
+                      </>
+                    )}
                   </p>
                 </div>
               )}
@@ -334,14 +375,18 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                 <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-800 flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
                   <span>
-                    พบรายการบันทึกมือของวันที่ {formData.date} ช่องทางนี้แล้ว การบันทึกจะอัปเดตทับรายการเดิม
+                    {isTh
+                      ? `พบรายการบันทึกมือของวันที่ ${formData.date} ช่องทางนี้แล้ว การบันทึกจะอัปเดตทับรายการเดิม`
+                      : `A manual entry already exists for ${formData.date} on this channel. Saving will update the existing record.`}
                   </span>
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">ยอดขายรวม (Gross ฿)</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {isTh ? 'ยอดขายรวม (Gross ฿)' : 'Gross Sales (฿)'}
+                  </label>
                   <NumericInput
                     type="number"
                     step="any"
@@ -353,7 +398,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">ส่วนลดโปรโมชั่น (฿)</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {isTh ? 'ส่วนลดโปรโมชั่น (฿)' : 'Promotional Discounts (฿)'}
+                  </label>
                   <NumericInput
                     type="number"
                     step="any"
@@ -367,7 +414,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
 
               <div className="grid grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">จำนวนออเดอร์</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {isTh ? 'จำนวนออเดอร์' : 'Orders'}
+                  </label>
                   <NumericInput
                     type="number"
                     min="0"
@@ -377,7 +426,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">คืนเงิน (Refund ฿)</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    {isTh ? 'คืนเงิน (Refund ฿)' : 'Refunds (฿)'}
+                  </label>
                   <NumericInput
                     type="number"
                     step="any"
@@ -410,13 +461,15 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                     className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                   />
                   <span className="text-xs font-semibold text-slate-800">
-                    ยอดขายข้างต้น รวมภาษีมูลค่าเพิ่มแล้ว (VAT-Inclusive)
+                    {isTh
+                      ? 'ยอดขายข้างต้น รวมภาษีมูลค่าเพิ่มแล้ว (VAT-Inclusive)'
+                      : 'Sales amounts above are VAT-Inclusive'}
                   </span>
                 </label>
 
                 {formData.isVatInclusive && (
                   <div className="flex items-center gap-2 pt-1.5 text-xs text-slate-600">
-                    <span>อัตรา VAT:</span>
+                    <span>{isTh ? 'อัตรา VAT:' : 'VAT Rate:'}</span>
                     <NumericInput
                       type="number"
                       min="0"
@@ -425,7 +478,11 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                       onValueChange={(val) => setFormData({ ...formData, vatRatePercent: val })}
                       className="w-16 rounded border border-slate-300 px-2 py-0.5 text-xs font-mono"
                     />
-                    <span>% (หาร {1 + formData.vatRatePercent / 100} เพื่อหายอด ex-VAT)</span>
+                    <span>
+                      {isTh
+                        ? `% (หาร ${1 + formData.vatRatePercent / 100} เพื่อหายอด ex-VAT)`
+                        : `% (divide by ${1 + formData.vatRatePercent / 100} for ex-VAT)`}
+                    </span>
                   </div>
                 )}
               </div>
@@ -434,7 +491,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs font-semibold text-slate-800">
-                    ฐานคิดค่า GP ({selectedChannelRaw?.commissionPercent || 0}% + VAT{' '}
+                    {isTh ? 'ฐานคิดค่า GP' : 'GP Fee Basis'} ({selectedChannelRaw?.commissionPercent || 0}% + VAT{' '}
                     {selectedChannelRaw?.taxOnCommissionPercent || 0}%)
                   </span>
                 </div>
@@ -448,7 +505,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    ยอดรวม VAT (Gross)
+                    {isTh ? 'ยอดรวม VAT (Gross)' : 'VAT-Inclusive (Gross)'}
                   </button>
                   <button
                     type="button"
@@ -459,15 +516,15 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
                     }`}
                   >
-                    ยอด ex-VAT (Net)
+                    {isTh ? 'ยอด ex-VAT (Net)' : 'ex-VAT (Net)'}
                   </button>
                 </div>
                 <div className="flex justify-between text-[11px] text-slate-600 pt-1 border-t border-slate-200/80 font-mono">
                   <span>
-                    ค่า GP ประมาณการ: <strong>฿{feePreview.platformFees.toFixed(2)}</strong>
+                    {isTh ? 'ค่า GP ประมาณการ:' : 'Est. GP Fee:'} <strong>฿{feePreview.platformFees.toFixed(2)}</strong>
                   </span>
                   <span>
-                    รับโอน: <strong>฿{feePreview.actualPayout.toFixed(2)}</strong>
+                    {isTh ? 'รับโอน:' : 'Net Payout:'} <strong>฿{feePreview.actualPayout.toFixed(2)}</strong>
                   </span>
                 </div>
               </div>
@@ -480,7 +537,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                       onClick={() => setIsModalOpen(false)}
                       className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                     >
-                      เก็บเฉพาะ POS
+                      {isTh ? 'เก็บเฉพาะ POS' : 'Keep POS Only'}
                     </button>
                     <button
                       type="button"
@@ -492,7 +549,7 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                       }
                       className="rounded-xl bg-amber-600 hover:bg-amber-700 px-4 py-2 text-xs font-bold text-white cursor-pointer"
                     >
-                      แทนที่ POS ด้วยยอดนี้
+                      {isTh ? 'แทนที่ POS ด้วยยอดนี้' : 'Replace POS Entry'}
                     </button>
                   </>
                 ) : (
@@ -502,13 +559,19 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                       onClick={() => setIsModalOpen(false)}
                       className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                     >
-                      ยกเลิก
+                      {isTh ? 'ยกเลิก' : 'Cancel'}
                     </button>
                     <button
                       type="submit"
                       className="rounded-xl bg-emerald-600 hover:bg-emerald-700 px-5 py-2 text-xs font-bold text-white cursor-pointer"
                     >
-                      {existingManualDuplicate ? 'อัปเดตยอดเดิม' : 'บันทึกยอดขาย'}
+                      {existingManualDuplicate
+                        ? isTh
+                          ? 'อัปเดตยอดเดิม'
+                          : 'Update Entry'
+                        : isTh
+                        ? 'บันทึกยอดขาย'
+                        : 'Save Sales'}
                     </button>
                   </>
                 )}

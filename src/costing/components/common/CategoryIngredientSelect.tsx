@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Ingredient } from '../../types';
+import { getLocalizedText, localizeUnit } from '../../../utils/thaiToEnglish';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 export interface ExtraIngredientOption {
   id: string;
@@ -28,6 +30,7 @@ export interface CategoryIngredientSelectProps {
   className?: string;
   disabled?: boolean;
   required?: boolean;
+  lang?: 'th' | 'en';
 }
 
 const CATEGORY_ORDER = [
@@ -54,12 +57,12 @@ export const CategoryIngredientSelect: React.FC<CategoryIngredientSelectProps> =
   ingredients,
   selectedIngredientId,
   onSelectIngredientId,
-  categoryLabel = 'หมวดหมู่วัตถุดิบ',
-  ingredientLabel = 'เลือกวัตถุดิบย่อย',
-  categoryPlaceholder = '-- เลือกหมวดหมู่วัตถุดิบ --',
-  ingredientPlaceholder = '-- เลือกวัตถุดิบย่อย --',
+  categoryLabel,
+  ingredientLabel,
+  categoryPlaceholder,
+  ingredientPlaceholder,
   includeAllCategories = true,
-  allCategoriesLabel = '📁 ทุกหมวดหมู่วัตถุดิบ',
+  allCategoriesLabel,
   defaultCategory,
   extraOptions = [],
   formatIngredientOption,
@@ -68,7 +71,19 @@ export const CategoryIngredientSelect: React.FC<CategoryIngredientSelectProps> =
   className = '',
   disabled = false,
   required = false,
+  lang: propLang,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
+  const resolvedCategoryLabel =
+    categoryLabel ?? (lang === 'en' ? 'Ingredient Category' : 'หมวดหมู่วัตถุดิบ');
+  const resolvedIngredientLabel =
+    ingredientLabel ?? (lang === 'en' ? 'Select Ingredient' : 'เลือกวัตถุดิบย่อย');
+  const resolvedIngredientPlaceholder =
+    ingredientPlaceholder ?? (lang === 'en' ? '-- Select Ingredient --' : '-- เลือกวัตถุดิบย่อย --');
+  const resolvedAllCategoriesLabel =
+    allCategoriesLabel ?? (lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวดหมู่วัตถุดิบ');
+  void categoryPlaceholder;
   // Extract all unique categories in preferred order
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -186,7 +201,11 @@ export const CategoryIngredientSelect: React.FC<CategoryIngredientSelectProps> =
     >
       {/* 1. Category Selector */}
       <div>
-        {categoryLabel && <label className={labelClass}>{categoryLabel} {required && <span className="text-[#F27D26]">*</span>}</label>}
+        {resolvedCategoryLabel && (
+          <label className={labelClass}>
+            {resolvedCategoryLabel} {required && <span className="text-[#F27D26]">*</span>}
+          </label>
+        )}
         <select
           value={selectedCategory}
           onChange={handleCategoryChange}
@@ -195,14 +214,14 @@ export const CategoryIngredientSelect: React.FC<CategoryIngredientSelectProps> =
         >
           {includeAllCategories && (
             <option value="ALL" className={isDark ? 'bg-[#1a1a1a] text-white' : ''}>
-              {allCategoriesLabel}
+              {resolvedAllCategoriesLabel}
             </option>
           )}
           {categories.map((cat) => {
             const icon = CATEGORY_ICONS[cat] || '📁';
             return (
               <option key={cat} value={cat} className={isDark ? 'bg-[#1a1a1a] text-white' : ''}>
-                {icon} {cat}
+                {icon} {getLocalizedText(lang, cat)}
               </option>
             );
           })}
@@ -211,7 +230,11 @@ export const CategoryIngredientSelect: React.FC<CategoryIngredientSelectProps> =
 
       {/* 2. Sub-ingredient Selector */}
       <div>
-        {ingredientLabel && <label className={labelClass}>{ingredientLabel} {required && <span className="text-[#F27D26]">*</span>}</label>}
+        {resolvedIngredientLabel && (
+          <label className={labelClass}>
+            {resolvedIngredientLabel} {required && <span className="text-[#F27D26]">*</span>}
+          </label>
+        )}
         <select
           value={selectedIngredientId}
           onChange={handleIngredientChange}
@@ -220,15 +243,19 @@ export const CategoryIngredientSelect: React.FC<CategoryIngredientSelectProps> =
           className={selectClass}
         >
           <option value="" className={isDark ? 'bg-[#1a1a1a] text-white/60' : 'text-stone-400'}>
-            {ingredientPlaceholder} ({filteredIngredients.length + filteredExtraOptions.length} รายการ)
+            {resolvedIngredientPlaceholder} ({filteredIngredients.length + filteredExtraOptions.length}{' '}
+            {lang === 'en' ? 'items' : 'รายการ'})
           </option>
 
           {/* Extra options if any (e.g. seafood combo) */}
           {filteredExtraOptions.length > 0 && (
-            <optgroup label="ตัวเลือกพิเศษ" className={isDark ? 'bg-[#1a1a1a] text-amber-400 font-bold' : 'font-bold text-[#F27D26]'}>
+            <optgroup
+              label={lang === 'en' ? 'Special Options' : 'ตัวเลือกพิเศษ'}
+              className={isDark ? 'bg-[#1a1a1a] text-amber-400 font-bold' : 'font-bold text-[#F27D26]'}
+            >
               {filteredExtraOptions.map((opt) => (
                 <option key={opt.id} value={opt.id} className={isDark ? 'text-white' : 'text-stone-900'}>
-                  {opt.name} {opt.subtext ? `(${opt.subtext})` : ''}
+                  {getLocalizedText(lang, opt.name)} {opt.subtext ? `(${opt.subtext})` : ''}
                 </option>
               ))}
             </optgroup>
@@ -236,9 +263,11 @@ export const CategoryIngredientSelect: React.FC<CategoryIngredientSelectProps> =
 
           {/* Regular Ingredients */}
           {filteredIngredients.map((ing) => {
+            const ingDisplay = getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName);
+            const unitDisplay = localizeUnit(ing.usageUnit || ing.baseUnit || ing.purchaseUnit || 'g', lang);
             const label = formatIngredientOption
               ? formatIngredientOption(ing)
-              : `${ing.name || ing.thaiName} (฿${(ing.costPerBaseUnit ?? ing.purchasePrice ?? 0).toFixed(ing.costPerBaseUnit && ing.costPerBaseUnit < 1 ? 3 : 2)}/${ing.usageUnit || ing.baseUnit || ing.purchaseUnit || 'g'})`;
+              : `${ingDisplay} (฿${(ing.costPerBaseUnit ?? ing.purchasePrice ?? 0).toFixed(ing.costPerBaseUnit && ing.costPerBaseUnit < 1 ? 3 : 2)}/${unitDisplay})`;
 
             return (
               <option key={ing.id} value={ing.id} className={isDark ? 'bg-[#1a1a1a] text-white' : 'text-stone-900'}>

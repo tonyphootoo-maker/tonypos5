@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { SyncStatus, Language } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import { Wifi, WifiOff, RefreshCw } from 'lucide-react';
 
 interface Props {
-  lang: Language;
+  lang?: Language;
 }
 
-export const OnlineStatusBadge: React.FC<Props> = ({ lang }) => {
+export const OnlineStatusBadge: React.FC<Props> = ({ lang: propLang }) => {
   const [status, setStatus] = useState<SyncStatus>(navigator.onLine ? 'online' : 'offline');
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
 
   useEffect(() => {

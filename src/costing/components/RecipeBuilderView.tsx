@@ -34,7 +34,13 @@ import {
   calculateSauceCost,
 } from '../services/calculationEngine';
 import { convertUnit } from '../engine/units';
-import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
+import {
+  translateThaiToEnglish,
+  computeAutoEnglishName,
+  getLocalizedText,
+  localizeUnit,
+} from '../../utils/thaiToEnglish';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { NumericInput } from './common/NumericInput';
 
 // Helper to determine if a recipe line item is a variant's protein/meat
@@ -149,6 +155,7 @@ interface RecipeBuilderViewProps {
   ingredients: Ingredient[];
   sauces: Sauce[];
   settings: RestaurantSettings;
+  lang?: 'th' | 'en';
   initialVariantId?: string;
   initialTab?: 'FOOD' | 'SAUCE' | 'RICE_NOODLES';
   onSaveVariantRecipe: (menuId: string, variantId: string, recipeItems: RecipeItem[]) => void;
@@ -161,12 +168,15 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   ingredients,
   sauces,
   settings,
+  lang: propLang,
   initialVariantId,
   initialTab,
   onSaveVariantRecipe,
   onSaveSauce,
   onSaveMenu,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   // 3 Primary Tabs
   const [activeTab, setActiveTab] = useState<'FOOD' | 'SAUCE' | 'RICE_NOODLES'>(initialTab || 'FOOD');
 
@@ -806,7 +816,13 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   const [sauceFormError, setSauceFormError] = useState<string | null>(null);
 
   const filteredSauces = useMemo(() => {
-    return sauces.filter((s) => s.name.toLowerCase().includes(sauceSearch.toLowerCase()));
+    const q = sauceSearch.toLowerCase();
+    return sauces.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        (s.englishName || '').toLowerCase().includes(q) ||
+        getLocalizedText('en', s.thaiName || s.name, s.englishName).toLowerCase().includes(q)
+    );
   }, [sauces, sauceSearch]);
 
   const handleOpenAddSauce = () => {
@@ -847,19 +863,22 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   const handleSaveSauceModal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSauce || !editingSauce.name?.trim()) {
-      setSauceFormError('กรุณาระบุชื่อสูตรซอส');
+      setSauceFormError(lang === 'en' ? 'Please enter a sauce recipe name' : 'กรุณาระบุชื่อสูตรซอส');
       return;
     }
 
     const rawActual = Number(editingSauce.actualQuantity);
     if (!Number.isFinite(rawActual) || rawActual <= 0) {
-      setSauceFormError('กรุณาระบุปริมาณสุทธิของซอส');
+      setSauceFormError(lang === 'en' ? 'Please enter the actual yield quantity' : 'กรุณาระบุปริมาณสุทธิของซอส');
       return;
     }
 
     const calc = calculateSauceCost(editingSauce, ingredientsMap);
     if (!calc.isValid) {
-      setSauceFormError(calc.errorMessage || 'ข้อมูลสูตรซอสยังไม่ถูกต้อง');
+      setSauceFormError(
+        (calc.errorMessage ? getLocalizedText(lang, calc.errorMessage) : '') ||
+          (lang === 'en' ? 'Sauce recipe data is incomplete or invalid' : 'ข้อมูลสูตรซอสยังไม่ถูกต้อง')
+      );
       return;
     }
 
@@ -914,57 +933,87 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     {
       id: 'portion_rice',
       name: 'ข้าวสวยหอมมะลิ (จานหลัก 200g)',
+      nameEn: 'Steamed Jasmine Rice (Main Dish 200g)',
       type: 'ข้าว',
+      typeEn: 'Rice',
       rawIngredientName: 'ข้าวสารหอมมะลิ',
+      rawIngredientNameEn: 'Jasmine Rice (Uncooked)',
       rawPurchaseCost: '฿42 / กก.',
+      rawPurchaseCostEn: '฿42 / kg',
       cookingYield: '220% (ขยาย 2.2 เท่า)',
+      cookingYieldEn: '220% (2.2x expansion)',
       portionGram: 200,
       costPerPortion: 8.67,
       dishesUsing: ['กะเพราทุกเมนู', 'หมูกระเทียม', 'ไก่ผัดพริกเผา'],
+      dishesUsingEn: ['All Holy Basil Dishes', 'Garlic Pork', 'Roasted Chili Paste Chicken'],
     },
     {
       id: 'portion_padthai',
       name: 'เส้นจันท์แช่น้ำ (ผัดไทย 150g)',
+      nameEn: 'Soaked Chantaburi Rice Noodles (Pad Thai 150g)',
       type: 'เส้น',
+      typeEn: 'Noodles',
       rawIngredientName: 'เส้นจันท์แห้ง',
+      rawIngredientNameEn: 'Dried Rice Noodles',
       rawPurchaseCost: '฿55 / กก.',
+      rawPurchaseCostEn: '฿55 / kg',
       cookingYield: '100% (แช่น้ำพร้อมผัด)',
+      cookingYieldEn: '100% (Soaked & ready to stir-fry)',
       portionGram: 150,
       costPerPortion: 8.25,
       dishesUsing: ['ผัดไทยกุ้งสด', 'ผัดไทยโบราณ', 'ผัดไทยทะเล'],
+      dishesUsingEn: ['Pad Thai Shrimp', 'Classic Pad Thai', 'Pad Thai Seafood'],
     },
     {
       id: 'portion_flat',
       name: 'เส้นใหญ่สด (ผัดซีอิ๊ว/คั่วไก่ 180g)',
+      nameEn: 'Fresh Wide Rice Noodles (Pad See Ew 180g)',
       type: 'เส้น',
+      typeEn: 'Noodles',
       rawIngredientName: 'เส้นใหญ่ตลาด',
+      rawIngredientNameEn: 'Fresh Flat Noodles',
       rawPurchaseCost: '฿35 / กก.',
+      rawPurchaseCostEn: '฿35 / kg',
       cookingYield: '100% (คลี่เส้นพร้อมผัด)',
+      cookingYieldEn: '100% (Separated & ready)',
       portionGram: 180,
       costPerPortion: 6.30,
       dishesUsing: ['ผัดซีอิ๊วหมู', 'ก๋วยเตี๋ยวคั่วไก่', 'ราดหน้า'],
+      dishesUsingEn: ['Pad See Ew Pork', 'Kuay Teow Kua Gai', 'Rad Na'],
     },
     {
       id: 'portion_mama',
       name: 'บะหมี่กึ่งสำเร็จรูป (มาม่า 1 ซอง 60g)',
+      nameEn: 'Instant Noodles (1 Pack 60g)',
       type: 'เส้น',
+      typeEn: 'Noodles',
       rawIngredientName: 'มาม่าแพ็ค',
+      rawIngredientNameEn: 'Instant Noodle Pack',
       rawPurchaseCost: '฿6.00 / ซอง',
+      rawPurchaseCostEn: '฿6.00 / pack',
       cookingYield: '100% (ลวกสุก)',
+      cookingYieldEn: '100% (Blanched)',
       portionGram: 60,
       costPerPortion: 6.00,
       dishesUsing: ['มาม่าผัดขี้เมา', 'ต้มยำมาม่าหม้อไฟ', 'ยำมาม่ารวมมิตร'],
+      dishesUsingEn: ['Drunken Stir-Fried Mama', 'Tom Yum Mama Hot Pot', 'Spicy Mama Salad'],
     },
     {
       id: 'portion_glass',
       name: 'วุ้นเส้นสด (อบหม้อดิน/ผัด 100g)',
+      nameEn: 'Fresh Glass Noodles (100g)',
       type: 'เส้น',
+      typeEn: 'Noodles',
       rawIngredientName: 'วุ้นเส้นสดเกรด A',
+      rawIngredientNameEn: 'Fresh Grade-A Glass Noodles',
       rawPurchaseCost: '฿65 / กก.',
+      rawPurchaseCostEn: '฿65 / kg',
       cookingYield: '100% (แช่น้ำ)',
+      cookingYieldEn: '100% (Soaked)',
       portionGram: 100,
       costPerPortion: 6.50,
       dishesUsing: ['กุ้งอบวุ้นเส้น', 'ยำวุ้นเส้นโบราณ', 'ต้มจืดวุ้นเส้น'],
+      dishesUsingEn: ['Baked Shrimp with Glass Noodles', 'Spicy Glass Noodle Salad', 'Clear Glass Noodle Soup'],
     },
   ];
 
@@ -975,7 +1024,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
         <div className="flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-[#F27D26]" />
           <h1 className="text-2xl font-bold text-white tracking-tight">
-            สูตรอาหาร (Recipe Management)
+            {lang === 'en' ? 'Recipe Management' : 'สูตรอาหาร (Recipe Management)'}
           </h1>
         </div>
 
@@ -991,7 +1040,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             }`}
           >
             <UtensilsCrossed className="w-3.5 h-3.5" />
-            <span>ขั้นตอนที่ 4: คลังสูตรอาหารกลาง (Base Recipe Repository)</span>
+            <span>
+              {lang === 'en'
+                ? 'Step 4: Base Recipe Repository'
+                : 'ขั้นตอนที่ 4: คลังสูตรอาหารกลาง (Base Recipe Repository)'}
+            </span>
           </button>
 
           <button
@@ -1004,7 +1057,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             }`}
           >
             <FlaskConical className="w-3.5 h-3.5" />
-            <span>ขั้นตอนที่ 3: ซอสและน้ำซุปกลาง (Sauce Batches)</span>
+            <span>
+              {lang === 'en'
+                ? 'Step 3: Sauce & Broth Batches'
+                : 'ขั้นตอนที่ 3: ซอสและน้ำซุปกลาง (Sauce Batches)'}
+            </span>
           </button>
 
           <button
@@ -1017,7 +1074,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             }`}
           >
             <Wheat className="w-3.5 h-3.5" />
-            <span>ข้าวและเส้น (Yield & Portions)</span>
+            <span>{lang === 'en' ? 'Rice & Noodles (Yield & Portions)' : 'ข้าวและเส้น (Yield & Portions)'}</span>
           </button>
         </div>
       </div>
@@ -1032,7 +1089,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
           <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex items-center gap-3 flex-1 flex-wrap">
               <span className="text-xs font-bold text-white/60 whitespace-nowrap">
-                เลือกสูตรอาหารกลาง (Base Recipe):
+                {lang === 'en' ? 'Select Base Recipe:' : 'เลือกสูตรอาหารกลาง (Base Recipe):'}
               </span>
               <select
                 value={selectedMenuId}
@@ -1041,7 +1098,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               >
                 {menus.map((m) => (
                   <option key={m.id} value={m.id} className="bg-[#1a1a1a]">
-                    สูตร {m.name}
+                    {lang === 'en'
+                      ? `Recipe: ${getLocalizedText(lang, m.thaiName || m.name, m.englishName)}`
+                      : `สูตร ${m.name}`}
                   </option>
                 ))}
               </select>
@@ -1050,13 +1109,17 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             <div className="flex items-center gap-2">
               {hasUnsavedChanges && (
                 <span className="text-xs text-amber-400 font-semibold animate-pulse">
-                  ● มีการแก้ไขที่ยังไม่ได้บันทึก
+                  ● {lang === 'en' ? 'Unsaved changes' : 'มีการแก้ไขที่ยังไม่ได้บันทึก'}
                 </span>
               )}
               {saveSuccessNotice && (
                 <span className="text-xs text-emerald-400 font-bold flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>บันทึกสูตรกลางและซิงค์ตัวเลือกเนื้อสัตว์เรียบร้อยแล้ว</span>
+                  <span>
+                    {lang === 'en'
+                      ? 'Base recipe saved & synced to all protein options'
+                      : 'บันทึกสูตรกลางและซิงค์ตัวเลือกเนื้อสัตว์เรียบร้อยแล้ว'}
+                  </span>
                 </span>
               )}
               <button
@@ -1070,7 +1133,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 }`}
               >
                 <Save className="w-3.5 h-3.5" />
-                <span>บันทึกสูตรอาหารกลาง (Sync ไปทุกเนื้อสัตว์)</span>
+                <span>
+                  {lang === 'en'
+                    ? 'Save Base Recipe (Sync to All Options)'
+                    : 'บันทึกสูตรอาหารกลาง (Sync ไปทุกเนื้อสัตว์)'}
+                </span>
               </button>
             </div>
           </div>
@@ -1083,7 +1150,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
                   <h3 className="font-bold text-white text-base">
-                    รายการส่วนประกอบในสูตรกลาง ({nonPackagingItems.length} รายการ)
+                    {lang === 'en'
+                      ? `Base Recipe Items (${nonPackagingItems.length} items)`
+                      : `รายการส่วนประกอบในสูตรกลาง (${nonPackagingItems.length} รายการ)`}
                   </h3>
 
                   {/* 2 Add buttons: วัตถุดิบ, ซอสปรุง */}
@@ -1092,19 +1161,19 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       type="button"
                       onClick={handleAddBaseIngredient}
                       className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                      title="เพิ่มวัตถุดิบกลาง เช่น พริก, กระเทียม, ใบกะเพรา, น้ำมัน"
+                      title={lang === 'en' ? 'Add base ingredient e.g. chili, garlic, holy basil, cooking oil' : 'เพิ่มวัตถุดิบกลาง เช่น พริก, กระเทียม, ใบกะเพรา, น้ำมัน'}
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>+ วัตถุดิบกลาง</span>
+                      <span>{lang === 'en' ? '+ Base Ingredient' : '+ วัตถุดิบกลาง'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleAddSauce}
                       className="px-2.5 py-1.5 rounded-xl bg-[#F27D26]/20 hover:bg-[#F27D26]/30 text-[#F27D26] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#F27D26]/30 transition-colors"
-                      title="เพิ่มซอสปรุงรสที่เตรียมล่วงหน้าเป็น Batch"
+                      title={lang === 'en' ? 'Add batch-prepared sauce' : 'เพิ่มซอสปรุงรสที่เตรียมล่วงหน้าเป็น Batch'}
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>+ ซอสปรุง</span>
+                      <span>{lang === 'en' ? '+ Sauce' : '+ ซอสปรุง'}</span>
                     </button>
                   </div>
                 </div>
@@ -1114,13 +1183,13 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                        <th className="py-2.5 px-3">หมวดหมู่</th>
-                        <th className="py-2.5 px-3">ชื่อรายการในสูตร</th>
-                        <th className="py-2.5 px-3 text-right">ปริมาณ</th>
-                        <th className="py-2.5 px-3">หน่วย</th>
-                        <th className="py-2.5 px-3 text-right">ต้นทุน/หน่วย</th>
-                        <th className="py-2.5 px-3 text-right">รวมเงิน (฿)</th>
-                        <th className="py-2.5 px-2 text-center">ลบ</th>
+                        <th className="py-2.5 px-3">{lang === 'en' ? 'Type' : 'หมวดหมู่'}</th>
+                        <th className="py-2.5 px-3">{lang === 'en' ? 'Recipe Item' : 'ชื่อรายการในสูตร'}</th>
+                        <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
+                        <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
+                        <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
+                        <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
+                        <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5 font-mono">
@@ -1132,15 +1201,15 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                             <td className="py-2.5 px-3 font-sans">
                               {item.type === 'SAUCE' ? (
                                 <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#F27D26]/20 text-[#F27D26] border border-[#F27D26]/30">
-                                  🧪 ซอสปรุง
+                                  🧪 {lang === 'en' ? 'Sauce' : 'ซอสปรุง'}
                                 </span>
                               ) : item.type === 'PREPARED_ITEM' ? (
                                 <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                  🥗 เครื่องเคียง
+                                  🥗 {lang === 'en' ? 'Side Dish' : 'เครื่องเคียง'}
                                 </span>
                               ) : (
                                 <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                  🌿 วัตถุดิบกลาง
+                                  🌿 {lang === 'en' ? 'Base Ing.' : 'วัตถุดิบกลาง'}
                                 </span>
                               )}
                             </td>
@@ -1154,7 +1223,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                 >
                                   {sauces.map((s) => (
                                     <option key={s.id} value={s.id} className="bg-[#1a1a1a]">
-                                      {s.name}
+                                      {getLocalizedText(lang, s.thaiName || s.name, s.englishName)}
                                     </option>
                                   ))}
                                 </select>
@@ -1175,12 +1244,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                       }
                                     }}
                                     className="bg-black/60 border border-white/20 rounded-lg px-2 py-1 text-[11px] text-[#F27D26] font-bold cursor-pointer shrink-0 max-w-[130px]"
-                                    title="1. เลือกหมวดหมู่วัตถุดิบก่อน"
+                                    title={lang === 'en' ? '1. Select ingredient category first' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}
                                   >
-                                    <option value="ALL">📁 ทุกหมวด</option>
+                                    <option value="ALL">{lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวด'}</option>
                                     {uniqueCategories.map((cat) => (
                                       <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
-                                        {getCategoryIcon(cat)} {cat}
+                                        {getCategoryIcon(cat)} {getLocalizedText(lang, cat)}
                                       </option>
                                     ))}
                                   </select>
@@ -1197,11 +1266,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                         value={item.ingredientId}
                                         onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
                                         className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[190px] cursor-pointer"
-                                        title="2. เลือกวัตถุดิบย่อย"
+                                        title={lang === 'en' ? '2. Select sub-ingredient' : '2. เลือกวัตถุดิบย่อย'}
                                       >
                                         {categoryIngs.map((ing) => (
                                           <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
-                                            {ing.name}
+                                            {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
                                           </option>
                                         ))}
                                       </select>
@@ -1225,7 +1294,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                             </td>
 
                             <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
-                              {item.unit}
+                              {localizeUnit(item.unit, lang)}
                             </td>
 
                             <td className="py-2.5 px-3 text-right text-white/60">
@@ -1233,7 +1302,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                 <span>฿{costInfo.unitCost.toFixed(costInfo.unitCost < 1 ? 4 : 2)}</span>
                                 {costInfo.missingPrice && (
                                   <span className="mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
-                                    ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง
+                                    {lang === 'en'
+                                      ? 'Missing ingredient price — cost may be understated'
+                                      : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'}
                                   </span>
                                 )}
                               </div>
@@ -1248,7 +1319,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                 type="button"
                                 onClick={() => handleRemoveBaseItemById(item.id || '')}
                                 className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
-                                title="ลบรายการนี้"
+                                title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -1269,7 +1340,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       <Package className="w-4 h-4" />
                     </div>
                     <h3 className="font-bold text-white text-base">
-                      ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items) ({packagingAndSideItems.length} รายการ)
+                      {lang === 'en'
+                        ? `Box & Packaging Costs (${packagingAndSideItems.length} items)`
+                        : `ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items) (${packagingAndSideItems.length} รายการ)`}
                     </h3>
                   </div>
 
@@ -1278,38 +1351,40 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       type="button"
                       onClick={handleAddSideDish}
                       className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer border border-amber-500/30 transition-colors"
-                      title="เพิ่มเครื่องเคียง เช่น พริกน้ำปลา, แตงกวาเคียง, ข้าวสวย, ไข่ดาว"
+                      title={lang === 'en' ? 'Add side dishes e.g. chili fish sauce, cucumber, rice, fried egg' : 'เพิ่มเครื่องเคียง เช่น พริกน้ำปลา, แตงกวาเคียง, ข้าวสวย, ไข่ดาว'}
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>+ เครื่องเคียง</span>
+                      <span>{lang === 'en' ? '+ Side Dish' : '+ เครื่องเคียง'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleAddPackaging}
                       className="px-3 py-1.5 rounded-xl bg-[#00B1FF]/20 hover:bg-[#00B1FF]/30 text-[#00B1FF] border border-[#00B1FF]/40 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
-                      title="เพิ่มบรรจุภัณฑ์ เช่น กล่องกระดาษคราฟท์, ช้อนส้อม, ถ้วยน้ำจิ้ม, ถุงหูหิ้ว"
+                      title={lang === 'en' ? 'Add packaging e.g. kraft box, cutlery set, sauce cup, bag' : 'เพิ่มบรรจุภัณฑ์ เช่น กล่องกระดาษคราฟท์, ช้อนส้อม, ถ้วยน้ำจิ้ม, ถุงหูหิ้ว'}
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>+ แพ็คเกจจิ้ง</span>
+                      <span>{lang === 'en' ? '+ Packaging' : '+ แพ็คเกจจิ้ง'}</span>
                     </button>
                   </div>
                 </div>
 
                 {packagingAndSideItems.length === 0 ? (
                   <div className="p-4 text-center text-white/40 text-xs border border-dashed border-white/10 rounded-2xl">
-                    ยังไม่มีรายการกล่องหรือเครื่องเคียงสำหรับเมนูนี้ (กดปุ่ม "+ เครื่องเคียง" หรือ "+ แพ็คเกจจิ้ง" ด้านบนเพื่อเพิ่ม)
+                    {lang === 'en'
+                      ? 'No packaging or side dish items for this menu yet (click "+ Side Dish" or "+ Packaging" above to add)'
+                      : 'ยังไม่มีรายการกล่องหรือเครื่องเคียงสำหรับเมนูนี้ (กดปุ่ม "+ เครื่องเคียง" หรือ "+ แพ็คเกจจิ้ง" ด้านบนเพื่อเพิ่ม)'}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                          <th className="py-2.5 px-3">รายการบรรจุภัณฑ์ / เครื่องเคียง</th>
-                          <th className="py-2.5 px-3 text-right">จำนวน</th>
-                          <th className="py-2.5 px-3">หน่วย</th>
-                          <th className="py-2.5 px-3 text-right">ต้นทุน/หน่วย</th>
-                          <th className="py-2.5 px-3 text-right">รวมเงิน (฿)</th>
-                          <th className="py-2.5 px-2 text-center">ลบ</th>
+                          <th className="py-2.5 px-3">{lang === 'en' ? 'Packaging / Side Dish Item' : 'รายการบรรจุภัณฑ์ / เครื่องเคียง'}</th>
+                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'จำนวน'}</th>
+                          <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
+                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
+                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
+                          <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5 font-mono">
@@ -1325,17 +1400,17 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                     onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
                                     className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
                                   >
-                                    <optgroup label="เครื่องเคียงมาตรฐาน (Presets)" className="bg-[#1a1a1a]">
+                                    <optgroup label={lang === 'en' ? 'Standard Side Dishes (Presets)' : 'เครื่องเคียงมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
                                       {SIDE_DISH_PRESETS.map((sd) => (
                                         <option key={sd.id} value={sd.id}>
-                                          {sd.name}
+                                          {getLocalizedText(lang, sd.name)}
                                         </option>
                                       ))}
                                     </optgroup>
-                                    <optgroup label="วัตถุดิบเสริมในคลัง" className="bg-[#1a1a1a]">
+                                    <optgroup label={lang === 'en' ? 'Additional Stock Ingredients' : 'วัตถุดิบเสริมในคลัง'} className="bg-[#1a1a1a]">
                                       {ingredients.map((ing) => (
                                         <option key={ing.id} value={ing.id}>
-                                          {ing.name}
+                                          {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
                                         </option>
                                       ))}
                                     </optgroup>
@@ -1346,19 +1421,19 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                     onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
                                     className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
                                   >
-                                    <optgroup label="รายการมาตรฐาน (Presets)" className="bg-[#1a1a1a]">
+                                    <optgroup label={lang === 'en' ? 'Standard Items (Presets)' : 'รายการมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
                                       {PACKAGING_PRESETS.map((pkg) => (
                                         <option key={pkg.id} value={pkg.id}>
-                                          {pkg.name}
+                                          {getLocalizedText(lang, pkg.name)}
                                         </option>
                                       ))}
                                     </optgroup>
-                                    <optgroup label="วัตถุดิบบรรจุภัณฑ์ในคลัง" className="bg-[#1a1a1a]">
+                                    <optgroup label={lang === 'en' ? 'Packaging Stock Items' : 'วัตถุดิบบรรจุภัณฑ์ในคลัง'} className="bg-[#1a1a1a]">
                                       {ingredients
                                         .filter((i) => i.category === 'บรรจุภัณฑ์')
                                         .map((ing) => (
                                           <option key={ing.id} value={ing.id}>
-                                            {ing.name}
+                                            {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
                                           </option>
                                         ))}
                                     </optgroup>
@@ -1380,7 +1455,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                               </td>
 
                               <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
-                                {item.unit || 'ชิ้น'}
+                                {localizeUnit(item.unit || 'ชิ้น', lang)}
                               </td>
 
                               <td className="py-2.5 px-3 text-right text-white/60">
@@ -1396,7 +1471,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                   type="button"
                                   onClick={() => handleRemoveBaseItemById(item.id || '')}
                                   className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
-                                  title="ลบรายการนี้"
+                                  title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
@@ -1410,7 +1485,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     <div className="flex justify-between items-center px-4 py-2.5 bg-[#00B1FF]/10 border border-[#00B1FF]/20 rounded-xl text-xs font-mono mt-3">
                       <span className="font-sans text-white/70 font-semibold flex items-center gap-1.5">
                         <Package className="w-3.5 h-3.5 text-[#00B1FF]" />
-                        <span>รวมต้นทุนกล่อง บรรจุภัณฑ์ และเครื่องเคียง:</span>
+                        <span>
+                          {lang === 'en'
+                            ? 'Total Packaging & Side Dish Cost:'
+                            : 'รวมต้นทุนกล่อง บรรจุภัณฑ์ และเครื่องเคียง:'}
+                        </span>
                       </span>
                       <span className="font-bold text-[#00B1FF] text-sm">
                         ฿{(totalPackagingCost + totalSideDishCost).toFixed(2)}
@@ -1426,10 +1505,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5 space-y-4">
                 <div>
                   <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">
-                    คลังสูตรอาหารกลาง (Base Recipe Cost)
+                    {lang === 'en' ? 'Base Recipe Cost Breakdown' : 'คลังสูตรอาหารกลาง (Base Recipe Cost)'}
                   </span>
                   <h3 className="font-bold text-white text-base mt-0.5">
-                    สูตร {currentMenu?.name}
+                    {lang === 'en'
+                      ? `Recipe: ${getLocalizedText(lang, currentMenu?.thaiName || currentMenu?.name || '', currentMenu?.englishName)}`
+                      : `สูตร ${currentMenu?.name}`}
                   </h3>
                 </div>
 
@@ -1438,7 +1519,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <div className="flex justify-between text-white/70">
                     <span className="font-sans flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                      <span>วัตถุดิบกลาง:</span>
+                      <span>{lang === 'en' ? 'Base Ingredients:' : 'วัตถุดิบกลาง:'}</span>
                     </span>
                     <span className="text-white font-bold">฿{totalBaseIngredientsCost.toFixed(2)}</span>
                   </div>
@@ -1446,7 +1527,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <div className="flex justify-between text-white/70">
                     <span className="font-sans flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-[#F27D26]" />
-                      <span>ซอสปรุงรส:</span>
+                      <span>{lang === 'en' ? 'Seasoning Sauces:' : 'ซอสปรุงรส:'}</span>
                     </span>
                     <span className="text-white font-bold">฿{totalSauceCost.toFixed(2)}</span>
                   </div>
@@ -1454,7 +1535,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <div className="flex justify-between text-white/70">
                     <span className="font-sans flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-amber-400" />
-                      <span>เครื่องเคียง:</span>
+                      <span>{lang === 'en' ? 'Side Dishes:' : 'เครื่องเคียง:'}</span>
                     </span>
                     <span className="text-white font-bold">฿{totalSideDishCost.toFixed(2)}</span>
                   </div>
@@ -1462,14 +1543,18 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <div className="flex justify-between text-white/70">
                     <span className="font-sans flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-purple-400" />
-                      <span>บรรจุภัณฑ์ (แพ็คเกจจิ้ง):</span>
+                      <span>{lang === 'en' ? 'Packaging:' : 'บรรจุภัณฑ์ (แพ็คเกจจิ้ง):'}</span>
                     </span>
                     <span className="text-white font-bold">฿{totalPackagingCost.toFixed(2)}</span>
                   </div>
 
                   <div className="flex justify-between pt-2 border-t border-white/10 font-bold text-sm">
-                    <span className="font-sans text-white">รวมต้นทุนสูตรกลาง:</span>
-                    <span className="text-[#FFC107]">฿{totalBaseRecipeCost.toFixed(2)} / จาน</span>
+                    <span className="font-sans text-white">
+                      {lang === 'en' ? 'Total Base Recipe Cost:' : 'รวมต้นทุนสูตรกลาง:'}
+                    </span>
+                    <span className="text-[#FFC107]">
+                      ฿{totalBaseRecipeCost.toFixed(2)} / {lang === 'en' ? 'dish' : 'จาน'}
+                    </span>
                   </div>
                 </div>
 
@@ -1477,7 +1562,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 <div className="pt-2 border-t border-white/10 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-white">
-                      ตัวเลือกเนื้อสัตว์ในสูตรนี้ ({currentMenu?.variants.length || 0} ตัวเลือก)
+                      {lang === 'en'
+                        ? `Protein Options in Recipe (${currentMenu?.variants.length || 0} options)`
+                        : `ตัวเลือกเนื้อสัตว์ในสูตรนี้ (${currentMenu?.variants.length || 0} ตัวเลือก)`}
                     </span>
                   </div>
 
@@ -1488,10 +1575,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                         className="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between text-xs"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="text-white font-bold">{v.proteinType || v.name}</span>
+                          <span className="text-white font-bold">
+                            {getLocalizedText(lang, v.thaiName || v.proteinType || v.name, v.englishName)}
+                          </span>
                           {v.proteinType === 'ทะเล' && (
                             <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">
-                              กุ้ง + หมึก
+                              {lang === 'en' ? 'Shrimp + Squid' : 'กุ้ง + หมึก'}
                             </span>
                           )}
                         </div>
@@ -1501,7 +1590,16 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   </div>
 
                   <div className="bg-white/5 p-2.5 rounded-xl text-[10px] text-white/50 leading-relaxed">
-                    💡 เมื่อกด <strong>บันทึกสูตรอาหารกลาง</strong> ระบบจะนำวัตถุดิบ ซอส เครื่องเคียง และแพ็คเกจจิ้งข้างต้นไปอัปเดตให้กับทุกตัวเลือกเนื้อสัตว์ทันที โดยยังคงพอร์ชั่นเนื้อสัตว์ของแต่ละตัวเลือกไว้
+                    💡{' '}
+                    {lang === 'en' ? (
+                      <>
+                        Clicking <strong>Save Base Recipe</strong> syncs these ingredients, sauces, side dishes, and packaging across all protein options while preserving each option's meat portioning.
+                      </>
+                    ) : (
+                      <>
+                        เมื่อกด <strong>บันทึกสูตรอาหารกลาง</strong> ระบบจะนำวัตถุดิบ ซอส เครื่องเคียง และแพ็คเกจจิ้งข้างต้นไปอัปเดตให้กับทุกตัวเลือกเนื้อสัตว์ทันที โดยยังคงพอร์ชั่นเนื้อสัตว์ของแต่ละตัวเลือกไว้
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1520,7 +1618,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               <Search className="w-4 h-4 text-white/40" />
               <input
                 type="text"
-                placeholder="ค้นหาซอสปรุงรส..."
+                placeholder={lang === 'en' ? 'Search sauces...' : 'ค้นหาซอสปรุงรส...'}
                 value={sauceSearch}
                 onChange={(e) => setSauceSearch(e.target.value)}
                 className="w-full bg-black/40 border border-white/15 px-3 py-2 rounded-xl text-xs text-white placeholder-white/40 focus:outline-none focus:border-[#F27D26]"
@@ -1533,7 +1631,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               className="px-4 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl text-xs shadow-lg shadow-[#F27D26]/20 flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>+ สร้างสูตรซอสใหม่</span>
+              <span>{lang === 'en' ? '+ Create Sauce Recipe' : '+ สร้างสูตรซอสใหม่'}</span>
             </button>
           </div>
 
@@ -1549,49 +1647,55 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F27D26]/20 text-[#F27D26]">
-                        {sauce.category || 'ซอสหลัก'}
+                        {getLocalizedText(lang, sauce.category || 'ซอสหลัก')}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleOpenEditSauce(sauce)}
                         className="p-1.5 rounded-xl text-white/40 hover:text-white hover:bg-white/10 cursor-pointer"
-                        title="แก้ไขสูตรซอส"
+                        title={lang === 'en' ? 'Edit Sauce Recipe' : 'แก้ไขสูตรซอส'}
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
-                    <h3 className="font-bold text-white text-base">{sauce.name}</h3>
+                    <h3 className="font-bold text-white text-base">
+                      {getLocalizedText(lang, sauce.thaiName || sauce.name, sauce.englishName)}
+                    </h3>
                     {sauce.notes && (
-                      <p className="text-[11px] text-white/40 mt-1 line-clamp-2">{sauce.notes}</p>
+                      <p className="text-[11px] text-white/40 mt-1 line-clamp-2">
+                        {getLocalizedText(lang, sauce.notes)}
+                      </p>
                     )}
 
                     {/* Batch stats */}
                     <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-white/10 text-xs font-mono">
                       <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
                         <span className="text-[10px] font-sans text-white/40 block">
-                          ปริมาณผลิต (Batch)
+                          {lang === 'en' ? 'Batch Output' : 'ปริมาณผลิต (Batch)'}
                         </span>
                         <span className="font-bold text-white mt-0.5 block">
-                          {sauce.productionQuantity} {sauce.productionUnit}
+                          {sauce.productionQuantity} {localizeUnit(sauce.productionUnit, lang)}
                         </span>
                         <span className="text-[9px] text-white/40">Yield: {sauce.yieldPercent}%</span>
                       </div>
 
                       <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                        <span className="text-[10px] font-sans text-white/40 block">ต้นทุนต่อหน่วย</span>
+                        <span className="text-[10px] font-sans text-white/40 block">
+                          {lang === 'en' ? 'Cost per Unit' : 'ต้นทุนต่อหน่วย'}
+                        </span>
                         {calc.isValid ? (
                           <>
                             <span className="font-bold text-[#FFC107] mt-0.5 block">
                               ฿{calc.costPerGram.toFixed(4)}
                             </span>
                             <span className="text-[9px] text-white/40">
-                              (฿{(calc.costPerGram * 30).toFixed(2)}/30{sauce.productionUnit || 'g'})
+                              (฿{(calc.costPerGram * 30).toFixed(2)}/30{localizeUnit(sauce.productionUnit || 'g', lang)})
                             </span>
                           </>
                         ) : (
                           <span className="font-bold text-rose-400 text-[11px] mt-0.5 block">
-                            {calc.errorMessage || 'ข้อมูลไม่ครบ'}
+                            {calc.errorMessage ? getLocalizedText(lang, calc.errorMessage) : (lang === 'en' ? 'Incomplete data' : 'ข้อมูลไม่ครบ')}
                           </span>
                         )}
                       </div>
@@ -1600,14 +1704,18 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     {/* Items preview */}
                     <div className="mt-3 space-y-1">
                       <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">
-                        วัตถุดิบในซอส ({sauce.items.length})
+                        {lang === 'en'
+                          ? `Sauce Ingredients (${sauce.items.length})`
+                          : `วัตถุดิบในซอส (${sauce.items.length})`}
                       </span>
                       <div className="text-[11px] text-white/70 space-y-0.5 max-h-24 overflow-y-auto pr-1">
                         {sauce.items.map((item, idx) => (
                           <div key={idx} className="flex justify-between font-mono">
-                            <span className="font-sans truncate">{item.ingredientName}</span>
+                            <span className="font-sans truncate">
+                              {getLocalizedText(lang, item.ingredientName)}
+                            </span>
                             <span>
-                              {item.quantity} {item.unit}
+                              {item.quantity} {localizeUnit(item.unit, lang)}
                             </span>
                           </div>
                         ))}
@@ -1616,8 +1724,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   </div>
 
                   <div className="mt-4 pt-3 border-t border-white/5 flex justify-between items-center text-xs font-mono">
-                    <span className="font-sans text-white/50">ต้นทุนรวมทั้งสูตร:</span>
-                    <span className="font-bold text-white">฿{calc.actualCost.toFixed(2)} บาท</span>
+                    <span className="font-sans text-white/50">
+                      {lang === 'en' ? 'Total Batch Cost:' : 'ต้นทุนรวมทั้งสูตร:'}
+                    </span>
+                    <span className="font-bold text-white">
+                      ฿{calc.actualCost.toFixed(2)} {lang === 'en' ? 'THB' : 'บาท'}
+                    </span>
                   </div>
                 </div>
               );
@@ -1635,7 +1747,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             <div className="flex items-center gap-2">
               <Wheat className="w-5 h-5 text-[#FFC107]" />
               <h2 className="text-lg font-bold text-white">
-                การจัดการต้นทุน ข้าวและเส้น (Rice & Noodle Portioning)
+                {lang === 'en'
+                  ? 'Rice & Noodle Portioning & Costing'
+                  : 'การจัดการต้นทุน ข้าวและเส้น (Rice & Noodle Portioning)'}
               </h2>
             </div>
           </div>
@@ -1650,31 +1764,47 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FFC107]/20 text-[#FFC107]">
-                      {portion.type}
+                      {lang === 'en' ? portion.typeEn : portion.type}
                     </span>
                     <span className="text-[10px] text-white/40 font-mono">
-                      ขนาดเสิร์ฟ: {portion.portionGram}g
+                      {lang === 'en' ? 'Serving:' : 'ขนาดเสิร์ฟ:'} {portion.portionGram}g
                     </span>
                   </div>
 
-                  <h3 className="font-bold text-white text-base">{portion.name}</h3>
+                  <h3 className="font-bold text-white text-base">
+                    {lang === 'en' ? portion.nameEn : portion.name}
+                  </h3>
 
                   {/* Details table */}
                   <div className="mt-3 p-3 rounded-2xl bg-black/30 border border-white/5 space-y-1.5 text-xs font-mono">
                     <div className="flex justify-between">
-                      <span className="font-sans text-white/50">วัตถุดิบหลัก:</span>
-                      <span className="text-white">{portion.rawIngredientName}</span>
+                      <span className="font-sans text-white/50">
+                        {lang === 'en' ? 'Base Ingredient:' : 'วัตถุดิบหลัก:'}
+                      </span>
+                      <span className="text-white">
+                        {lang === 'en' ? portion.rawIngredientNameEn : portion.rawIngredientName}
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="font-sans text-white/50">ราคาตลาด:</span>
-                      <span className="text-white">{portion.rawPurchaseCost}</span>
+                      <span className="font-sans text-white/50">
+                        {lang === 'en' ? 'Market Price:' : 'ราคาตลาด:'}
+                      </span>
+                      <span className="text-white">
+                        {lang === 'en' ? portion.rawPurchaseCostEn : portion.rawPurchaseCost}
+                      </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="font-sans text-white/50">Yield การหุง/ลวก:</span>
-                      <span className="text-emerald-400 font-bold">{portion.cookingYield}</span>
+                      <span className="font-sans text-white/50">
+                        {lang === 'en' ? 'Cooking Yield:' : 'Yield การหุง/ลวก:'}
+                      </span>
+                      <span className="text-emerald-400 font-bold">
+                        {lang === 'en' ? portion.cookingYieldEn : portion.cookingYield}
+                      </span>
                     </div>
                     <div className="flex justify-between pt-1 border-t border-white/10 font-bold text-sm">
-                      <span className="font-sans text-white">ต้นทุนต่อจาน:</span>
+                      <span className="font-sans text-white">
+                        {lang === 'en' ? 'Cost per Dish:' : 'ต้นทุนต่อจาน:'}
+                      </span>
                       <span className="text-[#FFC107]">฿{portion.costPerPortion.toFixed(2)}</span>
                     </div>
                   </div>
@@ -1682,10 +1812,10 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   {/* Dishes using */}
                   <div className="mt-3">
                     <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider block mb-1">
-                      เมนูที่ใช้ปริมาณนี้:
+                      {lang === 'en' ? 'Used in Dishes:' : 'เมนูที่ใช้ปริมาณนี้:'}
                     </span>
                     <div className="flex flex-wrap gap-1">
-                      {portion.dishesUsing.map((dish, i) => (
+                      {(lang === 'en' ? portion.dishesUsingEn : portion.dishesUsing).map((dish, i) => (
                         <span
                           key={i}
                           className="px-2 py-0.5 rounded-lg text-[10px] bg-white/5 text-white/70 border border-white/5"
@@ -1710,8 +1840,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h3 className="font-bold text-white text-base">
                 {editingSauce.id?.startsWith('sauce_') && !sauces.find((s) => s.id === editingSauce.id)
-                  ? 'สร้างสูตรซอสใหม่'
-                  : 'แก้ไขสูตรซอส'}
+                  ? lang === 'en' ? 'Create New Sauce Recipe' : 'สร้างสูตรซอสใหม่'
+                  : lang === 'en' ? 'Edit Sauce Recipe' : 'แก้ไขสูตรซอส'}
               </h3>
               <button
                 type="button"
@@ -1725,11 +1855,13 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             <form onSubmit={handleSaveSauceModal} className="space-y-4 mt-4 text-xs">
               <div className="space-y-3">
                 <div>
-                  <label className="block text-white/70 mb-1 font-semibold">ชื่อสูตรซอส (ไทย)</label>
+                  <label className="block text-white/70 mb-1 font-semibold">
+                    {lang === 'en' ? 'Sauce Recipe Name (Thai)' : 'ชื่อสูตรซอส (ไทย)'}
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="เช่น ซอสผัดกะเพราโบราณ, ซอสพริกไทยดำ"
+                    placeholder={lang === 'en' ? 'e.g. Classic Holy Basil Stir-fry Sauce' : 'เช่น ซอสผัดกะเพราโบราณ, ซอสพริกไทยดำ'}
                     value={editingSauce.name || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
@@ -1753,7 +1885,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-white/70 font-semibold">
-                      ชื่อสูตรซอส (English Name — แปลอัตโนมัติ)
+                      {lang === 'en' ? 'Sauce Name (English — Auto-translated)' : 'ชื่อสูตรซอส (English Name — แปลอัตโนมัติ)'}
                     </label>
                     <button
                       type="button"
@@ -1765,12 +1897,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       }
                       className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                     >
-                      แปลใหม่จากภาษาไทย
+                      {lang === 'en' ? 'Re-translate from Thai' : 'แปลใหม่จากภาษาไทย'}
                     </button>
                   </div>
                   <input
                     type="text"
-                    placeholder="Auto-translated English sauce name"
+                    placeholder={lang === 'en' ? 'Auto-translated English sauce name' : 'ชื่อซอสภาษาอังกฤษที่แปลอัตโนมัติ'}
                     value={editingSauce.englishName || ''}
                     onChange={(e) => {
                       setSauceFormError(null);
@@ -1783,13 +1915,15 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-white/70 mb-1 font-semibold">ปริมาณสุทธิที่ได้ (Actual Yield)</label>
+                  <label className="block text-white/70 mb-1 font-semibold">
+                    {lang === 'en' ? 'Actual Yield Quantity' : 'ปริมาณสุทธิที่ได้ (Actual Yield)'}
+                  </label>
                   <NumericInput
                     type="number"
                     min="0"
                     step="any"
                     required
-                    placeholder="เช่น 600"
+                    placeholder={lang === 'en' ? 'e.g. 600' : 'เช่น 600'}
                     value={editingSauce.actualQuantity ?? ''}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value);
@@ -1803,7 +1937,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block text-white/70 mb-1 font-semibold">หน่วยผลิตซอส</label>
+                  <label className="block text-white/70 mb-1 font-semibold">
+                    {lang === 'en' ? 'Production Unit' : 'หน่วยผลิตซอส'}
+                  </label>
                   <select
                     value={editingSauce.productionUnit || 'g'}
                     onChange={(e) => {
@@ -1812,8 +1948,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     }}
                     className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white cursor-pointer"
                   >
-                    <option value="g" className="bg-[#1a1a1a]">g (กรัม)</option>
-                    <option value="ml" className="bg-[#1a1a1a]">ml (มิลลิลิตร)</option>
+                    <option value="g" className="bg-[#1a1a1a]">{lang === 'en' ? 'g (grams)' : 'g (กรัม)'}</option>
+                    <option value="ml" className="bg-[#1a1a1a]">{lang === 'en' ? 'ml (milliliters)' : 'ml (มิลลิลิตร)'}</option>
                   </select>
                 </div>
               </div>
@@ -1828,7 +1964,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-white/70 font-semibold">
-                    วัตถุดิบและสัดส่วนในซอส ({(editingSauce.items || []).length})
+                    {lang === 'en'
+                      ? `Sauce Ingredients & Ratios (${(editingSauce.items || []).length})`
+                      : `วัตถุดิบและสัดส่วนในซอส (${(editingSauce.items || []).length})`}
                   </label>
                   <button
                     type="button"
@@ -1853,7 +1991,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     }}
                     className="text-[10px] text-[#F27D26] hover:underline font-bold"
                   >
-                    + เพิ่มวัตถุดิบในซอส
+                    {lang === 'en' ? '+ Add Sauce Ingredient' : '+ เพิ่มวัตถุดิบในซอส'}
                   </button>
                 </div>
 
@@ -1895,7 +2033,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                         >
                           {displayOptions.map((ing) => (
                             <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
-                              {ing.name}
+                              {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
                             </option>
                           ))}
                         </select>
@@ -1918,7 +2056,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                           className="w-16 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold"
                         />
 
-                        <span className="text-[11px] text-white/50">{item.unit}</span>
+                        <span className="text-[11px] text-white/50">{localizeUnit(item.unit, lang)}</span>
 
                         <button
                           type="button"
@@ -1943,13 +2081,13 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   onClick={() => setIsSauceModalOpen(false)}
                   className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer"
                 >
-                  บันทึกสูตรซอส
+                  {lang === 'en' ? 'Save Sauce Recipe' : 'บันทึกสูตรซอส'}
                 </button>
               </div>
             </form>
@@ -1963,7 +2101,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
           <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-md w-full p-6 shadow-2xl border border-white/20 text-white">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h3 className="font-bold text-white text-base">
-                + เพิ่มวัตถุดิบในสูตรอาหารกลาง (Base Recipe)
+                {lang === 'en'
+                  ? '+ Add Ingredient to Base Recipe'
+                  : '+ เพิ่มวัตถุดิบในสูตรอาหารกลาง (Base Recipe)'}
               </h3>
               <button
                 type="button"
@@ -1978,7 +2118,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               {/* Step 1: Select Category first */}
               <div>
                 <label className="block text-white/80 font-bold mb-1">
-                  1. เลือกหมวดหมู่วัตถุดิบก่อน <span className="text-[#F27D26]">*</span>
+                  {lang === 'en' ? '1. Select Ingredient Category First' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}{' '}
+                  <span className="text-[#F27D26]">*</span>
                 </label>
                 <select
                   value={newBaseIngCategory}
@@ -1995,10 +2136,10 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   }}
                   className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl font-bold text-white cursor-pointer focus:border-[#F27D26]"
                 >
-                  <option value="ALL">📁 ทุกหมวดหมู่วัตถุดิบ</option>
+                  <option value="ALL">{lang === 'en' ? '📁 All Ingredient Categories' : '📁 ทุกหมวดหมู่วัตถุดิบ'}</option>
                   {uniqueCategories.map((cat) => (
                     <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
-                      {getCategoryIcon(cat)} {cat}
+                      {getCategoryIcon(cat)} {getLocalizedText(lang, cat)}
                     </option>
                   ))}
                 </select>
@@ -2007,7 +2148,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               {/* Step 2: Select Sub-ingredient */}
               <div>
                 <label className="block text-white/80 font-bold mb-1">
-                  2. เลือกวัตถุดิบย่อย <span className="text-[#F27D26]">*</span>
+                  {lang === 'en' ? '2. Select Sub-ingredient' : '2. เลือกวัตถุดิบย่อย'}{' '}
+                  <span className="text-[#F27D26]">*</span>
                 </label>
                 {(() => {
                   const matching = newBaseIngCategory === 'ALL'
@@ -2028,10 +2170,14 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       required
                       className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl font-bold text-white cursor-pointer focus:border-[#F27D26]"
                     >
-                      <option value="">-- เลือกวัตถุดิบย่อย ({matching.length} รายการ) --</option>
+                      <option value="">
+                        {lang === 'en'
+                          ? `-- Select Sub-ingredient (${matching.length} items) --`
+                          : `-- เลือกวัตถุดิบย่อย (${matching.length} รายการ) --`}
+                      </option>
                       {matching.map((ing) => (
                         <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
-                          {ing.name}
+                          {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
                         </option>
                       ))}
                     </select>
@@ -2043,11 +2189,13 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               <div>
                 <div className="flex justify-between items-center mb-1">
                   <label className="text-white/80 font-bold">
-                    ปริมาณที่ใช้ในสูตรกลาง (Quantity) <span className="text-[#F27D26]">*</span>
+                    {lang === 'en' ? 'Quantity in Base Recipe' : 'ปริมาณที่ใช้ในสูตรกลาง (Quantity)'}{' '}
+                    <span className="text-[#F27D26]">*</span>
                   </label>
                   {newBaseIngId && ingredientsMap.get(newBaseIngId) && (
                     <span className="text-[11px] text-[#F27D26] font-mono font-bold">
-                      หน่วย: {ingredientsMap.get(newBaseIngId)?.usageUnit}
+                      {lang === 'en' ? 'Unit:' : 'หน่วย:'}{' '}
+                      {localizeUnit(ingredientsMap.get(newBaseIngId)?.usageUnit, lang)}
                     </span>
                   )}
                 </div>
@@ -2068,14 +2216,14 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   onClick={() => setIsAddBaseIngModalOpen(false)}
                   className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white font-semibold cursor-pointer"
                 >
-                  ยกเลิก
+                  {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
                 </button>
                 <button
                   type="submit"
                   disabled={!newBaseIngId}
                   className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer disabled:opacity-50"
                 >
-                  + เพิ่มลงสูตรอาหารกลาง
+                  {lang === 'en' ? '+ Add to Base Recipe' : '+ เพิ่มลงสูตรอาหารกลาง'}
                 </button>
               </div>
             </form>

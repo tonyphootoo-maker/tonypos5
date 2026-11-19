@@ -1,18 +1,23 @@
 import React, { useState, useRef } from 'react';
 import { X, Upload, Check, RefreshCw, Smartphone, Tablet, Download, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { AppIconService, APP_ICON_PRESETS, AppIconPreset } from '../../services/appIconService';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 interface AppIconModalProps {
   isOpen: boolean;
   onClose: () => void;
   onIconChanged?: (newIconUrl: string) => void;
+  lang?: 'th' | 'en';
 }
 
 export const AppIconModal: React.FC<AppIconModalProps> = ({
   isOpen,
   onClose,
   onIconChanged,
+  lang: propLang,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [currentIcon, setCurrentIcon] = useState<string>(() => AppIconService.getCurrentIcon());
   const [selectedPresetId, setSelectedPresetId] = useState<string>('default');
   const [customUploadedData, setCustomUploadedData] = useState<string | null>(null);
@@ -33,7 +38,11 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      setSaveSuccessMessage('กรุณาเลือกไฟล์รูปภาพ (PNG, JPG, WebP หรือ SVG)');
+      setSaveSuccessMessage(
+        lang === 'en'
+          ? 'Please choose an image file (PNG, JPG, WebP, or SVG).'
+          : 'กรุณาเลือกไฟล์รูปภาพ (PNG, JPG, WebP หรือ SVG)'
+      );
       return;
     }
 
@@ -54,7 +63,9 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
     if (onIconChanged) {
       onIconChanged(currentIcon);
     }
-    setSaveSuccessMessage('บันทึกรูปไอคอนใหม่เรียบร้อยแล้ว!');
+    setSaveSuccessMessage(
+      lang === 'en' ? 'New app icon saved successfully!' : 'บันทึกรูปไอคอนใหม่เรียบร้อยแล้ว!'
+    );
     setTimeout(() => {
       setSaveSuccessMessage(null);
       onClose();
@@ -69,7 +80,9 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
     if (onIconChanged) {
       onIconChanged(APP_ICON_PRESETS[0].svgDataUri);
     }
-    setSaveSuccessMessage('รีเซ็ตเป็นไอคอนเริ่มต้นเรียบร้อยแล้ว');
+    setSaveSuccessMessage(
+      lang === 'en' ? 'Reset to default icon.' : 'รีเซ็ตเป็นไอคอนเริ่มต้นเรียบร้อยแล้ว'
+    );
     setTimeout(() => setSaveSuccessMessage(null), 1500);
   };
 
@@ -92,7 +105,7 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <h2 className="text-base sm:text-lg font-bold text-stone-900 leading-tight">
-              เปลี่ยนรูปไอคอนแอป (Custom App Icon)
+              {lang === 'en' ? 'Customize App Icon' : 'เปลี่ยนรูปไอคอนแอป (Custom App Icon)'}
             </h2>
           </div>
           <button
@@ -117,7 +130,9 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
           <div className="md:col-span-7 space-y-4">
             <div>
               <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-2">
-                1. เลือกจากชุดไอคอนสำเร็จรูป (Preset Gallery)
+                {lang === 'en'
+                  ? '1. Choose from Preset Gallery'
+                  : '1. เลือกจากชุดไอคอนสำเร็จรูป (Preset Gallery)'}
               </label>
               <div className="grid grid-cols-2 gap-2.5">
                 {APP_ICON_PRESETS.map((preset) => {
@@ -135,15 +150,15 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
                     >
                       <img
                         src={preset.svgDataUri}
-                        alt={preset.nameTh}
+                        alt={lang === 'en' ? preset.nameEn : preset.nameTh}
                         className="w-10 h-10 rounded-xl shrink-0 object-cover shadow-2xs"
                       />
                       <div className="min-w-0">
                         <div className="font-bold text-xs text-stone-800 truncate">
-                          {preset.nameTh.split('(')[0]}
+                          {lang === 'en' ? preset.nameEn : preset.nameTh.split('(')[0]}
                         </div>
                         <div className="text-[10px] text-stone-500 mt-0.5 line-clamp-2 leading-tight">
-                          {preset.descriptionTh}
+                          {lang === 'en' ? preset.descriptionEn : preset.descriptionTh}
                         </div>
                       </div>
                     </button>
@@ -155,7 +170,9 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
             {/* Custom Upload Section */}
             <div className="pt-2">
               <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-2">
-                2. หรืออัปโหลดรูปภาพ / โลโก้ร้านของคุณเอง
+                {lang === 'en'
+                  ? '2. Or Upload Your Own Logo / Image'
+                  : '2. หรืออัปโหลดรูปภาพ / โลโก้ร้านของคุณเอง'}
               </label>
               <div
                 onClick={() => fileInputRef.current?.click()}
@@ -176,10 +193,18 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
                   <Upload className="w-5 h-5" />
                 </div>
                 <div className="font-bold text-xs text-stone-800">
-                  {customUploadedData ? 'เปลี่ยนรูปที่อัปโหลด' : 'คลิกเพื่อเลือกไฟล์รูปภาพจากเครื่อง'}
+                  {customUploadedData
+                    ? lang === 'en'
+                      ? 'Change Uploaded Image'
+                      : 'เปลี่ยนรูปที่อัปโหลด'
+                    : lang === 'en'
+                      ? 'Click to select an image file'
+                      : 'คลิกเพื่อเลือกไฟล์รูปภาพจากเครื่อง'}
                 </div>
                 <p className="text-[11px] text-stone-400 mt-0.5">
-                  รองรับ PNG, JPG, WebP หรือ SVG (แนะนำรูปทรงสี่เหลี่ยมจัตุรัส)
+                  {lang === 'en'
+                    ? 'Supports PNG, JPG, WebP or SVG (square recommended)'
+                    : 'รองรับ PNG, JPG, WebP หรือ SVG (แนะนำรูปทรงสี่เหลี่ยมจัตุรัส)'}
                 </p>
               </div>
             </div>
@@ -189,7 +214,9 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
           <div className="md:col-span-5 flex flex-col items-center justify-between p-4 rounded-2xl bg-white border border-stone-200 shadow-xs">
             <div className="w-full">
               <div className="flex items-center justify-between mb-3 pb-2 border-b border-stone-100">
-                <span className="text-xs font-bold text-stone-700">ตัวอย่างบนหน้าจอจริง</span>
+                <span className="text-xs font-bold text-stone-700">
+                  {lang === 'en' ? 'Device Preview' : 'ตัวอย่างบนหน้าจอจริง'}
+                </span>
                 <div className="flex items-center gap-1 bg-stone-100 p-0.5 rounded-lg">
                   <button
                     type="button"
@@ -199,7 +226,7 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
                     }`}
                   >
                     <Smartphone className="w-3.5 h-3.5 inline mr-1" />
-                    มือถือ
+                    {lang === 'en' ? 'Phone' : 'มือถือ'}
                   </button>
                   <button
                     type="button"
@@ -209,7 +236,7 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
                     }`}
                   >
                     <Tablet className="w-3.5 h-3.5 inline mr-1" />
-                    แท็บเล็ต
+                    {lang === 'en' ? 'Tablet' : 'แท็บเล็ต'}
                   </button>
                 </div>
               </div>
@@ -245,7 +272,7 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
                     <div className="relative">
                       <img
                         src={currentIcon}
-                        alt="App Icon Preview"
+                        alt={lang === 'en' ? 'App Icon Preview' : 'ตัวอย่างไอคอนแอป'}
                         className="w-11 h-11 rounded-2xl shadow-lg ring-2 ring-white/40 object-cover"
                       />
                       <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center border border-slate-900 shadow-xs">
@@ -281,19 +308,19 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
                 type="button"
                 onClick={handleResetDefault}
                 className="hover:text-stone-800 flex items-center gap-1 cursor-pointer transition-colors"
-                title="ย้อนกลับเป็นไอคอนค่าเริ่มต้น"
+                title={lang === 'en' ? 'Reset to default icon' : 'ย้อนกลับเป็นไอคอนค่าเริ่มต้น'}
               >
                 <RefreshCw className="w-3 h-3" />
-                <span>รีเซ็ตค่าเริ่มต้น</span>
+                <span>{lang === 'en' ? 'Reset Default' : 'รีเซ็ตค่าเริ่มต้น'}</span>
               </button>
               <button
                 type="button"
                 onClick={handleDownloadIcon}
                 className="hover:text-stone-800 flex items-center gap-1 cursor-pointer transition-colors"
-                title="ดาวน์โหลดรูปไอคอนเก็บไว้"
+                title={lang === 'en' ? 'Download icon image' : 'ดาวน์โหลดรูปไอคอนเก็บไว้'}
               >
                 <Download className="w-3 h-3" />
-                <span>ดาวน์โหลดรูป</span>
+                <span>{lang === 'en' ? 'Download' : 'ดาวน์โหลดรูป'}</span>
               </button>
             </div>
           </div>
@@ -306,7 +333,7 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 rounded-xl text-stone-600 hover:text-stone-800 bg-white hover:bg-stone-100 border border-stone-200 text-xs font-semibold cursor-pointer transition-colors"
           >
-            ยกเลิก
+            {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
           </button>
           <button
             type="button"
@@ -314,7 +341,7 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
             className="px-5 py-2 rounded-xl bg-gradient-to-r from-[#F27D26] to-[#EA580C] hover:from-[#EA580C] hover:to-[#D97706] text-white text-xs font-bold shadow-sm hover:shadow transition-all cursor-pointer flex items-center gap-1.5"
           >
             <Check className="w-4 h-4" />
-            <span>นำไอคอนนี้ไปใช้งาน</span>
+            <span>{lang === 'en' ? 'Apply This Icon' : 'นำไอคอนนี้ไปใช้งาน'}</span>
           </button>
         </div>
       </div>

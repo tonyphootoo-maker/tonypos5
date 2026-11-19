@@ -8,6 +8,7 @@ import {
   Language,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import {
   formatMoney,
   calculateEmployeeMonthlyCost,
@@ -47,12 +48,14 @@ import { ConfirmModal } from '../components/ConfirmModal';
 
 interface Props {
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
 }
 
 type TabType = 'expenses' | 'labor' | 'breakeven';
 
-export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
+export const FinancePage: React.FC<Props> = ({ settings, lang: propLang }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
   const [activeTab, setActiveTab] = useState<TabType>('expenses');
 
@@ -292,7 +295,8 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <div className="text-xs text-neutral-600">
-              Total Monthly Fixed Overhead: <strong className="text-emerald-700 font-extrabold">฿{formatMoney(totalMonthlyFixedExpenses)}</strong>
+              {t.finance.totalMonthlyFixedExpenses}:{' '}
+              <strong className="text-emerald-700 font-extrabold">฿{formatMoney(totalMonthlyFixedExpenses)}</strong>
               <span className="text-[11px] text-neutral-400 ml-2">({periodLabel})</span>
             </div>
             <button
@@ -329,12 +333,12 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                     <div className="flex items-center gap-1">
                       {isExplicitPayrollExpense(exp) && (
                         <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
-                          Payroll
+                          {lang === 'th' ? 'เงินเดือน' : 'Payroll'}
                         </span>
                       )}
                       {exp.isRecurring && (
                         <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                          Monthly
+                          {t.finance.monthly}
                         </span>
                       )}
                     </div>
@@ -388,7 +392,8 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
         <div className="space-y-4">
           <div className="flex justify-between items-center">
             <div className="text-xs text-neutral-600">
-              Total Monthly Labor Cost: <strong className="text-emerald-700 font-extrabold">฿{formatMoney(totalMonthlyLabor)}</strong>
+              {t.finance.totalMonthlyLabor}:{' '}
+              <strong className="text-emerald-700 font-extrabold">฿{formatMoney(totalMonthlyLabor)}</strong>
               <span className="text-[11px] text-neutral-400 ml-2">({periodLabel})</span>
             </div>
             <button
@@ -428,11 +433,17 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
 
                     <div className="mt-3 space-y-1 text-xs text-neutral-600">
                       <div className="flex justify-between">
-                        <span>Wage Type:</span>
-                        <span className="font-bold capitalize">{emp.wageType}</span>
+                        <span>{t.finance.wageType}:</span>
+                        <span className="font-bold">
+                          {emp.wageType === 'monthly'
+                            ? t.finance.monthly
+                            : emp.wageType === 'daily'
+                            ? t.finance.daily
+                            : t.finance.hourly}
+                        </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Wage Rate:</span>
+                        <span>{t.finance.wageAmount}:</span>
                         <span className="font-bold">฿{formatMoney(emp.wageAmount)}</span>
                       </div>
                       <div className="flex justify-between pt-1 border-t border-neutral-100 text-neutral-900 font-black">
@@ -508,7 +519,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
             <div>
               <span className="text-neutral-500">{t.finance.operatingDaysNote}</span>
               <div className="text-base font-extrabold text-neutral-900">
-                {breakEven.operatingDays} days
+                {breakEven.operatingDays} {lang === 'th' ? 'วัน' : 'days'}
               </div>
             </div>
           </div>
@@ -531,13 +542,15 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
               </span>
               {derivedMargin.hasRealData && (
                 <span className="font-black text-sm">
-                  Var Cost {formatPercent(derivedMargin.variableCostPercent)} → CM {formatPercent(derivedMargin.contributionMarginPercent)}
+                  {lang === 'th' ? 'ต้นทุนผันแปร' : 'Var Cost'} {formatPercent(derivedMargin.variableCostPercent)} → CM {formatPercent(derivedMargin.contributionMarginPercent)}
                 </span>
               )}
             </div>
             {derivedMargin.hasRealData ? (
               <div className="text-[11px] opacity-80">
-                30-Day Real Net Sales: ฿{formatMoney(derivedMargin.totalNetSales)} ({last30Summaries.length} business days)
+                {lang === 'th'
+                  ? `ยอดขายสุทธิจริง 30 วัน: ฿${formatMoney(derivedMargin.totalNetSales)} (${last30Summaries.length} วันทำการ)`
+                  : `30-Day Real Net Sales: ฿${formatMoney(derivedMargin.totalNetSales)} (${last30Summaries.length} business days)`}
               </div>
             ) : (
               <div className="text-[11px] opacity-80">
@@ -612,7 +625,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   : 'N/A'}
               </div>
               <div className="text-[10px] text-emerald-700 mt-0.5">
-                ÷ {breakEven.operatingDays} operating days
+                ÷ {breakEven.operatingDays} {lang === 'th' ? 'วันทำการ' : 'operating days'}
               </div>
             </div>
           </div>
@@ -648,7 +661,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   value={editingExpense.title || ''}
                   onChange={(e) => setEditingExpense({ ...editingExpense, title: e.target.value })}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. November Rent"
+                  placeholder={lang === 'th' ? 'เช่น ค่าเช่าร้านเดือนนี้' : 'e.g. November Rent'}
                 />
               </div>
 
@@ -760,7 +773,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   value={editingEmployee.name || ''}
                   onChange={(e) => setEditingEmployee({ ...editingEmployee, name: e.target.value })}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. Somsak"
+                  placeholder={lang === 'th' ? 'เช่น สมศักดิ์' : 'e.g. Somsak'}
                 />
               </div>
 
@@ -774,7 +787,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang }) => {
                   value={editingEmployee.role || ''}
                   onChange={(e) => setEditingEmployee({ ...editingEmployee, role: e.target.value })}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
-                  placeholder="e.g. Head Chef, Waiter"
+                  placeholder={lang === 'th' ? 'เช่น หัวหน้าเชฟ, พนักงานเสิร์ฟ' : 'e.g. Head Chef, Waiter'}
                 />
               </div>
 

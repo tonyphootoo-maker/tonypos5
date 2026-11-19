@@ -2,10 +2,9 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { User } from 'firebase/auth';
 import {
   SettingsDoc,
-  Language,
   ShiftDoc,
 } from './types';
-import { translations } from './i18n/translations';
+import { useLanguage } from './contexts/LanguageContext';
 import {
   subscribeAuth,
   signInWithGoogle,
@@ -65,7 +64,7 @@ export default function App() {
   );
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(appMode === 'owner');
-  const [lang, setLang] = useState<Language>('th'); // Default to Thai with 1-click toggle to English
+  const { lang, toggleLang: handleToggleLanguage, t } = useLanguage();
 
   const [settings, setSettings] = useState<SettingsDoc | null>(null);
   const [currentPage, setCurrentPage] = useState<AppPage>('pos');
@@ -84,8 +83,6 @@ export default function App() {
     window.addEventListener('gmp-quota-exceeded', handleQuota);
     return () => window.removeEventListener('gmp-quota-exceeded', handleQuota);
   }, []);
-
-  const t = translations[lang];
 
   // Subscribe to Auth state changes for Owner mode ONLY
   useEffect(() => {
@@ -188,10 +185,6 @@ export default function App() {
     };
   }, [appMode]);
 
-  const handleToggleLanguage = () => {
-    setLang((prev) => (prev === 'th' ? 'en' : 'th'));
-  };
-
   const handleGoogleSignIn = async () => {
     setLoginError(null);
     try {
@@ -224,7 +217,7 @@ export default function App() {
         fallback={
           <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-4 text-slate-700 text-xs font-bold">
             <Loader2 className="w-5 h-5 animate-spin text-orange-600 mr-2" />
-            <span>กำลังโหลดเมนูออนไลน์...</span>
+            <span>{lang === 'th' ? 'กำลังโหลดเมนูออนไลน์...' : 'Loading Online Menu...'}</span>
           </div>
         }
       >
@@ -239,16 +232,18 @@ export default function App() {
         {mapsQuotaExceeded && (
           <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-[70] shadow-sm">
             <span>
-              Google Maps Platform quota reached. If you are the app owner, visit{' '}
+              {lang === 'th'
+                ? 'ใช้งานโควตา Google Maps Platform ครบกำหนดแล้ว หากคุณเป็นเจ้าของแอป โปรดดูวิธีอัปเดตบัญชีได้ที่ '
+                : 'Google Maps Platform quota reached. If you are the app owner, visit '}
               <a
                 href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline font-semibold text-amber-950 hover:text-amber-800"
               >
-                maps developer site
-              </a>{' '}
-              for instructions to update your account.
+                {lang === 'th' ? 'เว็บไซต์นักพัฒนา Maps' : 'maps developer site'}
+              </a>
+              {lang === 'th' ? '' : ' for instructions to update your account.'}
             </span>
           </div>
         )}
@@ -256,7 +251,7 @@ export default function App() {
           fallback={
             <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-200 text-xs font-bold">
               <Loader2 className="w-5 h-5 animate-spin text-emerald-400 mr-2" />
-              <span>กำลังโหลดแอป Rider...</span>
+              <span>{lang === 'th' ? 'กำลังโหลดแอป Rider...' : 'Loading Rider App...'}</span>
             </div>
           }
         >
@@ -328,7 +323,7 @@ export default function App() {
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-semibold space-y-1">
               <div className="font-bold flex items-center gap-1.5 text-rose-800">
                 <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>Firebase Initialization Error / ข้อผิดพลาดการเชื่อมต่อ</span>
+                <span>{lang === 'th' ? 'ข้อผิดพลาดการเชื่อมต่อ Firebase' : 'Firebase Initialization Error'}</span>
               </div>
               <div className="text-[11px] text-rose-600 break-all">{firebaseInitError}</div>
             </div>
@@ -370,7 +365,9 @@ export default function App() {
 
         {/* Footer */}
         <div className="text-center text-[11px] text-slate-400">
-          KinPOS • Multi-Tab Offline &amp; Real-Time Sync Engine
+          {lang === 'th'
+            ? 'KinPOS • ระบบซิงค์ข้อมูลออฟไลน์และเรียลไทม์หลายหน้าจอ'
+            : 'KinPOS • Multi-Tab Offline & Real-Time Sync Engine'}
         </div>
       </div>
     );
@@ -381,7 +378,9 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-transparent text-slate-600 text-xs">
         <Loader2 className="w-5 h-5 animate-spin text-orange-600 mr-2" />
-        <span>Initializing store configuration...</span>
+        <span>
+          {lang === 'th' ? 'กำลังโหลดการตั้งค่าร้านค้า...' : 'Initializing store configuration...'}
+        </span>
       </div>
     );
   }
@@ -455,7 +454,7 @@ export default function App() {
             fallback={
               <div className="p-8 flex items-center justify-center text-slate-600 text-xs font-bold">
                 <Loader2 className="w-5 h-5 animate-spin text-emerald-600 mr-2" />
-                <span>กำลังโหลดระบบออเดอร์ออนไลน์...</span>
+                <span>{lang === 'th' ? 'กำลังโหลดระบบออเดอร์ออนไลน์...' : 'Loading Online Orders...'}</span>
               </div>
             }
           >

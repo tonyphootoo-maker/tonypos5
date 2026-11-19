@@ -385,6 +385,56 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['สั่งกลับบ้าน', 'Takeaway'],
   ['กลับบ้าน', 'Takeaway'],
   ['เดลิเวอรี', 'Delivery'],
+  ['กะเพราจานด่วน / ตามสั่ง', 'Holy Basil Express / Made to Order'],
+  ['เส้นและก๋วยเตี๋ยว', 'Noodles & Stir-Fried Noodles'],
+  ['ชุดเครื่องเคียง', 'Side Dishes'],
+  ['ผัดไทย จันท์', 'Chanthaburi Pad Thai'],
+  ['ผัดไทยเส้นจันท์', 'Chanthaburi-Noodle Pad Thai'],
+  ['สุกี้แห้งหมูหมัก', 'Dry Sukiyaki with Marinated Pork'],
+  ['ไข่ดาว / ไข่เจียว', 'Fried Egg / Omelette'],
+  ['ไข่ดาวกรอบ', 'Crispy Fried Egg'],
+  ['ไข่ดาว', 'Fried Egg'],
+  ['น้ำจิ้มสุกี้โบราณ', 'Traditional Suki Dipping Sauce'],
+  ['น้ำซอสมะขามผัดไทย', 'Pad Thai Tamarind Sauce'],
+  ['ซอสผัดกระทะมาตรฐาน (สูตรประจำร้าน)', 'House Standard Stir-Fry Sauce'],
+  ['หมูหมัก (สูตรทางร้าน)', 'House Marinated Pork'],
+  ['หมูบด (สันนอกบดมันน้อย)', 'Lean Ground Pork Loin'],
+  ['อกไก่หั่นชิ้น', 'Sliced Chicken Breast'],
+  ['เนื้อวัวสไลซ์', 'Sliced Beef'],
+  ['ปลาหมึกกล้วยสด', 'Fresh Squid'],
+  ['ไข่ไก่สด (เบอร์ 2)', 'Fresh Chicken Egg (Size 2)'],
+  ['เต้าหู้ไข่ไก่ (หลอด)', 'Egg Tofu (Tube)'],
+  ['ใบกะเพราเด็ดใบ', 'Picked Holy Basil Leaves'],
+  ['ใบกะเพราป่าออร์แกนิก', 'Organic Wild Holy Basil'],
+  ['ใบโหระพา', 'Sweet Basil Leaves'],
+  ['กระเทียมไทยแกะกลีบ', 'Peeled Thai Garlic'],
+  ['ผักบุ้งจีนหั่นท่อน', 'Cut Chinese Morning Glory'],
+  ['ผักบุ้งจีน', 'Chinese Morning Glory'],
+  ['คะน้าฮ่องกง', 'Hong Kong Kale'],
+  ['กะหล่ำปลีซอย', 'Shredded Cabbage'],
+  ['ข้าวสวยหอมมะลิ (หุงสุก)', 'Cooked Jasmine Rice'],
+  ['เส้นจันท์แช่น้ำ', 'Soaked Chanthaburi Rice Noodles'],
+  ['วุ้นเส้นแช่น้ำ', 'Soaked Glass Noodles'],
+  ['บะหมี่กึ่งสำเร็จรูป (มาม่าซอง)', 'Instant Noodles (Packet)'],
+  ['น้ำมันปาล์มสำหรับผัด/ทอด', 'Palm Oil (Stir-Fry / Frying)'],
+  ['น้ำมันปาล์มสำหรับทอด', 'Palm Oil for Frying'],
+  ['ซอสหอยนางรมตราแม่ครัว', 'Oyster Sauce (Maekrua)'],
+  ['ซีอิ๊วขาวเห็ดหอม', 'Shiitake Light Soy Sauce'],
+  ['น้ำปลาแท้ตราทิพรส', 'Fish Sauce (Tiparos)'],
+  ['มะขามเปียกแกะเมล็ด', 'Seedless Tamarind Paste'],
+  ['กล่องกระดาษใส่อาหารรักษ์โลก', 'Eco Paper Food Container'],
+  ['เจริญโภคภัณฑ์สด (ตลาดไท)', 'CPF Fresh (Talaad Thai)'],
+  ['มหาชัยซีฟู้ดส์', 'Mahachai Seafoods'],
+  ['ผักสดสวนลุงชาติ', 'Uncle Chat Fresh Garden'],
+  ['ย่งฮั้วฮวด เครื่องปรุงและบรรจุภัณฑ์', 'Yong Huat Seasonings & Packaging'],
+  ['ค่าเช่า', 'Rent'],
+  ['ค่าไฟ', 'Electricity'],
+  ['ค่าน้ำ', 'Water'],
+  ['ค่าแก๊ส', 'Cooking Gas (LPG)'],
+  ['ค่าแรง', 'Labor Cost'],
+  ['ค่าแพ็กเกจจิ้ง', 'Packaging Cost'],
+  ['โซนในร้าน', 'Indoor Zone'],
+  ['โซนกลางแจ้ง', 'Outdoor Zone'],
   ['อื่นๆ', 'Other'],
   ['ทั่วไป', 'General'],
 ];
@@ -628,3 +678,73 @@ export function computeAutoEnglishName(params: {
 
   return translateThaiToEnglish(nextThai);
 }
+
+const HAS_THAI_RE = /[\u0E00-\u0E7F]/;
+
+/**
+ * Resolves the display string for any named record/field based on current app language.
+ * - In 'th': prefers non-empty Thai string, falls back to English/fallback.
+ * - In 'en': prefers clean non-Thai English string; if missing or still contains Thai, auto-translates!
+ */
+export function getLocalizedText(
+  lang: 'th' | 'en',
+  thText?: string | null,
+  enText?: string | null
+): string {
+  const th = (thText || '').trim();
+  const en = (enText || '').trim();
+
+  if (lang === 'th') {
+    return th || en;
+  }
+
+  if (en && !HAS_THAI_RE.test(en)) {
+    return en;
+  }
+
+  const source = th || en;
+  if (!source) return '';
+  if (!HAS_THAI_RE.test(source)) return source;
+  return translateThaiToEnglish(source) || source;
+}
+
+const UNIT_EN_MAP: Record<string, string> = {
+  'ตัว': 'pc',
+  'ฟอง': 'egg',
+  'ชิ้น': 'pc',
+  'แพ็ค': 'pack',
+  'แพค': 'pack',
+  'ขวด': 'bottle',
+  'จาน': 'plate',
+  'ถ้วย': 'cup',
+  'มัด': 'bunch',
+  'ชุด': 'set',
+  'ถุง': 'bag',
+  'กล่อง': 'box',
+  'ซอง': 'sachet',
+  'กระป๋อง': 'can',
+  'กรัม': 'g',
+  'กิโลกรัม': 'kg',
+  'มิลลิลิตร': 'ml',
+  'ลิตร': 'L',
+  'ช้อนโต๊ะ': 'tbsp',
+  'ช้อนชา': 'tsp',
+  'ลูก': 'pc',
+  'อัน': 'pc',
+  'ที่': 'portion',
+  'เสิร์ฟ': 'serving',
+  'ไม้': 'skewer',
+  'หัว': 'head',
+  'ใบ': 'leaf',
+  'แผ่น': 'sheet',
+};
+
+/**
+ * Localizes unit tokens (e.g. 'ฟอง' -> 'egg', 'ชิ้น' -> 'pc') when viewing in English.
+ */
+export function localizeUnit(unit: string | undefined | null, lang: 'th' | 'en'): string {
+  const raw = (unit || '').trim();
+  if (!raw || lang === 'th') return raw;
+  return UNIT_EN_MAP[raw] || (HAS_THAI_RE.test(raw) ? translateThaiToEnglish(raw) : raw);
+}
+

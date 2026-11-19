@@ -52,6 +52,7 @@ import { FirebaseSyncService } from '../../services/firebaseSyncService';
 import { calculateVariantCostBreakdown, getEffectiveDeliveryGpPercent } from '../../services/calculationEngine';
 import { INITIAL_SETTINGS } from '../../data/initialData';
 import { WhatShouldIDoSection } from './WhatShouldIDoSection';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 interface ExecutiveDashboardProps {
   ingredients?: Array<IndexIngredient | Ingredient>;
@@ -71,7 +72,7 @@ interface ExecutiveDashboardProps {
   settings?: BusinessSettings;
   currentSettings?: RestaurantSettings;
   advices?: WhatShouldIDoAdvice[];
-  activeLanguage: 'th' | 'en';
+  activeLanguage?: 'th' | 'en';
   onNavigate?: (view: string) => void;
   onNavigateToTab?: (tabId: string) => void;
   onSalesUpdated?: (sales: DailySalesRecord[]) => void;
@@ -94,11 +95,13 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   settings = INITIAL_SETTINGS,
   currentSettings: rawCurrentSettings,
   advices,
-  activeLanguage = 'th',
+  activeLanguage: propActiveLanguage,
   onNavigate,
   onNavigateToTab,
   onSalesUpdated,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const activeLanguage = propActiveLanguage ?? ctxLang;
   const [isSyncingSales, setIsSyncingSales] = React.useState(false);
   const [syncFeedback, setSyncFeedback] = React.useState<string | null>(null);
   const [excludePayrollDuplicates, setExcludePayrollDuplicates] = React.useState(true);
@@ -120,12 +123,24 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
         if (onSalesUpdated) {
           onSalesUpdated(res.data);
         }
-        setSyncFeedback(`ซิงค์สำเร็จ (${res.data.length} วัน)`);
+        setSyncFeedback(
+          activeLanguage === 'th'
+            ? `ซิงค์สำเร็จ (${res.data.length} วัน)`
+            : `Synced successfully (${res.data.length} days)`
+        );
       } else {
-        setSyncFeedback(res.error ? `ข้อผิดพลาด: ${res.error}` : 'ไม่พบข้อมูลใหม่จาก POS');
+        setSyncFeedback(
+          res.error
+            ? activeLanguage === 'th'
+              ? `ข้อผิดพลาด: ${res.error}`
+              : `Error: ${res.error}`
+            : activeLanguage === 'th'
+            ? 'ไม่พบข้อมูลใหม่จาก POS'
+            : 'No new POS data found'
+        );
       }
     } catch (err: any) {
-      setSyncFeedback('ซิงค์ล้มเหลว');
+      setSyncFeedback(activeLanguage === 'th' ? 'ซิงค์ล้มเหลว' : 'Sync failed');
     } finally {
       setIsSyncingSales(false);
       setTimeout(() => setSyncFeedback(null), 4000);
@@ -191,7 +206,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
 
           return {
             id: v.id,
-            name: v.name || v.proteinType || 'จานปกติ',
+            name: v.name || v.proteinType || (activeLanguage === 'th' ? 'จานปกติ' : 'Standard'),
             directFoodCost,
             packagingCost,
             totalDirectCost,
@@ -204,7 +219,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
       }
       return [];
     },
-    [ingredients, currentSettings]
+    [ingredients, currentSettings, activeLanguage]
   );
 
   // Double-counting guard: explicit isPayroll check with user toggle (no keyword matching)
@@ -419,7 +434,10 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   if (highCostPortion) {
     const p = highCostPortion.portion;
     const m = highCostPortion.menu;
-    const menuTitle = m.thaiName || m.name || 'เมนูหลัก';
+    const menuTitle =
+      activeLanguage === 'en'
+        ? (m as any).englishName || m.name || m.thaiName || 'Main Dish'
+        : m.thaiName || m.name || 'เมนูหลัก';
     defaultAdvicesList.push({
       id: 'adv-1',
       type: 'CRITICAL',
@@ -543,7 +561,11 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
               onClick={handleSyncLivePOS}
               disabled={isSyncingSales}
               className="inline-flex items-center gap-1.5 rounded-xl bg-white/75 hover:bg-white border border-slate-200/90 px-3.5 py-2 text-xs font-semibold text-slate-700 transition-all shadow-xs cursor-pointer disabled:opacity-50"
-              title="ดึงยอดขายสดล่าสุดจาก Firebase Firestore ที่ POS บันทึกเข้ามา"
+              title={
+                activeLanguage === 'th'
+                  ? 'ดึงยอดขายสดล่าสุดจาก Firebase Firestore ที่ POS บันทึกเข้ามา'
+                  : 'Fetch the latest live POS sales synced to Firebase Firestore'
+              }
             >
               <RefreshCw className={`h-3.5 w-3.5 text-emerald-600 ${isSyncingSales ? 'animate-spin' : ''}`} />
               <span>
@@ -574,10 +596,17 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
               <span>
-                พบรายจ่ายเงินเดือน/ค่าแรง ({payrollFlaggedExpenses.length} รายการ) ซ้อนกับข้อมูลพนักงาน ({activeEmployees.length} คน) —{' '}
-                {excludePayrollDuplicates
-                  ? 'งดนับซ้ำใน P&L และจุดคุ้มทุน (ใช้ยอดจากหน้าพนักงาน)'
-                  : 'กำลังนับรวมทั้งสองแหล่ง'}
+                {activeLanguage === 'th'
+                  ? `พบรายจ่ายเงินเดือน/ค่าแรง (${payrollFlaggedExpenses.length} รายการ) ซ้อนกับข้อมูลพนักงาน (${activeEmployees.length} คน) — ${
+                      excludePayrollDuplicates
+                        ? 'งดนับซ้ำใน P&L และจุดคุ้มทุน (ใช้ยอดจากหน้าพนักงาน)'
+                        : 'กำลังนับรวมทั้งสองแหล่ง'
+                    }`
+                  : `Found ${payrollFlaggedExpenses.length} payroll expense(s) overlapping with ${activeEmployees.length} staff record(s) — ${
+                      excludePayrollDuplicates
+                        ? 'Excluded from P&L & Break-Even to avoid double counting (using Labor records)'
+                        : 'Including both sources'
+                    }`}
               </span>
             </div>
             <button
@@ -585,7 +614,13 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
               onClick={() => setExcludePayrollDuplicates(!excludePayrollDuplicates)}
               className="px-3 py-1 rounded-lg border border-amber-400 bg-white hover:bg-amber-100 text-xs font-bold text-amber-900 shrink-0 cursor-pointer"
             >
-              {excludePayrollDuplicates ? 'เปลี่ยนเป็นนับรวมด้วย' : 'งดนับซ้ำกับพนักงาน'}
+              {excludePayrollDuplicates
+                ? activeLanguage === 'th'
+                  ? 'เปลี่ยนเป็นนับรวมด้วย'
+                  : 'Include Both'
+                : activeLanguage === 'th'
+                ? 'งดนับซ้ำกับพนักงาน'
+                : 'Avoid Double Counting'}
             </button>
           </div>
         )}
@@ -868,15 +903,15 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
             <table className="exec-glass-table w-full text-left text-xs">
               <thead>
                 <tr>
-                  <th className="py-2.5 px-3.5">รหัส / ชื่อเมนู</th>
-                  <th className="py-2.5 px-3.5">พอร์ชั่น</th>
-                  <th className="py-2.5 px-3.5 text-right">ต้นทุนอาหาร (฿)</th>
-                  <th className="py-2.5 px-3.5 text-right">กล่อง (฿)</th>
-                  <th className="py-2.5 px-3.5 text-right">ต้นทุนรวม (฿)</th>
-                  <th className="py-2.5 px-3.5 text-right">ราคาขาย (฿)</th>
-                  <th className="py-2.5 px-3.5 text-right">% Food Cost</th>
-                  <th className="py-2.5 px-3.5 text-right">กำไรต่อจาน (฿)</th>
-                  <th className="py-2.5 px-3.5 text-center">สถานะ</th>
+                  <th className="py-2.5 px-3.5">{activeLanguage === 'th' ? 'รหัส / ชื่อเมนู' : 'Code / Menu'}</th>
+                  <th className="py-2.5 px-3.5">{activeLanguage === 'th' ? 'พอร์ชั่น' : 'Portion'}</th>
+                  <th className="py-2.5 px-3.5 text-right">{activeLanguage === 'th' ? 'ต้นทุนอาหาร (฿)' : 'Food Cost (฿)'}</th>
+                  <th className="py-2.5 px-3.5 text-right">{activeLanguage === 'th' ? 'กล่อง (฿)' : 'Packaging (฿)'}</th>
+                  <th className="py-2.5 px-3.5 text-right">{activeLanguage === 'th' ? 'ต้นทุนรวม (฿)' : 'Total Cost (฿)'}</th>
+                  <th className="py-2.5 px-3.5 text-right">{activeLanguage === 'th' ? 'ราคาขาย (฿)' : 'Selling Price (฿)'}</th>
+                  <th className="py-2.5 px-3.5 text-right">{activeLanguage === 'th' ? '% Food Cost' : 'Food Cost %'}</th>
+                  <th className="py-2.5 px-3.5 text-right">{activeLanguage === 'th' ? 'กำไรต่อจาน (฿)' : 'Profit / Dish (฿)'}</th>
+                  <th className="py-2.5 px-3.5 text-center">{activeLanguage === 'th' ? 'สถานะ' : 'Status'}</th>
                 </tr>
               </thead>
               <tbody className="text-slate-700 tabular-nums">
@@ -899,13 +934,17 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
                     return portionsList.map((portion: any, pIdx: number) => {
                       const isHighFoodCost = (portion.foodCostPercent || 0) > targetFoodCost;
                       const isLoss = (portion.contributionProfit ?? 0) < 0;
+                      const displayMenuName =
+                        activeLanguage === 'en'
+                          ? menu.englishName || menu.name || menu.thaiName || 'Menu'
+                          : menu.thaiName || menu.name || 'เมนู';
                       return (
                         <tr key={`${menu.id}-${portion.id}`} className="transition-colors">
                           <td className="py-3 px-3.5 font-medium text-slate-900">
                             {pIdx === 0 ? (
                               <div>
                                 <div className="font-semibold text-slate-900">
-                                  {menu.thaiName || menu.name || 'เมนู'}
+                                  {displayMenuName}
                                 </div>
                                 {menu.code && (
                                   <div className="text-[11px] text-slate-400 font-mono">
@@ -953,11 +992,11 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
                             ) : isHighFoodCost ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700">
                                 <AlertTriangle className="h-3 w-3 shrink-0" />
-                                <span>ควรปรับราคา</span>
+                                <span>{activeLanguage === 'th' ? 'ควรปรับราคา' : 'Reprice'}</span>
                               </span>
                             ) : (
                               <span className="text-[11px] font-semibold text-emerald-700">
-                                กำไรดี
+                                {activeLanguage === 'th' ? 'กำไรดี' : 'Healthy'}
                               </span>
                             )}
                           </td>

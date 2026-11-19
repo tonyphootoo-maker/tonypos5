@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { BillDoc, SettingsDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import { formatMoney } from '../engine/calculations';
-import { Printer, X, FileText, CheckCircle2 } from 'lucide-react';
+import { Printer, X, FileText } from 'lucide-react';
 
 interface Props {
   bill: BillDoc;
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
   onClose: () => void;
   isCheckReceipt?: boolean; // When printing check before paying
 }
@@ -15,11 +16,13 @@ interface Props {
 export const ReceiptModal: React.FC<Props> = ({
   bill,
   settings,
-  lang,
+  lang: propLang,
   onClose,
   isCheckReceipt = false,
 }) => {
   const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>('80mm');
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
 
   const handlePrint = () => {
@@ -91,18 +94,26 @@ export const ReceiptModal: React.FC<Props> = ({
             <div className="text-center pb-3 border-b border-dashed border-neutral-400">
               {isCheckReceipt && (
                 <div className="text-[11px] font-bold text-orange-600 border border-orange-400 rounded-md py-0.5 mb-1.5 uppercase">
-                  *** CHECK RECEIPT / ใบตรวจสอบยอด ***
+                  {lang === 'th' ? '*** ใบตรวจสอบยอด ***' : '*** CHECK RECEIPT ***'}
                 </div>
               )}
               {bill.status === 'voided' && (
                 <div className="text-[11px] font-bold text-rose-600 border border-rose-400 rounded-md py-0.5 mb-1.5 uppercase">
-                  *** VOIDED BILL / บิลนี้ถูกยกเลิก ***
+                  {lang === 'th' ? '*** บิลนี้ถูกยกเลิก ***' : '*** VOIDED BILL ***'}
                 </div>
               )}
               <h2 className="text-sm font-bold tracking-tight">{settings.shopName}</h2>
               {settings.shopAddress && <p className="text-[10px] text-neutral-600">{settings.shopAddress}</p>}
-              {settings.shopPhone && <p className="text-[10px] text-neutral-600">Tel: {settings.shopPhone}</p>}
-              {settings.taxId && <p className="text-[10px] text-neutral-600">TAX ID: {settings.taxId}</p>}
+              {settings.shopPhone && (
+                <p className="text-[10px] text-neutral-600">
+                  {lang === 'th' ? 'โทร:' : 'Tel:'} {settings.shopPhone}
+                </p>
+              )}
+              {settings.taxId && (
+                <p className="text-[10px] text-neutral-600">
+                  {lang === 'th' ? 'เลขประจำตัวผู้เสียภาษี:' : 'TAX ID:'} {settings.taxId}
+                </p>
+              )}
               {settings.receiptHeader && (
                 <p className="text-[10px] text-neutral-700 italic mt-1">{settings.receiptHeader}</p>
               )}
@@ -111,24 +122,32 @@ export const ReceiptModal: React.FC<Props> = ({
             {/* Bill Meta */}
             <div className="py-2.5 border-b border-dashed border-neutral-400 text-[11px] space-y-0.5">
               <div className="flex justify-between">
-                <span>Bill #:</span>
+                <span>{lang === 'th' ? 'เลขที่บิล:' : 'Bill #:'}</span>
                 <span className="font-bold">{bill.billNumber}</span>
               </div>
               <div className="flex justify-between">
-                <span>Date:</span>
-                <span>{bill.workDate} {new Date(bill.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span>{lang === 'th' ? 'วันที่:' : 'Date:'}</span>
+                <span>
+                  {bill.workDate}{' '}
+                  {new Date(bill.createdAt).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span>Table:</span>
-                <span className="font-bold">{bill.tableName || bill.tableId || 'Takeaway/Online'}</span>
+                <span>{lang === 'th' ? 'โต๊ะ:' : 'Table:'}</span>
+                <span className="font-bold">
+                  {bill.tableName || bill.tableId || (lang === 'th' ? 'สั่งกลับบ้าน/ออนไลน์' : 'Takeaway/Online')}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span>Channel:</span>
+                <span>{lang === 'th' ? 'ช่องทาง:' : 'Channel:'}</span>
                 <span>{bill.channelName}</span>
               </div>
               {bill.memberName && (
                 <div className="flex justify-between text-orange-700 font-semibold">
-                  <span>Member:</span>
+                  <span>{lang === 'th' ? 'สมาชิก:' : 'Member:'}</span>
                   <span>{bill.memberName}</span>
                 </div>
               )}
@@ -178,20 +197,25 @@ export const ReceiptModal: React.FC<Props> = ({
             {/* Totals Calculation */}
             <div className="py-2.5 border-b border-dashed border-neutral-400 text-[11px] space-y-1">
               <div className="flex justify-between">
-                <span>Subtotal:</span>
+                <span>{lang === 'th' ? 'รวมรายการอาหาร:' : 'Subtotal:'}</span>
                 <span>{formatMoney(bill.subtotal)}</span>
               </div>
               {bill.discountAmount > 0 && (
                 <div className="flex justify-between text-rose-600">
-                  <span>Discount:</span>
+                  <span>{lang === 'th' ? 'ส่วนลด:' : 'Discount:'}</span>
                   <span>-{formatMoney(bill.discountAmount)}</span>
                 </div>
               )}
               {bill.serviceChargeAmount > 0 && (
                 <div className="flex justify-between">
                   <span>
-                    Service Charge ({bill.serviceChargeRate}%
-                    {settings.pricesIncludeVat && settings.serviceChargeIncludedInPrice ? ', Incl.' : ''}):
+                    {lang === 'th' ? 'ค่าบริการ' : 'Service Charge'} ({bill.serviceChargeRate}%
+                    {settings.pricesIncludeVat && settings.serviceChargeIncludedInPrice
+                      ? lang === 'th'
+                        ? ', รวมในราคา'
+                        : ', Incl.'
+                      : ''}
+                    ):
                   </span>
                   <span>{formatMoney(bill.serviceChargeAmount)}</span>
                 </div>
@@ -199,13 +223,14 @@ export const ReceiptModal: React.FC<Props> = ({
               {bill.vatAmount > 0 && (
                 <div className="flex justify-between">
                   <span>
-                    VAT ({bill.vatRate}%{settings.pricesIncludeVat ? ', Incl.' : ''}):
+                    {lang === 'th' ? 'ภาษีมูลค่าเพิ่ม' : 'VAT'} ({bill.vatRate}%
+                    {settings.pricesIncludeVat ? (lang === 'th' ? ', รวมในราคา' : ', Incl.') : ''}):
                   </span>
                   <span>{formatMoney(bill.vatAmount)}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm font-bold pt-1 border-t border-neutral-400">
-                <span>TOTAL:</span>
+                <span>{lang === 'th' ? 'ยอดรวมสุทธิ:' : 'TOTAL:'}</span>
                 <span>฿{formatMoney(bill.grandTotal)}</span>
               </div>
             </div>
@@ -213,16 +238,35 @@ export const ReceiptModal: React.FC<Props> = ({
             {/* Payments breakdown */}
             {bill.payments && bill.payments.length > 0 && (
               <div className="py-2 border-b border-dashed border-neutral-400 text-[10px] space-y-0.5">
-                <span className="font-bold">Payment Methods:</span>
-                {bill.payments.map((p, idx) => (
-                  <div key={idx} className="flex justify-between pl-1">
-                    <span className="capitalize">{p.subMethod || p.method}:</span>
-                    <span>฿{formatMoney(p.amount)}</span>
-                  </div>
-                ))}
+                <span className="font-bold">{lang === 'th' ? 'วิธีชำระเงิน:' : 'Payment Methods:'}</span>
+                {bill.payments.map((p, idx) => {
+                  const rawMethod = (p.subMethod || p.method || '').toLowerCase();
+                  const methodLabel =
+                    rawMethod === 'cash'
+                      ? lang === 'th'
+                        ? 'เงินสด'
+                        : 'Cash'
+                      : rawMethod === 'transfer' || rawMethod === 'promptpay'
+                      ? lang === 'th'
+                        ? 'โอน / พร้อมเพย์'
+                        : 'Transfer / PromptPay'
+                      : rawMethod === 'card'
+                      ? lang === 'th'
+                        ? 'บัตรเครดิต/เดบิต'
+                        : 'Card'
+                      : rawMethod === 'ewallet'
+                      ? 'E-Wallet'
+                      : p.subMethod || p.method;
+                  return (
+                    <div key={idx} className="flex justify-between pl-1">
+                      <span className="capitalize">{methodLabel}:</span>
+                      <span>฿{formatMoney(p.amount)}</span>
+                    </div>
+                  );
+                })}
                 {bill.payments.some((p) => p.change && p.change > 0) && (
                   <div className="flex justify-between pl-1 font-bold text-neutral-800">
-                    <span>Change:</span>
+                    <span>{lang === 'th' ? 'เงินทอน:' : 'Change:'}</span>
                     <span>฿{formatMoney(bill.payments.find((p) => p.change)?.change)}</span>
                   </div>
                 )}
@@ -232,14 +276,20 @@ export const ReceiptModal: React.FC<Props> = ({
             {/* Points info */}
             {bill.pointsEarned && bill.pointsEarned > 0 && (
               <div className="py-1 border-b border-dashed border-neutral-400 text-[10px] text-center text-orange-700">
-                Earned +{bill.pointsEarned} loyalty points!
+                {lang === 'th'
+                  ? `ได้รับคะแนนสะสม +${bill.pointsEarned} แต้ม!`
+                  : `Earned +${bill.pointsEarned} loyalty points!`}
               </div>
             )}
 
             {/* Footer info */}
             <div className="pt-3 text-center text-[10px] text-neutral-600 space-y-1">
               {settings.receiptFooter && <p>{settings.receiptFooter}</p>}
-              <p className="text-[9px] text-neutral-400">KinPOS Engine - Cloud Verified</p>
+              <p className="text-[9px] text-neutral-400">
+                {lang === 'th'
+                  ? 'KinPOS Engine - ยืนยันข้อมูลผ่านระบบคลาวด์'
+                  : 'KinPOS Engine - Cloud Verified'}
+              </p>
             </div>
           </div>
         </div>

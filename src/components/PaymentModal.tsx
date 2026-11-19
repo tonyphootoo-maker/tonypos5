@@ -9,6 +9,7 @@ import {
   ChannelDoc,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import {
   formatMoney,
   roundTo2,
@@ -38,7 +39,7 @@ import { ReceiptModal } from './ReceiptModal';
 interface Props {
   bill: BillDoc;
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
   onClose: () => void;
   onPaymentSuccess: (finalBill: BillDoc) => void;
 }
@@ -103,10 +104,12 @@ const TabIcon: React.FC<{ tabId: PaymentTabId; active: boolean }> = ({ tabId, ac
 export const PaymentModal: React.FC<Props> = ({
   bill,
   settings,
-  lang,
+  lang: propLang,
   onClose,
   onPaymentSuccess,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
 
   // QR Code Image state
@@ -921,7 +924,7 @@ export const PaymentModal: React.FC<Props> = ({
                               )
                             }
                             className="w-20 px-2 py-2 text-xs text-center font-bold bg-white border border-amber-300 rounded-md focus:ring-2 focus:ring-amber-500"
-                            placeholder="Pts"
+                            placeholder={lang === 'th' ? 'แต้ม' : 'Pts'}
                           />
                           <span className="text-xs text-amber-800 font-bold tabular-nums">
                             -฿{formatMoney(pointsDiscountValue)}

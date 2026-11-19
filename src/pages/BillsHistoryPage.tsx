@@ -1,33 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { BillDoc, BillStatus, SettingsDoc, Language } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import { formatMoney, getBusinessWorkDate } from '../engine/calculations';
 import { subscribeBillsWithFilter, voidBillAtomic } from '../data/db';
 import { ReceiptModal } from '../components/ReceiptModal';
 import {
   Receipt,
-  Search,
-  Calendar,
-  Filter,
-  Eye,
   Printer,
   Ban,
-  AlertTriangle,
+  Eye,
   ChevronLeft,
   ChevronRight,
-  CheckCircle2,
-  Clock,
   X,
 } from 'lucide-react';
 
 interface Props {
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
 }
 
 type DatePreset = 'today' | 'yesterday' | 'last7' | 'thisMonth' | 'custom';
 
-export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
+export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
 
   // Filters state
@@ -144,9 +141,9 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
             <span className="text-xs font-bold text-neutral-500 mr-1">{t.bills.filterStatus}:</span>
             {[
               { id: 'all', label: t.common.all },
-              { id: 'saved', label: 'Saved / Unpaid' },
-              { id: 'paid', label: 'Paid' },
-              { id: 'voided', label: 'Voided' },
+              { id: 'saved', label: lang === 'th' ? 'ค้างชำระ / พักบิล' : 'Saved / Unpaid' },
+              { id: 'paid', label: t.bills.statusPaid },
+              { id: 'voided', label: t.bills.statusVoided },
             ].map((st) => (
               <button
                 key={st.id}
@@ -204,9 +201,9 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
             <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600 font-bold uppercase text-[10px]">
               <tr>
                 <th className="p-3">{t.bills.billNo}</th>
-                <th className="p-3">{t.bills.time} / Date</th>
+                <th className="p-3">{t.bills.time} / {t.common.date}</th>
                 <th className="p-3">{t.bills.table}</th>
-                <th className="p-3">Channel</th>
+                <th className="p-3">{lang === 'th' ? 'ช่องทาง' : 'Channel'}</th>
                 <th className="p-3">{t.common.status}</th>
                 <th className="p-3 text-right">{t.common.total}</th>
                 <th className="p-3 text-right">{t.common.actions}</th>
@@ -236,16 +233,19 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
                       className={`hover:bg-neutral-50 ${isVoided ? 'bg-rose-50/40 opacity-75' : ''}`}
                     >
                       <td className="p-3 font-mono font-bold text-neutral-900">
-                        {bill.billNumber || 'Unsaved'}
+                        {bill.billNumber || (lang === 'th' ? 'ยังไม่บันทึก' : 'Unsaved')}
                       </td>
                       <td className="p-3 text-neutral-600 whitespace-nowrap">
                         <div>{bill.workDate}</div>
                         <div className="text-[10px] text-neutral-400">
-                          {new Date(bill.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(bill.createdAt).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
                         </div>
                       </td>
                       <td className="p-3 font-bold text-neutral-800">
-                        {bill.tableName || bill.tableId || 'Takeaway'}
+                        {bill.tableName || bill.tableId || t.pos.takeaway}
                       </td>
                       <td className="p-3 text-neutral-600">{bill.channelName}</td>
                       <td className="p-3">
@@ -258,7 +258,11 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
                               : 'bg-amber-100 text-amber-800'
                           }`}
                         >
-                          {bill.status}
+                          {isPaid
+                            ? t.bills.statusPaid
+                            : isVoided
+                            ? t.bills.statusVoided
+                            : t.bills.statusSaved}
                         </span>
                       </td>
                       <td className="p-3 text-right font-black text-sm text-neutral-900 whitespace-nowrap">
@@ -306,7 +310,9 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
         {/* Paging */}
         <div className="p-3 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between text-xs text-neutral-600">
           <span>
-            Page {page} of {totalPages} ({bills.length} total bills)
+            {lang === 'th'
+              ? `หน้า ${page} จาก ${totalPages} (ทั้งหมด ${bills.length} บิล)`
+              : `Page ${page} of ${totalPages} (${bills.length} total bills)`}
           </span>
           <div className="flex gap-1.5">
             <button
@@ -337,7 +343,7 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
                   {t.bills.billDetails} - {selectedBillForDetails.billNumber}
                 </h3>
                 <p className="text-xs text-orange-100">
-                  {selectedBillForDetails.workDate} • {selectedBillForDetails.tableName || 'Takeaway'}
+                  {selectedBillForDetails.workDate} • {selectedBillForDetails.tableName || t.pos.takeaway}
                 </p>
               </div>
               <button
@@ -353,7 +359,9 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
                 <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-900 text-xs font-bold space-y-1">
                   <div>{t.bills.voidedBanner}</div>
                   <div className="text-[11px] font-medium text-rose-700">
-                    Reason: {selectedBillForDetails.voidReason || 'No reason specified'}
+                    {lang === 'th' ? 'เหตุผล:' : 'Reason:'}{' '}
+                    {selectedBillForDetails.voidReason ||
+                      (lang === 'th' ? 'ไม่ได้ระบุเหตุผล' : 'No reason specified')}
                   </div>
                   <div className="text-[10px] text-neutral-500">
                     {t.bills.voidedExcludedNote}
@@ -363,7 +371,9 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
 
               {/* Items */}
               <div className="space-y-1.5">
-                <span className="text-xs font-bold text-neutral-700">Ordered Items</span>
+                <span className="text-xs font-bold text-neutral-700">
+                  {lang === 'th' ? 'รายการอาหารที่สั่ง' : 'Ordered Items'}
+                </span>
                 {selectedBillForDetails.items.map((item, idx) => (
                   <div
                     key={idx}
@@ -374,7 +384,7 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
                         {item.dishName} ({item.variantName})
                       </div>
                       <div className="text-[10px] text-neutral-500">
-                        Qty: {item.quantity} x ฿{formatMoney(item.unitPrice)}
+                        {lang === 'th' ? 'จำนวน:' : 'Qty:'} {item.quantity} x ฿{formatMoney(item.unitPrice)}
                       </div>
                     </div>
                     <div className="font-black text-neutral-900">
@@ -387,29 +397,29 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
               {/* Totals */}
               <div className="p-3 bg-neutral-100 rounded-xl space-y-1 text-xs">
                 <div className="flex justify-between text-neutral-600">
-                  <span>Subtotal:</span>
+                  <span>{t.pos.subtotal}:</span>
                   <span>฿{formatMoney(selectedBillForDetails.subtotal)}</span>
                 </div>
                 {selectedBillForDetails.discountAmount > 0 && (
                   <div className="flex justify-between text-rose-600">
-                    <span>Discount:</span>
+                    <span>{t.pos.discount}:</span>
                     <span>-฿{formatMoney(selectedBillForDetails.discountAmount)}</span>
                   </div>
                 )}
                 {selectedBillForDetails.serviceChargeAmount > 0 && (
                   <div className="flex justify-between text-neutral-600">
-                    <span>Service Charge:</span>
+                    <span>{t.pos.serviceCharge}:</span>
                     <span>฿{formatMoney(selectedBillForDetails.serviceChargeAmount)}</span>
                   </div>
                 )}
                 {selectedBillForDetails.vatAmount > 0 && (
                   <div className="flex justify-between text-neutral-600">
-                    <span>VAT:</span>
+                    <span>{t.pos.vat}:</span>
                     <span>฿{formatMoney(selectedBillForDetails.vatAmount)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm font-black text-neutral-900 pt-1 border-t border-neutral-300">
-                  <span>Grand Total:</span>
+                  <span>{t.pos.grandTotal}:</span>
                   <span className="text-orange-600">฿{formatMoney(selectedBillForDetails.grandTotal)}</span>
                 </div>
               </div>
@@ -455,7 +465,17 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
 
             <div className="p-4 space-y-3">
               <div className="text-xs text-neutral-600">
-                Are you sure you want to void bill <strong>{billToVoid.billNumber}</strong> (฿{formatMoney(billToVoid.grandTotal)})?
+                {lang === 'th' ? (
+                  <>
+                    คุณแน่ใจหรือไม่ว่าต้องการยกเลิกบิล <strong>{billToVoid.billNumber}</strong> (฿
+                    {formatMoney(billToVoid.grandTotal)})?
+                  </>
+                ) : (
+                  <>
+                    Are you sure you want to void bill <strong>{billToVoid.billNumber}</strong> (฿
+                    {formatMoney(billToVoid.grandTotal)})?
+                  </>
+                )}
               </div>
 
               <div>
@@ -468,7 +488,11 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang }) => {
                   value={voidReason}
                   onChange={(e) => setVoidReason(e.target.value)}
                   className="w-full p-2.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-rose-500"
-                  placeholder="e.g. Customer cancelled order, wrong entry"
+                  placeholder={
+                    lang === 'th'
+                      ? 'เช่น ลูกค้ายกเลิกออเดอร์, คีย์รายการผิด'
+                      : 'e.g. Customer cancelled order, wrong entry'
+                  }
                 />
               </div>
 

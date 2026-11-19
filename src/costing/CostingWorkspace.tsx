@@ -56,6 +56,7 @@ import { ProfitAndLossView } from './components/Financials/ProfitAndLossView';
 import { LaborView } from './components/Financials/LaborView';
 import { ExecutiveDashboard } from './components/Dashboard/ExecutiveDashboard';
 import { AppIconModal } from './components/common/AppIconModal';
+import { useLanguage } from '../contexts/LanguageContext';
 
 export type CostingTabId =
   | 'executive_dashboard'
@@ -80,7 +81,7 @@ interface CostingWorkspaceProps {
   onSelectCostTab: (tab: CostingTabId) => void;
   onNavigateToPos: () => void;
   user: FirebaseUser;
-  lang: 'th' | 'en';
+  lang?: 'th' | 'en';
 }
 
 const DEFAULT_SALES_CHANNELS: SalesChannel[] = [
@@ -95,8 +96,10 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   onSelectCostTab,
   onNavigateToPos,
   user,
-  lang,
+  lang: propLang,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [settings, setSettings] = useState<RestaurantSettings>(() => StorageService.getSettings());
   const [ingredients, setIngredients] = useState<Ingredient[]>(() => StorageService.getIngredients());
   const [sauces, setSauces] = useState<Sauce[]>(() => StorageService.getSauces());
@@ -489,8 +492,10 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
         resultingQuantity: updatedStock,
         unit: item.unit,
         date: purchase.date,
-        reason: `บิลซื้อเลขที่ ${purchase.invoiceNumber || '-'}`,
-        user: user.email || 'Owner',
+        reason: lang === 'th'
+          ? `บิลซื้อเลขที่ ${purchase.invoiceNumber || '-'}`
+          : `Purchase Invoice #${purchase.invoiceNumber || '-'}`,
+        user: user.email || (lang === 'en' ? 'Owner' : 'เจ้าของร้าน'),
         cost: purchase.totalPrice,
       };
       setInventoryTransactions((prev) => [txn, ...prev]);
@@ -600,7 +605,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
       } else {
         setBridgeFeedback({
           type: 'error',
-          text: res.error || 'Sync failed',
+          text: res.error || (lang === 'en' ? 'Sync failed' : 'ซิงค์ไม่สำเร็จ'),
         });
       }
     } catch (err: unknown) {
@@ -736,6 +741,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             ingredients={ingredients}
             sauces={sauces}
             settings={settings}
+            lang={lang}
             initialServingMode="ON_RICE"
             onSaveMenu={handleSaveMenu}
             onDeleteMenu={handleDeleteMenu}
@@ -751,6 +757,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             ingredients={ingredients}
             sauces={sauces}
             settings={settings}
+            lang={lang}
             initialServingMode="A_LA_CARTE"
             onSaveMenu={handleSaveMenu}
             onDeleteMenu={handleDeleteMenu}
@@ -765,6 +772,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             ingredients={ingredients}
             sauces={sauces}
             settings={settings}
+            lang={lang}
             onSaveNewMenu={(newMenu) => {
               handleSaveMenu(newMenu);
             }}
@@ -778,6 +786,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             ingredients={ingredients}
             sauces={sauces}
             settings={settings}
+            lang={lang}
             initialVariantId={targetRecipeVariantId}
             initialTab={activeTab === 'sauces' ? 'SAUCE' : 'FOOD'}
             onSaveVariantRecipe={handleSaveVariantRecipe}
@@ -794,6 +803,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             menuNamesMap={menuNamesMap}
             settings={settings}
             priceHistory={priceHistory}
+            lang={lang}
             onSaveIngredient={handleSaveIngredient}
             onDeleteIngredient={handleDeleteIngredient}
             onReorderIngredients={handleReorderIngredients}
@@ -848,7 +858,17 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
         {activeTab === 'sales_entry' && (
           <SalesEntryView
             sales={dailySales}
-            channels={salesChannels}
+            channels={salesChannels.map((ch) => ({
+              ...ch,
+              name:
+                lang === 'en'
+                  ? ch.code === 'DINE_IN'
+                    ? 'Dine-in'
+                    : ch.code === 'TAKEAWAY'
+                    ? 'Takeaway'
+                    : ch.name
+                  : ch.name,
+            }))}
             onAddSalesRecord={handleAddDailySalesRecord}
             onDeleteSalesRecord={handleDeleteDailySalesRecord}
             onUpdateChannels={setSalesChannels}
@@ -873,7 +893,17 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             purchases={purchases}
             stockCounts={stockCounts}
             salesOrders={salesOrders}
-            channels={salesChannels}
+            channels={salesChannels.map((ch) => ({
+              ...ch,
+              name:
+                lang === 'en'
+                  ? ch.code === 'DINE_IN'
+                    ? 'Dine-in'
+                    : ch.code === 'TAKEAWAY'
+                    ? 'Takeaway'
+                    : ch.name
+                  : ch.name,
+            }))}
             currentSettings={settings}
             activeLanguage={lang}
             onNavigate={(tabId) => {
@@ -950,6 +980,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             transactions={inventoryTransactions}
             wasteLog={wasteLog}
             stockCounts={stockCounts}
+            lang={lang}
             onSaveStockCount={(snapshot, adjustments) => {
               setStockCounts((prev) => [snapshot, ...prev]);
               FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.STOCK_COUNTS, snapshot.id, snapshot);
@@ -1014,6 +1045,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             purchases={purchases}
             priceHistory={priceHistory}
             settings={settings}
+            lang={lang}
             onSavePurchase={handleSavePurchase}
             onUpdateIngredientPrice={(id, price) =>
               setIngredients((prev) => prev.map((i) => (i.id === id ? { ...i, purchasePrice: price } : i)))
@@ -1030,6 +1062,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             expenses={expenses}
             salesOrders={salesOrders}
             settings={settings}
+            lang={lang}
             onIngredientsImported={(newIngredients) => {
               setIngredients(newIngredients);
               FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.INGREDIENTS, newIngredients);
@@ -1042,6 +1075,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
         {activeTab === 'settings' && (
           <SettingsView
             settings={settings}
+            lang={lang}
             onSaveSettings={handleSaveSettings}
             onOpenIconModal={() => setIsIconModalOpen(true)}
           />
@@ -1049,7 +1083,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
       </div>
 
       {/* App Icon Customizer Modal */}
-      <AppIconModal isOpen={isIconModalOpen} onClose={() => setIsIconModalOpen(false)} />
+      <AppIconModal isOpen={isIconModalOpen} onClose={() => setIsIconModalOpen(false)} lang={lang} />
     </div>
   );
 };

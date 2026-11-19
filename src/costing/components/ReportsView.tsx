@@ -18,6 +18,8 @@ import {
 } from '../types';
 import { StorageService } from '../services/storageService';
 import { ConfirmModal } from '../../components/ConfirmModal';
+import { getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface ReportsViewProps {
   ingredients: Ingredient[];
@@ -29,6 +31,7 @@ interface ReportsViewProps {
   onIngredientsImported: (newIngredients: Ingredient[]) => void;
   onEditIngredient: (ing: Ingredient) => void;
   onResetDefaults: () => void;
+  lang?: 'th' | 'en';
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({
@@ -41,7 +44,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   onIngredientsImported,
   onEditIngredient,
   onResetDefaults,
+  lang: propLang,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const [activeTab, setActiveTab] = useState<'EXPORT_IMPORT' | 'REVIEW_REQUIRED'>('EXPORT_IMPORT');
   const [importStatus, setImportStatus] = useState<{
     loading: boolean;
@@ -87,7 +93,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       setImportStatus({
         loading: false,
         success: false,
-        warnings: [err.message || 'เกิดข้อผิดพลาดในการอ่านไฟล์ Excel'],
+        warnings: [err.message || (lang === 'en' ? 'Failed to parse Excel file' : 'เกิดข้อผิดพลาดในการอ่านไฟล์ Excel')],
       });
     }
 
@@ -99,7 +105,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* Header */}
       <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <h1 className="text-2xl font-bold text-white tracking-tight">
-          รายงาน การส่งออก และตรวจทานข้อมูล (Reports & Audit)
+          {lang === 'en'
+            ? 'Reports, Excel Export & Data Audit'
+            : 'รายงาน การส่งออก และตรวจทานข้อมูล (Reports & Audit)'}
         </h1>
 
         <div className="flex items-center gap-2">
@@ -109,7 +117,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer border border-white/10"
           >
             <Printer className="w-4 h-4" />
-            <span>พิมพ์รายงาน</span>
+            <span>{lang === 'en' ? 'Print Report' : 'พิมพ์รายงาน'}</span>
           </button>
           <button
             type="button"
@@ -117,7 +125,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-1.5 cursor-pointer"
           >
             <Download className="w-4 h-4" />
-            <span>ส่งออกสมุดงาน Excel (.xlsx)</span>
+            <span>{lang === 'en' ? 'Export Excel (.xlsx)' : 'ส่งออกสมุดงาน Excel (.xlsx)'}</span>
           </button>
         </div>
       </div>
@@ -134,7 +142,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           }`}
         >
           <FileSpreadsheet className="w-4 h-4" />
-          <span>ส่งออกและนำเข้า Excel</span>
+          <span>{lang === 'en' ? 'Excel Import / Export' : 'ส่งออกและนำเข้า Excel'}</span>
         </button>
 
         <button
@@ -147,7 +155,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           }`}
         >
           <AlertTriangle className="w-4 h-4 text-red-400" />
-          <span>ข้อมูลที่ต้องตรวจทาน (DATA_REVIEW_REQUIRED) ({reviewRequiredList.length})</span>
+          <span>
+            {lang === 'en'
+              ? `Data Review Required (${reviewRequiredList.length})`
+              : `ข้อมูลที่ต้องตรวจทาน (DATA_REVIEW_REQUIRED) (${reviewRequiredList.length})`}
+          </span>
         </button>
       </div>
 
@@ -162,13 +174,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   <Download className="w-5 h-5" />
                 </div>
                 <h3 className="font-bold text-white text-base">
-                  ส่งออกข้อมูลทั้งหมดเป็น Excel
+                  {lang === 'en' ? 'Export All Costing Data to Excel' : 'ส่งออกข้อมูลทั้งหมดเป็น Excel'}
                 </h3>
               </div>
 
               <p className="text-xs text-white/70 leading-relaxed">
-                สร้างไฟล์ Excel (.xlsx) ที่ตรงตามโครงสร้างสมุดงานบัญชีของ Tony's Kitchen
-                พร้อมสูตรต้นทุน Yield และกำไรต่อจาน เพื่อเปิดใน Microsoft Excel หรือ Google Sheets
+                {lang === 'en'
+                  ? 'Generate a structured Excel (.xlsx) workbook with ingredient yield, dish costs, and margins for Excel or Google Sheets.'
+                  : 'สร้างไฟล์ Excel (.xlsx) ที่ตรงตามโครงสร้างสมุดงานบัญชีของ Tony\'s Kitchen พร้อมสูตรต้นทุน Yield และกำไรต่อจาน เพื่อเปิดใน Microsoft Excel หรือ Google Sheets'}
               </p>
 
               <button
@@ -177,7 +190,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Download className="w-4 h-4" />
-                <span>ดาวน์โหลด TonysKitchen_FoodCost.xlsx</span>
+                <span>{lang === 'en' ? 'Download TonysKitchen_FoodCost.xlsx' : 'ดาวน์โหลด TonysKitchen_FoodCost.xlsx'}</span>
               </button>
             </div>
 
@@ -188,13 +201,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   <Upload className="w-5 h-5" />
                 </div>
                 <h3 className="font-bold text-white text-base">
-                  นำเข้าไฟล์ Excel ของร้าน (Excel Importer)
+                  {lang === 'en' ? 'Excel Workbook Importer' : 'นำเข้าไฟล์ Excel ของร้าน (Excel Importer)'}
                 </h3>
               </div>
 
               <p className="text-xs text-white/70 leading-relaxed">
-                อัปโหลดไฟล์สมุดงานเดิม ระบบจะอ่านข้อมูลวัตถุดิบ ราคาซื้อ และคำนวณ Yield ให้อัตโนมัติ
-                หากมีแถวข้อมูลขาดหาย ระบบจะขึ้นสถานะ DATA_REVIEW_REQUIRED ให้ตรวจสอบ
+                {lang === 'en'
+                  ? 'Upload an existing workbook to auto-import ingredients, purchase prices, and yield %. Incomplete rows are flagged for review.'
+                  : 'อัปโหลดไฟล์สมุดงานเดิม ระบบจะอ่านข้อมูลวัตถุดิบ ราคาซื้อ และคำนวณ Yield ให้อัตโนมัติ หากมีแถวข้อมูลขาดหาย ระบบจะขึ้นสถานะ DATA_REVIEW_REQUIRED ให้ตรวจสอบ'}
               </p>
 
               <input
@@ -211,7 +225,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 className="w-full py-3 bg-white/10 hover:bg-white/20 border border-white/15 text-white rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Upload className="w-4 h-4" />
-                <span>เลือกไฟล์ Excel เพื่อนำเข้า (.xlsx)</span>
+                <span>{lang === 'en' ? 'Select Excel File to Import (.xlsx)' : 'เลือกไฟล์ Excel เพื่อนำเข้า (.xlsx)'}</span>
               </button>
             </div>
           </div>
@@ -233,8 +247,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 )}
                 <span>
                   {importStatus.success
-                    ? `นำเข้าวัตถุดิบสำเร็จจำนวน ${importStatus.count} รายการ!`
-                    : 'การนำเข้าไม่สมบูรณ์ กรุณาตรวจสอบไฟล์'}
+                    ? lang === 'en'
+                      ? `Imported ${importStatus.count} ingredients successfully!`
+                      : `นำเข้าวัตถุดิบสำเร็จจำนวน ${importStatus.count} รายการ!`
+                    : lang === 'en'
+                      ? 'Import incomplete. Please check the file.'
+                      : 'การนำเข้าไม่สมบูรณ์ กรุณาตรวจสอบไฟล์'}
                 </span>
               </div>
 
@@ -252,10 +270,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           <div className="p-5 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
             <div>
               <span className="font-bold text-white block">
-                รีเซ็ตข้อมูลทั้งหมดกลับสู่ค่าเริ่มต้นของ Tony's Kitchen
+                {lang === 'en'
+                  ? "Reset all costing data back to Tony's Kitchen defaults"
+                  : "รีเซ็ตข้อมูลทั้งหมดกลับสู่ค่าเริ่มต้นของ Tony's Kitchen"}
               </span>
               <span className="text-white/50 text-[11px]">
-                ล้างข้อมูลในบราวเซอร์และโหลดวัตถุดิบ ซอส และเมนูกะเพราต้นฉบับกลับมา
+                {lang === 'en'
+                  ? 'Clear browser cache and restore starter ingredients, sauces, and sample menus.'
+                  : 'ล้างข้อมูลในบราวเซอร์และโหลดวัตถุดิบ ซอส และเมนูกะเพราต้นฉบับกลับมา'}
               </span>
             </div>
             <button
@@ -263,7 +285,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               onClick={() => setIsResetConfirmOpen(true)}
               className="px-3.5 py-2 bg-white/10 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 text-white/80 border border-white/10 rounded-xl font-bold transition-colors cursor-pointer self-start sm:self-auto"
             >
-              รีเซ็ตค่าเริ่มต้น (Factory Reset)
+              {lang === 'en' ? 'Factory Reset' : 'รีเซ็ตค่าเริ่มต้น (Factory Reset)'}
             </button>
           </div>
         </div>
@@ -275,11 +297,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3 text-xs text-white">
             <Info className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold">หลักการบัญชีของ Tony's Kitchen:</span>
+              <span className="font-bold">
+                {lang === 'en' ? 'Cost Accounting Principle:' : "หลักการบัญชีของ Tony's Kitchen:"}
+              </span>
               <p className="mt-0.5 text-[11px] text-white/70 leading-relaxed">
-                "ห้ามให้อาหารที่ดูเหมือนทำกำไร เกิดขึ้นเพียงเพราะข้อมูลต้นทุนที่หายไปถูกคำนวณเป็นศูนย์"
-                รายการด้านล่างคือวัตถุดิบที่มีราคาเป็น 0, Yield เป็น 0, หรือนำเข้าข้อมูลไม่สมบูรณ์
-                กรุณาตรวจสอบและแก้ไขเพื่อความแม่นยำทางบัญชี
+                {lang === 'en'
+                  ? '"Never let a dish appear profitable just because missing ingredient costs default to zero." Review items with zero price, zero yield, or incomplete import below.'
+                  : '"ห้ามให้อาหารที่ดูเหมือนทำกำไร เกิดขึ้นเพียงเพราะข้อมูลต้นทุนที่หายไปถูกคำนวณเป็นศูนย์" รายการด้านล่างคือวัตถุดิบที่มีราคาเป็น 0, Yield เป็น 0, หรือนำเข้าข้อมูลไม่สมบูรณ์ กรุณาตรวจสอบและแก้ไขเพื่อความแม่นยำทางบัญชี'}
               </p>
             </div>
           </div>
@@ -289,10 +313,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <div className="text-center py-12 text-white/40 text-xs">
                 <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-400" />
                 <span className="font-bold text-white text-sm block">
-                  ยอดเยี่ยม! ข้อมูลวัตถุดิบทุกรายการสมบูรณ์ 100%
+                  {lang === 'en'
+                    ? 'Great! All ingredient records are 100% complete.'
+                    : 'ยอดเยี่ยม! ข้อมูลวัตถุดิบทุกรายการสมบูรณ์ 100%'}
                 </span>
                 <span className="text-white/40 mt-1 block">
-                  ไม่มีรายการใดค้างอยู่ในสถานะรอตรวจทาน
+                  {lang === 'en'
+                    ? 'No items pending data review.'
+                    : 'ไม่มีรายการใดค้างอยู่ในสถานะรอตรวจทาน'}
                 </span>
               </div>
             ) : (
@@ -300,12 +328,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-white/5 border-b border-white/10 text-white/50 font-bold uppercase tracking-wider text-[10px]">
-                      <th className="py-3 px-4">วัตถุดิบ</th>
-                      <th className="py-3 px-3">หมวดหมู่</th>
-                      <th className="py-3 px-3">ราคาซื้อ</th>
+                      <th className="py-3 px-4">{lang === 'en' ? 'Ingredient' : 'วัตถุดิบ'}</th>
+                      <th className="py-3 px-3">{lang === 'en' ? 'Category' : 'หมวดหมู่'}</th>
+                      <th className="py-3 px-3">{lang === 'en' ? 'Purchase Price' : 'ราคาซื้อ'}</th>
                       <th className="py-3 px-3">Yield</th>
-                      <th className="py-3 px-3">สาเหตุที่ต้องตรวจทาน</th>
-                      <th className="py-3 px-4 text-right">แก้ไข</th>
+                      <th className="py-3 px-3">{lang === 'en' ? 'Review Reason' : 'สาเหตุที่ต้องตรวจทาน'}</th>
+                      <th className="py-3 px-4 text-right">{lang === 'en' ? 'Edit' : 'แก้ไข'}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
@@ -314,17 +342,23 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                         <td
                           className="py-3.5 px-4 font-bold text-white cursor-pointer select-none hover:text-[#F27D26] hover:underline transition-colors"
                           onDoubleClick={() => onEditIngredient(ing)}
-                          title="ดับเบิลคลิกเพื่อแก้ไขข้อมูลวัตถุดิบ"
+                          title={lang === 'en' ? 'Double-click to edit ingredient' : 'ดับเบิลคลิกเพื่อแก้ไขข้อมูลวัตถุดิบ'}
                         >
-                          {ing.name}
+                          {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
                         </td>
-                        <td className="py-3.5 px-3 text-white/60">{ing.category}</td>
+                        <td className="py-3.5 px-3 text-white/60">
+                          {getLocalizedText(lang, ing.category)}
+                        </td>
                         <td className="py-3.5 px-3 font-mono font-bold text-red-400">
-                          ฿{ing.purchasePrice} / {ing.purchaseQuantity} {ing.purchaseUnit}
+                          ฿{ing.purchasePrice} / {ing.purchaseQuantity} {localizeUnit(ing.purchaseUnit, lang)}
                         </td>
                         <td className="py-3.5 px-3 font-mono text-white/80">{ing.yieldPercent}%</td>
                         <td className="py-3.5 px-3 text-red-400 font-medium">
-                          {ing.reviewReason || 'ข้อมูลไม่สมบูรณ์'}
+                          {ing.reviewReason
+                            ? getLocalizedText(lang, ing.reviewReason)
+                            : lang === 'en'
+                              ? 'Incomplete data'
+                              : 'ข้อมูลไม่สมบูรณ์'}
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <button
@@ -332,7 +366,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                             onClick={() => onEditIngredient(ing)}
                             className="px-3 py-1.5 bg-[#F27D26] hover:bg-[#d96817] text-black rounded-xl font-bold text-xs cursor-pointer shadow-sm"
                           >
-                            แก้ไขทันที
+                            {lang === 'en' ? 'Fix Now' : 'แก้ไขทันที'}
                           </button>
                         </td>
                       </tr>
@@ -346,10 +380,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       )}
       <ConfirmModal
         isOpen={isResetConfirmOpen}
-        title="รีเซ็ตค่าเริ่มต้น (Factory Reset)"
-        message="คุณแน่ใจหรือไม่ที่จะรีเซ็ตข้อมูลทั้งหมดกลับสู่ค่าเริ่มต้น?"
-        confirmLabel="ยืนยันรีเซ็ต"
-        cancelLabel="ยกเลิก"
+        lang={lang}
+        title={lang === 'en' ? 'Factory Reset' : 'รีเซ็ตค่าเริ่มต้น (Factory Reset)'}
+        message={
+          lang === 'en'
+            ? 'Are you sure you want to reset all costing data back to factory defaults?'
+            : 'คุณแน่ใจหรือไม่ที่จะรีเซ็ตข้อมูลทั้งหมดกลับสู่ค่าเริ่มต้น?'
+        }
+        confirmLabel={lang === 'en' ? 'Confirm Reset' : 'ยืนยันรีเซ็ต'}
+        cancelLabel={lang === 'en' ? 'Cancel' : 'ยกเลิก'}
         variant="danger"
         onCancel={() => setIsResetConfirmOpen(false)}
         onConfirm={() => {

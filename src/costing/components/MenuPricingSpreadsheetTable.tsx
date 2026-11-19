@@ -18,6 +18,8 @@ import { convertUnit } from '../engine/units';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
 import { Plus, SlidersHorizontal, Store, Bike, Smartphone, Flame, LayoutGrid, UtensilsCrossed, Edit2, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { NumericInput } from './common/NumericInput';
+import { getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export type PricingChannelTab = 'DINE_IN' | 'GRAB' | 'LINEMAN' | 'ROBINHOOD' | 'ALL';
 export type ServingDishMode = 'ON_RICE' | 'A_LA_CARTE';
@@ -27,6 +29,7 @@ interface MenuPricingSpreadsheetTableProps {
   ingredientsMap: Map<string, Ingredient>;
   saucesMap: Map<string, Sauce>;
   settings: RestaurantSettings;
+  lang?: 'th' | 'en';
   onSaveMenu: (menu: MenuItem) => void;
   onSelectBreakdown?: (data: {
     menu: MenuItem;
@@ -47,6 +50,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
   ingredientsMap,
   saucesMap,
   settings,
+  lang: propLang,
   onSaveMenu,
   onSelectBreakdown,
   onOpenAddVariant,
@@ -57,6 +61,8 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
   activeServingMode: parentServingMode,
   onServingModeChange,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   // Channel view: DINE_IN (กินที่ร้าน), GRAB, LINEMAN, ROBINHOOD, ALL (แสดงทั้งหมด)
   const [localChannel, setLocalChannel] = useState<PricingChannelTab>('DINE_IN');
   const currentChannel = parentChannel || localChannel;
@@ -333,24 +339,23 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
       {/* Top Header Row with Menu Title, Serving Mode & Channel Switcher Buttons */}
       <div className="bg-white border-b border-stone-300 px-4 py-2.5 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Serving Mode Badge - Ultra High Contrast */}
           <span
             className="px-3 py-1 !text-white font-black text-xs sm:text-sm rounded-lg shadow-xs tracking-wider flex items-center gap-1 border bg-rose-600 border-rose-700"
           >
-            🍚 จานเดียว / ราดข้าว
+            {lang === 'th' ? '🍚 จานเดียว / ราดข้าว' : '🍚 Single Plate / On Rice'}
           </span>
           <h2 className="text-xl sm:text-2xl font-black text-stone-950 tracking-tight">
-            {menu.name}
+            {getLocalizedText(lang, menu.thaiName || menu.name, menu.englishName)}
           </h2>
           <span className="text-xs px-2 py-0.5 bg-stone-100 border border-stone-300 text-stone-700 rounded-md font-bold">
-            {menu.variants.length} ตัวเลือก
+            {lang === 'th' ? `${menu.variants.length} ตัวเลือก` : `${menu.variants.length} options`}
           </span>
         </div>
 
-        {/* Channel Selector Buttons: กินที่ร้าน / Grab Food / Line Man / Robinhood / แสดงทั้งหมด */}
+        {/* Channel Selector Buttons */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <div className="flex items-center bg-stone-200 p-1 rounded-xl border border-stone-300 shadow-2xs">
-            {/* กินที่ร้าน */}
+            {/* Dine-in */}
             <button
               type="button"
               onClick={() => handleSelectChannel('DINE_IN')}
@@ -361,7 +366,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               }`}
             >
               <Store className="w-3.5 h-3.5" />
-              <span>กินที่ร้าน</span>
+              <span>{lang === 'th' ? 'กินที่ร้าน' : 'Dine-in'}</span>
             </button>
 
             {/* Grab Food */}
@@ -406,7 +411,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               <span>Robinhood</span>
             </button>
 
-            {/* แสดงทั้งหมด (All Channels) */}
+            {/* All Channels */}
             <button
               type="button"
               onClick={() => handleSelectChannel('ALL')}
@@ -415,10 +420,10 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   ? 'bg-stone-900 !text-white shadow-xs'
                   : 'text-stone-800 hover:text-stone-950 font-bold hover:bg-stone-300'
               }`}
-              title="เปรียบเทียบทุกช่องทางพร้อมกัน"
+              title={lang === 'th' ? 'เปรียบเทียบทุกช่องทางพร้อมกัน' : 'Compare all channels side-by-side'}
             >
               <LayoutGrid className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">แสดงทั้งหมด</span>
+              <span className="hidden sm:inline">{lang === 'th' ? 'แสดงทั้งหมด' : 'Show All'}</span>
             </button>
           </div>
 
@@ -429,7 +434,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               className="px-3 py-1.5 bg-[#F27D26] hover:bg-[#d96817] !text-white font-black text-xs rounded-xl shadow-xs flex items-center gap-1 cursor-pointer transition-colors border border-[#c2580e]"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ เพิ่มตัวเลือก</span>
+              <span>{lang === 'th' ? '+ เพิ่มตัวเลือก' : '+ Add Option'}</span>
             </button>
           )}
         </div>
@@ -443,33 +448,57 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
             <tr className="text-xs font-black select-none border-b border-black">
               {currentChannel === 'DINE_IN' && (
                 <>
-                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">ข้อมูลเมนู</th>
-                  <th colSpan={8} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">ต้นทุนวัตถุดิบ & การตั้งราคาหน้าร้าน</th>
-                  <th colSpan={2} className="bg-cyan-700 !text-white font-black py-1.5 tracking-wide">กำไรหน้าร้าน</th>
+                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">
+                    {lang === 'th' ? 'ข้อมูลเมนู' : 'Menu Info'}
+                  </th>
+                  <th colSpan={8} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">
+                    {lang === 'th' ? 'ต้นทุนวัตถุดิบ & การตั้งราคาหน้าร้าน' : 'Ingredient Cost & Dine-In Pricing'}
+                  </th>
+                  <th colSpan={2} className="bg-cyan-700 !text-white font-black py-1.5 tracking-wide">
+                    {lang === 'th' ? 'กำไรหน้าร้าน' : 'Storefront Profit'}
+                  </th>
                 </>
               )}
 
               {currentChannel === 'GRAB' && (
                 <>
-                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">ข้อมูลเมนู</th>
-                  <th colSpan={4} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">ต้นทุนอ้างอิง</th>
-                  <th colSpan={6} className="bg-[#00873e] !text-white font-black py-1.5 tracking-wide">Grab Food (GP {grabGpPctDisplay}% รวม VAT)</th>
+                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">
+                    {lang === 'th' ? 'ข้อมูลเมนู' : 'Menu Info'}
+                  </th>
+                  <th colSpan={4} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">
+                    {lang === 'th' ? 'ต้นทุนอ้างอิง' : 'Cost Reference'}
+                  </th>
+                  <th colSpan={6} className="bg-[#00873e] !text-white font-black py-1.5 tracking-wide">
+                    {lang === 'th' ? `Grab Food (GP ${grabGpPctDisplay}% รวม VAT)` : `Grab Food (GP ${grabGpPctDisplay}% incl. VAT)`}
+                  </th>
                 </>
               )}
 
               {currentChannel === 'LINEMAN' && (
                 <>
-                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">ข้อมูลเมนู</th>
-                  <th colSpan={4} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">ต้นทุนอ้างอิง</th>
-                  <th colSpan={6} className="bg-[#FFB300] text-stone-950 font-black py-1.5 tracking-wide">Line Man (GP {linemanGpPctDisplay}% รวม VAT)</th>
+                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">
+                    {lang === 'th' ? 'ข้อมูลเมนู' : 'Menu Info'}
+                  </th>
+                  <th colSpan={4} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">
+                    {lang === 'th' ? 'ต้นทุนอ้างอิง' : 'Cost Reference'}
+                  </th>
+                  <th colSpan={6} className="bg-[#FFB300] text-stone-950 font-black py-1.5 tracking-wide">
+                    {lang === 'th' ? `Line Man (GP ${linemanGpPctDisplay}% รวม VAT)` : `Line Man (GP ${linemanGpPctDisplay}% incl. VAT)`}
+                  </th>
                 </>
               )}
 
               {currentChannel === 'ROBINHOOD' && (
                 <>
-                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">ข้อมูลเมนู</th>
-                  <th colSpan={4} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">ต้นทุนอ้างอิง</th>
-                  <th colSpan={6} className="bg-[#6d28d9] !text-white font-black py-1.5 tracking-wide">Robinhood (0% GP)</th>
+                  <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">
+                    {lang === 'th' ? 'ข้อมูลเมนู' : 'Menu Info'}
+                  </th>
+                  <th colSpan={4} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">
+                    {lang === 'th' ? 'ต้นทุนอ้างอิง' : 'Cost Reference'}
+                  </th>
+                  <th colSpan={6} className="bg-[#6d28d9] !text-white font-black py-1.5 tracking-wide">
+                    Robinhood (0% GP)
+                  </th>
                 </>
               )}
 
@@ -477,7 +506,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 <>
                   <th colSpan={10} className="bg-[#FAF8F5] border-r border-black py-1"></th>
                   <th colSpan={12} className="bg-[#FFFF00] text-stone-950 text-sm font-black py-1.5 border-b border-black tracking-wide">
-                    กำไรแต่ละรายการ
+                    {lang === 'th' ? 'กำไรแต่ละรายการ' : 'Profit Per Item'}
                   </th>
                 </>
               )}
@@ -487,7 +516,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
             {currentChannel === 'ALL' && (
               <tr className="text-xs font-bold select-none border-b border-black">
                 <th colSpan={10} className="bg-[#FAF8F5] border-r border-black"></th>
-                <th colSpan={2} className="bg-cyan-700 !text-white font-black py-1 border-r border-black">ที่ร้าน</th>
+                <th colSpan={2} className="bg-cyan-700 !text-white font-black py-1 border-r border-black">
+                  {lang === 'th' ? 'ที่ร้าน' : 'In-Store'}
+                </th>
                 <th colSpan={5} className="bg-[#00873e] !text-white font-black py-1 border-r border-black">Grab Food</th>
                 <th colSpan={5} className="bg-[#FFB300] text-stone-950 font-black py-1">Line Man</th>
               </tr>
@@ -496,48 +527,56 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
             {/* Header Tier 3: Detailed Column Headers per Active Channel */}
             <tr className="text-[11px] font-bold text-stone-900 border-b-2 border-black whitespace-nowrap">
               {/* Common Columns */}
-              <th className="py-2.5 px-2 bg-[#E53935] text-white border-r border-black min-w-[70px]">ลำดับ</th>
-              <th className="py-2.5 px-3 bg-[#90CAF9] text-stone-900 border-r border-black text-left min-w-[120px]">รายการ</th>
+              <th className="py-2.5 px-2 bg-[#E53935] text-white border-r border-black min-w-[70px]">
+                {lang === 'th' ? 'ลำดับ' : 'Order'}
+              </th>
+              <th className="py-2.5 px-3 bg-[#90CAF9] text-stone-900 border-r border-black text-left min-w-[120px]">
+                {lang === 'th' ? 'รายการ' : 'Item'}
+              </th>
 
               {/* DINE_IN COLUMNS */}
               {currentChannel === 'DINE_IN' && (
                 <>
                   <th className="py-2.5 px-2 bg-[#FFD54F] text-stone-900 border-r border-black min-w-[85px]">
-                    <div>ราคาตั้งขาย</div>
-                    <div className="text-[10px] text-stone-700">ที่ร้าน (บาท) ✏️</div>
+                    <div>{lang === 'th' ? 'ราคาตั้งขาย' : 'Selling Price'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? 'ที่ร้าน (บาท) ✏️' : 'Dine-in (฿) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
-                    <div>น้ำหนักเนื้อที่ใช้</div>
-                    <div className="text-[10px] text-stone-700">(กรัม / ตัว) ✏️</div>
+                    <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(กรัม / ตัว) ✏️' : '(g / pc) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[80px]">
-                    <div>ราคาต้นทุน</div>
-                    <div className="text-[10px] text-stone-600"><span className="text-rose-600 font-bold">เนื้อ</span>/จาน</div>
+                    <div>{lang === 'th' ? 'ราคาต้นทุน' : 'Protein Cost'}</div>
+                    <div className="text-[10px] text-stone-600">
+                      {lang === 'th' ? <><span className="text-rose-600 font-bold">เนื้อ</span>/จาน</> : <><span className="text-rose-600 font-bold">Meat</span>/plate</>}
+                    </div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ต้นทุนวัตถุดิบ</div>
-                    <div className="text-[10px] text-stone-600">กลาง (บาท)</div>
+                    <div>{lang === 'th' ? 'ต้นทุนวัตถุดิบ' : 'Base Recipe'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'กลาง (บาท)' : 'Cost (฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ต้นทุนวัตถุดิบ</div>
-                    <div className="text-[10px] text-stone-600">ทั้งหมด (บาท)</div>
+                    <div>{lang === 'th' ? 'ต้นทุนวัตถุดิบ' : 'Total Raw'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'ทั้งหมด (บาท)' : 'Material (฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[70px]">
-                    <div>ต้นทุนแฝง</div>
-                    <div className="text-[10px] text-stone-600">(บาท)</div>
+                    <div>{lang === 'th' ? 'ต้นทุนแฝง' : 'Hidden Cost'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[70px]">
-                    <div>ต้นทุนรวม</div>
-                    <div className="text-[10px] text-stone-700">(บาท)</div>
+                    <div>{lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
-                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">% ต้นทุน</th>
+                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">
+                    {lang === 'th' ? '% ต้นทุน' : '% Cost'}
+                  </th>
                   <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[75px]">
-                    <div>กำไร</div>
-                    <div className="text-[10px] text-stone-700">กินที่ร้าน (บาท)</div>
+                    <div>{lang === 'th' ? 'กำไร' : 'Profit'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? 'กินที่ร้าน (บาท)' : 'Dine-in (฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 min-w-[75px]">
-                    <div>กำไร</div>
-                    <div className="text-[10px] text-stone-700">ใส่กล่อง (บาท)</div>
+                    <div>{lang === 'th' ? 'กำไร' : 'Profit'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? 'ใส่กล่อง (บาท)' : 'Takeaway (฿)'}</div>
                   </th>
                 </>
               )}
@@ -546,37 +585,39 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               {currentChannel === 'GRAB' && (
                 <>
                   <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[75px]">
-                    <div>ราคาหน้าร้าน</div>
-                    <div className="text-[10px] text-stone-500">(อ้างอิง)</div>
+                    <div>{lang === 'th' ? 'ราคาหน้าร้าน' : 'Store Price'}</div>
+                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(อ้างอิง)' : '(Ref)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
-                    <div>น้ำหนักเนื้อที่ใช้</div>
-                    <div className="text-[10px] text-stone-700">(กรัม / ตัว) ✏️</div>
+                    <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(กรัม / ตัว) ✏️' : '(g / pc) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ต้นทุนรวม</div>
-                    <div className="text-[10px] text-stone-700">(บาท)</div>
+                    <div>{lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
-                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">% ต้นทุน</th>
+                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">
+                    {lang === 'th' ? '% ต้นทุน' : '% Cost'}
+                  </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[85px]">
-                    <div>ราคาที่ต้องตั้ง</div>
-                    <div className="text-[10px] text-stone-600">ขาย (1.5x)</div>
+                    <div>{lang === 'th' ? 'ราคาที่ต้องตั้ง' : 'Suggested'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'ขาย (1.5x)' : 'Price (1.5x)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[85px]">
-                    <div>ราคา</div>
-                    <div className="text-[10px] text-stone-700">ตั้งเอง (บาท) ✏️</div>
+                    <div>{lang === 'th' ? 'ราคา' : 'Custom'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? 'ตั้งเอง (บาท) ✏️' : 'Price (฿) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ถูกหัก GP ไป</div>
+                    <div>{lang === 'th' ? 'ถูกหัก GP ไป' : 'GP Fee'}</div>
                     <div className="text-[10px] text-stone-600">({grabGpPctDisplay}%)</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>หลังหัก</div>
-                    <div className="text-[10px] text-stone-600">เหลือ (บาท)</div>
+                    <div>{lang === 'th' ? 'หลังหัก' : 'Net Payout'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'เหลือ (บาท)' : '(฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[75px]">
-                    <div>กำไรที่ได้</div>
-                    <div className="text-[10px] text-stone-700">(บาท)</div>
+                    <div>{lang === 'th' ? 'กำไรที่ได้' : 'Net Profit'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 min-w-[65px]">% Margin</th>
                 </>
@@ -586,37 +627,39 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               {currentChannel === 'LINEMAN' && (
                 <>
                   <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[75px]">
-                    <div>ราคาหน้าร้าน</div>
-                    <div className="text-[10px] text-stone-500">(อ้างอิง)</div>
+                    <div>{lang === 'th' ? 'ราคาหน้าร้าน' : 'Store Price'}</div>
+                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(อ้างอิง)' : '(Ref)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
-                    <div>น้ำหนักเนื้อที่ใช้</div>
-                    <div className="text-[10px] text-stone-700">(กรัม / ตัว) ✏️</div>
+                    <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(กรัม / ตัว) ✏️' : '(g / pc) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ต้นทุนรวม</div>
-                    <div className="text-[10px] text-stone-700">(บาท)</div>
+                    <div>{lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
-                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">% ต้นทุน</th>
+                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">
+                    {lang === 'th' ? '% ต้นทุน' : '% Cost'}
+                  </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[85px]">
-                    <div>ราคาที่ต้องตั้ง</div>
-                    <div className="text-[10px] text-stone-600">ขาย (1.5x)</div>
+                    <div>{lang === 'th' ? 'ราคาที่ต้องตั้ง' : 'Suggested'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'ขาย (1.5x)' : 'Price (1.5x)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[85px]">
-                    <div>ราคา</div>
-                    <div className="text-[10px] text-stone-700">ตั้งเอง (บาท) ✏️</div>
+                    <div>{lang === 'th' ? 'ราคา' : 'Custom'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? 'ตั้งเอง (บาท) ✏️' : 'Price (฿) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ถูกหัก GP</div>
+                    <div>{lang === 'th' ? 'ถูกหัก GP' : 'GP Fee'}</div>
                     <div className="text-[10px] text-stone-600">({linemanGpPctDisplay}%)</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>หลังหัก</div>
-                    <div className="text-[10px] text-stone-600">เหลือ (บาท)</div>
+                    <div>{lang === 'th' ? 'หลังหัก' : 'Net Payout'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'เหลือ (บาท)' : '(฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[75px]">
-                    <div>กำไรที่ได้</div>
-                    <div className="text-[10px] text-stone-700">(บาท)</div>
+                    <div>{lang === 'th' ? 'กำไรที่ได้' : 'Net Profit'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 min-w-[65px]">% Margin</th>
                 </>
@@ -626,37 +669,39 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               {currentChannel === 'ROBINHOOD' && (
                 <>
                   <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[75px]">
-                    <div>ราคาหน้าร้าน</div>
-                    <div className="text-[10px] text-stone-500">(อ้างอิง)</div>
+                    <div>{lang === 'th' ? 'ราคาหน้าร้าน' : 'Store Price'}</div>
+                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(อ้างอิง)' : '(Ref)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
-                    <div>น้ำหนักเนื้อที่ใช้</div>
-                    <div className="text-[10px] text-stone-700">(กรัม / ตัว) ✏️</div>
+                    <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(กรัม / ตัว) ✏️' : '(g / pc) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ต้นทุนรวม</div>
-                    <div className="text-[10px] text-stone-700">(บาท)</div>
+                    <div>{lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
-                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">% ต้นทุน</th>
+                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[65px]">
+                    {lang === 'th' ? '% ต้นทุน' : '% Cost'}
+                  </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[85px]">
-                    <div>ราคาที่ต้องตั้ง</div>
-                    <div className="text-[10px] text-stone-600">ขาย (แนะนำ)</div>
+                    <div>{lang === 'th' ? 'ราคาที่ต้องตั้ง' : 'Suggested'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'ขาย (แนะนำ)' : 'Price'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#EDE9FE] text-purple-900 border-r border-black min-w-[85px]">
-                    <div>ราคา</div>
-                    <div className="text-[10px] text-purple-700">ตั้งเอง (บาท) ✏️</div>
+                    <div>{lang === 'th' ? 'ราคา' : 'Custom'}</div>
+                    <div className="text-[10px] text-purple-700">{lang === 'th' ? 'ตั้งเอง (บาท) ✏️' : 'Price (฿) ✏️'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>ถูกหัก GP</div>
+                    <div>{lang === 'th' ? 'ถูกหัก GP' : 'GP Fee'}</div>
                     <div className="text-[10px] text-stone-600">(0% GP)</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">
-                    <div>หลังหัก</div>
-                    <div className="text-[10px] text-stone-600">เหลือ (บาท)</div>
+                    <div>{lang === 'th' ? 'หลังหัก' : 'Net Payout'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'เหลือ (บาท)' : '(฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[75px]">
-                    <div>กำไรที่ได้</div>
-                    <div className="text-[10px] text-stone-700">(บาท)</div>
+                    <div>{lang === 'th' ? 'กำไรที่ได้' : 'Net Profit'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(บาท)' : '(฿)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 min-w-[65px]">% Margin</th>
                 </>
@@ -665,26 +710,26 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               {/* ALL CHANNELS (Full 22 Columns) */}
               {currentChannel === 'ALL' && (
                 <>
-                  <th className="py-2.5 px-2 bg-[#FFD54F] text-stone-900 border-r border-black min-w-[80px]">ราคาตั้งขาย</th>
-                  <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[80px]">น้ำหนักเนื้อ (g)</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[70px]">ต้นทุนเนื้อ</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[70px]">วัตถุดิบกลาง</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[70px]">วัตถุดิบรวม</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">ต้นทุนแฝง</th>
-                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[70px]">ต้นทุนรวม</th>
-                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[60px]">% ต้นทุน</th>
-                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[70px]">กำไรที่ร้าน</th>
-                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r-2 border-black min-w-[70px]">กำไรใส่กล่อง</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">Grab แนะนำ</th>
-                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[75px]">Grab ตั้งเอง</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">หัก GP</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">หลังหัก</th>
-                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r-2 border-black min-w-[65px]">กำไร Grab</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">Line Man แนะนำ</th>
-                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[75px]">LM ตั้งเอง</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">หัก GP</th>
-                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">หลังหัก</th>
-                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 min-w-[65px]">กำไร LM</th>
+                  <th className="py-2.5 px-2 bg-[#FFD54F] text-stone-900 border-r border-black min-w-[80px]">{lang === 'th' ? 'ราคาตั้งขาย' : 'Price'}</th>
+                  <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[80px]">{lang === 'th' ? 'น้ำหนักเนื้อ (g)' : 'Protein (g)'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[70px]">{lang === 'th' ? 'ต้นทุนเนื้อ' : 'Meat Cost'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[70px]">{lang === 'th' ? 'วัตถุดิบกลาง' : 'Base Cost'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[70px]">{lang === 'th' ? 'วัตถุดิบรวม' : 'Raw Total'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">{lang === 'th' ? 'ต้นทุนแฝง' : 'Overhead'}</th>
+                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[70px]">{lang === 'th' ? 'ต้นทุนรวม' : 'Total Cost'}</th>
+                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r-2 border-black min-w-[60px]">{lang === 'th' ? '% ต้นทุน' : '% Cost'}</th>
+                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[70px]">{lang === 'th' ? 'กำไรที่ร้าน' : 'Dine-in Profit'}</th>
+                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r-2 border-black min-w-[70px]">{lang === 'th' ? 'กำไรใส่กล่อง' : 'Takeaway Profit'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">{lang === 'th' ? 'Grab แนะนำ' : 'Grab Sugg.'}</th>
+                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[75px]">{lang === 'th' ? 'Grab ตั้งเอง' : 'Grab Price'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">{lang === 'th' ? 'หัก GP' : 'GP Fee'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">{lang === 'th' ? 'หลังหัก' : 'Net'}</th>
+                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r-2 border-black min-w-[65px]">{lang === 'th' ? 'กำไร Grab' : 'Grab Profit'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[75px]">{lang === 'th' ? 'Line Man แนะนำ' : 'LM Sugg.'}</th>
+                  <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[75px]">{lang === 'th' ? 'LM ตั้งเอง' : 'LM Price'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">{lang === 'th' ? 'หัก GP' : 'GP Fee'}</th>
+                  <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[65px]">{lang === 'th' ? 'หลังหัก' : 'Net'}</th>
+                  <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 min-w-[65px]">{lang === 'th' ? 'กำไร LM' : 'LM Profit'}</th>
                 </>
               )}
             </tr>
@@ -1068,7 +1113,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                     <div className="flex flex-col gap-1 items-center justify-center py-0.5">
                       <div className="flex items-center gap-1">
                         <span className="text-[9px] font-black text-amber-900 bg-amber-100 px-1 py-0.2 rounded border border-amber-300">
-                          กุ้ง
+                          {lang === 'th' ? 'กุ้ง' : 'Shrimp'}
                         </span>
                         <NumericInput
                           min="0"
@@ -1077,13 +1122,13 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             handleSeafoodChange(v.id, 'shrimp', val)
                           }
                           className={`${compact ? 'w-10' : 'w-12'} px-1 py-0.5 text-center font-bold text-stone-900 bg-white border border-amber-400 rounded focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs font-mono`}
-                          title="จำนวนกุ้ง (ตัว)"
+                          title={lang === 'th' ? 'จำนวนกุ้ง (ตัว)' : 'Shrimp count (pcs)'}
                         />
-                        <span className="text-[9px] text-stone-500">ตัว</span>
+                        <span className="text-[9px] text-stone-500">{localizeUnit('ตัว', lang)}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <span className="text-[9px] font-black text-sky-900 bg-sky-100 px-1 py-0.2 rounded border border-sky-300">
-                          หมึก
+                          {lang === 'th' ? 'หมึก' : 'Squid'}
                         </span>
                         <NumericInput
                           min="0"
@@ -1092,7 +1137,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             handleSeafoodChange(v.id, 'squid', val)
                           }
                           className={`${compact ? 'w-10' : 'w-12'} px-1 py-0.5 text-center font-bold text-stone-900 bg-white border border-sky-400 rounded focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs font-mono`}
-                          title="น้ำหนักปลาหมึก (กรัม)"
+                          title={lang === 'th' ? 'น้ำหนักปลาหมึก (กรัม)' : 'Squid weight (g)'}
                         />
                         <span className="text-[9px] text-stone-500">g</span>
                       </div>
@@ -1108,7 +1153,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       handleCellChange(v.id, 'proteinWeight', val)
                     }
                     className={`${compact ? 'w-14 px-1 py-0.5' : 'w-16 px-1.5 py-1'} text-center font-bold text-stone-900 bg-white border border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-600 text-xs font-mono`}
-                    title="น้ำหนักเนื้อที่ใช้ (กรัม / ตัว)"
+                    title={lang === 'th' ? 'น้ำหนักเนื้อที่ใช้ (กรัม / ตัว)' : 'Protein weight used (g / pc)'}
                   />
                 );
               };
@@ -1129,12 +1174,12 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       : 'hover:bg-amber-50/40'
                   }`}
                 >
-                  {/* Common 0. ลำดับ พร้อมปุ่มลากย้าย & ลูกศร ขึ้น-ลง */}
+                  {/* Common 0. Order */}
                   <td className="py-1 px-1.5 bg-[#E53935] text-white font-extrabold border-r border-black select-none">
                     <div className="flex items-center justify-center gap-1">
                       <div
                         className="p-0.5 text-white/80 hover:text-white cursor-grab active:cursor-grabbing rounded hover:bg-black/20"
-                        title="กดเมาส์ค้างไว้เพื่อลากย้ายลำดับเนื้อสัตว์"
+                        title={lang === 'th' ? 'กดเมาส์ค้างไว้เพื่อลากย้ายลำดับเนื้อสัตว์' : 'Drag to reorder'}
                       >
                         <GripVertical className="w-3.5 h-3.5" />
                       </div>
@@ -1148,7 +1193,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             handleMoveVariant(v.id, 'up');
                           }}
                           className="p-0.5 text-white/80 hover:text-white disabled:opacity-20 disabled:hover:text-white/80 rounded cursor-pointer transition-colors"
-                          title="ย้ายขึ้น"
+                          title={lang === 'th' ? 'ย้ายขึ้น' : 'Move up'}
                         >
                           <ChevronUp className="w-3 h-3" />
                         </button>
@@ -1160,7 +1205,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             handleMoveVariant(v.id, 'down');
                           }}
                           className="p-0.5 text-white/80 hover:text-white disabled:opacity-20 disabled:hover:text-white/80 rounded cursor-pointer transition-colors"
-                          title="ย้ายลง"
+                          title={lang === 'th' ? 'ย้ายลง' : 'Move down'}
                         >
                           <ChevronDown className="w-3 h-3" />
                         </button>
@@ -1168,15 +1213,15 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                     </div>
                   </td>
 
-                  {/* Common 1. รายการ */}
+                  {/* Common 1. Item */}
                   <td className="py-2 px-3 bg-[#FFE0B2] text-stone-900 font-bold border-r border-black text-left whitespace-nowrap">
                     <div className="flex items-center justify-between gap-1.5">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className={`font-bold ${v.isOutOfStock ? 'line-through text-stone-500' : ''}`}>
-                          {v.proteinType || v.name}
+                          {getLocalizedText(lang, v.thaiName || v.proteinType || v.name, v.englishName)}
                         </span>
                         {(v.sku || v.code) && (
-                          <span className="text-[10px] bg-stone-100 text-stone-700 px-1 py-0.2 rounded font-mono font-normal border border-stone-300" title={`รหัสเมนู POS / SKU: ${v.sku || v.code}`}>
+                          <span className="text-[10px] bg-stone-100 text-stone-700 px-1 py-0.2 rounded font-mono font-normal border border-stone-300" title={`POS SKU: ${v.sku || v.code}`}>
                             #{v.sku || v.code}
                           </span>
                         )}
@@ -1188,13 +1233,17 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                               ? 'bg-rose-100 text-rose-700 border border-rose-300 hover:bg-rose-200 font-bold'
                               : 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-amber-100 hover:text-amber-800'
                           }`}
-                          title={v.isOutOfStock ? 'คลิกเพื่อเปลี่ยนเป็น พร้อมขาย' : 'คลิกเพื่อแจ้ง วัตถุดิบหมด (POS จะปิดขาย)'}
+                          title={
+                            v.isOutOfStock
+                              ? (lang === 'th' ? 'คลิกเพื่อเปลี่ยนเป็น พร้อมขาย' : 'Click to mark Available')
+                              : (lang === 'th' ? 'คลิกเพื่อแจ้ง วัตถุดิบหมด (POS จะปิดขาย)' : 'Click to mark Out of Stock')
+                          }
                         >
-                          {v.isOutOfStock ? '⚠️ ของหมด' : 'พร้อมขาย'}
+                          {v.isOutOfStock ? (lang === 'th' ? '⚠️ ของหมด' : '⚠️ Out of Stock') : (lang === 'th' ? 'พร้อมขาย' : 'Available')}
                         </button>
                         {v.availableChannels && v.availableChannels.length > 0 && v.availableChannels.length < 4 && (
-                          <span className="text-[9px] bg-amber-100/80 text-amber-900 px-1 py-0.2 rounded font-normal border border-amber-200" title={`ช่องทางที่ขาย: ${v.availableChannels.join(', ')}`}>
-                            {v.availableChannels.map(c => c === 'DINE_IN' ? 'หน้าร้าน' : c === 'TAKEAWAY' ? 'กลับบ้าน' : c).join('·')}
+                          <span className="text-[9px] bg-amber-100/80 text-amber-900 px-1 py-0.2 rounded font-normal border border-amber-200" title={`${lang === 'th' ? 'ช่องทางที่ขาย:' : 'Channels:'} ${v.availableChannels.join(', ')}`}>
+                            {v.availableChannels.map(c => c === 'DINE_IN' ? (lang === 'th' ? 'หน้าร้าน' : 'Dine-in') : c === 'TAKEAWAY' ? (lang === 'th' ? 'กลับบ้าน' : 'Takeaway') : c).join('·')}
                           </span>
                         )}
                       </div>
@@ -1204,7 +1253,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             type="button"
                             onClick={() => onEditVariant(menu, v)}
                             className="p-1 text-stone-600 hover:text-amber-800 hover:bg-amber-200/80 rounded cursor-pointer transition-colors"
-                            title="แก้ไขตัวเลือก"
+                            title={lang === 'th' ? 'แก้ไขตัวเลือก' : 'Edit option'}
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
@@ -1214,7 +1263,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             type="button"
                             onClick={() => onDeleteVariant(menu, v.id)}
                             className="p-1 text-stone-600 hover:text-rose-600 hover:bg-rose-100 rounded cursor-pointer transition-colors"
-                            title="ลบตัวเลือกเนื้อสัตว์"
+                            title={lang === 'th' ? 'ลบตัวเลือกเนื้อสัตว์' : 'Delete option'}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1227,7 +1276,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             onSelectBreakdown({ menu, variant: editedVariant, breakdown: activeBd });
                           }}
                           className="p-1 text-stone-500 hover:text-stone-900 rounded cursor-pointer"
-                          title="ดูสูตรละเอียดและแพ็กเกจจิ้ง"
+                          title={lang === 'th' ? 'ดูสูตรละเอียดและแพ็กเกจจิ้ง' : 'View recipe & packaging breakdown'}
                         >
                           <SlidersHorizontal className="w-3 h-3" />
                         </button>
@@ -1239,7 +1288,6 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   {/* DINE_IN DATA CELLS */}
                   {currentChannel === 'DINE_IN' && (
                     <>
-                      {/* ราคาตั้งขายที่ร้าน (EDITABLE) */}
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
                         <NumericInput
                           min="0"
@@ -1251,17 +1299,15 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         />
                       </td>
 
-                      {/* น้ำหนักเนื้อที่ใช้ (EDITABLE) - แยก 2 ค่าสำหรับ 'ทะเล' */}
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
                         {renderProteinWeightInput(false)}
                       </td>
 
-                      {/* ราคาต้นทุนเนื้อ/จาน (รวมค่าเดียวสำหรับ 'ทะเล') */}
                       <td className="py-2 px-2 bg-white text-stone-900 font-bold border-r border-black">
                         <div className="text-stone-900 font-bold">{proteinCost}</div>
                         {isSeafood && (
                           <div className="text-[9px] text-stone-500 font-normal leading-tight">
-                            กุ้ง {shrimpTotalCost.toFixed(1)} + หมึก {squidTotalCost.toFixed(1)}
+                            {lang === 'th' ? `กุ้ง ${shrimpTotalCost.toFixed(1)} + หมึก ${squidTotalCost.toFixed(1)}` : `Shrimp ${shrimpTotalCost.toFixed(1)} + Squid ${squidTotalCost.toFixed(1)}`}
                           </div>
                         )}
                       </td>
@@ -1442,7 +1488,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         <div>{proteinCost}</div>
                         {isSeafood && (
                           <div className="text-[8px] text-stone-500 font-normal leading-tight">
-                            กุ้ง{shrimpTotalCost.toFixed(1)}+หมึก{squidTotalCost.toFixed(1)}
+                            {lang === 'th' ? `กุ้ง${shrimpTotalCost.toFixed(1)}+หมึก${squidTotalCost.toFixed(1)}` : `Shr${shrimpTotalCost.toFixed(1)}+Sq${squidTotalCost.toFixed(1)}`}
                           </div>
                         )}
                       </td>
@@ -1495,19 +1541,21 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-300 inline-block border border-blue-500"></span>
-            <span>ช่องสีมีสัญลักษณ์ ✏️ พิมพ์ตัวเลขแก้ไขได้โดยตรง</span>
+            <span>
+              {lang === 'th' ? 'ช่องสีมีสัญลักษณ์ ✏️ พิมพ์ตัวเลขแก้ไขได้โดยตรง' : 'Highlighted cells with ✏️ are directly editable'}
+            </span>
           </span>
           <span className="flex items-center gap-1">
             <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>
-            <span>สีแดง = กำไรติดลบ (Loss Alert)</span>
+            <span>{lang === 'th' ? 'สีแดง = กำไรติดลบ (Loss Alert)' : 'Red = Negative Profit (Loss Alert)'}</span>
           </span>
         </div>
         <div className="text-[10px] text-stone-400">
-          {currentChannel === 'DINE_IN' && 'แสดงเฉพาะรายการขายหน้าร้าน (ไม่รวมกล่อง) และใส่กล่องกลับบ้าน'}
-          {currentChannel === 'GRAB' && `คำนวณหัก GP Grab Food: ${grabCommissionBase}%${commissionHasVat ? ` + VAT ${vatRate}%` : ''} = ${grabGpPctDisplay}%`}
-          {currentChannel === 'LINEMAN' && `คำนวณหัก GP Line Man: ${linemanCommissionBase}%${commissionHasVat ? ` + VAT ${vatRate}%` : ''} = ${linemanGpPctDisplay}%`}
-          {currentChannel === 'ROBINHOOD' && 'คำนวณ Robinhood: 0% GP รับเงินเต็มจำนวน'}
-          {currentChannel === 'ALL' && 'ตารางเปรียบเทียบทุกช่องทางพร้อมกัน'}
+          {currentChannel === 'DINE_IN' && (lang === 'th' ? 'แสดงเฉพาะรายการขายหน้าร้าน (ไม่รวมกล่อง) และใส่กล่องกลับบ้าน' : 'Shows Storefront Dine-in (excl. box) & Takeaway')}
+          {currentChannel === 'GRAB' && `${lang === 'th' ? 'คำนวณหัก GP Grab Food' : 'Grab Food GP'}: ${grabCommissionBase}%${commissionHasVat ? ` + VAT ${vatRate}%` : ''} = ${grabGpPctDisplay}%`}
+          {currentChannel === 'LINEMAN' && `${lang === 'th' ? 'คำนวณหัก GP Line Man' : 'Line Man GP'}: ${linemanCommissionBase}%${commissionHasVat ? ` + VAT ${vatRate}%` : ''} = ${linemanGpPctDisplay}%`}
+          {currentChannel === 'ROBINHOOD' && (lang === 'th' ? 'คำนวณ Robinhood: 0% GP รับเงินเต็มจำนวน' : 'Robinhood: 0% GP (100% payout)')}
+          {currentChannel === 'ALL' && (lang === 'th' ? 'ตารางเปรียบเทียบทุกช่องทางพร้อมกัน' : 'Side-by-side multi-channel comparison')}
         </div>
       </div>
     </div>

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Language, ShiftDoc } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import { OnlineStatusBadge } from './OnlineStatusBadge';
 import { PWAInstallButton } from './PWAInstallButton';
 import { signOutOwner } from '../data/db';
@@ -76,8 +77,8 @@ const UNIFIED_FINANCE_PAGES: AppPage[] = [
 interface Props {
   currentPage: AppPage;
   onSelectPage: (page: AppPage) => void;
-  lang: Language;
-  onToggleLang: () => void;
+  lang?: Language;
+  onToggleLang?: () => void;
   userEmail?: string | null;
   activeShift?: ShiftDoc | null;
   onOpenShiftModal: () => void;
@@ -98,13 +99,16 @@ interface MenuGroupDef {
 export const Navigation: React.FC<Props> = ({
   currentPage,
   onSelectPage,
-  lang,
-  onToggleLang,
+  lang: propLang,
+  onToggleLang: propOnToggleLang,
   userEmail,
   activeShift,
   onOpenShiftModal,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const { lang: ctxLang, toggleLang: ctxToggleLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
+  const onToggleLang = propOnToggleLang ?? ctxToggleLang;
   const t = translations[lang];
 
   // Close on Escape key press
@@ -337,7 +341,7 @@ export const Navigation: React.FC<Props> = ({
           </div>
           <button
             onClick={() => setIsOpen(false)}
-            aria-label="Close sidebar menu"
+            aria-label={lang === 'th' ? 'ปิดแถบเมนูด้านข้าง' : 'Close sidebar menu'}
             className="p-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white cursor-pointer transition-colors active:scale-95"
           >
             <X className="w-5 h-5" />
@@ -413,7 +417,7 @@ export const Navigation: React.FC<Props> = ({
             <button
               onClick={onToggleLang}
               className="py-1.5 px-3 rounded-xl bg-white hover:bg-neutral-100 text-neutral-800 border border-neutral-300 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 cursor-pointer"
-              title="Toggle Thai / English"
+              title={lang === 'th' ? 'สลับภาษา ไทย / อังกฤษ' : 'Toggle Thai / English'}
             >
               <Globe className="w-3.5 h-3.5 text-neutral-600" />
               <span>{lang === 'th' ? 'ไทย' : 'EN'}</span>
@@ -424,7 +428,7 @@ export const Navigation: React.FC<Props> = ({
           <div className="text-[11px] text-neutral-500 truncate flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
             <span className="truncate">
-              {t.nav.signedInAs} <strong className="text-neutral-800">{userEmail || 'Owner'}</strong>
+              {t.nav.signedInAs} <strong className="text-neutral-800">{userEmail || (lang === 'th' ? 'เจ้าของร้าน' : 'Owner')}</strong>
             </span>
           </div>
 
@@ -450,7 +454,7 @@ export const Navigation: React.FC<Props> = ({
         <div className="flex items-center gap-2.5">
           <button
             onClick={() => setIsOpen(true)}
-            aria-label="Open Sidebar Menu"
+            aria-label={lang === 'th' ? 'เปิดแถบเมนูด้านข้าง' : 'Open Sidebar Menu'}
             title={lang === 'th' ? 'เปิดแถบเมนูด้านซ้าย' : 'Open Left Sidebar Menu'}
             className="p-2 rounded-xl bg-white hover:bg-orange-50 text-orange-700 border border-slate-200 shadow-[0_2px_0_#e2e8f0,0_4px_10px_-4px_rgba(15,23,42,0.08)] transition-transform active:translate-y-[1px] flex items-center justify-center cursor-pointer"
           >
@@ -502,7 +506,7 @@ export const Navigation: React.FC<Props> = ({
           <button
             onClick={onToggleLang}
             className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-xs font-bold flex items-center gap-1.5 shadow-[0_2px_0_#e2e8f0] active:translate-y-[1px] transition-all cursor-pointer"
-            title="Toggle Thai / English"
+            title={lang === 'th' ? 'สลับภาษา ไทย / อังกฤษ' : 'Toggle Thai / English'}
           >
             <Globe className="w-3.5 h-3.5 text-slate-600" />
             <span>{lang === 'th' ? 'ไทย' : 'EN'}</span>

@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { ShiftDoc, Language, SettingsDoc } from '../types';
 import { translations } from '../i18n/translations';
+import { useLanguage } from '../contexts/LanguageContext';
 import { formatMoney, getBusinessWorkDate, roundTo2 } from '../engine/calculations';
 import { saveDocument } from '../data/db';
-import { X, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Clock } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
 
 interface Props {
   activeShift: ShiftDoc | null;
   settings: SettingsDoc;
-  lang: Language;
+  lang?: Language;
   onClose: () => void;
   onShiftUpdated: (shift: ShiftDoc | null) => void;
 }
@@ -17,10 +18,12 @@ interface Props {
 export const ShiftModal: React.FC<Props> = ({
   activeShift,
   settings,
-  lang,
+  lang: propLang,
   onClose,
   onShiftUpdated,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   const t = translations[lang];
   const [startingCash, setStartingCash] = useState<number>(0);
   const [countedCash, setCountedCash] = useState<number>(0);
@@ -123,7 +126,7 @@ export const ShiftModal: React.FC<Props> = ({
               </div>
 
               <div className="text-[11px] text-neutral-500">
-                Business Work Date: <strong>{workDate}</strong>
+                {lang === 'th' ? 'วันทำการ:' : 'Business Work Date:'} <strong>{workDate}</strong>
               </div>
             </div>
           ) : (
@@ -133,11 +136,11 @@ export const ShiftModal: React.FC<Props> = ({
                 <div className="flex justify-between text-neutral-600">
                   <span>{t.shift.activeShiftInfo}:</span>
                   <span className="font-bold">
-                    {new Date(activeShift.openedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(activeShift.openedAt).toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
                 <div className="flex justify-between text-neutral-800">
-                  <span>Starting Cash:</span>
+                  <span>{t.shift.startingCash}:</span>
                   <span className="font-bold">฿{formatMoney(activeShift.startingCash)}</span>
                 </div>
               </div>
@@ -170,7 +173,11 @@ export const ShiftModal: React.FC<Props> = ({
               >
                 <span className="font-bold">{t.shift.discrepancy}:</span>
                 <span className="font-black text-sm">
-                  {discrepancy > 0 ? `+฿${formatMoney(discrepancy)} (Over)` : discrepancy < 0 ? `-฿${formatMoney(Math.abs(discrepancy))} (Short)` : '฿0.00 (Balanced)'}
+                  {discrepancy > 0
+                    ? `+฿${formatMoney(discrepancy)} (${lang === 'th' ? 'เกิน' : 'Over'})`
+                    : discrepancy < 0
+                    ? `-฿${formatMoney(Math.abs(discrepancy))} (${lang === 'th' ? 'ขาด' : 'Short'})`
+                    : `฿0.00 (${lang === 'th' ? 'ตรงตามยอด' : 'Balanced'})`}
                 </span>
               </div>
             </div>
@@ -183,7 +190,7 @@ export const ShiftModal: React.FC<Props> = ({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="w-full p-2.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500"
-              placeholder="Notes..."
+              placeholder={lang === 'th' ? 'หมายเหตุ...' : 'Notes...'}
             />
           </div>
         </div>

@@ -14,6 +14,7 @@ import {
 } from '../../../engine/calculations';
 import { StorageService } from '../../services/storageService';
 import { FirebaseSyncService } from '../../services/firebaseSyncService';
+import { useLanguage } from '../../../contexts/LanguageContext';
 
 interface ProfitAndLossViewProps {
   sales: DailySalesRecord[];
@@ -25,7 +26,7 @@ interface ProfitAndLossViewProps {
   wasteLog?: WasteRecord[];
   stockCounts?: StockCountSnapshot[];
   salesOrders?: SaleOrder[];
-  activeLanguage: 'th' | 'en';
+  activeLanguage?: 'th' | 'en';
   onSalesUpdated?: (sales: DailySalesRecord[]) => void;
 }
 
@@ -39,9 +40,12 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
   wasteLog,
   stockCounts,
   salesOrders,
-  activeLanguage,
+  activeLanguage: propActiveLanguage,
   onSalesUpdated,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const activeLanguage = propActiveLanguage ?? ctxLang;
+  const isTh = activeLanguage === 'th';
   const [isSyncingSales, setIsSyncingSales] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [excludePayrollDuplicates, setExcludePayrollDuplicates] = useState<boolean>(true);
@@ -55,12 +59,22 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
         if (onSalesUpdated) {
           onSalesUpdated(res.data);
         }
-        setSyncFeedback(`ซิงค์สำเร็จ (${res.data.length} รายการ)`);
+        setSyncFeedback(
+          isTh ? `ซิงค์สำเร็จ (${res.data.length} รายการ)` : `Synced successfully (${res.data.length} records)`
+        );
       } else {
-        setSyncFeedback(res.error ? `ข้อผิดพลาด: ${res.error}` : 'ไม่พบข้อมูลใหม่จาก POS');
+        setSyncFeedback(
+          res.error
+            ? isTh
+              ? `ข้อผิดพลาด: ${res.error}`
+              : `Error: ${res.error}`
+            : isTh
+            ? 'ไม่พบข้อมูลใหม่จาก POS'
+            : 'No new POS data found'
+        );
       }
     } catch (err: any) {
-      setSyncFeedback('ซิงค์ล้มเหลว');
+      setSyncFeedback(isTh ? 'ซิงค์ล้มเหลว' : 'Sync failed');
     } finally {
       setIsSyncingSales(false);
       setTimeout(() => setSyncFeedback(null), 4000);
@@ -298,10 +312,22 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
             onClick={handleSyncLivePOS}
             disabled={isSyncingSales}
             className="flex items-center gap-2 px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-medium cursor-pointer transition-colors disabled:opacity-50"
-            title="ดึงยอดขายสดล่าสุดจาก Firebase Firestore ที่ POS บันทึกเข้ามา"
+            title={
+              isTh
+                ? 'ดึงยอดขายสดล่าสุดจาก Firebase Firestore ที่ POS บันทึกเข้ามา'
+                : 'Pull latest live POS sales synced to Firebase Firestore'
+            }
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSales ? 'animate-spin' : ''}`} />
-            <span>{isSyncingSales ? 'กำลังซิงค์ POS...' : '📡 ซิงค์ยอดขายสดจาก POS'}</span>
+            <span>
+              {isSyncingSales
+                ? isTh
+                  ? 'กำลังซิงค์ POS...'
+                  : 'Syncing POS...'
+                : isTh
+                ? 'ซิงค์ยอดขายสดจาก POS'
+                : 'Sync Live POS Sales'}
+            </span>
           </button>
         </div>
       </div>
@@ -311,7 +337,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-200 text-xs flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
           <span>
-            ข้อมูล POS บางส่วนจากสรุปยอดเก่าไม่มีรายละเอียดแยกช่องทาง ระบบประมาณการส่วนลด ค่า GP และ Service Charge ตามสัดส่วนยอดขาย (แนะนำซิงค์หรือ Rebuild สรุปยอดจากบิลจริง)
+            {isTh
+              ? 'ข้อมูล POS บางส่วนจากสรุปยอดเก่าไม่มีรายละเอียดแยกช่องทาง ระบบประมาณการส่วนลด ค่า GP และ Service Charge ตามสัดส่วนยอดขาย (แนะนำซิงค์หรือ Rebuild สรุปยอดจากบิลจริง)'
+              : 'Some legacy POS daily summaries lack per-channel breakdowns. Discounts, GP fees, and service charge were allocated proportionally by revenue (re-sync or rebuild from actual receipts recommended).'}
           </span>
         </div>
       )}
@@ -320,7 +348,11 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
       {effectiveCogsMode === 'actual' && hasActualStockData && actualCogsResult.isNegative && (
         <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-4 text-red-300 text-xs flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0 text-red-400" />
-          <span className="font-semibold">ตัวเลขสต็อกผิดปกติ ตรวจสอบการนับสต็อก (ต้นทุนสต็อกติดลบ ฿{actualCogsResult.cogs.toLocaleString()})</span>
+          <span className="font-semibold">
+            {isTh
+              ? `ตัวเลขสต็อกผิดปกติ ตรวจสอบการนับสต็อก (ต้นทุนสต็อกติดลบ ฿${actualCogsResult.cogs.toLocaleString()})`
+              : `Stock anomaly detected — verify stock counts (negative COGS: ฿${actualCogsResult.cogs.toLocaleString()})`}
+          </span>
         </div>
       )}
 
@@ -329,7 +361,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-300 text-xs flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
           <span>
-            มียอดขาย manual {uncostedManualSalesTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })} บาทที่ไม่มีต้นทุนอาหารคู่ อาจทำให้กำไรสูงเกินจริง
+            {isTh
+              ? `มียอดขาย manual ${uncostedManualSalesTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })} บาทที่ไม่มีต้นทุนอาหารคู่ อาจทำให้กำไรสูงเกินจริง`
+              : `${uncostedManualSalesTotal.toLocaleString('en-US', { maximumFractionDigits: 2 })} THB of manual sales have no paired food cost, which may overstate profit.`}
           </span>
         </div>
       )}
@@ -340,10 +374,20 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
             <span>
-              <strong>ประมาณการจากสูตร ยังไม่มีการนับสต็อก</strong> — แนะนำให้นับสต็อกใหม่หนึ่งครั้งในหน้าคลังสินค้า (นับสต็อกปิดงวด) เพื่อเทียบ Actual COGS จริง
+              {isTh ? (
+                <>
+                  <strong>ประมาณการจากสูตร ยังไม่มีการนับสต็อก</strong> — แนะนำให้นับสต็อกใหม่หนึ่งครั้งในหน้าคลังสินค้า (นับสต็อกปิดงวด) เพื่อเทียบ Actual COGS จริง
+                </>
+              ) : (
+                <>
+                  <strong>Recipe-estimated COGS (No stock counts yet)</strong> — Perform a period-end stock count in Inventory to compare against Actual COGS.
+                </>
+              )}
             </span>
           </div>
-          <span className="text-[11px] font-mono text-amber-300/80 shrink-0">งวด {targetMonth}</span>
+          <span className="text-[11px] font-mono text-amber-300/80 shrink-0">
+            {isTh ? `งวด ${targetMonth}` : `Period ${targetMonth}`}
+          </span>
         </div>
       )}
 
@@ -351,7 +395,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-[#151518] border border-white/5">
         <div className="flex items-center gap-2">
           <Scale className="h-4 w-4 text-[#F27D26]" />
-          <span className="text-xs font-semibold text-white/80">วิธีคำนวณต้นทุนอาหารขาย (COGS):</span>
+          <span className="text-xs font-semibold text-white/80">
+            {isTh ? 'วิธีคำนวณต้นทุนอาหารขาย (COGS):' : 'COGS Calculation Method:'}
+          </span>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex rounded-lg bg-black/40 p-1 border border-white/10">
@@ -364,7 +410,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
                   : 'text-white/60 hover:text-white'
               }`}
             >
-              ต้นทุนตามสูตร & ยอดขาย (% Food Cost)
+              {isTh ? 'ต้นทุนตามสูตร & ยอดขาย (% Food Cost)' : 'Theoretical / Recipe (% Food Cost)'}
             </button>
             <button
               type="button"
@@ -375,12 +421,12 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
                   : 'text-white/60 hover:text-white'
               }`}
             >
-              ต้นทุนจากสต็อกปิดงวด (Actual COGS)
+              {isTh ? 'ต้นทุนจากสต็อกปิดงวด (Actual COGS)' : 'Actual Stock Count (Actual COGS)'}
             </button>
           </div>
           {effectiveCogsMode === 'estimated' && (
             <span className="px-2 py-1 rounded text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-              ตามสูตรมาตรฐาน
+              {isTh ? 'ตามสูตรมาตรฐาน' : 'Standard Recipe'}
             </span>
           )}
           {effectiveCogsMode === 'actual' && (
@@ -389,22 +435,34 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
                 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                 : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
             }`}>
-              {hasActualStockData ? 'นับสต็อกปิดงวดครบ' : 'ประมาณการจากสูตร ยังไม่มีการนับสต็อก'}
+              {hasActualStockData
+                ? isTh
+                  ? 'นับสต็อกปิดงวดครบ'
+                  : 'Stock Counts Complete'
+                : isTh
+                ? 'ประมาณการจากสูตร ยังไม่มีการนับสต็อก'
+                : 'Recipe Estimated (No Stock Count)'}
             </span>
           )}
         </div>
       </div>
 
-      {/* Variance Analysis Block (ต้นทุนจริง vs ต้นทุนตามสูตร) */}
+      {/* Variance Analysis Block */}
       <div className="rounded-xl border border-white/5 bg-[#151518] p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-sky-400" />
-            <span className="text-sm font-semibold text-white">ส่วนต่างต้นทุน (Variance)</span>
-            <span className="text-xs text-white/40 font-mono">(เปรียบเทียบต้นทุนจริง vs ต้นทุนสูตรมาตรฐาน)</span>
+            <span className="text-sm font-semibold text-white">
+              {isTh ? 'ส่วนต่างต้นทุน (Variance)' : 'COGS Variance Analysis'}
+            </span>
+            <span className="text-xs text-white/40 font-mono">
+              {isTh ? '(เปรียบเทียบต้นทุนจริง vs ต้นทุนสูตรมาตรฐาน)' : '(Actual vs Theoretical COGS)'}
+            </span>
           </div>
           <span className="text-xs font-mono text-white/50">
-            เกณฑ์การเตือน: {varianceThresholdPercent.toFixed(1)}% ของยอดขายสุทธิ
+            {isTh
+              ? `เกณฑ์การเตือน: ${varianceThresholdPercent.toFixed(1)}% ของยอดขายสุทธิ`
+              : `Alert Threshold: ${varianceThresholdPercent.toFixed(1)}% of Net Sales`}
           </span>
         </div>
 
@@ -413,24 +471,38 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-3.5 text-rose-300 text-xs flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400" />
             <span>
-              แจ้งเตือน: ผลต่างต้นทุน {variancePointsOfNetSales.toFixed(1)}% ของยอดขายสุทธิ เกินเกณฑ์ควบคุม {varianceThresholdPercent.toFixed(1)}% กรุณาตรวจสอบการสูญเสีย การตักเกิน หรือของเสีย
+              {isTh
+                ? `แจ้งเตือน: ผลต่างต้นทุน ${variancePointsOfNetSales.toFixed(1)}% ของยอดขายสุทธิ เกินเกณฑ์ควบคุม ${varianceThresholdPercent.toFixed(1)}% กรุณาตรวจสอบการสูญเสีย การตักเกิน หรือของเสีย`
+                : `Alert: Cost variance of ${variancePointsOfNetSales.toFixed(1)}% of Net Sales exceeds the ${varianceThresholdPercent.toFixed(1)}% control threshold. Check shrinkage, over-portioning, or spoilage.`}
             </span>
           </div>
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div className="bg-white/5 p-3.5 rounded-xl border border-white/5">
-            <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">ต้นทุนจริงจากการนับสต็อก (Actual)</div>
+            <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">
+              {isTh ? 'ต้นทุนจริงจากการนับสต็อก (Actual)' : 'Actual COGS (Stock Count)'}
+            </div>
             <div className="mt-1.5 text-xl font-light text-white font-mono">
-              {hasActualStockData ? `฿${Math.round(actualCogsResult.cogs).toLocaleString()}` : 'ยังไม่มีผลนับสต็อก'}
+              {hasActualStockData
+                ? `฿${Math.round(actualCogsResult.cogs).toLocaleString()}`
+                : isTh
+                ? 'ยังไม่มีผลนับสต็อก'
+                : 'No Stock Count'}
             </div>
             <div className="text-[10px] text-white/30 font-mono mt-0.5">
-              {hasActualStockData && netSales > 0 ? `${((actualCogsResult.cogs / netSales) * 100).toFixed(1)}% of Net Sales` : 'ต้องมีสต็อกต้นงวด & ปลายงวด'}
+              {hasActualStockData && netSales > 0
+                ? `${((actualCogsResult.cogs / netSales) * 100).toFixed(1)}% of Net Sales`
+                : isTh
+                ? 'ต้องมีสต็อกต้นงวด & ปลายงวด'
+                : 'Requires beginning & ending counts'}
             </div>
           </div>
 
           <div className="bg-white/5 p-3.5 rounded-xl border border-white/5">
-            <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">ต้นทุนสูตรมาตรฐาน (Theoretical)</div>
+            <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">
+              {isTh ? 'ต้นทุนสูตรมาตรฐาน (Theoretical)' : 'Theoretical COGS (Recipes)'}
+            </div>
             <div className="mt-1.5 text-xl font-light text-white font-mono">
               ฿{Math.round(theoreticalCOGS).toLocaleString()}
             </div>
@@ -446,7 +518,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
               ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
               : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
           }`}>
-            <div className="text-[10px] uppercase font-bold tracking-wider">ส่วนต่าง (Variance)</div>
+            <div className="text-[10px] uppercase font-bold tracking-wider">
+              {isTh ? 'ส่วนต่าง (Variance)' : 'Cost Variance'}
+            </div>
             <div className="mt-1.5 text-xl font-light font-mono">
               {hasActualStockData
                 ? `${varianceResult.varianceAmount > 0 ? '+' : varianceResult.varianceAmount < 0 ? '-' : ''}฿${Math.round(Math.abs(varianceResult.varianceAmount)).toLocaleString()}`
@@ -455,20 +529,22 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
             <div className="text-[10px] font-mono mt-0.5">
               {hasActualStockData
                 ? `${varianceResult.variancePercent > 0 ? '+' : ''}${varianceResult.variancePercent.toFixed(2)}% (${variancePointsOfNetSales.toFixed(2)}% of Sales)`
-                : 'ประมาณการจากสูตร'}
+                : isTh
+                ? 'ประมาณการจากสูตร'
+                : 'Recipe estimated'}
             </div>
           </div>
 
           <div className="bg-white/5 p-3.5 rounded-xl border border-white/5">
             <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1">
               <Trash2 className="w-3 h-3 text-rose-400" />
-              <span>ของเสียในงวด (Waste Memo)</span>
+              <span>{isTh ? 'ของเสียในงวด (Waste Memo)' : 'Period Waste (Memo)'}</span>
             </div>
             <div className="mt-1.5 text-xl font-light text-rose-300 font-mono">
               ฿{Math.round(actualCogsResult.wasteMemo).toLocaleString()}
             </div>
             <div className="text-[10px] text-white/30 font-sans mt-0.5">
-              แสดงอ้างอิงแยก ไม่นำไปหักออกจาก COGS
+              {isTh ? 'แสดงอ้างอิงแยก ไม่นำไปหักออกจาก COGS' : 'Reference only — not subtracted from COGS'}
             </div>
           </div>
         </div>
@@ -480,10 +556,17 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
             <span>
-              พบรายจ่ายเงินเดือน/ค่าแรง ({payrollFlaggedExpenses.length} รายการ) ซ้อนกับข้อมูลพนักงาน ({activeEmployees.length} คน) —{' '}
-              {excludePayrollDuplicates
-                ? 'สถานะ: งดนับซ้ำ (ใช้ยอดจากหน้าพนักงาน)'
-                : 'สถานะ: นับรวมรายจ่ายเพิ่มจากค่าแรงพนักงาน'}
+              {isTh
+                ? `พบรายจ่ายเงินเดือน/ค่าแรง (${payrollFlaggedExpenses.length} รายการ) ซ้อนกับข้อมูลพนักงาน (${activeEmployees.length} คน) — ${
+                    excludePayrollDuplicates
+                      ? 'สถานะ: งดนับซ้ำ (ใช้ยอดจากหน้าพนักงาน)'
+                      : 'สถานะ: นับรวมรายจ่ายเพิ่มจากค่าแรงพนักงาน'
+                  }`
+                : `Found ${payrollFlaggedExpenses.length} payroll expense(s) alongside ${activeEmployees.length} employee(s) — ${
+                    excludePayrollDuplicates
+                      ? 'Status: Deduplicated (using Labor payroll)'
+                      : 'Status: Including both expense lines and staff payroll'
+                  }`}
             </span>
           </div>
           <button
@@ -491,7 +574,13 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
             onClick={() => setExcludePayrollDuplicates(!excludePayrollDuplicates)}
             className="px-3 py-1.5 rounded-lg border border-amber-400/50 bg-amber-500/20 hover:bg-amber-500/30 text-xs font-bold text-amber-100 shrink-0 cursor-pointer"
           >
-            {excludePayrollDuplicates ? 'เปลี่ยนเป็นนับรวมด้วย' : 'งดนับซ้ำกับพนักงาน'}
+            {excludePayrollDuplicates
+              ? isTh
+                ? 'เปลี่ยนเป็นนับรวมด้วย'
+                : 'Include Both'
+              : isTh
+              ? 'งดนับซ้ำกับพนักงาน'
+              : 'Deduplicate Payroll'}
           </button>
         </div>
       )}
@@ -499,7 +588,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
       {/* Top 4 Summary Margin Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">ยอดขายสุทธิ (Net Revenue)</div>
+          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">
+            {isTh ? 'ยอดขายสุทธิ (Net Revenue)' : 'Net Revenue'}
+          </div>
           <div className="mt-3 text-2xl font-light tracking-tight text-white font-mono">
             ฿{pnl.netSales.toLocaleString()}
           </div>
@@ -510,13 +601,17 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">Prime Cost % (COGS + Total Labor)</div>
           <div className="mt-3 text-2xl font-light font-mono flex items-baseline gap-1.5 text-purple-400">
             <span>{pnl.primeCostPercent.toFixed(1)}%</span>
-            <span className="text-xs text-white/30 font-mono font-normal">(เป้า {settings.primeCostTargetPercent}%)</span>
+            <span className="text-xs text-white/30 font-mono font-normal">
+              ({isTh ? 'เป้า' : 'Target'} {settings.primeCostTargetPercent}%)
+            </span>
           </div>
           <div className="text-[10px] text-white/40 font-mono mt-1">฿{pnl.primeCost.toLocaleString()}</div>
         </div>
 
         <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">กำไรขั้นต้น (Gross Profit)</div>
+          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">
+            {isTh ? 'กำไรขั้นต้น (Gross Profit)' : 'Gross Profit'}
+          </div>
           <div className="mt-3 text-2xl font-light text-[#10B981] font-mono">
             ฿{pnl.grossProfit.toLocaleString()}
           </div>
@@ -524,7 +619,9 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
         </div>
 
         <div className="bg-[#151518] rounded-xl border border-white/5 p-4 flex flex-col justify-between hover:border-white/15 transition-colors">
-          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">กำไรสุทธิ (Net Profit)</div>
+          <div className="text-white/40 text-[10px] uppercase font-bold tracking-wider">
+            {isTh ? 'กำไรสุทธิ (Net Profit)' : 'Net Profit'}
+          </div>
           <div className="mt-3 text-2xl font-light text-[#10B981] font-mono">
             ฿{pnl.netProfit.toLocaleString()}
           </div>
@@ -537,40 +634,57 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
       {/* Full Formal P&L Statement Table */}
       <div className="rounded-xl border border-white/5 bg-[#151518] p-6">
         <h2 className="text-xs font-bold uppercase tracking-widest text-white/60 mb-5 pb-3 border-b border-white/5 flex items-center justify-between">
-          <span>ตารางแจกแจงงบกำไรขาดทุนรายเดือน (Statement of Comprehensive Income)</span>
-          <span className="text-xs font-mono font-normal text-white/30">สกุลเงิน: บาท (THB)</span>
+          <span>
+            {isTh
+              ? 'ตารางแจกแจงงบกำไรขาดทุนรายเดือน (Statement of Comprehensive Income)'
+              : 'Statement of Comprehensive Income (Monthly P&L)'}
+          </span>
+          <span className="text-xs font-mono font-normal text-white/30">
+            {isTh ? 'สกุลเงิน: บาท (THB)' : 'Currency: THB (฿)'}
+          </span>
         </h2>
 
         <div className="space-y-4 text-xs font-mono">
           {/* 1. REVENUE SECTION */}
           <div className="space-y-1.5">
             <div className="text-[11px] font-bold font-sans text-white/70 uppercase tracking-wider bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-              1. รายได้จากการขาย (Revenue)
+              {isTh ? '1. รายได้จากการขาย (Revenue)' : '1. Revenue'}
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ยอดขายรวมก่อนหักส่วนลด (Gross Sales)</span>
+              <span className="font-sans">{isTh ? 'ยอดขายรวมก่อนหักส่วนลด (Gross Sales)' : 'Gross Sales'}</span>
               <span>฿{grossSales.toLocaleString()}</span>
             </div>
             <div className="flex justify-between px-3 py-1 text-[#F59E0B]">
-              <span className="font-sans">หัก: ส่วนลดและโปรโมชั่นที่ร้านออกเอง (Discounts)</span>
+              <span className="font-sans">{isTh ? 'หัก: ส่วนลดและโปรโมชั่นที่ร้านออกเอง (Discounts)' : 'Less: Store Discounts & Promotions'}</span>
               <span>-฿{discounts.toLocaleString()}</span>
             </div>
             {refunds > 0 && (
               <div className="flex justify-between px-3 py-1 text-[#EF4444]">
-                <span className="font-sans">หัก: รายการคืนเงินและยกเลิกบิล (Refunds)</span>
+                <span className="font-sans">{isTh ? 'หัก: รายการคืนเงินและยกเลิกบิล (Refunds)' : 'Less: Refunds & Voided Bills'}</span>
                 <span>-฿{refunds.toLocaleString()}</span>
               </div>
             )}
             {serviceChargeTotal > 0 && (
               <div className="flex justify-between px-3 py-1 text-white/70">
                 <span className="font-sans">
-                  Service Charge {(settings.serviceChargeTreatment || 'staff_pool') === 'retained' ? '(รวมเป็นรายได้ร้าน)' : '(กองทุนพนักงาน — ไม่นับเป็นรายได้)'}
+                  Service Charge{' '}
+                  {(settings.serviceChargeTreatment || 'staff_pool') === 'retained'
+                    ? isTh
+                      ? '(รวมเป็นรายได้ร้าน)'
+                      : '(Retained as Store Revenue)'
+                    : isTh
+                    ? '(กองทุนพนักงาน — ไม่นับเป็นรายได้)'
+                    : '(Staff Pool — Excluded from Revenue)'}
                 </span>
-                <span>{retainedServiceCharge > 0 ? `+฿${serviceChargeTotal.toLocaleString()}` : `฿${serviceChargeTotal.toLocaleString()} (อ้างอิง)`}</span>
+                <span>
+                  {retainedServiceCharge > 0
+                    ? `+฿${serviceChargeTotal.toLocaleString()}`
+                    : `฿${serviceChargeTotal.toLocaleString()} (${isTh ? 'อ้างอิง' : 'Memo'})`}
+                </span>
               </div>
             )}
             <div className="flex justify-between px-3 py-2 font-bold text-white bg-white/[0.04] rounded-lg text-sm border border-white/5">
-              <span className="font-sans">ยอดขายสุทธิที่แท้จริง (Net Sales)</span>
+              <span className="font-sans">{isTh ? 'ยอดขายสุทธิที่แท้จริง (Net Sales)' : 'Net Sales'}</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40">100.0%</span>
                 <span>฿{pnl.netSales.toLocaleString()}</span>
@@ -581,24 +695,24 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           {/* 2. COST OF GOODS SOLD (COGS) */}
           <div className="space-y-1.5 pt-2">
             <div className="text-[11px] font-bold font-sans text-white/70 uppercase tracking-wider bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-              2. ต้นทุนขาย (Cost of Goods Sold - COGS)
+              {isTh ? '2. ต้นทุนขาย (Cost of Goods Sold - COGS)' : '2. Cost of Goods Sold (COGS)'}
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ต้นทุนวัตถุดิบและอาหาร (Food Cost)</span>
+              <span className="font-sans">{isTh ? 'ต้นทุนวัตถุดิบและอาหาร (Food Cost)' : 'Food & Ingredient Cost'}</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40 font-sans">{foodCostPercent.toFixed(1)}%</span>
                 <span>฿{Math.round(foodCogs).toLocaleString()}</span>
               </div>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ต้นทุนกล่องและบรรจุภัณฑ์ (Packaging Cost)</span>
+              <span className="font-sans">{isTh ? 'ต้นทุนกล่องและบรรจุภัณฑ์ (Packaging Cost)' : 'Packaging Cost'}</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40 font-sans">{packagingCostPercent.toFixed(1)}%</span>
                 <span>฿{Math.round(packagingCogs).toLocaleString()}</span>
               </div>
             </div>
             <div className="flex justify-between px-3 py-2 font-bold text-white bg-white/[0.04] rounded-lg border border-white/5">
-              <span className="font-sans">รวมต้นทุนขายทั้งสิ้น (Total COGS)</span>
+              <span className="font-sans">{isTh ? 'รวมต้นทุนขายทั้งสิ้น (Total COGS)' : 'Total COGS'}</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40">{(foodCostPercent + packagingCostPercent).toFixed(1)}%</span>
                 <span>฿{Math.round(pnl.totalCogs).toLocaleString()}</span>
@@ -608,7 +722,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
 
           {/* 3. GROSS PROFIT */}
           <div className="flex justify-between px-3 py-2.5 font-bold text-[#10B981] bg-[#10B981]/10 rounded-xl text-sm border border-[#10B981]/20">
-            <span className="font-sans">กำไรขั้นต้น (Gross Profit)</span>
+            <span className="font-sans">{isTh ? 'กำไรขั้นต้น (Gross Profit)' : 'Gross Profit'}</span>
             <div className="flex items-center gap-4">
               <span>{pnl.grossMarginPercent.toFixed(1)}%</span>
               <span>฿{Math.round(pnl.grossProfit).toLocaleString()}</span>
@@ -617,7 +731,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
 
           {/* 3.1 CHANNEL FEES & TOTAL LABOR */}
           <div className="flex justify-between px-3 py-2 text-white/80 bg-white/[0.03] rounded-lg border border-white/5">
-            <span className="font-sans">หัก: ค่าธรรมเนียมแพลตฟอร์ม (Channel Fees / GP)</span>
+            <span className="font-sans">{isTh ? 'หัก: ค่าธรรมเนียมแพลตฟอร์ม (Channel Fees / GP)' : 'Less: Channel Commission Fees (GP)'}</span>
             <div className="flex items-center gap-4">
               <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((pnl.channelFees / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
               <span className="text-rose-300 font-mono">-฿{Math.round(pnl.channelFees).toLocaleString()}</span>
@@ -625,7 +739,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           </div>
 
           <div className="flex justify-between px-3 py-2 text-white/80 bg-white/[0.03] rounded-lg border border-white/5">
-            <span className="font-sans">หัก: ค่าแรงรวมทุกแผนก (Total Labor)</span>
+            <span className="font-sans">{isTh ? 'หัก: ค่าแรงรวมทุกแผนก (Total Labor)' : 'Less: Total Labor (All Departments)'}</span>
             <div className="flex items-center gap-4">
               <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((pnl.totalLabor / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
               <span className="text-purple-300 font-mono">-฿{Math.round(pnl.totalLabor).toLocaleString()}</span>
@@ -635,25 +749,25 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           {/* 4. PRIME COST HIGHLIGHT */}
           <div className="space-y-1.5 pt-2">
             <div className="text-[11px] font-bold font-sans text-purple-300 uppercase tracking-wider bg-purple-500/10 px-3 py-1.5 rounded-lg border border-purple-500/20 flex justify-between">
-              <span>การวิเคราะห์ PRIME COST (Total COGS + Total Labor)</span>
+              <span>{isTh ? 'การวิเคราะห์ PRIME COST (Total COGS + Total Labor)' : 'PRIME COST BREAKDOWN (Total COGS + Total Labor)'}</span>
               <span className="font-mono font-bold text-purple-300">{pnl.primeCostPercent.toFixed(1)}% of Net Sales</span>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ค่าแรงทีมงานครัว (Kitchen Direct Labor)</span>
+              <span className="font-sans">{isTh ? 'ค่าแรงทีมงานครัว (Kitchen Direct Labor)' : 'Kitchen Direct Labor'}</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((directKitchenLabor / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
                 <span>฿{directKitchenLabor.toLocaleString()}</span>
               </div>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ค่าแรงหน้าร้านและบริหาร (FOH & Admin Staff)</span>
+              <span className="font-sans">{isTh ? 'ค่าแรงหน้าร้านและบริหาร (FOH & Admin Staff)' : 'FOH & Admin Staff Labor'}</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((nonKitchenLabor / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
                 <span>฿{nonKitchenLabor.toLocaleString()}</span>
               </div>
             </div>
             <div className="flex justify-between px-3 py-1.5 font-bold text-purple-200 bg-purple-500/10 rounded-lg">
-              <span className="font-sans">ยอดรวม PRIME COST ทั้งหมด (COGS + Total Labor)</span>
+              <span className="font-sans">{isTh ? 'ยอดรวม PRIME COST ทั้งหมด (COGS + Total Labor)' : 'Total Prime Cost (COGS + Total Labor)'}</span>
               <span>฿{Math.round(pnl.primeCost).toLocaleString()}</span>
             </div>
           </div>
@@ -661,22 +775,22 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
           {/* 5. OPERATING EXPENSES */}
           <div className="space-y-1.5 pt-2">
             <div className="text-[11px] font-bold font-sans text-white/70 uppercase tracking-wider bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
-              4. ค่าใช้จ่ายดำเนินงานอื่นๆ (Operating Expenses / Overheads)
+              {isTh ? '4. ค่าใช้จ่ายดำเนินงานอื่นๆ (Operating Expenses / Overheads)' : '4. Operating Expenses (OPEX / Overheads)'}
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ค่าเช่าพื้นที่ (Rent)</span>
+              <span className="font-sans">{isTh ? 'ค่าเช่าพื้นที่ (Rent)' : 'Rent'}</span>
               <span>฿{Math.round(effectiveExpenses.filter(e => e.category === 'Rent').reduce((s, e) => s + getMonthlyExp(e), 0)).toLocaleString()}</span>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">สาธารณูปโภค (ค่าน้ำ ค่าไฟ ค่าแก๊ส)</span>
+              <span className="font-sans">{isTh ? 'สาธารณูปโภค (ค่าน้ำ ค่าไฟ ค่าแก๊ส)' : 'Utilities (Electricity, Water, Gas)'}</span>
               <span>฿{Math.round(effectiveExpenses.filter(e => ['Electricity', 'Water', 'Gas (LPG)'].includes(e.category)).reduce((s, e) => s + getMonthlyExp(e), 0)).toLocaleString()}</span>
             </div>
             <div className="flex justify-between px-3 py-1 text-white/70">
-              <span className="font-sans">ค่าการตลาด ซอฟต์แวร์ และอื่นๆ</span>
+              <span className="font-sans">{isTh ? 'ค่าการตลาด ซอฟต์แวร์ และอื่นๆ' : 'Marketing, Software & Other Overheads'}</span>
               <span>฿{Math.round(effectiveExpenses.filter(e => !['Rent', 'Electricity', 'Water', 'Gas (LPG)'].includes(e.category)).reduce((s, e) => s + getMonthlyExp(e), 0)).toLocaleString()}</span>
             </div>
             <div className="flex justify-between px-3 py-2 font-bold text-white bg-white/[0.04] rounded-lg border border-white/5">
-              <span className="font-sans">รวมค่าใช้จ่ายดำเนินงาน (Total OPEX)</span>
+              <span className="font-sans">{isTh ? 'รวมค่าใช้จ่ายดำเนินงาน (Total OPEX)' : 'Total Operating Expenses (OPEX)'}</span>
               <div className="flex items-center gap-4">
                 <span className="text-white/40">{operatingExpensePercent.toFixed(1)}%</span>
                 <span>฿{Math.round(operatingExpenses).toLocaleString()}</span>
@@ -686,7 +800,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
 
           {/* 6. OPERATING PROFIT */}
           <div className="flex justify-between px-3 py-2.5 font-bold text-white bg-white/5 rounded-xl text-sm border border-white/10">
-            <span className="font-sans">กำไรจากการดำเนินงาน (Operating Profit)</span>
+            <span className="font-sans">{isTh ? 'กำไรจากการดำเนินงาน (Operating Profit)' : 'Operating Profit'}</span>
             <div className="flex items-center gap-4">
               <span>{pnl.operatingMarginPercent.toFixed(1)}%</span>
               <span>฿{Math.round(pnl.operatingProfit).toLocaleString()}</span>
@@ -695,7 +809,11 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
 
           {/* 6.5 ESTIMATED INCOME TAX */}
           <div className="flex justify-between px-3 py-2 text-white/80 bg-white/[0.03] rounded-lg border border-white/5">
-            <span className="font-sans">หัก: ประมาณการภาษีเงินได้ ({incomeTaxRate}%) — ประมาณการ — โปรดยืนยันกับนักบัญชี</span>
+            <span className="font-sans">
+              {isTh
+                ? `หัก: ประมาณการภาษีเงินได้ (${incomeTaxRate}%) — ประมาณการ — โปรดยืนยันกับนักบัญชี`
+                : `Less: Estimated Income Tax (${incomeTaxRate}%) — Estimate — Confirm with accountant`}
+            </span>
             <div className="flex items-center gap-4">
               <span className="text-white/40 font-sans">{pnl.netSales > 0 ? ((pnl.taxAmount / pnl.netSales) * 100).toFixed(1) : '0.0'}%</span>
               <span className="text-amber-400 font-mono">-฿{Math.round(pnl.taxAmount).toLocaleString()}</span>
@@ -704,7 +822,7 @@ export const ProfitAndLossView: React.FC<ProfitAndLossViewProps> = ({
 
           {/* 7. NET PROFIT */}
           <div className="flex justify-between px-4 py-3.5 font-bold text-[#10B981] bg-[#10B981]/15 rounded-xl text-base border border-[#10B981]/30">
-            <span className="font-sans">กำไรสุทธิหลังหักภาษี (Net Profit)</span>
+            <span className="font-sans">{isTh ? 'กำไรสุทธิหลังหักภาษี (Net Profit)' : 'Net Profit (After Tax)'}</span>
             <div className="flex items-center gap-6">
               <span className="text-[#10B981] font-normal">{pnl.netMarginPercent.toFixed(1)}%</span>
               <span className="text-xl">฿{Math.round(pnl.netProfit).toLocaleString()}</span>

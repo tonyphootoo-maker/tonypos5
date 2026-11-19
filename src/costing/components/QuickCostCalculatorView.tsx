@@ -24,24 +24,26 @@ import {
 import { Ingredient, Sauce, MenuItem, RestaurantSettings } from '../types';
 import { calculateChannelSuggestedPrices, roundUpToStep } from '../services/calculationEngine';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
-import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
+import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { NumericInput } from './common/NumericInput';
 
 interface CalculatorItem {
   id: string;
   name: string;
   sourceIngredientId?: string;
-  purchasePrice: number; // AP Price (บาท)
-  packageSize: number; // AP Package Quantity (เช่น 1000 กรัม หรือ 1 ลิตร)
-  unit: string; // g, ml, ฟอง, ชิ้น, ใบ, ชุด
-  yieldPercent: number; // Yield % (เช่น 100% หรือ 70%)
-  quantityUsed: number; // ปริมาณที่ใช้ในจานนี้
+  purchasePrice: number;
+  packageSize: number;
+  unit: string;
+  yieldPercent: number;
+  quantityUsed: number;
 }
 
 interface QuickCostCalculatorViewProps {
   ingredients: Ingredient[];
   sauces: Sauce[];
   settings: RestaurantSettings;
+  lang?: 'th' | 'en';
   onSaveNewMenu?: (menu: MenuItem) => void;
   onNavigateToTab?: (tabId: string) => void;
 }
@@ -50,9 +52,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   ingredients,
   sauces,
   settings,
+  lang: propLang,
   onSaveNewMenu,
   onNavigateToTab,
 }) => {
+  const { lang: ctxLang } = useLanguage();
+  const lang = propLang ?? ctxLang;
   // Dish information
   const [dishName, setDishName] = useState<string>('ข้าวกะเพราหมูสับไข่ดาว (ตัวอย่าง)');
   const [dishEnglishName, setDishEnglishName] = useState<string>(() =>
@@ -225,7 +230,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
 
     const defaultItem: CalculatorItem = {
       id: `item-${Date.now()}`,
-      name: 'วัตถุดิบใหม่',
+      name: lang === 'en' ? 'New Ingredient' : 'วัตถุดิบใหม่',
       purchasePrice: 100,
       packageSize: 1000,
       unit: 'g',
@@ -267,7 +272,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
 
     const defaultItem: CalculatorItem = {
       id: `qf-${Date.now()}`,
-      name: 'เครื่องปรุงรส/น้ำมันใหม่',
+      name: lang === 'en' ? 'New Seasoning / Oil' : 'เครื่องปรุงรส/น้ำมันใหม่',
       purchasePrice: 50,
       packageSize: 1000,
       unit: 'ml',
@@ -309,7 +314,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
 
     const defaultItem: CalculatorItem = {
       id: `pkg-${Date.now()}`,
-      name: 'บรรจุภัณฑ์/อุปกรณ์ใหม่',
+      name: lang === 'en' ? 'New Packaging / Supply' : 'บรรจุภัณฑ์/อุปกรณ์ใหม่',
       purchasePrice: 120,
       packageSize: 50,
       unit: 'ใบ',
@@ -428,23 +433,23 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   const getBenchmarkStatus = (fcPercent: number) => {
     if (fcPercent <= 32) {
       return {
-        label: 'ดีมาก (On Target)',
-        desc: 'อยู่ในเกณฑ์กำไรมาตรฐานสากล (≤ 32%)',
+        label: lang === 'th' ? 'ดีมาก (On Target)' : 'Excellent (On Target)',
+        desc: lang === 'th' ? 'อยู่ในเกณฑ์กำไรมาตรฐานสากล (≤ 32%)' : 'Within international profitable benchmark (≤ 32%)',
         color: 'text-emerald-700 bg-emerald-50 border-emerald-200',
         badge: 'bg-emerald-600 text-white',
       };
     }
     if (fcPercent <= 38) {
       return {
-        label: 'ปานกลาง (Acceptable)',
-        desc: 'เฝ้าระวังต้นทุน ควบคุมปริมาณตัก (33% - 38%)',
+        label: lang === 'th' ? 'ปานกลาง (Acceptable)' : 'Moderate (Acceptable)',
+        desc: lang === 'th' ? 'เฝ้าระวังต้นทุน ควบคุมปริมาณตัก (33% - 38%)' : 'Watch portions carefully (33% - 38%)',
         color: 'text-amber-800 bg-amber-50 border-amber-200',
         badge: 'bg-amber-500 text-black font-bold',
       };
     }
     return {
-      label: 'ต้นทุนสูงเกินเกณฑ์ (High Cost)',
-      desc: 'เสี่ยงขาดทุน ควรปรับราคาหรือลดปริมาณ (> 38%)',
+      label: lang === 'th' ? 'ต้นทุนสูงเกินเกณฑ์ (High Cost)' : 'High Cost Alert',
+      desc: lang === 'th' ? 'เสี่ยงขาดทุน ควรปรับราคาหรือลดปริมาณ (> 38%)' : 'Risk of loss — adjust price or portions (> 38%)',
       color: 'text-rose-700 bg-rose-50 border-rose-200',
       badge: 'bg-rose-600 text-white',
     };
@@ -593,7 +598,11 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
     };
 
     onSaveNewMenu(newMenu);
-    setSavedSuccessMsg(`บันทึกเมนู "${dishName}" พร้อมแจกแจงรายการต้นทุนทั้งหมดสำเร็จแล้ว!`);
+    setSavedSuccessMsg(
+      lang === 'en'
+        ? `Saved menu "${getLocalizedText(lang, dishName, dishEnglishName)}" with full cost breakdown!`
+        : `บันทึกเมนู "${dishName}" พร้อมแจกแจงรายการต้นทุนทั้งหมดสำเร็จแล้ว!`
+    );
     setTimeout(() => setSavedSuccessMsg(null), 4000);
   };
 
@@ -606,33 +615,37 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
             <Calculator className="w-4 h-4" />
           </span>
           <h1 className="text-xl sm:text-2xl font-bold text-stone-900 tracking-tight">
-            เครื่องคิดเลขคำนวณต้นทุนอาหารตามหลักสากล (Recipe Cost Calculator)
+            {lang === 'en'
+              ? 'International Recipe Cost Calculator'
+              : 'เครื่องคิดเลขคำนวณต้นทุนอาหารตามหลักสากล (Recipe Cost Calculator)'}
           </h1>
         </div>
 
         {/* Quick Presets */}
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] text-stone-400 font-semibold mr-1">โหลดตัวอย่าง:</span>
+          <span className="text-[11px] text-stone-400 font-semibold mr-1">
+            {lang === 'en' ? 'Load Preset:' : 'โหลดตัวอย่าง:'}
+          </span>
           <button
             type="button"
             onClick={() => handleResetToPreset('KAPRAO')}
             className="px-3 py-1.5 bg-[#FAF8F5] hover:bg-[#F7F3EB] border border-[#EAE4D9] rounded-xl text-xs font-semibold text-stone-700 transition-colors cursor-pointer"
           >
-            กะเพราไข่ดาว
+            {lang === 'en' ? 'Holy Basil & Fried Egg' : 'กะเพราไข่ดาว'}
           </button>
           <button
             type="button"
             onClick={() => handleResetToPreset('STEAK')}
             className="px-3 py-1.5 bg-[#FAF8F5] hover:bg-[#F7F3EB] border border-[#EAE4D9] rounded-xl text-xs font-semibold text-stone-700 transition-colors cursor-pointer"
           >
-            สเต็กอกไก่
+            {lang === 'en' ? 'Chicken Breast Steak' : 'สเต็กอกไก่'}
           </button>
           <button
             type="button"
             onClick={() => handleResetToPreset('TOMYUM')}
             className="px-3 py-1.5 bg-[#FAF8F5] hover:bg-[#F7F3EB] border border-[#EAE4D9] rounded-xl text-xs font-semibold text-stone-700 transition-colors cursor-pointer"
           >
-            ต้มยำกุ้ง
+            {lang === 'en' ? 'Tom Yum Goong' : 'ต้มยำกุ้ง'}
           </button>
         </div>
       </div>
@@ -647,7 +660,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               onClick={() => onNavigateToTab('food_cost')}
               className="ml-auto underline text-xs font-bold text-emerald-900 cursor-pointer"
             >
-              ดูรายการเมนูทั้งหมด &rarr;
+              {lang === 'en' ? 'View All Menus' : 'ดูรายการเมนูทั้งหมด'} &rarr;
             </button>
           )}
         </div>
@@ -662,7 +675,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-bold text-stone-600 mb-1">
-                  ชื่อเมนูอาหาร (ไทย)
+                  {lang === 'en' ? 'Menu Name (Thai)' : 'ชื่อเมนูอาหาร (ไทย)'}
                 </label>
                 <input
                   type="text"
@@ -679,21 +692,21 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     setDishName(nextTh);
                   }}
                   className="w-full px-3 py-2 bg-white border border-[#D6CEBE] rounded-xl text-sm font-bold text-stone-900 focus:outline-none focus:border-[#F27D26]"
-                  placeholder="เช่น ข้าวกะเพราหมูสับไข่ดาว"
+                  placeholder={lang === 'en' ? 'e.g. Holy Basil Pork with Fried Egg' : 'เช่น ข้าวกะเพราหมูสับไข่ดาว'}
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-[11px] font-bold text-stone-600">
-                    ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)
+                    {lang === 'en' ? 'English Name (Auto-translated)' : 'ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)'}
                   </label>
                   <button
                     type="button"
                     onClick={() => setDishEnglishName(translateThaiToEnglish(dishName))}
                     className="text-[10px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                   >
-                    แปลใหม่
+                    {lang === 'en' ? 'Re-translate' : 'แปลใหม่'}
                   </button>
                 </div>
                 <input
@@ -701,25 +714,25 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                   value={dishEnglishName}
                   onChange={(e) => setDishEnglishName(e.target.value)}
                   className="w-full px-3 py-2 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-[#F27D26]"
-                  placeholder="Auto-translated English name"
+                  placeholder={lang === 'en' ? 'Auto-translated English name' : 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ'}
                 />
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold text-stone-600 mb-1">
-                  หมวดหมู่ (Category)
+                  {lang === 'en' ? 'Category' : 'หมวดหมู่ (Category)'}
                 </label>
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-[#D6CEBE] rounded-xl text-xs font-semibold text-stone-800 focus:outline-none focus:border-[#F27D26]"
                 >
-                  <option value="ผัดและกะเพรา">ผัดและกะเพรา</option>
-                  <option value="ทอดและกระเทียม">ทอดและกระเทียม</option>
-                  <option value="ต้มยำและแกง">ต้มยำและแกง</option>
-                  <option value="ข้าวผัดและเส้น">ข้าวผัดและเส้น</option>
-                  <option value="ทานเล่นและเครื่องดื่ม">ทานเล่นและเครื่องดื่ม</option>
-                  <option value="สเต็กและอาหารจานเดียว">สเต็กและอาหารจานเดียว</option>
+                  <option value="ผัดและกะเพรา">{lang === 'en' ? 'Stir-Fry & Holy Basil' : 'ผัดและกะเพรา'}</option>
+                  <option value="ทอดและกระเทียม">{lang === 'en' ? 'Fried & Garlic' : 'ทอดและกระเทียม'}</option>
+                  <option value="ต้มยำและแกง">{lang === 'en' ? 'Soups & Curries' : 'ต้มยำและแกง'}</option>
+                  <option value="ข้าวผัดและเส้น">{lang === 'en' ? 'Fried Rice & Noodles' : 'ข้าวผัดและเส้น'}</option>
+                  <option value="ทานเล่นและเครื่องดื่ม">{lang === 'en' ? 'Snacks & Drinks' : 'ทานเล่นและเครื่องดื่ม'}</option>
+                  <option value="สเต็กและอาหารจานเดียว">{lang === 'en' ? 'Steaks & Single-Dish Meals' : 'สเต็กและอาหารจานเดียว'}</option>
                 </select>
               </div>
             </div>
@@ -732,11 +745,15 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#F27D26]" />
                   <span className="font-bold text-stone-900 text-sm">
-                    1. รายการวัตถุดิบหลัก & สัดส่วนต่อจาน (Main Recipe Items)
+                    {lang === 'en'
+                      ? '1. Main Recipe Items & Portioning'
+                      : '1. รายการวัตถุดิบหลัก & สัดส่วนต่อจาน (Main Recipe Items)'}
                   </span>
                 </div>
                 <p className="text-[10px] text-stone-500 mt-0.5">
-                  เนื้อสัตว์, ผัก, ข้าว, เส้น, ซอสหลัก คิดราคาซื้อ (AP) แปลงเป็นต้นทุนเนื้อแท้ (EP) ตาม Yield %
+                  {lang === 'en'
+                    ? 'Meats, vegetables, rice, noodles & main sauces — converts As-Purchased (AP) price to Edible Portion (EP) cost by Yield %'
+                    : 'เนื้อสัตว์, ผัก, ข้าว, เส้น, ซอสหลัก คิดราคาซื้อ (AP) แปลงเป็นต้นทุนเนื้อแท้ (EP) ตาม Yield %'}
                 </p>
               </div>
 
@@ -745,17 +762,20 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                 {ingredients.length > 0 && (
                   <>
                     <div className="flex items-center gap-1">
-                      <span className="text-[11px] text-stone-500 font-bold hidden sm:inline">หมวด:</span>
+                      <span className="text-[11px] text-stone-500 font-bold hidden sm:inline">
+                        {lang === 'en' ? 'Cat:' : 'หมวด:'}
+                      </span>
                       <select
                         value={selectedQuickCategory}
                         onChange={(e) => setSelectedQuickCategory(e.target.value)}
                         className="text-xs px-2 py-1.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-800 font-semibold cursor-pointer max-w-[140px]"
-                        title="เลือกหมวดหมู่วัตถุดิบก่อน"
+                        title={lang === 'en' ? 'Select ingredient category first' : 'เลือกหมวดหมู่วัตถุดิบก่อน'}
                       >
-                        <option value="ALL">📁 ทุกหมวดหมู่</option>
+                        <option value="ALL">{lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวดหมู่'}</option>
                         {quickCategories.map((cat) => (
                           <option key={cat} value={cat}>
-                            {cat === 'เนื้อสัตว์และอาหารทะเล' ? '🥩 ' : cat === 'ผักและสมุนไพร' ? '🥬 ' : cat === 'เครื่องปรุงและซอส' ? '🧂 ' : cat === 'ข้าวและเส้น' ? '🍚 ' : cat === 'ไข่และเต้าหู้' ? '🥚 ' : cat === 'บรรจุภัณฑ์' ? '🥡 ' : '📦 '}{cat}
+                            {cat === 'เนื้อสัตว์และอาหารทะเล' ? '🥩 ' : cat === 'ผักและสมุนไพร' ? '🥬 ' : cat === 'เครื่องปรุงและซอส' ? '🧂 ' : cat === 'ข้าวและเส้น' ? '🍚 ' : cat === 'ไข่และเต้าหู้' ? '🥚 ' : cat === 'บรรจุภัณฑ์' ? '🥡 ' : '📦 '}
+                            {getLocalizedText(lang, cat)}
                           </option>
                         ))}
                       </select>
@@ -770,12 +790,16 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       }}
                       defaultValue=""
                       className="text-xs px-2.5 py-1.5 bg-white border border-amber-300 rounded-xl text-stone-900 font-bold cursor-pointer max-w-[170px] truncate shadow-2xs focus:ring-2 focus:ring-[#F27D26]"
-                      title="เลือกวัตถุดิบย่อยเพื่อเพิ่มเข้าสูตร"
+                      title={lang === 'en' ? 'Select ingredient to add to recipe' : 'เลือกวัตถุดิบย่อยเพื่อเพิ่มเข้าสูตร'}
                     >
-                      <option value="" disabled>+ ดึงวัตถุดิบย่อย ({filteredQuickIngredients.length})...</option>
+                      <option value="" disabled>
+                        {lang === 'en'
+                          ? `+ Add Ingredient (${filteredQuickIngredients.length})...`
+                          : `+ ดึงวัตถุดิบย่อย (${filteredQuickIngredients.length})...`}
+                      </option>
                       {filteredQuickIngredients.map((ing) => (
                         <option key={ing.id} value={ing.id}>
-                          {ing.name} ({ing.pricePerPack ?? ing.purchasePrice}฿/{ing.packQuantity ?? ing.purchaseQuantity}{ing.packUnit ?? ing.purchaseUnit})
+                          {getLocalizedText(lang, ing.name)} ({ing.pricePerPack ?? ing.purchasePrice}฿/{ing.packQuantity ?? ing.purchaseQuantity}{localizeUnit(ing.packUnit ?? ing.purchaseUnit, lang)})
                         </option>
                       ))}
                     </select>
@@ -787,7 +811,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                   className="px-3 py-1.5 bg-[#F27D26] hover:bg-[#d96817] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1 cursor-pointer shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  เพิ่มแถว
+                  {lang === 'en' ? 'Add Row' : 'เพิ่มแถว'}
                 </button>
               </div>
             </div>
@@ -797,12 +821,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-[#F7F3EB] border-b border-[#EAE4D9] text-stone-600 text-[10px] uppercase font-bold tracking-wider">
-                    <th className="py-2.5 px-3 min-w-[140px]">ชื่อวัตถุดิบ</th>
-                    <th className="py-2.5 px-2 text-right">ราคาซื้อ (AP)</th>
-                    <th className="py-2.5 px-2 text-right">ขนาดยกแพ็ค</th>
+                    <th className="py-2.5 px-3 min-w-[140px]">{lang === 'en' ? 'Ingredient' : 'ชื่อวัตถุดิบ'}</th>
+                    <th className="py-2.5 px-2 text-right">{lang === 'en' ? 'Purchase (AP)' : 'ราคาซื้อ (AP)'}</th>
+                    <th className="py-2.5 px-2 text-right">{lang === 'en' ? 'Pack Size' : 'ขนาดยกแพ็ค'}</th>
                     <th className="py-2.5 px-2 text-center">Yield %</th>
-                    <th className="py-2.5 px-2 text-right">ปริมาณในจาน</th>
-                    <th className="py-2.5 px-3 text-right">ต้นทุนจริง (฿)</th>
+                    <th className="py-2.5 px-2 text-right">{lang === 'en' ? 'Qty / Dish' : 'ปริมาณในจาน'}</th>
+                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Net Cost (฿)' : 'ต้นทุนจริง (฿)'}</th>
                     <th className="py-2.5 px-2 text-center w-8"></th>
                   </tr>
                 </thead>
@@ -812,7 +836,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       <td className="py-2.5 px-3">
                         <input
                           type="text"
-                          value={row.name}
+                          value={lang === 'en' ? getLocalizedText(lang, row.name) : row.name}
                           onChange={(e) => handleUpdateItem(row.id, 'name', e.target.value)}
                           className="w-full bg-transparent border-b border-transparent hover:border-stone-300 focus:border-[#F27D26] focus:bg-white text-stone-900 font-semibold text-xs px-1 py-0.5 rounded focus:outline-none"
                         />
@@ -838,7 +862,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                           />
                           <input
                             type="text"
-                            value={row.unit}
+                            value={lang === 'en' ? localizeUnit(row.unit, lang) : row.unit}
                             onChange={(e) => handleUpdateItem(row.id, 'unit', e.target.value)}
                             className="w-10 text-center bg-transparent border-b border-stone-200 text-stone-600 text-[10px]"
                           />
@@ -869,7 +893,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                             onValueChange={(val) => handleUpdateItem(row.id, 'quantityUsed', val)}
                             className="w-16 text-right bg-white border border-[#D6CEBE] rounded-lg px-1.5 py-0.5 font-mono text-xs font-bold text-stone-900"
                           />
-                          <span className="text-[10px] text-stone-500 w-6 text-left">{row.unit}</span>
+                          <span className="text-[10px] text-stone-500 w-6 text-left">{localizeUnit(row.unit, lang)}</span>
                         </div>
                       </td>
 
@@ -882,7 +906,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                           type="button"
                           onClick={() => handleRemoveItem(row.id)}
                           className="p-1 text-stone-400 hover:text-rose-600 transition-colors cursor-pointer"
-                          title="ลบแถว"
+                          title={lang === 'en' ? 'Remove Row' : 'ลบแถว'}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -896,7 +920,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
             {/* Direct Cost Subtotal Strip */}
             <div className="p-4 bg-[#FAF8F5] border-t border-[#EAE4D9] flex justify-between items-center text-xs">
               <span className="font-semibold text-stone-600">
-                รวมต้นทุนวัตถุดิบหลัก ({calculatedRows.length} รายการ):
+                {lang === 'en'
+                  ? `Main Recipe Ingredients Subtotal (${calculatedRows.length} items):`
+                  : `รวมต้นทุนวัตถุดิบหลัก (${calculatedRows.length} รายการ):`}
               </span>
               <span className="font-mono text-base font-bold text-stone-900">
                 ฿{directFoodCost.toFixed(2)}
@@ -911,10 +937,14 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <div>
                 <span className="font-bold text-stone-900 text-sm flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-[#B45309]" />
-                  2. ต้นทุนส่วนเพิ่มตามรายการจริง (Q-Factor & Packaging Items)
+                  {lang === 'en'
+                    ? '2. Itemized Extra Costs (Q-Factor & Packaging Items)'
+                    : '2. ต้นทุนส่วนเพิ่มตามรายการจริง (Q-Factor & Packaging Items)'}
                 </span>
                 <p className="text-[10px] text-stone-500 mt-0.5">
-                  ระบุราคาซื้อจริง (AP), ขนาดยกแพ็ค และปริมาณที่ใช้ต่อจานอย่างละเอียด ไร้การคาดคะเน
+                  {lang === 'en'
+                    ? 'Specify exact purchase price (AP), pack size, and quantity per dish with zero guesswork'
+                    : 'ระบุราคาซื้อจริง (AP), ขนาดยกแพ็ค และปริมาณที่ใช้ต่อจานอย่างละเอียด ไร้การคาดคะเน'}
                 </p>
               </div>
 
@@ -929,7 +959,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       : 'text-stone-600 hover:text-stone-900'
                   }`}
                 >
-                  ทั้งหมด (Both)
+                  {lang === 'en' ? 'Both' : 'ทั้งหมด (Both)'}
                 </button>
                 <button
                   type="button"
@@ -940,7 +970,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       : 'text-stone-600 hover:text-stone-900'
                   }`}
                 >
-                  📦 บรรจุภัณฑ์ ({packagingItems.length})
+                  📦 {lang === 'en' ? 'Packaging' : 'บรรจุภัณฑ์'} ({packagingItems.length})
                 </button>
                 <button
                   type="button"
@@ -951,7 +981,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       : 'text-stone-600 hover:text-stone-900'
                   }`}
                 >
-                  🧂 เครื่องปรุงย่อย ({qFactorItems.length})
+                  🧂 {lang === 'en' ? 'Seasoning' : 'เครื่องปรุงย่อย'} ({qFactorItems.length})
                 </button>
               </div>
             </div>
@@ -963,10 +993,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                   <div className="flex items-center gap-2">
                     <Box className="w-4 h-4 text-[#F27D26]" />
                     <span className="font-bold text-stone-800 text-xs">
-                      กล่อง & บรรจุภัณฑ์ & อุปกรณ์จัดเสิร์ฟ (Packaging Items)
+                      {lang === 'en'
+                        ? 'Boxes, Packaging & Serving Supplies'
+                        : 'กล่อง & บรรจุภัณฑ์ & อุปกรณ์จัดเสิร์ฟ (Packaging Items)'}
                     </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 font-mono font-semibold">
-                      {packagingItems.length} รายการ
+                      {lang === 'en' ? `${packagingItems.length} items` : `${packagingItems.length} รายการ`}
                     </span>
                   </div>
 
@@ -976,7 +1008,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     className="px-2.5 py-1 bg-white hover:bg-stone-50 border border-[#D6CEBE] text-stone-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    เพิ่มบรรจุภัณฑ์
+                    {lang === 'en' ? 'Add Packaging' : 'เพิ่มบรรจุภัณฑ์'}
                   </button>
                 </div>
 
@@ -984,12 +1016,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-[#FAF8F5] border-b border-[#EAE4D9] text-stone-600 text-[10px] uppercase font-bold tracking-wider">
-                        <th className="py-2 px-3 min-w-[140px]">ชื่อบรรจุภัณฑ์ / อุปกรณ์</th>
-                        <th className="py-2 px-2 text-right">ราคาซื้อ (AP ฿)</th>
-                        <th className="py-2 px-2 text-right">ขนาดยกแพ็ค</th>
+                        <th className="py-2 px-3 min-w-[140px]">{lang === 'en' ? 'Packaging / Supply' : 'ชื่อบรรจุภัณฑ์ / อุปกรณ์'}</th>
+                        <th className="py-2 px-2 text-right">{lang === 'en' ? 'Purchase (AP ฿)' : 'ราคาซื้อ (AP ฿)'}</th>
+                        <th className="py-2 px-2 text-right">{lang === 'en' ? 'Pack Size' : 'ขนาดยกแพ็ค'}</th>
                         <th className="py-2 px-2 text-center">Yield %</th>
-                        <th className="py-2 px-2 text-right">จำนวนที่ใช้ในจาน</th>
-                        <th className="py-2 px-3 text-right">ต้นทุนจริง (฿)</th>
+                        <th className="py-2 px-2 text-right">{lang === 'en' ? 'Qty / Dish' : 'จำนวนที่ใช้ในจาน'}</th>
+                        <th className="py-2 px-3 text-right">{lang === 'en' ? 'Net Cost (฿)' : 'ต้นทุนจริง (฿)'}</th>
                         <th className="py-2 px-2 text-center w-8"></th>
                       </tr>
                     </thead>
@@ -999,7 +1031,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                           <td className="py-2 px-3">
                             <input
                               type="text"
-                              value={row.name}
+                              value={lang === 'en' ? getLocalizedText(lang, row.name) : row.name}
                               onChange={(e) => handleUpdatePackagingItem(row.id, 'name', e.target.value)}
                               className="w-full bg-transparent border-b border-transparent hover:border-stone-300 focus:border-[#F27D26] focus:bg-white text-stone-900 font-semibold text-xs px-1 py-0.5 rounded focus:outline-none"
                             />
@@ -1023,7 +1055,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                               />
                               <input
                                 type="text"
-                                value={row.unit}
+                                value={lang === 'en' ? localizeUnit(row.unit, lang) : row.unit}
                                 onChange={(e) => handleUpdatePackagingItem(row.id, 'unit', e.target.value)}
                                 className="w-10 text-center bg-transparent border-b border-stone-200 text-stone-600 text-[10px]"
                               />
@@ -1048,7 +1080,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                                 onValueChange={(val) => handleUpdatePackagingItem(row.id, 'quantityUsed', val)}
                                 className="w-14 text-right bg-white border border-[#D6CEBE] rounded-lg px-1.5 py-0.5 font-mono text-xs font-bold text-stone-900"
                               />
-                              <span className="text-[10px] text-stone-500 w-6 text-left">{row.unit}</span>
+                              <span className="text-[10px] text-stone-500 w-6 text-left">{localizeUnit(row.unit, lang)}</span>
                             </div>
                           </td>
                           <td className="py-2 px-3 text-right font-mono font-bold text-stone-900">
@@ -1059,7 +1091,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                               type="button"
                               onClick={() => handleRemovePackagingItem(row.id)}
                               className="p-1 text-stone-400 hover:text-rose-600 transition-colors cursor-pointer"
-                              title="ลบแถว"
+                              title={lang === 'en' ? 'Remove Row' : 'ลบแถว'}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1071,7 +1103,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                 </div>
 
                 <div className="px-5 py-2.5 bg-[#FAF8F5]/80 flex justify-between items-center text-xs">
-                  <span className="text-stone-600 font-semibold">รวมต้นทุนบรรจุภัณฑ์ต่อจาน:</span>
+                  <span className="text-stone-600 font-semibold">
+                    {lang === 'en' ? 'Total Packaging Cost / Dish:' : 'รวมต้นทุนบรรจุภัณฑ์ต่อจาน:'}
+                  </span>
                   <span className="font-mono font-bold text-stone-900">฿{totalPackagingCost.toFixed(2)}</span>
                 </div>
               </div>
@@ -1084,10 +1118,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                   <div className="flex items-center gap-2">
                     <Flame className="w-4 h-4 text-[#F27D26]" />
                     <span className="font-bold text-stone-800 text-xs">
-                      เครื่องปรุงรสย่อย & น้ำมัน & ของเสียหน้าเตา (Q-Factor / Seasoning Items)
+                      {lang === 'en'
+                        ? 'Seasonings, Oil & Cooking Waste (Q-Factor)'
+                        : 'เครื่องปรุงรสย่อย & น้ำมัน & ของเสียหน้าเตา (Q-Factor / Seasoning Items)'}
                     </span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 font-mono font-semibold">
-                      {qFactorItems.length} รายการ
+                      {lang === 'en' ? `${qFactorItems.length} items` : `${qFactorItems.length} รายการ`}
                     </span>
                   </div>
 
@@ -1097,7 +1133,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     className="px-2.5 py-1 bg-white hover:bg-stone-50 border border-[#D6CEBE] text-stone-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    เพิ่มเครื่องปรุงย่อย
+                    {lang === 'en' ? 'Add Seasoning' : 'เพิ่มเครื่องปรุงย่อย'}
                   </button>
                 </div>
 
@@ -1105,12 +1141,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-[#FAF8F5] border-b border-[#EAE4D9] text-stone-600 text-[10px] uppercase font-bold tracking-wider">
-                        <th className="py-2 px-3 min-w-[140px]">ชื่อเครื่องปรุง / น้ำมัน / ของหน้าเตา</th>
-                        <th className="py-2 px-2 text-right">ราคาซื้อ (AP ฿)</th>
-                        <th className="py-2 px-2 text-right">ขนาดยกแพ็ค</th>
+                        <th className="py-2 px-3 min-w-[140px]">{lang === 'en' ? 'Seasoning / Oil / Prep Loss' : 'ชื่อเครื่องปรุง / น้ำมัน / ของหน้าเตา'}</th>
+                        <th className="py-2 px-2 text-right">{lang === 'en' ? 'Purchase (AP ฿)' : 'ราคาซื้อ (AP ฿)'}</th>
+                        <th className="py-2 px-2 text-right">{lang === 'en' ? 'Pack Size' : 'ขนาดยกแพ็ค'}</th>
                         <th className="py-2 px-2 text-center">Yield %</th>
-                        <th className="py-2 px-2 text-right">ปริมาณที่ใช้ในจาน</th>
-                        <th className="py-2 px-3 text-right">ต้นทุนจริง (฿)</th>
+                        <th className="py-2 px-2 text-right">{lang === 'en' ? 'Qty / Dish' : 'ปริมาณที่ใช้ในจาน'}</th>
+                        <th className="py-2 px-3 text-right">{lang === 'en' ? 'Net Cost (฿)' : 'ต้นทุนจริง (฿)'}</th>
                         <th className="py-2 px-2 text-center w-8"></th>
                       </tr>
                     </thead>
@@ -1120,7 +1156,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                           <td className="py-2 px-3">
                             <input
                               type="text"
-                              value={row.name}
+                              value={lang === 'en' ? getLocalizedText(lang, row.name) : row.name}
                               onChange={(e) => handleUpdateQFactorItem(row.id, 'name', e.target.value)}
                               className="w-full bg-transparent border-b border-transparent hover:border-stone-300 focus:border-[#F27D26] focus:bg-white text-stone-900 font-semibold text-xs px-1 py-0.5 rounded focus:outline-none"
                             />
@@ -1144,7 +1180,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                               />
                               <input
                                 type="text"
-                                value={row.unit}
+                                value={lang === 'en' ? localizeUnit(row.unit, lang) : row.unit}
                                 onChange={(e) => handleUpdateQFactorItem(row.id, 'unit', e.target.value)}
                                 className="w-10 text-center bg-transparent border-b border-stone-200 text-stone-600 text-[10px]"
                               />
@@ -1169,7 +1205,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                                 onValueChange={(val) => handleUpdateQFactorItem(row.id, 'quantityUsed', val)}
                                 className="w-14 text-right bg-white border border-[#D6CEBE] rounded-lg px-1.5 py-0.5 font-mono text-xs font-bold text-stone-900"
                               />
-                              <span className="text-[10px] text-stone-500 w-6 text-left">{row.unit}</span>
+                              <span className="text-[10px] text-stone-500 w-6 text-left">{localizeUnit(row.unit, lang)}</span>
                             </div>
                           </td>
                           <td className="py-2 px-3 text-right font-mono font-bold text-stone-900">
@@ -1180,7 +1216,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                               type="button"
                               onClick={() => handleRemoveQFactorItem(row.id)}
                               className="p-1 text-stone-400 hover:text-rose-600 transition-colors cursor-pointer"
-                              title="ลบแถว"
+                              title={lang === 'en' ? 'Remove Row' : 'ลบแถว'}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1192,7 +1228,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                 </div>
 
                 <div className="px-5 py-2.5 bg-[#FAF8F5]/80 flex justify-between items-center text-xs">
-                  <span className="text-stone-600 font-semibold">รวมต้นทุนเครื่องปรุงย่อย (Q-Factor) ต่อจาน:</span>
+                  <span className="text-stone-600 font-semibold">
+                    {lang === 'en' ? 'Total Q-Factor Cost / Dish:' : 'รวมต้นทุนเครื่องปรุงย่อย (Q-Factor) ต่อจาน:'}
+                  </span>
                   <span className="font-mono font-bold text-stone-900">฿{totalQFactorCost.toFixed(2)}</span>
                 </div>
               </div>
@@ -1206,21 +1244,21 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
           <div className="bg-[#FFFDF9] border border-[#EAE4D9] rounded-2xl p-5 sm:p-6 shadow-md space-y-5">
             <div className="border-b border-[#EAE4D9] pb-4">
               <span className="text-[10px] uppercase font-bold tracking-widest text-stone-500 block">
-                ต้นทุนอาหารต่อจาน (Food Cost หน้าร้าน)
+                {lang === 'en' ? 'Dine-In Food Cost / Portion' : 'ต้นทุนอาหารต่อจาน (Food Cost หน้าร้าน)'}
               </span>
               <div className="text-3xl sm:text-4xl font-mono font-bold text-stone-900 mt-1">
                 ฿{foodOnlyCostPerPortion.toFixed(2)}
               </div>
               <div className="flex items-center gap-2 mt-2 text-xs text-stone-500 flex-wrap">
                 <span className="bg-[#FAF8F5] px-2 py-0.5 rounded-md border border-[#EAE4D9]">
-                  วัตถุดิบ ฿{directFoodCost.toFixed(2)}
+                  {lang === 'en' ? 'Ingredients' : 'วัตถุดิบ'} ฿{directFoodCost.toFixed(2)}
                 </span>
                 <span>+</span>
                 <span className="bg-[#FAF8F5] px-2 py-0.5 rounded-md border border-[#EAE4D9]">
-                  เครื่องปรุง ฿{totalQFactorCost.toFixed(2)}
+                  {lang === 'en' ? 'Seasoning' : 'เครื่องปรุง'} ฿{totalQFactorCost.toFixed(2)}
                 </span>
                 <span className="bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 text-amber-800 font-semibold">
-                  + บรรจุภัณฑ์ (Takeaway/Delivery) ฿{totalPackagingCost.toFixed(2)}
+                  + {lang === 'en' ? 'Packaging (Takeaway/Delivery)' : 'บรรจุภัณฑ์ (Takeaway/Delivery)'} ฿{totalPackagingCost.toFixed(2)}
                 </span>
               </div>
             </div>
@@ -1229,7 +1267,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-stone-800 mb-1">
-                  ราคาขายปัจจุบันที่ตั้งไว้ (Selling Price) {isVatInclusive ? `(รวม VAT ${vatRate}% • Net ฿${netSellingPrice.toFixed(2)})` : ''}
+                  {lang === 'en' ? 'Current Selling Price' : 'ราคาขายปัจจุบันที่ตั้งไว้ (Selling Price)'}{' '}
+                  {isVatInclusive
+                    ? lang === 'en'
+                      ? `(Incl. VAT ${vatRate}% • Net ฿${netSellingPrice.toFixed(2)})`
+                      : `(รวม VAT ${vatRate}% • Net ฿${netSellingPrice.toFixed(2)})`
+                    : ''}
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 font-bold">฿</span>
@@ -1246,7 +1289,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <div className={`p-4 rounded-xl border ${status.color} space-y-2`}>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold uppercase tracking-wider">
-                    Food Cost % ปัจจุบัน
+                    {lang === 'en' ? 'Current Food Cost %' : 'Food Cost % ปัจจุบัน'}
                   </span>
                   <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold ${status.badge}`}>
                     {status.label}
@@ -1257,7 +1300,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     {actualFoodCostPercent.toFixed(1)}%
                   </span>
                   <span className="text-xs font-semibold">
-                    (เป้าหมาย ≤ {targetFcPercent}%)
+                    ({lang === 'en' ? 'Target' : 'เป้าหมาย'} ≤ {targetFcPercent}%)
                   </span>
                 </div>
                 {/* Progress bar */}
@@ -1282,10 +1325,12 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <div className="p-3.5 bg-[#FAF8F5] border border-[#EAE4D9] rounded-xl flex items-center justify-between text-xs">
                 <div>
                   <span className="font-bold text-stone-800 block">
-                    กำไรส่วนเกินต่อจาน (หน้าร้าน ไม่รวมกล่อง)
+                    {lang === 'en' ? 'Contribution Margin / Dish (Dine-in, Excl. Box)' : 'กำไรส่วนเกินต่อจาน (หน้าร้าน ไม่รวมกล่อง)'}
                   </span>
                   <span className="text-[10px] text-stone-500">
-                    ราคา Net ฿{netSellingPrice.toFixed(2)} หักต้นทุนอาหาร ฿{foodOnlyCostPerPortion.toFixed(2)}
+                    {lang === 'en'
+                      ? `Net Price ฿${netSellingPrice.toFixed(2)} minus Food Cost ฿${foodOnlyCostPerPortion.toFixed(2)}`
+                      : `ราคา Net ฿${netSellingPrice.toFixed(2)} หักต้นทุนอาหาร ฿${foodOnlyCostPerPortion.toFixed(2)}`}
                   </span>
                 </div>
                 <div className="text-right">
@@ -1293,7 +1338,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     {contributionMargin >= 0 ? `+฿${contributionMargin.toFixed(2)}` : `-฿${Math.abs(contributionMargin).toFixed(2)}`}
                   </span>
                   <span className="text-[10px] font-mono text-stone-500">
-                    Margin {marginPercent.toFixed(1)}%
+                    {lang === 'en' ? 'Margin' : 'อัตรากำไร'} {marginPercent.toFixed(1)}%
                   </span>
                 </div>
               </div>
@@ -1303,7 +1348,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
             <div className="pt-4 border-t border-[#EAE4D9] space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-stone-800">
-                  เกณฑ์เป้าหมาย Food Cost % (Target Benchmark)
+                  {lang === 'en' ? 'Target Food Cost % Benchmark' : 'เกณฑ์เป้าหมาย Food Cost % (Target Benchmark)'}
                 </span>
                 <span className="font-mono font-bold text-[#F27D26] text-sm">
                   {targetFcPercent}%
@@ -1323,14 +1368,16 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <div className="p-4 bg-amber-50/60 border border-amber-200/80 rounded-xl space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-stone-800">
-                    ราคาขายหน้าร้านที่แนะนำ (Suggested Price):
+                    {lang === 'en' ? 'Suggested Dine-in Price:' : 'ราคาขายหน้าร้านที่แนะนำ (Suggested Price):'}
                   </span>
                   <span className="font-mono text-lg font-bold text-amber-900">
                     ฿{suggestedSellingPrice}
                   </span>
                 </div>
                 <p className="text-[10px] text-stone-600">
-                  ต้นทุนอาหาร ฿{foodOnlyCostPerPortion.toFixed(2)} ÷ {targetFcPercent}%{isVatInclusive ? ` × VAT ${vatRate}%` : ''} (ปัดขึ้นทีละ {roundingStep}฿ = ฿{suggestedSellingPrice})
+                  {lang === 'en'
+                    ? `Food Cost ฿${foodOnlyCostPerPortion.toFixed(2)} ÷ ${targetFcPercent}%${isVatInclusive ? ` × VAT ${vatRate}%` : ''} (rounded up by ${roundingStep}฿ = ฿${suggestedSellingPrice})`
+                    : `ต้นทุนอาหาร ฿${foodOnlyCostPerPortion.toFixed(2)} ÷ ${targetFcPercent}%${isVatInclusive ? ` × VAT ${vatRate}%` : ''} (ปัดขึ้นทีละ ${roundingStep}฿ = ฿${suggestedSellingPrice})`}
                 </p>
                 {suggestedSellingPrice > sellingPrice && (
                   <button
@@ -1338,7 +1385,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     onClick={() => setSellingPrice(roundUpToStep(suggestedSellingPrice, roundingStep))}
                     className="w-full mt-2 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
                   >
-                    ปรับใช้ราคาแนะนำ ฿{suggestedSellingPrice} ทันที
+                    {lang === 'en' ? `Apply Suggested Price ฿${suggestedSellingPrice}` : `ปรับใช้ราคาแนะนำ ฿${suggestedSellingPrice} ทันที`}
                   </button>
                 )}
               </div>
@@ -1347,14 +1394,18 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
               <div className="p-4 bg-[#FAF8F5] border border-[#EAE4D9] rounded-xl space-y-2 text-xs">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-stone-800">
-                    ราคาขายเดลิเวอรี (GP {deliveryGpPercent}%{hasGpVat ? ` + VAT = ${effectiveDeliveryGpPercent.toFixed(1)}%` : ''})
+                    {lang === 'en'
+                      ? `Delivery Price (GP ${deliveryGpPercent}%${hasGpVat ? ` + VAT = ${effectiveDeliveryGpPercent.toFixed(1)}%` : ''})`
+                      : `ราคาขายเดลิเวอรี (GP ${deliveryGpPercent}%${hasGpVat ? ` + VAT = ${effectiveDeliveryGpPercent.toFixed(1)}%` : ''})`}
                   </span>
                   <span className="font-mono text-base font-bold text-stone-900">
                     ฿{suggestedDeliveryPrice}
                   </span>
                 </div>
                 <p className="text-[10px] text-stone-500">
-                  ครอบคลุมค่ากล่อง ฿{totalPackagingCost.toFixed(2)} และ Effective GP {effectiveDeliveryGpPercent.toFixed(1)}% ปัดขึ้นเป็น ฿{suggestedDeliveryPrice}
+                  {lang === 'en'
+                    ? `Covers packaging ฿${totalPackagingCost.toFixed(2)} & Effective GP ${effectiveDeliveryGpPercent.toFixed(1)}%, rounded up to ฿${suggestedDeliveryPrice}`
+                    : `ครอบคลุมค่ากล่อง ฿${totalPackagingCost.toFixed(2)} และ Effective GP ${effectiveDeliveryGpPercent.toFixed(1)}% ปัดขึ้นเป็น ฿${suggestedDeliveryPrice}`}
                 </p>
               </div>
             </div>
@@ -1367,7 +1418,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                 className="flex-1 py-3 bg-[#F27D26] hover:bg-[#d96817] text-white rounded-xl text-xs font-bold shadow-md shadow-[#F27D26]/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Save className="w-4 h-4" />
-                บันทึกเข้าสู่คลังเมนูอาหาร
+                {lang === 'en' ? 'Save to Menu Catalog' : 'บันทึกเข้าสู่คลังเมนูอาหาร'}
               </button>
 
               <button
@@ -1376,7 +1427,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                 className="px-4 py-3 bg-white hover:bg-stone-50 border border-[#D6CEBE] text-stone-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
               >
                 <Printer className="w-4 h-4" />
-                พิมพ์ Recipe Sheet
+                {lang === 'en' ? 'Print Recipe Sheet' : 'พิมพ์ Recipe Sheet'}
               </button>
             </div>
           </div>
@@ -1385,26 +1436,32 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
           <div className="bg-[#FAF8F5] border border-[#EAE4D9] rounded-2xl p-4 text-xs space-y-2.5">
             <div className="flex items-center gap-2 font-bold text-stone-800">
               <Info className="w-4 h-4 text-[#F27D26]" />
-              <span>หลักสากลในการคำนวณ Food Cost (International Standards)</span>
+              <span>{lang === 'en' ? 'International Food Cost Standards' : 'หลักสากลในการคำนวณ Food Cost (International Standards)'}</span>
             </div>
             <ul className="space-y-1.5 text-[11px] text-stone-600 list-disc list-inside">
               <li>
-                <strong className="text-stone-800">As-Purchased (AP):</strong> ราคาซื้อวัตถุดิบยกแพ็ค/กิโลกรัม
+                <strong className="text-stone-800">As-Purchased (AP):</strong>{' '}
+                {lang === 'en' ? 'Bulk/kg ingredient purchase price' : 'ราคาซื้อวัตถุดิบยกแพ็ค/กิโลกรัม'}
               </li>
               <li>
-                <strong className="text-stone-800">Usable Yield %:</strong> น้ำหนักส่วนที่ทานได้จริงหลังตัดแต่งลอกหนัง/เอ็น/เด็ดใบ
+                <strong className="text-stone-800">Usable Yield %:</strong>{' '}
+                {lang === 'en' ? 'Edible weight ratio remaining after trimming/peeling/prep' : 'น้ำหนักส่วนที่ทานได้จริงหลังตัดแต่งลอกหนัง/เอ็น/เด็ดใบ'}
               </li>
               <li>
-                <strong className="text-stone-800">Edible Portion (EP):</strong> ต้นทุนเนื้อแท้หลังตัดแต่ง = AP Price ÷ Yield %
+                <strong className="text-stone-800">Edible Portion (EP):</strong>{' '}
+                {lang === 'en' ? 'True net portion cost = AP Price ÷ Yield %' : 'ต้นทุนเนื้อแท้หลังตัดแต่ง = AP Price ÷ Yield %'}
               </li>
               <li>
-                <strong className="text-stone-800">Q-Factor:</strong> แจกแจงรายการเครื่องปรุงย่อย น้ำมัน ซอส และของเสียหน้าเตาตามการใช้จริง
+                <strong className="text-stone-800">Q-Factor:</strong>{' '}
+                {lang === 'en' ? 'Itemized minor seasonings, cooking oils & stove prep waste' : 'แจกแจงรายการเครื่องปรุงย่อย น้ำมัน ซอส และของเสียหน้าเตาตามการใช้จริง'}
               </li>
               <li>
-                <strong className="text-stone-800">Packaging:</strong> แจกแจงรายการกล่อง ถุง ช้อนส้อม และซองเครื่องปรุงตามชิ้นที่ใช้จริง
+                <strong className="text-stone-800">Packaging:</strong>{' '}
+                {lang === 'en' ? 'Itemized boxes, bags, cutlery & condiment packets per dish' : 'แจกแจงรายการกล่อง ถุง ช้อนส้อม และซองเครื่องปรุงตามชิ้นที่ใช้จริง'}
               </li>
               <li>
-                <strong className="text-stone-800">Food Cost %:</strong> สัดส่วนต้นทุนรวมต่อราคาขาย มาตรฐานภัตตาคาร 28% - 35%
+                <strong className="text-stone-800">Food Cost %:</strong>{' '}
+                {lang === 'en' ? 'Total cost ratio to selling price (restaurant benchmark: 28% - 35%)' : 'สัดส่วนต้นทุนรวมต่อราคาขาย มาตรฐานภัตตาคาร 28% - 35%'}
               </li>
             </ul>
           </div>
