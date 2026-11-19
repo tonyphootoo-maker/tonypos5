@@ -6,8 +6,9 @@ import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface Props {
   lang: Language;
-  variant?: 'header' | 'button' | 'card';
+  variant?: 'header' | 'button' | 'card' | 'rider-banner';
   appName?: string;
+  theme?: 'orange' | 'emerald';
   onActionTaken?: () => void;
 }
 
@@ -15,10 +16,14 @@ export const PWAInstallButton: React.FC<Props> = ({
   lang,
   variant = 'header',
   appName = 'KinPOS',
+  theme = 'orange',
   onActionTaken,
 }) => {
   const { isInstallable, isInstalled, isIOS, isAndroid, install } = usePWAInstall();
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [guideTab, setGuideTab] = useState<'ios' | 'android'>(() => (isIOS ? 'ios' : 'android'));
+
+  const isRiderTheme = theme === 'emerald' || variant === 'rider-banner';
 
   // If already running as an installed standalone PWA on Tablet / POS / Phone
   if (isInstalled) {
@@ -44,48 +49,79 @@ export const PWAInstallButton: React.FC<Props> = ({
     return null;
   }
 
-  const handleClick = async () => {
-    if (isInstallable) {
-      await install();
-      onActionTaken?.();
-      return;
-    }
+  const openGuideFor = (tab?: 'ios' | 'android') => {
+    setGuideTab(tab ?? (isIOS ? 'ios' : 'android'));
     setShowGuideModal(true);
   };
 
-  // Show guide button on iOS/iPadOS, Android, or anytime variant is 'card' (in Settings) or 'button' (Login)
+  const handleClick = async () => {
+    if (isInstallable) {
+      const accepted = await install();
+      onActionTaken?.();
+      if (accepted) return;
+    }
+    openGuideFor();
+  };
+
+  // Show guide button on iOS/iPadOS, Android, anytime variant is 'card'/'button'/'rider-banner', or emerald Rider theme
   const shouldRenderTrigger =
-    isInstallable || isIOS || isAndroid || variant === 'card' || variant === 'button';
+    isInstallable ||
+    isIOS ||
+    isAndroid ||
+    variant === 'card' ||
+    variant === 'button' ||
+    variant === 'rider-banner' ||
+    isRiderTheme;
 
   if (!shouldRenderTrigger) {
     return null;
   }
 
+  const isCustomApp = appName !== 'KinPOS';
   const labelText =
     lang === 'th'
       ? isInstallable
-        ? 'ติดตั้งแอป'
+        ? isCustomApp
+          ? 'ติดตั้งแอป'
+          : 'ติดตั้งแอป'
         : isIOS
-          ? 'ติดตั้ง iPad/iOS'
-          : 'ติดตั้งแอป POS'
+          ? isCustomApp
+            ? 'ติดตั้ง iOS'
+            : 'ติดตั้ง iPad/iOS'
+          : isCustomApp
+            ? 'ติดตั้งแอป'
+            : 'ติดตั้งแอป POS'
       : isInstallable
         ? 'Install App'
         : isIOS
           ? 'Install iOS'
           : 'Install App';
 
+  const headerGrad = isRiderTheme
+    ? 'from-emerald-600 to-teal-700'
+    : 'from-orange-500 to-red-500';
+  const badgeBg = isRiderTheme ? 'bg-emerald-600' : 'bg-orange-500';
+  const infoBg = isRiderTheme
+    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+    : 'bg-orange-50 border-orange-200 text-orange-900';
+  const iconAccent = isRiderTheme ? 'text-emerald-600' : 'text-orange-600';
+
   const guideModal =
     showGuideModal && typeof document !== 'undefined'
       ? createPortal(
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-neutral-950/70 backdrop-blur-xs">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-orange-200 overflow-hidden text-neutral-900">
-              <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <Tablet className="w-5 h-5" />
-                  <h3 className="font-extrabold text-base">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-neutral-950/75 backdrop-blur-xs">
+            <div
+              className={`bg-white rounded-3xl shadow-2xl max-w-md w-full border overflow-hidden text-neutral-900 ${
+                isRiderTheme ? 'border-emerald-200' : 'border-orange-200'
+              }`}
+            >
+              <div className={`p-4 bg-gradient-to-r ${headerGrad} text-white flex items-center justify-between`}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Smartphone className="w-5 h-5 shrink-0" />
+                  <h3 className="font-extrabold text-base truncate">
                     {lang === 'th'
-                      ? `ติดตั้ง ${appName} ลงบนมือถือ / Tablet`
-                      : `Install ${appName} on Phone / Tablet`}
+                      ? `ติดตั้ง ${appName} ลงบนมือถือ`
+                      : `Install ${appName} App`}
                   </h3>
                 </div>
                 <button
@@ -98,29 +134,80 @@ export const PWAInstallButton: React.FC<Props> = ({
               </div>
 
               <div className="p-5 space-y-4 text-xs">
-                {isIOS ? (
+                {/* Switch between Android & iOS guides */}
+                <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setGuideTab('android')}
+                    className={`py-2 px-3 rounded-lg font-extrabold cursor-pointer transition-colors ${
+                      guideTab === 'android'
+                        ? isRiderTheme
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-orange-500 text-white'
+                        : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    Android (Chrome)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGuideTab('ios')}
+                    className={`py-2 px-3 rounded-lg font-extrabold cursor-pointer transition-colors ${
+                      guideTab === 'ios'
+                        ? isRiderTheme
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-orange-500 text-white'
+                        : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    iOS / iPhone (Safari)
+                  </button>
+                </div>
+
+                {guideTab === 'android' && isInstallable && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const ok = await install();
+                      if (ok) setShowGuideModal(false);
+                      onActionTaken?.();
+                    }}
+                    className={`w-full py-3 rounded-xl text-white font-black text-xs flex items-center justify-center gap-2 cursor-pointer ${
+                      isRiderTheme ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-orange-500 hover:bg-orange-600'
+                    }`}
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {lang === 'th'
+                        ? `กดติดตั้ง ${appName} บน Android ทันที`
+                        : `Install ${appName} Now (One-Tap)`}
+                    </span>
+                  </button>
+                )}
+
+                {guideTab === 'ios' ? (
                   <div className="space-y-3">
-                    <div className="p-3 bg-orange-50 border border-orange-200 rounded-2xl font-bold text-orange-900 flex items-center gap-2">
-                      <Smartphone className="w-4 h-4 text-orange-600 shrink-0" />
+                    <div className={`p-3 border rounded-2xl font-bold flex items-center gap-2 ${infoBg}`}>
+                      <Smartphone className={`w-4 h-4 shrink-0 ${iconAccent}`} />
                       <span>
                         {lang === 'th'
-                          ? 'วิธีติดตั้งสำหรับ iPad / iPhone (เปิดด้วย Safari)'
-                          : 'iPad / iPhone Installation Steps (Safari)'}
+                          ? `วิธีติดตั้ง ${appName} บน iPhone / iPad (เปิดด้วย Safari)`
+                          : `iPhone / iPad Installation Steps (Safari)`}
                       </span>
                     </div>
                     <ol className="space-y-2.5 text-neutral-700 leading-relaxed">
                       <li className="flex items-start gap-2.5">
-                        <span className="w-5 h-5 rounded-full bg-orange-500 text-white font-black flex items-center justify-center shrink-0 text-[11px]">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
                           1
                         </span>
                         <span>
                           {lang === 'th' ? (
                             <>
-                              เปิดหน้านี้ด้วย <strong>Safari</strong> แล้วแตะปุ่ม{' '}
+                              เปิดลิงก์นี้ด้วยแอป <strong>Safari</strong> แล้วแตะปุ่ม{' '}
                               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-neutral-100 border border-neutral-300 font-bold">
                                 <Share className="w-3 h-3 text-blue-600" /> แชร์ (Share)
                               </span>{' '}
-                              ที่แถบเครื่องมือด้านบนหรือด้านล่าง
+                              ที่แถบด้านล่างหรือด้านบนของหน้าจอ
                             </>
                           ) : (
                             <>
@@ -131,7 +218,7 @@ export const PWAInstallButton: React.FC<Props> = ({
                         </span>
                       </li>
                       <li className="flex items-start gap-2.5">
-                        <span className="w-5 h-5 rounded-full bg-orange-500 text-white font-black flex items-center justify-center shrink-0 text-[11px]">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
                           2
                         </span>
                         <span>
@@ -151,46 +238,46 @@ export const PWAInstallButton: React.FC<Props> = ({
                         </span>
                       </li>
                       <li className="flex items-start gap-2.5">
-                        <span className="w-5 h-5 rounded-full bg-orange-500 text-white font-black flex items-center justify-center shrink-0 text-[11px]">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
                           3
                         </span>
                         <span>
                           {lang === 'th'
-                            ? 'แตะปุ่ม "เพิ่ม (Add)" มุมขวาบน จากนั้นเปิดใช้งานจากไอคอน KinPOS บนหน้าจอหลักได้ทันที'
-                            : 'Tap "Add" in the top-right corner, then launch KinPOS directly from your Home Screen.'}
+                            ? `แตะ "เพิ่ม (Add)" มุมขวาบน จากนั้นเปิดใช้งานจากไอคอน ${appName} บนหน้าจอหลักได้แบบเต็มจอทันที`
+                            : `Tap "Add" in the top-right corner, then launch ${appName} directly from your Home Screen.`}
                         </span>
                       </li>
                     </ol>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="p-3 bg-orange-50 border border-orange-200 rounded-2xl font-bold text-orange-900 flex items-center gap-2">
-                      <Tablet className="w-4 h-4 text-orange-600 shrink-0" />
+                    <div className={`p-3 border rounded-2xl font-bold flex items-center gap-2 ${infoBg}`}>
+                      <Tablet className={`w-4 h-4 shrink-0 ${iconAccent}`} />
                       <span>
                         {lang === 'th'
-                          ? 'วิธีติดตั้งสำหรับ Tablet / เครื่อง POS ระบบ Android (Chrome / Edge)'
-                          : 'Android Tablet / POS Installation Steps (Chrome / Edge)'}
+                          ? `วิธีติดตั้ง ${appName} บนมือถือ Android (Chrome / Edge)`
+                          : `Android Installation Steps (Chrome / Edge)`}
                       </span>
                     </div>
                     <ol className="space-y-2.5 text-neutral-700 leading-relaxed">
                       <li className="flex items-start gap-2.5">
-                        <span className="w-5 h-5 rounded-full bg-orange-500 text-white font-black flex items-center justify-center shrink-0 text-[11px]">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
                           1
                         </span>
                         <span>
                           {lang === 'th' ? (
                             <>
-                              เปิดหน้านี้ด้วยเบราว์เซอร์ <strong>Google Chrome</strong> หรือ <strong>Edge</strong> บนเครื่อง Android POS / Tablet
+                              เปิดหน้านี้ด้วยเบราว์เซอร์ <strong>Google Chrome</strong> หรือ <strong>Edge</strong> บนมือถือ Android
                             </>
                           ) : (
                             <>
-                              Open this app in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on your Android POS or Tablet.
+                              Open this page in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on your Android device.
                             </>
                           )}
                         </span>
                       </li>
                       <li className="flex items-start gap-2.5">
-                        <span className="w-5 h-5 rounded-full bg-orange-500 text-white font-black flex items-center justify-center shrink-0 text-[11px]">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
                           2
                         </span>
                         <span>
@@ -212,13 +299,13 @@ export const PWAInstallButton: React.FC<Props> = ({
                         </span>
                       </li>
                       <li className="flex items-start gap-2.5">
-                        <span className="w-5 h-5 rounded-full bg-orange-500 text-white font-black flex items-center justify-center shrink-0 text-[11px]">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
                           3
                         </span>
                         <span>
                           {lang === 'th'
-                            ? 'กด "ติดตั้ง (Install)" แอป KinPOS จะปรากฏบนหน้าจอเครื่อง POS และเปิดใช้งานเต็มจอได้ทันที'
-                            : 'Tap "Install" to add the KinPOS icon to your POS/Tablet launcher for full-screen use.'}
+                            ? `กด "ติดตั้ง (Install)" ไอคอนแอป ${appName} จะปรากฏบนหน้าจอหลักสำหรับเปิดรับงานและนำทางเต็มจอ`
+                            : `Tap "Install" to add the ${appName} icon to your Home Screen for full-screen delivery & navigation.`}
                         </span>
                       </li>
                     </ol>
@@ -238,6 +325,59 @@ export const PWAInstallButton: React.FC<Props> = ({
           document.body
         )
       : null;
+
+  if (variant === 'rider-banner') {
+    return (
+      <>
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-emerald-500/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+              <Smartphone className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-extrabold text-white truncate">
+                {lang === 'th'
+                  ? `ติดตั้งแอป ${appName} บนมือถือ (Android / iOS)`
+                  : `Install ${appName} Mobile App (Android / iOS)`}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {lang === 'th'
+                  ? 'เปิดใช้งานรับงานและนำทางเต็มหน้าจอได้ทันทีจากหน้าจอหลัก'
+                  : 'Launch full-screen delivery dispatch & navigation from your home screen'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleClick}
+              className="flex-1 sm:flex-initial min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+            >
+              <Download className="w-4 h-4" />
+              <span>
+                {lang === 'th'
+                  ? isInstallable
+                    ? 'ติดตั้ง Android ทันที'
+                    : 'ติดตั้งแอป Android / iOS'
+                  : 'Install App'}
+              </span>
+            </button>
+            {isInstallable && (
+              <button
+                type="button"
+                onClick={() => openGuideFor('ios')}
+                className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+              >
+                iOS
+              </button>
+            )}
+          </div>
+        </div>
+        {guideModal}
+      </>
+    );
+  }
 
   if (variant === 'card') {
     return (
@@ -273,9 +413,13 @@ export const PWAInstallButton: React.FC<Props> = ({
         <button
           type="button"
           onClick={handleClick}
-          className="px-3 py-1.5 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 border border-orange-400/40 text-orange-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md"
+          className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md ${
+            isRiderTheme
+              ? 'bg-emerald-500 hover:bg-emerald-400 border-emerald-400 text-slate-950 font-extrabold'
+              : 'bg-orange-500/20 hover:bg-orange-500/30 border-orange-400/40 text-orange-200'
+          }`}
         >
-          <Download className="w-3.5 h-3.5 text-orange-300" />
+          <Download className={`w-3.5 h-3.5 ${isRiderTheme ? 'text-slate-950' : 'text-orange-300'}`} />
           <span>{labelText}</span>
         </button>
         {guideModal}
@@ -289,10 +433,14 @@ export const PWAInstallButton: React.FC<Props> = ({
         type="button"
         onClick={handleClick}
         title={labelText}
-        className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-500 hover:brightness-105 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs active:scale-95 transition-all cursor-pointer"
+        className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs active:scale-95 transition-all cursor-pointer ${
+          isRiderTheme
+            ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold'
+            : 'bg-gradient-to-r from-orange-500 to-red-500 hover:brightness-105 text-white'
+        }`}
       >
         <Download className="w-3.5 h-3.5" />
-        <span className="hidden md:inline">{labelText}</span>
+        <span className={isRiderTheme ? 'inline' : 'hidden md:inline'}>{labelText}</span>
       </button>
       {guideModal}
     </>

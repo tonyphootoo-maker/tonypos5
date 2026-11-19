@@ -26,6 +26,7 @@ import {
 import { formatMoney } from '../engine/calculations';
 import { toDateSafe } from '../engine/onlineOrdering';
 import { PWAInstallButton } from '../components/PWAInstallButton';
+import { RiderNavigationOverlay } from '../components/RiderNavigationOverlay';
 
 interface Props {
   lang?: Language;
@@ -41,14 +42,6 @@ const RIDER_STATUS_LABELS: Record<string, { th: string; en: string; cls: string 
   cancelled: { th: 'ยกเลิกแล้ว', en: 'Cancelled', cls: 'bg-rose-500/20 text-rose-300' },
 };
 
-function buildGoogleMapsUrl(order: OnlineOrderDoc): string {
-  if (typeof order.deliveryLat === 'number' && typeof order.deliveryLng === 'number') {
-    return `https://www.google.com/maps/dir/?api=1&destination=${order.deliveryLat},${order.deliveryLng}`;
-  }
-  const addr = encodeURIComponent(order.deliveryAddress || '');
-  return `https://www.google.com/maps/dir/?api=1&destination=${addr}`;
-}
-
 export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
   const [lang, setLang] = useState<Language>(initialLang);
   const [storeId, setStoreId] = useState<string | null>(null);
@@ -61,10 +54,33 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
   const [confirmDeliverId, setConfirmDeliverId] = useState<string | null>(null);
+  const [activeNavOrderId, setActiveNavOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     saveRiderName(riderName);
   }, [riderName]);
+
+  // Keep dedicated Rider PWA manifest & iOS touch icon synchronized in document head
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.title = 'KinPOS Rider - งานจัดส่ง';
+
+    const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (appleTitle) appleTitle.setAttribute('content', 'KinPOS Rider');
+
+    const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+    if (appleIcon) appleIcon.setAttribute('href', './rider-apple-touch-icon.png');
+
+    const manifestLink = document.querySelector('link[rel="manifest"]');
+    if (manifestLink) {
+      manifestLink.setAttribute('href', './manifest-rider.webmanifest');
+    } else {
+      const ml = document.createElement('link');
+      ml.rel = 'manifest';
+      ml.href = './manifest-rider.webmanifest';
+      document.head.appendChild(ml);
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -134,6 +150,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
   );
 
   const visibleJobs = activeTab === 'active' ? activeJobs : completedJobs;
+  const activeNavOrder = useMemo(
+    () => orders.find((o) => o.id === activeNavOrderId) || null,
+    [orders, activeNavOrderId]
+  );
 
   const handleStartDelivery = async (order: OnlineOrderDoc) => {
     setBusyOrderId(order.id);
@@ -200,7 +220,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <PWAInstallButton lang={lang} variant="header" appName="KinPOS Rider" />
+              <PWAInstallButton lang={lang} variant="button" appName="KinPOS Rider" theme="emerald" />
               <button
                 type="button"
                 onClick={() => setLang((p) => (p === 'th' ? 'en' : 'th'))}
@@ -255,6 +275,8 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-4 space-y-3">
+        <PWAInstallButton lang={lang} variant="rider-banner" appName="KinPOS Rider" theme="emerald" />
+
         {errorMsg && (
           <div className="p-3.5 rounded-2xl bg-rose-950/70 border border-rose-700 text-rose-200 text-xs font-bold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
@@ -290,7 +312,6 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
         ) : (
           visibleJobs.map((order) => {
             const st = RIDER_STATUS_LABELS[order.status] || RIDER_STATUS_LABELS.accepted;
-            const mapsUrl = buildGoogleMapsUrl(order);
             const created = toDateSafe(order.createdAt);
             const isBusy = busyOrderId === order.id;
 
@@ -381,12 +402,12 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
                 {order.status !== 'completed' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                     {order.status !== 'out_for_delivery' ? (
-                      <a
-                        href={mapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        disabled={isBusy}
                         onClick={() => {
-                          handleStartDelivery(order);
+                          setActiveNavOrderId(order.id);
+                          void handleStartDelivery(order);
                         }}
                         className="min-h-[46px] px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer"
                       >
@@ -396,17 +417,16 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
                             ? 'รับอาหาร & เปิดแผนที่นำทาง'
                             : 'Start Delivery & Open Maps'}
                         </span>
-                      </a>
+                      </button>
                     ) : (
-                      <a
-                        href={mapsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="min-h-[46px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-xs flex items-center justify-center gap-2"
+                      <button
+                        type="button"
+                        onClick={() => setActiveNavOrderId(order.id)}
+                        className="min-h-[46px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <NavigationIcon className="w-4 h-4 text-orange-400" />
-                        <span>{lang === 'th' ? 'เปิด Google Maps นำทาง' : 'Open Google Maps'}</span>
-                      </a>
+                        <span>{lang === 'th' ? 'เปิดแผนที่นำทาง (Google Maps)' : 'Open Google Maps Navigation'}</span>
+                      </button>
                     )}
 
                     {confirmDeliverId === order.id ? (
@@ -446,6 +466,17 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
           })
         )}
       </main>
+
+      {activeNavOrder && (
+        <RiderNavigationOverlay
+          order={activeNavOrder}
+          store={store}
+          lang={lang}
+          busy={busyOrderId === activeNavOrder.id}
+          onBack={() => setActiveNavOrderId(null)}
+          onCompleteDelivery={handleCompleteDelivery}
+        />
+      )}
     </div>
   );
 };

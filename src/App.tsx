@@ -77,6 +77,13 @@ export default function App() {
     categoryId?: string | null;
     nonce: number;
   } | null>(null);
+  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handleQuota = () => setMapsQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleQuota);
+    return () => window.removeEventListener('gmp-quota-exceeded', handleQuota);
+  }, []);
 
   const t = translations[lang];
 
@@ -228,16 +235,34 @@ export default function App() {
 
   if (appMode === 'rider') {
     return (
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-200 text-xs font-bold">
-            <Loader2 className="w-5 h-5 animate-spin text-emerald-400 mr-2" />
-            <span>กำลังโหลดแอป Rider...</span>
+      <>
+        {mapsQuotaExceeded && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-[70] shadow-sm">
+            <span>
+              Google Maps Platform quota reached. If you are the app owner, visit{' '}
+              <a
+                href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline font-semibold text-amber-950 hover:text-amber-800"
+              >
+                maps developer site
+              </a>{' '}
+              for instructions to update your account.
+            </span>
           </div>
-        }
-      >
-        <RiderAppPage lang={lang} />
-      </Suspense>
+        )}
+        <Suspense
+          fallback={
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-200 text-xs font-bold">
+              <Loader2 className="w-5 h-5 animate-spin text-emerald-400 mr-2" />
+              <span>กำลังโหลดแอป Rider...</span>
+            </div>
+          }
+        >
+          <RiderAppPage lang={lang} />
+        </Suspense>
+      </>
     );
   }
 

@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildExternalGoogleMapsUrl,
   buildWebSyncDailySalesRecords,
   calculateOnlineOrderCostSnapshot,
+  extractLatLngLiteral,
+  formatNavDistance,
+  formatNavDuration,
   getBangkokBusinessWorkDate,
+  haversineMeters,
   isOnlineOrderInLocalPeriod,
   resolveAppMode,
   sanitizeMenuForPublicStore,
+  stripHtmlInstructions,
 } from '../onlineOrdering';
 import { buildPeriodPnl } from '../calculations';
 import { convertDailySummariesToSalesRecords } from '../../costing/services/firebaseSyncService';
@@ -489,5 +495,46 @@ describe('Online Ordering Engine', () => {
       }
     }
   });
+
+  it('formats Rider navigation distances, durations, instructions, coordinates, and fallback Maps URLs', () => {
+    // Haversine ~111.19 km per 1 degree latitude
+    const dist = haversineMeters({ lat: 13.7563, lng: 100.5018 }, { lat: 13.7653, lng: 100.5018 });
+    expect(dist).toBeGreaterThan(950);
+    expect(dist).toBeLessThan(1050);
+
+    expect(formatNavDistance(346, 'th')).toBe('350 ม.');
+    expect(formatNavDistance(2450, 'th')).toBe('2.5 กม.');
+    expect(formatNavDistance(2450, 'en')).toBe('2.5 km');
+
+    expect(formatNavDuration(12 * 60000, 'th')).toBe('12 นาที');
+    expect(formatNavDuration(75 * 60000, 'th')).toBe('1 ชม. 15 นาที');
+    expect(formatNavDuration(60 * 60000, 'en')).toBe('1 hr');
+
+    expect(
+      stripHtmlInstructions('Turn <b>left</b> onto Sukhumvit Rd<div style="font-size:0.9em">Pass BTS</div>')
+    ).toBe('Turn left onto Sukhumvit Rd Pass BTS');
+
+    expect(extractLatLngLiteral({ lat: 13.75, lng: 100.5 })).toEqual({ lat: 13.75, lng: 100.5 });
+    expect(extractLatLngLiteral({ lat: () => 13.8, lng: () => 100.6 })).toEqual({ lat: 13.8, lng: 100.6 });
+    expect(
+      extractLatLngLiteral({ location: { latLng: { latitude: 13.71, longitude: 100.52 } } })
+    ).toEqual({ lat: 13.71, lng: 100.52 });
+    expect(extractLatLngLiteral(null)).toBeNull();
+
+    expect(
+      buildExternalGoogleMapsUrl({
+        deliveryLat: 13.7563,
+        deliveryLng: 100.5018,
+        deliveryAddress: 'Siam',
+      })
+    ).toBe('https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=13.7563,100.5018');
+
+    expect(
+      buildExternalGoogleMapsUrl({
+        deliveryAddress: '99 Rama 9 Bangkok',
+      })
+    ).toBe('https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=99%20Rama%209%20Bangkok');
+  });
 });
+
 

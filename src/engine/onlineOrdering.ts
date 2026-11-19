@@ -525,3 +525,122 @@ export function buildWebSyncDailySalesRecords(
 
   return records;
 }
+
+export interface LatLngLiteralSimple {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Calculates straight-line geodesic distance in meters between two lat/lng coordinates (Haversine).
+ */
+export function haversineMeters(a: LatLngLiteralSimple, b: LatLngLiteralSimple): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLng = Math.sin(dLng / 2);
+  const h =
+    sinLat * sinLat +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * sinLng * sinLng;
+  return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+/**
+ * Formats navigation distance cleanly in meters or kilometers for Thai/English Rider UI.
+ */
+export function formatNavDistance(meters: number, lang: 'th' | 'en' = 'th'): string {
+  const safe = Math.max(0, Number(meters) || 0);
+  if (safe < 1000) {
+    const rounded = Math.round(safe / 10) * 10;
+    return lang === 'th' ? `${rounded} ม.` : `${rounded} m`;
+  }
+  const km = (safe / 1000).toFixed(1);
+  return lang === 'th' ? `${km} กม.` : `${km} km`;
+}
+
+/**
+ * Formats navigation ETA / duration cleanly in minutes / hours for Thai/English Rider UI.
+ */
+export function formatNavDuration(durationMillis: number, lang: 'th' | 'en' = 'th'): string {
+  const totalMinutes = Math.max(1, Math.round((Number(durationMillis) || 0) / 60000));
+  if (totalMinutes < 60) {
+    return lang === 'th' ? `${totalMinutes} นาที` : `${totalMinutes} min`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const mins = totalMinutes % 60;
+  if (mins === 0) {
+    return lang === 'th' ? `${hours} ชม.` : `${hours} hr`;
+  }
+  return lang === 'th' ? `${hours} ชม. ${mins} นาที` : `${hours} hr ${mins} min`;
+}
+
+/**
+ * Strips HTML markup from Google Routes step instructions safely for plain-text React rendering.
+ */
+export function stripHtmlInstructions(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<div[^>]*>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Normalizes Google Maps LatLng / LatLngLiteral / PlaceLocation shapes into `{ lat, lng }`.
+ */
+export function extractLatLngLiteral(input: unknown): LatLngLiteralSimple | null {
+  if (!input || typeof input !== 'object') return null;
+  const obj = input as Record<string, unknown>;
+
+  if (typeof obj.lat === 'number' && typeof obj.lng === 'number') {
+    return Number.isFinite(obj.lat) && Number.isFinite(obj.lng)
+      ? { lat: obj.lat, lng: obj.lng }
+      : null;
+  }
+
+  if (typeof obj.lat === 'function' && typeof obj.lng === 'function') {
+    const lat = (obj.lat as () => number)();
+    const lng = (obj.lng as () => number)();
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  }
+
+  if (typeof obj.latitude === 'number' && typeof obj.longitude === 'number') {
+    return Number.isFinite(obj.latitude) && Number.isFinite(obj.longitude)
+      ? { lat: obj.latitude, lng: obj.longitude }
+      : null;
+  }
+
+  if (obj.latLng) {
+    return extractLatLngLiteral(obj.latLng);
+  }
+  if (obj.location) {
+    return extractLatLngLiteral(obj.location);
+  }
+  return null;
+}
+
+/**
+ * Builds an external Google Maps turn-by-turn directions fallback URL.
+ */
+export function buildExternalGoogleMapsUrl(
+  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
+): string {
+  if (
+    typeof order.deliveryLat === 'number' &&
+    typeof order.deliveryLng === 'number' &&
+    Number.isFinite(order.deliveryLat) &&
+    Number.isFinite(order.deliveryLng)
+  ) {
+    return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${order.deliveryLat},${order.deliveryLng}`;
+  }
+  const addr = encodeURIComponent((order.deliveryAddress || '').trim());
+  return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${addr}`;
+}
+
