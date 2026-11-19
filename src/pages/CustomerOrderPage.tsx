@@ -36,12 +36,14 @@ import {
 import {
   cancelOnlineOrderByCustomer,
   createOnlineOrder,
-  ensureAnonymousAuth,
   fetchPublicStoreImage,
   loadSavedCustomerInfo,
+  loadTrackedCustomerOrderIds,
+  resolveCustomerOrRiderSession,
   resolvePublicStoreId,
   saveCustomerInfo,
   subscribeCustomerOrders,
+  subscribeGuestOrdersByIds,
   subscribePublicStore,
 } from '../data/onlineDb';
 import { formatMoney } from '../engine/calculations';
@@ -82,6 +84,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
   const [storeId, setStoreId] = useState<string | null>(null);
   const [store, setStore] = useState<PublicStoreDoc | null>(null);
   const [customerUid, setCustomerUid] = useState<string | null>(null);
+  const [isAuthCustomer, setIsAuthCustomer] = useState(false);
+  const [trackedOrderIds, setTrackedOrderIds] = useState<string[]>([]);
+  const [authOrders, setAuthOrders] = useState<OnlineOrderDoc[]>([]);
+  const [localOrders, setLocalOrders] = useState<OnlineOrderDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -117,7 +123,6 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
   const [deliveryLat, setDeliveryLat] = useState<number | null>(savedProfile.deliveryLat ?? null);
   const [deliveryLng, setDeliveryLng] = useState<number | null>(savedProfile.deliveryLng ?? null);
 
-  const [customerOrders, setCustomerOrders] = useState<OnlineOrderDoc[]>([]);
   const loadedImageIdsRef = useRef<Set<string>>(new Set());
 
   const handleSwitchLang = () => {
@@ -128,17 +133,13 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
   useEffect(() => {
     let mounted = true;
     let unsubStore: (() => void) | null = null;
-    let unsubOrders: (() => void) | null = null;
 
     const boot = async () => {
       try {
-        const user = await ensureAnonymousAuth();
-        if (!mounted) return;
-        setCustomerUid(user.uid);
-
         const resolvedStoreId = await resolvePublicStoreId(window.location.search);
         if (!mounted) return;
         setStoreId(resolvedStoreId);
+        setTrackedOrderIds(loadTrackedCustomerOrderIds(resolvedStoreId));
 
         if (resolvedStoreId) {
           unsubStore = subscribePublicStore(
@@ -165,16 +166,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
           setLoading(false);
         }
 
-        unsubOrders = subscribeCustomerOrders(
-          user.uid,
-          (orders) => {
-            if (!mounted) return;
-            setCustomerOrders(orders);
-          },
-          (err) => {
-            console.warn('Customer orders warning:', err.message);
-          }
-        );
+        const session = await resolveCustomerOrRiderSession();
+        if (!mounted) return;
+        setCustomerUid(session.uid);
+        setIsAuthCustomer(session.isAuthenticated);
       } catch (err) {
         if (!mounted) return;
         setAuthError(err instanceof Error ? err.message : String(err));
@@ -186,9 +181,51 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
     return () => {
       mounted = false;
       unsubStore?.();
-      unsubOrders?.();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isAuthCustomer || !customerUid) {
+      setAuthOrders([]);
+      return;
+    }
+    return subscribeCustomerOrders(
+      customerUid,
+      (orders) => {
+        setAuthOrders(orders);
+      },
+      (err) => {
+        console.warn('Customer orders warning:', err.message);
+      }
+    );
+  }, [isAuthCustomer, customerUid]);
+
+  useEffect(() => {
+    if (trackedOrderIds.length === 0) {
+      setLocalOrders([]);
+      return;
+    }
+    return subscribeGuestOrdersByIds(
+      trackedOrderIds,
+      (orders) => {
+        setLocalOrders(orders);
+      },
+      (err) => {
+        console.warn('Guest tracked orders warning:', err.message);
+      }
+    );
+  }, [trackedOrderIds]);
+
+  const customerOrders = useMemo(() => {
+    const merged = new Map<string, OnlineOrderDoc>();
+    for (const o of localOrders) merged.set(o.id, o);
+    for (const o of authOrders) merged.set(o.id, o);
+    return Array.from(merged.values()).sort((a, b) => {
+      const da = toDateSafe(a.createdAt)?.getTime() ?? 0;
+      const dbTime = toDateSafe(b.createdAt)?.getTime() ?? 0;
+      return dbTime - da;
+    });
+  }, [authOrders, localOrders]);
 
   // Load dish photos + store PromptPay QR photo lazily from publicStores/{storeId}/images
   useEffect(() => {
@@ -447,7 +484,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
         options: c.options,
       }));
 
-      await createOnlineOrder({
+      const createdOrder = await createOnlineOrder({
         storeId,
         customerName: trimmedName,
         customerPhone: trimmedPhone,
@@ -463,6 +500,9 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: initialLang = 'th', o
         totalAmount: grandTotal,
       });
 
+      setTrackedOrderIds((prev) =>
+        prev.includes(createdOrder.id) ? prev : [createdOrder.id, ...prev]
+      );
       setCart([]);
       setIsCheckoutOpen(false);
       setIsOrdersOpen(true);

@@ -15,8 +15,8 @@ import {
 } from 'lucide-react';
 import { Language, OnlineOrderDoc, PublicStoreDoc } from '../types';
 import {
-  ensureAnonymousAuth,
   loadSavedRiderName,
+  resolveCustomerOrRiderSession,
   resolvePublicStoreId,
   saveRiderName,
   subscribePublicStore,
@@ -73,10 +73,6 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
 
     const boot = async () => {
       try {
-        const user = await ensureAnonymousAuth();
-        if (!mounted) return;
-        setRiderUid(user.uid);
-
         const resolvedStoreId = await resolvePublicStoreId(window.location.search);
         if (!mounted) return;
         setStoreId(resolvedStoreId);
@@ -101,6 +97,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: initialLang = 'th' }) => {
         } else {
           setLoading(false);
         }
+
+        const session = await resolveCustomerOrRiderSession();
+        if (!mounted) return;
+        setRiderUid(session.uid);
       } catch (err) {
         if (!mounted) return;
         setErrorMsg(err instanceof Error ? err.message : String(err));

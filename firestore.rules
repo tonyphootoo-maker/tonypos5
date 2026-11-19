@@ -27,6 +27,15 @@ service cloud.firestore {
       return val == null || (val is number);
     }
 
+    function isValidGuestUid(uid) {
+      return uid is string && uid.size() >= 20 && uid.size() <= 80 && uid.matches('^guest_[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAuthorizedOrderCreator(customerUid, orderId) {
+      return (isSignedIn() && customerUid == request.auth.uid)
+        || (!isSignedIn() && isValidGuestUid(customerUid) && orderId.size() >= 16);
+    }
+
     function isValidPublicStore(storeId) {
       let data = request.resource.data;
       return data.keys().hasAll([
@@ -77,7 +86,7 @@ service cloud.firestore {
         && data.id == orderId
         && isValidId(data.storeId)
         && exists(/databases/$(database)/documents/publicStores/$(data.storeId))
-        && data.customerUid == request.auth.uid
+        && isAuthorizedOrderCreator(data.customerUid, orderId)
         && data.orderNumber is string && data.orderNumber.size() >= 3 && data.orderNumber.size() <= 48
         && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 100
         && data.customerPhone is string && data.customerPhone.size() >= 6 && data.customerPhone.size() <= 30
@@ -139,22 +148,23 @@ service cloud.firestore {
       let d = request.resource.data;
       let o = resource.data;
       let changed = d.diff(o).affectedKeys();
-      return isSignedIn()
+      return (isSignedIn() || isOptionalString(d.get('riderUid', null), 128))
         && o.orderMode == 'delivery'
         && o.status in ['accepted', 'preparing', 'ready_for_pickup', 'out_for_delivery']
         && d.status in ['out_for_delivery', 'completed']
         && orderImmutableFieldsUnchanged()
         && changed.hasOnly(['status', 'riderName', 'riderUid', 'pickedUpAt', 'completedAt', 'updatedAt'])
         && isOptionalString(d.get('riderName', null), 100)
+        && isOptionalString(d.get('riderUid', null), 128)
         && d.updatedAt == request.time;
     }
 
-    function isValidCustomerOrderCancel() {
+    function isValidCustomerOrderCancel(orderId) {
       let d = request.resource.data;
       let o = resource.data;
       let changed = d.diff(o).affectedKeys();
-      return isSignedIn()
-        && o.customerUid == request.auth.uid
+      return ((isSignedIn() && o.customerUid == request.auth.uid)
+          || (!isSignedIn() && isValidGuestUid(o.customerUid) && orderId.size() >= 16))
         && o.status == 'pending'
         && d.status == 'cancelled'
         && orderImmutableFieldsUnchanged()
@@ -221,13 +231,17 @@ service cloud.firestore {
 
     // Customer & Rider online orders (completely isolated from POS tables/bills/dailySummaries)
     match /onlineOrders/{orderId} {
-      allow read: if isSignedIn() && (
+      allow get: if isValidId(orderId) && (
         isOwner(resource.data.storeId)
-        || resource.data.customerUid == request.auth.uid
+        || (isSignedIn() && resource.data.customerUid == request.auth.uid)
         || (resource.data.orderMode == 'delivery' && isValidId(resource.data.storeId))
+        || (isValidGuestUid(resource.data.customerUid) && orderId.size() >= 16)
       );
-      allow create: if isSignedIn() && isValidId(orderId) && isValidOnlineOrderCreate(orderId);
-      allow update: if isValidOwnerOrderUpdate() || isValidRiderOrderUpdate() || isValidCustomerOrderCancel();
+      allow list: if isOwner(resource.data.storeId)
+        || (isSignedIn() && resource.data.customerUid == request.auth.uid)
+        || (resource.data.orderMode == 'delivery' && isValidId(resource.data.storeId));
+      allow create: if isValidId(orderId) && isValidOnlineOrderCreate(orderId);
+      allow update: if isValidOwnerOrderUpdate() || isValidRiderOrderUpdate() || isValidCustomerOrderCancel(orderId);
       allow delete: if isOwner(resource.data.storeId);
     }
   }

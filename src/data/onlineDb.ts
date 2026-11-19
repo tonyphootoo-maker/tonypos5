@@ -51,7 +51,81 @@ import {
 const STORAGE_STORE_ID_KEY = 'kinpos_public_store_id';
 const STORAGE_RIDER_NAME_KEY = 'kinpos_rider_name';
 const STORAGE_CUSTOMER_INFO_KEY = 'kinpos_online_customer_profile';
+const STORAGE_GUEST_UID_KEY = 'kinpos_guest_uid';
+const STORAGE_TRACKED_ORDER_IDS_KEY = 'kinpos_tracked_order_ids';
 const publicImageCache = new Map<string, string>();
+let cachedAnonProviderDisabled = false;
+
+export interface CustomerOrRiderSession {
+  uid: string;
+  isAuthenticated: boolean;
+}
+
+function generateRandomAlphaNum(length: number): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let out = '';
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const buf = new Uint8Array(length);
+    crypto.getRandomValues(buf);
+    for (let i = 0; i < length; i++) {
+      out += chars[buf[i] % chars.length];
+    }
+    return out;
+  }
+  for (let i = 0; i < length; i++) {
+    out += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return out;
+}
+
+export function getOrCreateGuestUid(): string {
+  try {
+    const existing = localStorage.getItem(STORAGE_GUEST_UID_KEY);
+    if (existing && /^guest_[a-zA-Z0-9_-]{16,80}$/.test(existing)) {
+      return existing;
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  const created = `guest_${generateRandomAlphaNum(24)}`;
+  try {
+    localStorage.setItem(STORAGE_GUEST_UID_KEY, created);
+  } catch {
+    // Ignore storage write errors
+  }
+  return created;
+}
+
+function getTrackedOrderStorageKey(storeId?: string | null): string {
+  return storeId ? `${STORAGE_TRACKED_ORDER_IDS_KEY}::${storeId}` : STORAGE_TRACKED_ORDER_IDS_KEY;
+}
+
+export function loadTrackedCustomerOrderIds(storeId?: string | null): string[] {
+  try {
+    const raw = localStorage.getItem(getTrackedOrderStorageKey(storeId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+        .slice(0, 30);
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return [];
+}
+
+export function saveTrackedCustomerOrderId(orderId: string, storeId?: string | null): string[] {
+  const existing = loadTrackedCustomerOrderIds(storeId);
+  const updated = [orderId, ...existing.filter((id) => id !== orderId)].slice(0, 30);
+  try {
+    localStorage.setItem(getTrackedOrderStorageKey(storeId), JSON.stringify(updated));
+  } catch {
+    // Ignore quota errors
+  }
+  return updated;
+}
 
 export interface SavedCustomerCheckoutInfo {
   customerName: string;
@@ -116,6 +190,48 @@ export function saveRiderName(name: string): void {
     localStorage.setItem(STORAGE_RIDER_NAME_KEY, name);
   } catch {
     // Ignore storage error
+  }
+}
+
+/**
+ * Resolves either an active Firebase user (Google / Anonymous if enabled)
+ * or falls back silently to a persistent device guest UID when Anonymous Sign-In
+ * is disabled in Firebase Console.
+ */
+export async function resolveCustomerOrRiderSession(): Promise<CustomerOrRiderSession> {
+  if (!auth) {
+    return { uid: getOrCreateGuestUid(), isAuthenticated: false };
+  }
+  try {
+    const authWithReady = auth as unknown as { authStateReady?: () => Promise<void> };
+    if (typeof authWithReady.authStateReady === 'function') {
+      await authWithReady.authStateReady();
+    }
+  } catch {
+    // Ignore authStateReady errors
+  }
+  if (auth.currentUser) {
+    return { uid: auth.currentUser.uid, isAuthenticated: true };
+  }
+  if (cachedAnonProviderDisabled) {
+    return { uid: getOrCreateGuestUid(), isAuthenticated: false };
+  }
+  try {
+    const cred = await signInAnonymously(auth);
+    return { uid: cred.user.uid, isAuthenticated: true };
+  } catch (err: any) {
+    const code = err?.code || '';
+    if (
+      code === 'auth/operation-not-allowed' ||
+      code === 'auth/admin-restricted-operation' ||
+      code === 'auth/configuration-not-found'
+    ) {
+      cachedAnonProviderDisabled = true;
+      console.warn('Anonymous Sign-In is disabled in Firebase Console; continuing in Guest mode.');
+      return { uid: getOrCreateGuestUid(), isAuthenticated: false };
+    }
+    console.warn('Anonymous auth unavailable, continuing in Guest mode:', err);
+    return { uid: getOrCreateGuestUid(), isAuthenticated: false };
   }
 }
 
@@ -339,8 +455,8 @@ export async function createOnlineOrder(input: {
   totalAmount: number;
 }): Promise<OnlineOrderDoc> {
   if (!db) throw new Error('Firestore is not initialized.');
-  const customerUser = await ensureAnonymousAuth();
-  const orderId = `ord_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const session = await resolveCustomerOrRiderSession();
+  const orderId = `ord_${Date.now()}_${generateRandomAlphaNum(16)}`;
   const orderNumber = generateOnlineOrderNumber();
   const path = `onlineOrders/${orderId}`;
 
@@ -348,7 +464,7 @@ export async function createOnlineOrder(input: {
     id: orderId,
     orderNumber,
     storeId: input.storeId,
-    customerUid: customerUser.uid,
+    customerUid: session.uid,
     customerName: input.customerName.trim(),
     customerPhone: input.customerPhone.trim(),
     orderMode: input.orderMode,
@@ -368,6 +484,7 @@ export async function createOnlineOrder(input: {
 
   try {
     await setDoc(doc(db, 'onlineOrders', orderId), payload);
+    saveTrackedCustomerOrderId(orderId, input.storeId);
     return {
       ...(payload as unknown as OnlineOrderDoc),
       createdAt: new Date().toISOString(),
@@ -384,7 +501,6 @@ export function subscribeCustomerOrders(
   onError?: (err: Error) => void
 ): Unsubscribe {
   if (!db || !customerUid) return () => {};
-  const path = 'onlineOrders';
   const q = query(collection(db, 'onlineOrders'), where('customerUid', '==', customerUid));
   return onSnapshot(
     q,
@@ -397,6 +513,42 @@ export function subscribeCustomerOrders(
       onError?.(err);
     }
   );
+}
+
+export function subscribeGuestOrdersByIds(
+  orderIds: string[],
+  onData: (orders: OnlineOrderDoc[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  if (!db || orderIds.length === 0) {
+    onData([]);
+    return () => {};
+  }
+  const orderMap = new Map<string, OnlineOrderDoc>();
+  const unsubs: Unsubscribe[] = [];
+
+  for (const orderId of orderIds.slice(0, 30)) {
+    const unsub = onSnapshot(
+      doc(db, 'onlineOrders', orderId),
+      (snap) => {
+        if (snap.exists()) {
+          orderMap.set(orderId, { ...snap.data(), id: snap.id } as OnlineOrderDoc);
+        } else {
+          orderMap.delete(orderId);
+        }
+        onData(sortOrdersNewestFirst(Array.from(orderMap.values())));
+      },
+      (err) => {
+        console.warn(`Guest order ${orderId} listener warning:`, err);
+        onError?.(err);
+      }
+    );
+    unsubs.push(unsub);
+  }
+
+  return () => {
+    for (const unsub of unsubs) unsub();
+  };
 }
 
 export async function cancelOnlineOrderByCustomer(

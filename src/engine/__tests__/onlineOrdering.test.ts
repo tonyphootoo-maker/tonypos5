@@ -437,4 +437,57 @@ describe('Online Ordering Engine', () => {
     expect(pnl.operatingProfit).toBe(950);
     expect(pnl.netProfit).toBe(950 - pnl.estimatedTax);
   });
+
+  it('generates and persists high-entropy guest UID and tracked order IDs without blocking on Anonymous Auth', async () => {
+    const storeMap = new Map<string, string>();
+    const prevLocalStorage = (globalThis as { localStorage?: Storage }).localStorage;
+    (globalThis as { localStorage: Storage }).localStorage = {
+      getItem: (k: string) => storeMap.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        storeMap.set(k, v);
+      },
+      removeItem: (k: string) => {
+        storeMap.delete(k);
+      },
+      clear: () => storeMap.clear(),
+      key: (i: number) => Array.from(storeMap.keys())[i] ?? null,
+      get length() {
+        return storeMap.size;
+      },
+    };
+
+    try {
+      const {
+        getOrCreateGuestUid,
+        loadTrackedCustomerOrderIds,
+        resolveCustomerOrRiderSession,
+        saveTrackedCustomerOrderId,
+      } = await import('../../data/onlineDb');
+
+      const uid1 = getOrCreateGuestUid();
+      const uid2 = getOrCreateGuestUid();
+      expect(uid1).toMatch(/^guest_[a-zA-Z0-9_-]{24}$/);
+      expect(uid2).toBe(uid1);
+
+      const saved1 = saveTrackedCustomerOrderId('ord_1795000000000_AbCdEfGh12345678', 'store_1');
+      const saved2 = saveTrackedCustomerOrderId('ord_1795000001000_ZyXwVuTs87654321', 'store_1');
+      expect(saved1).toEqual(['ord_1795000000000_AbCdEfGh12345678']);
+      expect(saved2).toEqual([
+        'ord_1795000001000_ZyXwVuTs87654321',
+        'ord_1795000000000_AbCdEfGh12345678',
+      ]);
+      expect(loadTrackedCustomerOrderIds('store_1')).toEqual(saved2);
+
+      const session = await resolveCustomerOrRiderSession();
+      expect(session.uid).toMatch(/^guest_[a-zA-Z0-9_-]{24}$/);
+      expect(session.isAuthenticated).toBe(false);
+    } finally {
+      if (prevLocalStorage) {
+        (globalThis as { localStorage: Storage }).localStorage = prevLocalStorage;
+      } else {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      }
+    }
+  });
 });
+
