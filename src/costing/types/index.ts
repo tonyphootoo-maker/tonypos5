@@ -30,6 +30,8 @@ export interface Ingredient {
   id: string;
   code?: string; // Optional SKU or barcode
   name: string;
+  thaiName?: string;
+  englishName?: string;
   category: IngredientCategory;
   purchaseQuantity: number;
   purchaseUnit: UnitType;
@@ -116,7 +118,7 @@ export interface RecipeItem {
   sauceId?: string;
   name: string;
   quantity: number;
-  unit: UnitType;
+  unit: UnitType | string;
   isSeafoodSpecialty?: boolean; // For explicit Shrimp or Squid tracking
   proteinCategory?: 'SHRIMP' | 'SQUID' | 'PORK' | 'CHICKEN' | 'BEEF' | 'OTHER';
   calculatedUnitCost?: number;
@@ -138,6 +140,8 @@ export interface MenuVariant {
   sku?: string; // POS SKU mapping
   barcode?: string;
   name: string; // e.g. "กะเพราหมูหมัก", "กะเพราทะเล"
+  thaiName?: string;
+  englishName?: string;
   proteinType: string; // "หมูหมัก" | "หมูบด" | "ไก่" | "เนื้อ" | "กุ้ง" | "ปลาหมึก" | "ทะเล"
   sellingPrice: number; // Dine-in price
   takeawayPrice: number; // Takeaway price

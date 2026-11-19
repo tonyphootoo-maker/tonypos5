@@ -35,6 +35,7 @@ import {
   calculateIngredientCost,
   analyzePriceChangeImpact,
 } from '../services/calculationEngine';
+import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
 import { NumericInput } from './common/NumericInput';
 
 interface IngredientsViewProps {
@@ -78,6 +79,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   // Add Category Modal state
   const [isAddCategoryModalOpen, setIsAddCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryEnglishName, setNewCategoryEnglishName] = useState('');
   const [customCategories, setCustomCategories] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('cost_custom_ingredient_categories');
@@ -228,6 +230,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     }
     setSelectedCategory(trimmed);
     setNewCategoryName('');
+    setNewCategoryEnglishName('');
     setIsAddCategoryModalOpen(false);
   };
 
@@ -320,6 +323,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     const newIng: Partial<Ingredient> = {
       id: `ing_${Date.now()}`,
       name: '',
+      thaiName: '',
+      englishName: '',
       category: defaultCat,
       purchaseQuantity: 1000,
       purchaseUnit: 'g',
@@ -344,8 +349,11 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     const computedActual = ing.actualQuantity !== undefined && ing.actualQuantity !== null
       ? ing.actualQuantity
       : Number(((pQty * yPct) / 100).toFixed(1));
+    const thName = ing.thaiName || ing.name || '';
     setEditingIngredient({
       ...ing,
+      thaiName: thName,
+      englishName: ing.englishName || translateThaiToEnglish(thName),
       actualQuantity: computedActual,
       actualUnit: ing.actualUnit || ing.purchaseUnit || 'g',
     });
@@ -356,10 +364,18 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     e.preventDefault();
     if (!editingIngredient || !editingIngredient.name) return;
 
+    const trimmedTh = editingIngredient.name.trim();
+    const trimmedEn =
+      (editingIngredient.englishName || '').trim() ||
+      translateThaiToEnglish(trimmedTh) ||
+      trimmedTh;
+
     const calc = calculateIngredientCost(editingIngredient);
     const completeIngredient: Ingredient = {
       id: editingIngredient.id || `ing_${Date.now()}`,
-      name: editingIngredient.name,
+      name: trimmedTh,
+      thaiName: trimmedTh,
+      englishName: trimmedEn,
       category: editingIngredient.category || 'เนื้อสัตว์และอาหารทะเล',
       purchaseQuantity: Number(editingIngredient.purchaseQuantity) || 1,
       purchaseUnit: editingIngredient.purchaseUnit || 'g',
@@ -779,6 +795,14 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         <span className="hover:text-[#F27D26] hover:underline transition-colors">
                           {ing.name}
                         </span>
+                        {(() => {
+                          const enName = (ing.englishName || translateThaiToEnglish(ing.name) || '').trim();
+                          return enName && enName !== ing.name ? (
+                            <span className="text-[10px] font-normal text-white/50">
+                              ({enName})
+                            </span>
+                          ) : null;
+                        })()}
                         {(!ing.purchasePrice || ing.purchasePrice <= 0) && (
                           <span
                             className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30"
@@ -893,15 +917,26 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-white/80 mb-1">
-                    ชื่อวัตถุดิบ <span className="text-rose-400">*</span>
+                    ชื่อวัตถุดิบ (ไทย) <span className="text-rose-400">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     value={editingIngredient.name || ''}
-                    onChange={(e) =>
-                      setEditingIngredient({ ...editingIngredient, name: e.target.value })
-                    }
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      const nextEn = computeAutoEnglishName({
+                        previousThai: editingIngredient.thaiName ?? editingIngredient.name,
+                        nextThai: nextTh,
+                        currentEnglish: editingIngredient.englishName,
+                      });
+                      setEditingIngredient({
+                        ...editingIngredient,
+                        name: nextTh,
+                        thaiName: nextTh,
+                        englishName: nextEn,
+                      });
+                    }}
                     className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none"
                     placeholder="เช่น หมูหมัก, กุ้งสด XL"
                   />
@@ -928,6 +963,35 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       ))}
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-white/80">
+                    ชื่อวัตถุดิบภาษาอังกฤษ (English Name — แปลอัตโนมัติ)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingIngredient({
+                        ...editingIngredient,
+                        englishName: translateThaiToEnglish(editingIngredient.name || ''),
+                      })
+                    }
+                    className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                  >
+                    แปลใหม่จากภาษาไทย
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={editingIngredient.englishName || ''}
+                  onChange={(e) =>
+                    setEditingIngredient({ ...editingIngredient, englishName: e.target.value })
+                  }
+                  className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 font-medium focus:border-[#F27D26] focus:outline-none placeholder-white/30"
+                  placeholder="Auto-translated English name (editable)"
+                />
               </div>
 
               {/* Purchase Details */}
@@ -1390,16 +1454,39 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
             <form onSubmit={handleAddCategory} className="space-y-4 mt-4 text-xs">
               <div>
                 <label className="block font-bold text-white/80 mb-1.5">
-                  ชื่อหมวดหมู่ใหม่ <span className="text-rose-400">*</span>
+                  ชื่อหมวดหมู่ใหม่ (ไทย) <span className="text-rose-400">*</span>
                 </label>
                 <input
                   type="text"
                   autoFocus
                   required
                   value={newCategoryName}
-                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  onChange={(e) => {
+                    const nextTh = e.target.value;
+                    setNewCategoryEnglishName((currEn) =>
+                      computeAutoEnglishName({
+                        previousThai: newCategoryName,
+                        nextThai: nextTh,
+                        currentEnglish: currEn,
+                      })
+                    );
+                    setNewCategoryName(nextTh);
+                  }}
                   className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none placeholder-white/30"
                   placeholder="เช่น เครื่องดื่ม, ของหวาน, เบเกอรี่, อาหารแปรรูป"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-white/80 mb-1.5">
+                  ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)
+                </label>
+                <input
+                  type="text"
+                  value={newCategoryEnglishName}
+                  onChange={(e) => setNewCategoryEnglishName(e.target.value)}
+                  className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 font-medium focus:border-[#F27D26] focus:outline-none placeholder-white/30"
+                  placeholder="Auto-translated category name"
                 />
               </div>
 
@@ -1409,6 +1496,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   onClick={() => {
                     setIsAddCategoryModalOpen(false);
                     setNewCategoryName('');
+                    setNewCategoryEnglishName('');
                   }}
                   className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-colors cursor-pointer"
                 >

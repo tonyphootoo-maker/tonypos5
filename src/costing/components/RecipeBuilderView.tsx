@@ -34,6 +34,7 @@ import {
   calculateSauceCost,
 } from '../services/calculationEngine';
 import { convertUnit } from '../engine/units';
+import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
 import { NumericInput } from './common/NumericInput';
 
 // Helper to determine if a recipe line item is a variant's protein/meat
@@ -812,6 +813,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     const newSauce: Partial<Sauce> = {
       id: `sauce_${Date.now()}`,
       name: '',
+      thaiName: '',
+      englishName: '',
       category: 'ซอสปรุงรส',
       productionQuantity: 1000,
       productionUnit: 'g',
@@ -833,7 +836,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
   const handleOpenEditSauce = (sauce: Sauce) => {
     setSauceFormError(null);
-    setEditingSauce(JSON.parse(JSON.stringify(sauce)));
+    const cloned = JSON.parse(JSON.stringify(sauce));
+    const thName = cloned.thaiName || cloned.name || '';
+    cloned.thaiName = thName;
+    cloned.englishName = cloned.englishName || translateThaiToEnglish(thName);
+    setEditingSauce(cloned);
     setIsSauceModalOpen(true);
   };
 
@@ -856,9 +863,17 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       return;
     }
 
+    const trimmedTh = editingSauce.name.trim();
+    const trimmedEn =
+      (editingSauce.englishName || '').trim() ||
+      translateThaiToEnglish(trimmedTh) ||
+      trimmedTh;
+
     const finalSauce: Sauce = {
       id: editingSauce.id || `sauce_${Date.now()}`,
-      name: editingSauce.name.trim(),
+      name: trimmedTh,
+      thaiName: trimmedTh,
+      englishName: trimmedEn,
       category: editingSauce.category || 'ซอสปรุงรส',
       productionQuantity: Number(editingSauce.productionQuantity) || rawActual,
       productionUnit: editingSauce.productionUnit || 'g',
@@ -1708,19 +1723,62 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveSauceModal} className="space-y-4 mt-4 text-xs">
-              <div>
-                <label className="block text-white/70 mb-1 font-semibold">ชื่อสูตรซอส</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="เช่น ซอสผัดกะเพราโบราณ, ซอสพริกไทยดำ"
-                  value={editingSauce.name || ''}
-                  onChange={(e) => {
-                    setSauceFormError(null);
-                    setEditingSauce({ ...editingSauce, name: e.target.value });
-                  }}
-                  className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
-                />
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-white/70 mb-1 font-semibold">ชื่อสูตรซอส (ไทย)</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="เช่น ซอสผัดกะเพราโบราณ, ซอสพริกไทยดำ"
+                    value={editingSauce.name || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      const nextEn = computeAutoEnglishName({
+                        previousThai: editingSauce.thaiName ?? editingSauce.name,
+                        nextThai: nextTh,
+                        currentEnglish: editingSauce.englishName,
+                      });
+                      setSauceFormError(null);
+                      setEditingSauce({
+                        ...editingSauce,
+                        name: nextTh,
+                        thaiName: nextTh,
+                        englishName: nextEn,
+                      });
+                    }}
+                    className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-white/70 font-semibold">
+                      ชื่อสูตรซอส (English Name — แปลอัตโนมัติ)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingSauce({
+                          ...editingSauce,
+                          englishName: translateThaiToEnglish(editingSauce.name || ''),
+                        })
+                      }
+                      className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                    >
+                      แปลใหม่จากภาษาไทย
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Auto-translated English sauce name"
+                    value={editingSauce.englishName || ''}
+                    onChange={(e) => {
+                      setSauceFormError(null);
+                      setEditingSauce({ ...editingSauce, englishName: e.target.value });
+                    }}
+                    className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 focus:outline-none focus:border-[#F27D26]"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

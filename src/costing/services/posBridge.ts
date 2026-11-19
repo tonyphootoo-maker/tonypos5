@@ -117,7 +117,7 @@ async function syncSingleMenuWithContext(
   if (!matchedCat) {
     matchedCat = {
       id: `cat_cost_${normalizePosId(catName).slice(0, 24)}`,
-      name: catName,
+      name: translateThaiToEnglish(catName) || catName,
       nameTh: catName,
       order: existingCategories.length + 1,
       createdAt: now,
@@ -149,8 +149,11 @@ async function syncSingleMenuWithContext(
     );
     const nextCostPerBase = costIng.costPerBaseUnit || calc.costPerBaseUnit;
 
+    const nextIngEn = costIng.englishName?.trim() || translateThaiToEnglish(costIng.name) || costIng.name;
+
     if (byName) {
       const changed =
+        byName.name !== nextIngEn ||
         byName.purchasePrice !== (costIng.purchasePrice || 0) ||
         byName.purchaseQuantity !== (costIng.purchaseQuantity || 1) ||
         byName.yieldPercent !== (costIng.yieldPercent || 100) ||
@@ -160,6 +163,8 @@ async function syncSingleMenuWithContext(
       if (changed) {
         const updatedIng: IngredientDoc = {
           ...byName,
+          name: nextIngEn,
+          nameTh: costIng.thaiName || costIng.name,
           purchaseUnit,
           purchasePrice: costIng.purchasePrice || 0,
           purchaseQuantity: costIng.purchaseQuantity || 1,
@@ -179,8 +184,8 @@ async function syncSingleMenuWithContext(
 
     const newIng: IngredientDoc = {
       id: posId,
-      name: translateThaiToEnglish(costIng.name) || costIng.name,
-      nameTh: costIng.name,
+      name: nextIngEn,
+      nameTh: costIng.thaiName || costIng.name,
       purchaseUnit,
       purchasePrice: costIng.purchasePrice || 0,
       purchaseQuantity: costIng.purchaseQuantity || 1,
@@ -355,7 +360,7 @@ async function syncSingleMenuWithContext(
     }
 
     const labelTh = resolveCostVariantLabel(v);
-    const labelEn = translateThaiToEnglish(labelTh) || labelTh;
+    const labelEn = v.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
     builtVariants.push({
       id: v.id || `var_${Date.now()}`,
       name: labelEn,
@@ -426,8 +431,8 @@ async function syncSingleMenuWithContext(
 
   const dishDoc: DishDoc = {
     id: existingDish ? existingDish.id : targetDishId,
-    name: existingDish?.name || translateThaiToEnglish(costMenu.name) || costMenu.name,
-    nameTh: existingDish?.nameTh || costMenu.name,
+    name: costMenu.englishName?.trim() || existingDish?.name || translateThaiToEnglish(costMenu.name) || costMenu.name,
+    nameTh: costMenu.thaiName?.trim() || existingDish?.nameTh || costMenu.name,
     categoryId: existingDish?.categoryId || matchedCat.id,
     ...(existingDish?.imageId ? { imageId: existingDish.imageId } : {}),
     costMenuId: costMenu.id,

@@ -78,12 +78,11 @@ export const PWAInstallButton: React.FC<Props> = ({
   }
 
   const isCustomApp = appName !== 'KinPOS';
+  const isRiderApp = appName.toLowerCase().includes('rider');
   const labelText =
     lang === 'th'
       ? isInstallable
-        ? isCustomApp
-          ? 'ติดตั้งแอป'
-          : 'ติดตั้งแอป'
+        ? 'ติดตั้งแอป'
         : isIOS
           ? isCustomApp
             ? 'ติดตั้ง iOS'
@@ -91,11 +90,15 @@ export const PWAInstallButton: React.FC<Props> = ({
           : isCustomApp
             ? 'ติดตั้งแอป'
             : 'ติดตั้งแอป POS'
-      : isInstallable
-        ? 'Install App'
-        : isIOS
-          ? 'Install iOS'
-          : 'Install App';
+      : isRiderApp
+        ? isIOS && !isInstallable
+          ? 'Install Rider App (iOS)'
+          : 'Install Rider App'
+        : isInstallable
+          ? 'Install App'
+          : isIOS
+            ? 'Install iOS'
+            : 'Install App';
 
   const headerGrad = isRiderTheme
     ? 'from-emerald-600 to-teal-700'
@@ -360,7 +363,9 @@ export const PWAInstallButton: React.FC<Props> = ({
                   ? isInstallable
                     ? 'ติดตั้ง Android ทันที'
                     : 'ติดตั้งแอป Android / iOS'
-                  : 'Install App'}
+                  : isRiderApp
+                    ? 'Install Rider App'
+                    : 'Install App'}
               </span>
             </button>
             {isInstallable && (

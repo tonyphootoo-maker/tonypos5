@@ -95,8 +95,8 @@ export interface ProcessTransactionOptions {
  */
 export function convertUnitQuantity(
   quantity: number,
-  fromUnit: UnitType,
-  toUnit: UnitType
+  fromUnit: UnitType | string,
+  toUnit: UnitType | string
 ): number {
   if (fromUnit === toUnit) return quantity;
 
@@ -253,7 +253,7 @@ export function explodeRecipeItems(
             rItem.ingredientId,
             rItem.name,
             totalDishItemQty,
-            rItem.unit,
+            rItem.unit as UnitType,
             item.variantId,
             item.menuName
           );
@@ -264,7 +264,7 @@ export function explodeRecipeItems(
           rItem.ingredientId,
           rItem.name,
           totalDishItemQty,
-          rItem.unit,
+          rItem.unit as UnitType,
           item.variantId,
           item.menuName
         );

@@ -24,6 +24,7 @@ import {
 import { Ingredient, Sauce, MenuItem, RestaurantSettings } from '../types';
 import { calculateChannelSuggestedPrices, roundUpToStep } from '../services/calculationEngine';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
+import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
 import { NumericInput } from './common/NumericInput';
 
 interface CalculatorItem {
@@ -54,6 +55,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
 }) => {
   // Dish information
   const [dishName, setDishName] = useState<string>('ข้าวกะเพราหมูสับไข่ดาว (ตัวอย่าง)');
+  const [dishEnglishName, setDishEnglishName] = useState<string>(() =>
+    translateThaiToEnglish('ข้าวกะเพราหมูสับไข่ดาว (ตัวอย่าง)')
+  );
   const [category, setCategory] = useState<string>('ผัดและกะเพรา');
   const [sellingPrice, setSellingPrice] = useState<number>(75);
   const [targetFcPercent, setTargetFcPercent] = useState<number>(settings.targetFoodCostPercent || 40);
@@ -451,7 +455,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   // Reset presets
   const handleResetToPreset = (presetType: 'KAPRAO' | 'STEAK' | 'TOMYUM') => {
     if (presetType === 'KAPRAO') {
-      setDishName('ข้าวกะเพราหมูสับไข่ดาว');
+      const nextTh = 'ข้าวกะเพราหมูสับไข่ดาว';
+      setDishName(nextTh);
+      setDishEnglishName(translateThaiToEnglish(nextTh));
       setCategory('ผัดและกะเพรา');
       setSellingPrice(75);
       setItems([
@@ -472,7 +478,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
         { id: 'p3', name: 'ซองพริกน้ำปลาปรุงสำเร็จ', purchasePrice: 35, packageSize: 50, unit: 'ซอง', yieldPercent: 100, quantityUsed: 1 },
       ]);
     } else if (presetType === 'STEAK') {
-      setDishName('สเต็กอกไก่พริกไทยดำ');
+      const nextTh = 'สเต็กอกไก่พริกไทยดำ';
+      setDishName(nextTh);
+      setDishEnglishName(translateThaiToEnglish(nextTh));
       setCategory('ทอดและกระเทียม');
       setSellingPrice(139);
       setItems([
@@ -492,7 +500,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
         { id: 'p3', name: 'มีดส้อมสเต็กพลาสติกแข็ง', purchasePrice: 65, packageSize: 50, unit: 'ชุด', yieldPercent: 100, quantityUsed: 1 },
       ]);
     } else {
-      setDishName('ต้มยำกุ้งน้ำข้นยอดมะพร้าว');
+      const nextTh = 'ต้มยำกุ้งน้ำข้นยอดมะพร้าว';
+      setDishName(nextTh);
+      setDishEnglishName(translateThaiToEnglish(nextTh));
       setCategory('ต้มยำและแกง');
       setSellingPrice(189);
       setItems([
@@ -553,15 +563,22 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
       })),
     ];
 
+    const trimmedTh = dishName.trim();
+    const finalEn = dishEnglishName.trim() || translateThaiToEnglish(trimmedTh) || trimmedTh;
+
     const newMenu: MenuItem = {
       id: `menu_${Date.now()}`,
-      name: dishName,
+      name: trimmedTh,
+      thaiName: trimmedTh,
+      englishName: finalEn,
       category: category,
       active: true,
       variants: [
         {
           id: `var_${Date.now()}`,
           name: 'ธรรมดา / จานเดี่ยว',
+          thaiName: 'ธรรมดา / จานเดี่ยว',
+          englishName: translateThaiToEnglish('ธรรมดา / จานเดี่ยว') || 'Regular',
           proteinType: 'มาตรฐาน',
           sellingPrice: Math.round(sellingPrice),
           takeawayPrice: Math.round(sellingPrice + totalPackagingCost),
@@ -642,21 +659,53 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
         <div className="lg:col-span-7 space-y-6">
           {/* Dish Header Info Card */}
           <div className="bg-[#FFFDF9] border border-[#EAE4D9] rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
                 <label className="block text-[11px] font-bold text-stone-600 mb-1">
-                  ชื่อเมนูอาหาร (Dish Name)
+                  ชื่อเมนูอาหาร (ไทย)
                 </label>
                 <input
                   type="text"
                   value={dishName}
-                  onChange={(e) => setDishName(e.target.value)}
+                  onChange={(e) => {
+                    const nextTh = e.target.value;
+                    setDishEnglishName((currEn) =>
+                      computeAutoEnglishName({
+                        previousThai: dishName,
+                        nextThai: nextTh,
+                        currentEnglish: currEn,
+                      })
+                    );
+                    setDishName(nextTh);
+                  }}
                   className="w-full px-3 py-2 bg-white border border-[#D6CEBE] rounded-xl text-sm font-bold text-stone-900 focus:outline-none focus:border-[#F27D26]"
                   placeholder="เช่น ข้าวกะเพราหมูสับไข่ดาว"
                 />
               </div>
 
-              <div className="w-full sm:w-48">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-stone-600">
+                    ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setDishEnglishName(translateThaiToEnglish(dishName))}
+                    className="text-[10px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                  >
+                    แปลใหม่
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={dishEnglishName}
+                  onChange={(e) => setDishEnglishName(e.target.value)}
+                  className="w-full px-3 py-2 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-xs font-bold text-stone-800 focus:outline-none focus:border-[#F27D26]"
+                  placeholder="Auto-translated English name"
+                />
+              </div>
+
+              <div>
                 <label className="block text-[11px] font-bold text-stone-600 mb-1">
                   หมวดหมู่ (Category)
                 </label>

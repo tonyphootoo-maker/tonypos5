@@ -335,13 +335,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
         <div className="flex items-center gap-2.5 flex-wrap">
           {/* Serving Mode Badge - Ultra High Contrast */}
           <span
-            className={`px-3 py-1 !text-white font-black text-xs sm:text-sm rounded-lg shadow-xs tracking-wider flex items-center gap-1 border ${
-              currentServingMode === 'ON_RICE'
-                ? 'bg-rose-600 border-rose-700'
-                : 'bg-purple-700 border-purple-800'
-            }`}
+            className="px-3 py-1 !text-white font-black text-xs sm:text-sm rounded-lg shadow-xs tracking-wider flex items-center gap-1 border bg-rose-600 border-rose-700"
           >
-            {currentServingMode === 'ON_RICE' ? '🍚 จานเดียว / ราดข้าว' : '🍲 กับข้าว (จานกลาง)'}
+            🍚 จานเดียว / ราดข้าว
           </span>
           <h2 className="text-xl sm:text-2xl font-black text-stone-950 tracking-tight">
             {menu.name}
@@ -349,34 +345,6 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
           <span className="text-xs px-2 py-0.5 bg-stone-100 border border-stone-300 text-stone-700 rounded-md font-bold">
             {menu.variants.length} ตัวเลือก
           </span>
-
-          {/* Serving Mode Switcher Buttons - Distinct High Contrast */}
-          <div className="flex items-center bg-stone-200 p-0.5 rounded-xl border border-stone-300 shadow-2xs ml-0 sm:ml-2">
-            <button
-              type="button"
-              onClick={() => handleSelectServingMode('ON_RICE')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1 ${
-                currentServingMode === 'ON_RICE'
-                  ? 'bg-rose-600 !text-white shadow-xs border border-rose-700'
-                  : 'text-stone-800 hover:text-stone-950 font-bold hover:bg-stone-300'
-              }`}
-              title="คำนวณต้นทุนอาหารจานเดียวแบบราดข้าว (รวมข้าวสวย 200g, ปริมาณเนื้อสัตว์จานเดี่ยว)"
-            >
-              <span>🍚 จานเดียว / ราดข้าว</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectServingMode('A_LA_CARTE')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer flex items-center gap-1 ${
-                currentServingMode === 'A_LA_CARTE'
-                  ? 'bg-purple-700 !text-white shadow-xs border border-purple-800'
-                  : 'text-stone-800 hover:text-stone-950 font-bold hover:bg-stone-300'
-              }`}
-              title="คำนวณต้นทุนอาหารเป็นกับข้าว (ไม่รวมข้าวสวย, กำหนดราคาและปริมาณเนื้อสัตว์ได้เอง)"
-            >
-              <span>🍲 กับข้าว</span>
-            </button>
-          </div>
         </div>
 
         {/* Channel Selector Buttons: กินที่ร้าน / Grab Food / Line Man / Robinhood / แสดงทั้งหมด */}
@@ -1236,7 +1204,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                             type="button"
                             onClick={() => onEditVariant(menu, v)}
                             className="p-1 text-stone-600 hover:text-amber-800 hover:bg-amber-200/80 rounded cursor-pointer transition-colors"
-                            title="แก้ไขตัวเลือกเนื้อสัตว์"
+                            title="แก้ไขตัวเลือก"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>

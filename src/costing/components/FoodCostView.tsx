@@ -38,8 +38,35 @@ import {
   roundUpToStep,
 } from '../services/calculationEngine';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
+import { translateThaiToEnglish, computeAutoEnglishName } from '../../utils/thaiToEnglish';
+import { convertUnit, isPieceLikeUnit } from '../engine/units';
 import { NumericInput } from './common/NumericInput';
 import { MenuPricingSpreadsheetTable } from './MenuPricingSpreadsheetTable';
+
+const PORTION_UNITS_STORAGE_KEY = 'kinpos_custom_portion_units';
+const DEFAULT_PORTION_UNITS = [
+  'g',
+  'kg',
+  'ชิ้น',
+  'ฟอง',
+  'ตัว',
+  'ถุง',
+  'ml',
+  'l',
+  'ลูก',
+  'แผ่น',
+  'ไม้',
+  'แพ็ค',
+  'ขวด',
+  'กล่อง',
+  'ช้อนโต๊ะ',
+];
+const PORTION_UNIT_LABELS: Record<string, string> = {
+  g: 'กรัม (g)',
+  kg: 'กิโลกรัม (kg)',
+  ml: 'มิลลิลิตร (ml)',
+  l: 'ลิตร (L)',
+};
 
 interface FoodCostViewProps {
   menus: MenuItem[];
@@ -154,6 +181,22 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   // Delete Menu Modal state
   const [menuToDelete, setMenuToDelete] = useState<MenuItem | null>(null);
 
+  // Customizable portion units persisted in localStorage
+  const [portionUnits, setPortionUnits] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(PORTION_UNITS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return DEFAULT_PORTION_UNITS;
+  });
+  const [isAddingCustomUnit, setIsAddingCustomUnit] = useState(false);
+  const [customUnitInput, setCustomUnitInput] = useState('');
+
   // Variant Modal state (Add or Edit)
   const [variantModalState, setVariantModalState] = useState<{
     isOpen: boolean;
@@ -163,6 +206,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     selectedCategory?: string;
     selectedIngredientId: string;
     meatQuantity: number;
+    meatUnit: string;
     seafoodShrimpQty?: number;
     seafoodSquidQty?: number;
   }>({
@@ -173,9 +217,37 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     selectedCategory: 'เนื้อสัตว์และอาหารทะเล',
     selectedIngredientId: '',
     meatQuantity: 80,
+    meatUnit: 'g',
     seafoodShrimpQty: 4,
     seafoodSquidQty: 40,
   });
+
+  const handleAddCustomUnit = () => {
+    const trimmed = customUnitInput.trim();
+    if (!trimmed) return;
+    if (!portionUnits.includes(trimmed)) {
+      const updated = [...portionUnits, trimmed];
+      setPortionUnits(updated);
+      try {
+        localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+    }
+    setVariantModalState((prev) => ({ ...prev, meatUnit: trimmed }));
+    setCustomUnitInput('');
+    setIsAddingCustomUnit(false);
+  };
+
+  const handleDeleteCustomUnit = (unitToDelete: string) => {
+    if (portionUnits.length <= 1) return;
+    const updated = portionUnits.filter((u) => u !== unitToDelete);
+    setPortionUnits(updated);
+    try {
+      localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(updated));
+    } catch {}
+    if (variantModalState.meatUnit === unitToDelete) {
+      setVariantModalState((prev) => ({ ...prev, meatUnit: updated[0] || 'g' }));
+    }
+  };
 
   // Variant Delete Modal state
   const [variantToDelete, setVariantToDelete] = useState<{
@@ -190,21 +262,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     );
   }, [ingredients]);
 
-  // All unique ingredient categories
-  const ingredientCategories = useMemo(() => {
-    const set = new Set<string>();
-    ingredients.forEach((i) => {
-      if (i.category) set.add(i.category);
+  // Ingredients grouped by category for unified Step-1 database dropdown
+  const groupedIngredients = useMemo(() => {
+    const groups = new Map<string, Ingredient[]>();
+    ingredients.forEach((ing) => {
+      const cat = ing.category || 'อื่นๆ';
+      const list = groups.get(cat) || [];
+      list.push(ing);
+      groups.set(cat, list);
     });
-    return Array.from(set);
+    return Array.from(groups.entries());
   }, [ingredients]);
-
-  // Filtered ingredients according to selected category in variant modal
-  const currentCategoryIngredients = useMemo(() => {
-    const cat = variantModalState.selectedCategory || 'เนื้อสัตว์และอาหารทะเล';
-    if (cat === 'ALL') return ingredients;
-    return ingredients.filter((i) => i.category === cat);
-  }, [ingredients, variantModalState.selectedCategory]);
 
   // Breakdown Modal state
   const [selectedBreakdown, setSelectedBreakdown] = useState<{
@@ -239,12 +307,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   // Modal state for adding new category
   const [isAddCategoryModalOpen, setIsAddCategoryModalOpen] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [newCategoryEnglishInput, setNewCategoryEnglishInput] = useState('');
   const [categoryError, setCategoryError] = useState<string | null>(null);
 
   // Modal state for editing existing category
   const [isEditCategoryModalOpen, setIsEditCategoryModalOpen] = useState(false);
   const [editingCategoryOldName, setEditingCategoryOldName] = useState('');
   const [editingCategoryNewName, setEditingCategoryNewName] = useState('');
+  const [editCategoryEnglishInput, setEditCategoryEnglishInput] = useState('');
   const [editCategoryError, setEditCategoryError] = useState<string | null>(null);
 
   // Modal state for deleting category
@@ -288,6 +358,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       setEditingMenu({ ...editingMenu, category: trimmed });
     }
     setNewCategoryInput('');
+    setNewCategoryEnglishInput('');
     setCategoryError(null);
     setIsAddCategoryModalOpen(false);
   };
@@ -296,6 +367,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     if (!categoryName || categoryName === 'ALL') return;
     setEditingCategoryOldName(categoryName);
     setEditingCategoryNewName(categoryName);
+    setEditCategoryEnglishInput(translateThaiToEnglish(categoryName));
     setEditCategoryError(null);
     setIsEditCategoryModalOpen(true);
   };
@@ -498,12 +570,16 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const newMenu: Partial<MenuItem> = {
       id: `menu_${Date.now()}`,
       name: '',
+      thaiName: '',
+      englishName: '',
       category: currentCat,
       variants: [
         {
           id: `var_${Date.now()}_1`,
           menuId: `menu_${Date.now()}`,
           name: 'ธรรมดา',
+          thaiName: 'ธรรมดา',
+          englishName: 'Regular',
           proteinType: 'หมูสับ',
           sellingPrice: 60,
           takeawayPrice: 65,
@@ -522,7 +598,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   };
 
   const handleOpenEditMenu = (menu: MenuItem) => {
-    setEditingMenu(JSON.parse(JSON.stringify(menu)));
+    const cloned = JSON.parse(JSON.stringify(menu));
+    const thName = cloned.thaiName || cloned.name || '';
+    cloned.thaiName = thName;
+    cloned.englishName = cloned.englishName || translateThaiToEnglish(thName);
+    setEditingMenu(cloned);
     setIsMenuModalOpen(true);
   };
 
@@ -530,9 +610,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     e.preventDefault();
     if (!editingMenu || !editingMenu.name) return;
 
+    const trimmedTh = editingMenu.name.trim();
+    const trimmedEn =
+      (editingMenu.englishName || '').trim() ||
+      translateThaiToEnglish(trimmedTh) ||
+      trimmedTh;
+
     const finalMenu: MenuItem = {
       id: editingMenu.id || `menu_${Date.now()}`,
-      name: editingMenu.name.trim(),
+      name: trimmedTh,
+      thaiName: trimmedTh,
+      englishName: trimmedEn,
+      code: editingMenu.code,
+      sku: editingMenu.sku,
+      barcode: editingMenu.barcode,
+      isOutOfStock: editingMenu.isOutOfStock,
       category: editingMenu.category || 'ผัดและกะเพรา',
       displayOrder: editingMenu.displayOrder || 1,
       variants: editingMenu.variants || [],
@@ -550,12 +642,24 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     // Find default meat ingredient if available from ingredients
     const defaultIng = meatIngredients[0] || ingredients[0];
     const defaultProtein = defaultIng ? defaultIng.name.split(' (')[0].split(' ')[0] : 'หมูสับ';
-    const initialQty = defaultIng?.usageUnit === 'ตัว' || defaultIng?.baseUnit === 'ตัว' ? 4 : 80;
+    const initialUnit = (defaultIng?.usageUnit || defaultIng?.baseUnit || 'g') as string;
+    const initialQty = isPieceLikeUnit(initialUnit) ? (initialUnit === 'ตัว' ? 4 : 1) : 80;
+    const variantTh = `${menu.name} ${defaultProtein}`;
+
+    if (initialUnit && !portionUnits.includes(initialUnit)) {
+      const nextUnits = [...portionUnits, initialUnit];
+      setPortionUnits(nextUnits);
+      try {
+        localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(nextUnits));
+      } catch {}
+    }
 
     const newVariant: Partial<MenuVariant> = {
       id: `var_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       menuId: menu.id,
-      name: `${menu.name} ${defaultProtein}`,
+      name: variantTh,
+      thaiName: variantTh,
+      englishName: translateThaiToEnglish(variantTh),
       proteinType: defaultProtein,
       sellingPrice: 65,
       takeawayPrice: 70,
@@ -571,7 +675,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               ingredientId: defaultIng.id,
               name: defaultIng.name,
               quantity: initialQty,
-              unit: defaultIng.usageUnit || 'g',
+              unit: initialUnit,
               calculatedUnitCost: defaultIng.costPerBaseUnit || 0,
               calculatedLineCost: Number(((defaultIng.costPerBaseUnit || 0) * initialQty).toFixed(2)),
             },
@@ -580,6 +684,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       active: true,
     };
 
+    setIsAddingCustomUnit(false);
+    setCustomUnitInput('');
     setVariantModalState({
       isOpen: true,
       mode: 'ADD',
@@ -588,6 +694,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedCategory: defaultIng?.category || 'เนื้อสัตว์และอาหารทะเล',
       selectedIngredientId: defaultIng ? defaultIng.id : '',
       meatQuantity: initialQty,
+      meatUnit: initialUnit,
       seafoodShrimpQty: 4,
       seafoodSquidQty: 40,
     });
@@ -632,7 +739,18 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     );
 
     const matchedIng = ingredients.find((i) => i.id === matchedIngId);
+    const initialUnit = String(proteinItem?.unit || matchedIng?.usageUnit || matchedIng?.baseUnit || 'g');
 
+    if (initialUnit && !portionUnits.includes(initialUnit)) {
+      const nextUnits = [...portionUnits, initialUnit];
+      setPortionUnits(nextUnits);
+      try {
+        localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(nextUnits));
+      } catch {}
+    }
+
+    setIsAddingCustomUnit(false);
+    setCustomUnitInput('');
     setVariantModalState({
       isOpen: true,
       mode: 'EDIT',
@@ -641,6 +759,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedCategory: isSeafoodItem ? 'เนื้อสัตว์และอาหารทะเล' : (matchedIng?.category || 'เนื้อสัตว์และอาหารทะเล'),
       selectedIngredientId: isSeafoodItem ? 'seafood_combo' : matchedIngId,
       meatQuantity: defaultQty,
+      meatUnit: initialUnit,
       seafoodShrimpQty: existingShrimp?.quantity || 4,
       seafoodSquidQty: existingSquid?.quantity || 40,
     });
@@ -673,14 +792,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     if (!variantModalState.menu || !variantModalState.variant) return;
     const targetMenu = variantModalState.menu;
     const v = variantModalState.variant;
-    const pType = v.proteinType?.trim() || 'หมูสับ';
-    const isSeafoodSelected =
-      pType.includes('ทะเล') ||
-      pType.includes('ซีฟู้ด') ||
-      variantModalState.selectedIngredientId === 'seafood_combo';
-
     const linkedIng = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
-    const qty = Number(variantModalState.meatQuantity) || (pType.includes('กุ้ง') ? 4 : 80);
+    const isSeafoodSelected =
+      variantModalState.selectedIngredientId === 'seafood_combo' ||
+      (v.proteinType || '').includes('ทะเล') ||
+      (v.proteinType || '').includes('ซีฟู้ด');
+
+    const derivedProtein = isSeafoodSelected
+      ? 'ทะเล'
+      : linkedIng
+        ? linkedIng.name.split(' (')[0]
+        : (v.proteinType?.trim() || 'หมูสับ');
+
+    const pType = derivedProtein;
+    const chosenUnit = (variantModalState.meatUnit || linkedIng?.usageUnit || linkedIng?.baseUnit || 'g').trim();
+    const qty = Number(variantModalState.meatQuantity) || (pType.includes('กุ้ง') ? 4 : isPieceLikeUnit(chosenUnit) ? 1 : 80);
 
     // Keep existing non-protein recipe items if any
     const existingOtherItems = (v.recipeItems || []).filter((it) => {
@@ -731,16 +857,26 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         ...existingOtherItems,
       ];
     } else {
+      let effectiveQtyForBase = qty;
+      if (linkedIng) {
+        const conv = convertUnit(qty, chosenUnit, linkedIng.baseUnit || linkedIng.usageUnit || 'g');
+        if (conv.success) {
+          effectiveQtyForBase = conv.convertedQuantity;
+        }
+      }
       const proteinRecipeItem: RecipeItem = {
         ingredientId: linkedIng ? linkedIng.id : '',
         name: linkedIng ? linkedIng.name : pType,
         quantity: qty,
-        unit: (linkedIng?.usageUnit as any) || (linkedIng?.baseUnit as any) || 'g',
+        unit: chosenUnit,
         calculatedUnitCost: linkedIng?.costPerBaseUnit || 0,
-        calculatedLineCost: Number(((linkedIng?.costPerBaseUnit || 0) * qty).toFixed(2)),
+        calculatedLineCost: Number(((linkedIng?.costPerBaseUnit || 0) * effectiveQtyForBase).toFixed(2)),
       };
       finalRecipeItems = [proteinRecipeItem, ...existingOtherItems];
     }
+
+    const derivedNameTh = v.name?.trim() || `${targetMenu.name} ${pType}`;
+    const derivedNameEn = translateThaiToEnglish(derivedNameTh) || derivedNameTh;
 
     const finalVariant: MenuVariant = {
       id: v.id || `var_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -748,7 +884,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       code: v.code?.trim() || undefined,
       sku: v.sku?.trim() || v.code?.trim() || undefined,
       barcode: v.barcode?.trim() || undefined,
-      name: v.name?.trim() || `${targetMenu.name} ${pType}`,
+      name: derivedNameTh,
+      thaiName: derivedNameTh,
+      englishName: derivedNameEn,
       proteinType: pType,
       sellingPrice: Number(v.sellingPrice) || 60,
       takeawayPrice: Number(v.takeawayPrice) || Number(v.sellingPrice) || 65,
@@ -787,6 +925,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       variant: null,
       selectedIngredientId: '',
       meatQuantity: 80,
+      meatUnit: 'g',
     });
   };
 
@@ -1215,8 +1354,16 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           >
                             {menu.name}
                           </span>
+                          {(() => {
+                            const enSubtitle = (menu.englishName || translateThaiToEnglish(menu.name) || '').trim();
+                            return enSubtitle && enSubtitle !== menu.name ? (
+                              <span className="text-[11px] text-stone-500 font-medium truncate">
+                                ({enSubtitle})
+                              </span>
+                            ) : null;
+                          })()}
                           <span className="text-[11px] text-stone-500 font-medium">
-                            ({menu.variants.length} ตัวเลือก)
+                            {menu.variants.length} ตัวเลือก
                           </span>
                           {hasWarning && (
                             <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-rose-600 !text-white shadow-2xs flex items-center gap-1">
@@ -1802,19 +1949,61 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveMenuModal} className="space-y-4 mt-4 text-xs">
-              <div>
-                <label className="block text-stone-700 mb-1.5 font-bold text-sm">
-                  ชื่อเมนูอาหาร <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="เช่น ข้าวกะเพราโบราณ, ข้าวผัดพริกเผา"
-                  value={editingMenu.name || ''}
-                  onChange={(e) => setEditingMenu({ ...editingMenu, name: e.target.value })}
-                  className="w-full p-3 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-sm font-medium focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
-                />
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-stone-700 mb-1.5 font-bold text-sm">
+                    ชื่อเมนูอาหาร (ไทย) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="เช่น ข้าวกะเพราโบราณ, ข้าวผัดพริกเผา"
+                    value={editingMenu.name || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      const nextEn = computeAutoEnglishName({
+                        previousThai: editingMenu.thaiName ?? editingMenu.name,
+                        nextThai: nextTh,
+                        currentEnglish: editingMenu.englishName,
+                      });
+                      setEditingMenu({
+                        ...editingMenu,
+                        name: nextTh,
+                        thaiName: nextTh,
+                        englishName: nextEn,
+                      });
+                    }}
+                    className="w-full p-3 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-sm font-medium focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-stone-700 font-bold text-xs">
+                      ชื่อเมนูภาษาอังกฤษ (English Name — แปลอัตโนมัติ)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingMenu({
+                          ...editingMenu,
+                          englishName: translateThaiToEnglish(editingMenu.name || ''),
+                        })
+                      }
+                      className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                    >
+                      แปลใหม่จากภาษาไทย
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Auto-translated English name (editable)"
+                    value={editingMenu.englishName || ''}
+                    onChange={(e) => setEditingMenu({ ...editingMenu, englishName: e.target.value })}
+                    className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1897,6 +2086,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   setIsAddCategoryModalOpen(false);
                   setCategoryError(null);
                   setNewCategoryInput('');
+                  setNewCategoryEnglishInput('');
                 }}
                 className="p-1 rounded-xl text-stone-400 hover:text-stone-700 hover:bg-stone-100 cursor-pointer"
               >
@@ -1905,27 +2095,50 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             <form onSubmit={handleCreateCategory} className="space-y-4 mt-4 text-xs">
-              <div>
-                <label className="block text-stone-700 mb-1.5 font-semibold">
-                  ชื่อหมวดหมู่ใหม่ (Category Name)
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="เช่น ของหวาน, เครื่องดื่ม, กับแกล้ม, สเต็ก"
-                  value={newCategoryInput}
-                  onChange={(e) => {
-                    setNewCategoryInput(e.target.value);
-                    if (categoryError) setCategoryError(null);
-                  }}
-                  className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
-                />
-                {categoryError && (
-                  <p className="text-[11px] text-rose-600 mt-1 font-semibold">
-                    {categoryError}
-                  </p>
-                )}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-stone-700 mb-1.5 font-semibold">
+                    ชื่อหมวดหมู่ใหม่ (ไทย)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    placeholder="เช่น ของหวาน, เครื่องดื่ม, กับแกล้ม, สเต็ก"
+                    value={newCategoryInput}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      setNewCategoryEnglishInput((currEn) =>
+                        computeAutoEnglishName({
+                          previousThai: newCategoryInput,
+                          nextThai: nextTh,
+                          currentEnglish: currEn,
+                        })
+                      );
+                      setNewCategoryInput(nextTh);
+                      if (categoryError) setCategoryError(null);
+                    }}
+                    className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
+                  />
+                  {categoryError && (
+                    <p className="text-[11px] text-rose-600 mt-1 font-semibold">
+                      {categoryError}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-stone-700 mb-1 font-semibold">
+                    ชื่อหมวดหมู่ภาษาอังกฤษ (แปลอัตโนมัติ)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Auto-translated category name"
+                    value={newCategoryEnglishInput}
+                    onChange={(e) => setNewCategoryEnglishInput(e.target.value)}
+                    className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-800 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
+                  />
+                </div>
               </div>
 
               {/* Quick Suggestions Chips */}
@@ -1947,6 +2160,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       type="button"
                       onClick={() => {
                         setNewCategoryInput(preset);
+                        setNewCategoryEnglishInput(translateThaiToEnglish(preset));
                         if (categoryError) setCategoryError(null);
                       }}
                       className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 border border-stone-200 rounded-lg text-[11px] text-stone-700 font-medium transition-colors cursor-pointer"
@@ -1964,6 +2178,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     setIsAddCategoryModalOpen(false);
                     setCategoryError(null);
                     setNewCategoryInput('');
+                    setNewCategoryEnglishInput('');
                   }}
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
@@ -2007,26 +2222,49 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveEditCategory} className="space-y-4 mt-4 text-xs">
-              <div>
-                <label className="block text-stone-700 mb-1.5 font-semibold">
-                  ชื่อหมวดหมู่ (Category Name)
-                </label>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  value={editingCategoryNewName}
-                  onChange={(e) => {
-                    setEditingCategoryNewName(e.target.value);
-                    if (editCategoryError) setEditCategoryError(null);
-                  }}
-                  className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
-                />
-                {editCategoryError && (
-                  <p className="text-[11px] text-rose-600 mt-1 font-semibold">
-                    {editCategoryError}
-                  </p>
-                )}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-stone-700 mb-1.5 font-semibold">
+                    ชื่อหมวดหมู่ (ไทย)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={editingCategoryNewName}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      setEditCategoryEnglishInput((currEn) =>
+                        computeAutoEnglishName({
+                          previousThai: editingCategoryNewName,
+                          nextThai: nextTh,
+                          currentEnglish: currEn,
+                        })
+                      );
+                      setEditingCategoryNewName(nextTh);
+                      if (editCategoryError) setEditCategoryError(null);
+                    }}
+                    className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
+                  />
+                  {editCategoryError && (
+                    <p className="text-[11px] text-rose-600 mt-1 font-semibold">
+                      {editCategoryError}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-stone-700 mb-1 font-semibold">
+                    ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Auto-translated English name"
+                    value={editCategoryEnglishInput}
+                    onChange={(e) => setEditCategoryEnglishInput(e.target.value)}
+                    className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-800 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
+                  />
+                </div>
               </div>
 
               <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-[11px] text-amber-900 leading-relaxed">
@@ -2330,9 +2568,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </span>
                 <div>
                   <h3 className="font-black text-stone-950 text-base">
-                    {variantModalState.mode === 'ADD'
-                      ? '+ เพิ่มตัวเลือกเนื้อสัตว์ใหม่'
-                      : 'แก้ไขตัวเลือกเนื้อสัตว์'}
+                    + เพิ่มตัวเลือก
                   </h3>
                   <p className="text-xs text-stone-500 font-medium">
                     เมนู: <strong className="text-stone-800">{variantModalState.menu.name}</strong>
@@ -2342,7 +2578,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <button
                 type="button"
                 onClick={() =>
-                  setVariantModalState({ isOpen: false, mode: 'ADD', menu: null, variant: null, selectedIngredientId: '', meatQuantity: 80 })
+                  setVariantModalState({
+                    isOpen: false,
+                    mode: 'ADD',
+                    menu: null,
+                    variant: null,
+                    selectedIngredientId: '',
+                    meatQuantity: 80,
+                    meatUnit: 'g',
+                  })
                 }
                 className="p-1.5 rounded-xl text-stone-400 hover:text-stone-700 hover:bg-stone-100 cursor-pointer"
               >
@@ -2351,7 +2595,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             <form onSubmit={handleSaveVariantModal} className="space-y-4 mt-4 text-xs">
-              {/* 1. เลือกประเภทวัตถุดิบ/เนื้อสัตว์จากฐานข้อมูล (เลือกหมวดหมู่ก่อน แล้วเลือกวัตถุดิบย่อย) */}
+              {/* 1. เลือกวัตถุดิบจากฐานข้อมูล (เหลือเฉพาะข้อ 1. เชื่อมข้อมูลจากฐานข้อมูลโดยตรง) */}
               <div className="p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-2xl space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="block text-stone-900 font-black text-xs">
@@ -2362,43 +2606,18 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {/* ขั้นที่ 1: เลือกหมวดหมู่วัตถุดิบ */}
+                <div className="grid grid-cols-1 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                      1. เลือกหมวดหมู่วัตถุดิบก่อน <span className="text-[#F27D26]">*</span>
+                      1. เลือกวัตถุดิบ / เนื้อสัตว์จากฐานข้อมูล <span className="text-[#F27D26]">*</span>
                     </label>
                     <select
-                      value={variantModalState.selectedCategory || 'เนื้อสัตว์และอาหารทะเล'}
-                      onChange={(e) => {
-                        const newCat = e.target.value;
-                        setVariantModalState((prev) => ({
-                          ...prev,
-                          selectedCategory: newCat,
-                          selectedIngredientId: '',
-                        }));
-                      }}
-                      className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26] cursor-pointer"
-                    >
-                      <option value="ALL">📁 ทุกหมวดหมู่วัตถุดิบ</option>
-                      {ingredientCategories.map((cat) => (
-                        <option key={cat} value={cat}>
-                          {cat === 'เนื้อสัตว์และอาหารทะเล' ? '🥩 ' : cat === 'ผักและสมุนไพร' ? '🥬 ' : cat === 'เครื่องปรุงและซอส' ? '🧂 ' : cat === 'ข้าวและเส้น' ? '🍚 ' : cat === 'ไข่และเต้าหู้' ? '🥚 ' : cat === 'บรรจุภัณฑ์' ? '🥡 ' : '📦 '}{cat}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* ขั้นที่ 2: เลือกวัตถุดิบย่อย */}
-                  <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                      2. เลือกวัตถุดิบย่อย <span className="text-[#F27D26]">*</span>
-                    </label>
-                    <select
+                      required
                       value={variantModalState.selectedIngredientId}
                       onChange={(e) => {
                         const ingId = e.target.value;
                         if (ingId === 'seafood_combo') {
+                          const vNameTh = `${variantModalState.menu?.name || ''} ทะเล`.trim();
                           setVariantModalState((prev) => ({
                             ...prev,
                             selectedIngredientId: 'seafood_combo',
@@ -2407,23 +2626,41 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             variant: {
                               ...prev.variant,
                               proteinType: 'ทะเล',
-                              name: prev.mode === 'ADD' || !prev.variant?.name ? `${prev.menu?.name} ทะเล` : prev.variant?.name,
+                              name: vNameTh,
+                              thaiName: vNameTh,
+                              englishName: translateThaiToEnglish(vNameTh),
                             },
                           }));
                         } else if (ingId) {
                           const ing = ingredients.find((i) => i.id === ingId);
                           if (ing) {
-                            const pName = ing.name.split(' (')[0].split(' ')[0];
-                            const defaultQty = ing.usageUnit === 'ตัว' || ing.baseUnit === 'ตัว' ? 4 : 80;
+                            const pName = ing.name.split(' (')[0];
+                            const nextUnit = String(ing.usageUnit || ing.baseUnit || 'g');
+                            const defaultQty = isPieceLikeUnit(nextUnit)
+                              ? (nextUnit === 'ตัว' ? 4 : 1)
+                              : 80;
+                            const vNameTh = `${variantModalState.menu?.name || ''} ${pName}`.trim();
+
+                            if (!portionUnits.includes(nextUnit)) {
+                              const nextUnits = [...portionUnits, nextUnit];
+                              setPortionUnits(nextUnits);
+                              try {
+                                localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(nextUnits));
+                              } catch {}
+                            }
+
                             setVariantModalState((prev) => ({
                               ...prev,
                               selectedCategory: ing.category || prev.selectedCategory,
                               selectedIngredientId: ingId,
                               meatQuantity: defaultQty,
+                              meatUnit: nextUnit,
                               variant: {
                                 ...prev.variant,
                                 proteinType: pName,
-                                name: prev.mode === 'ADD' || !prev.variant?.name ? `${prev.menu?.name} ${pName}` : prev.variant?.name,
+                                name: vNameTh,
+                                thaiName: vNameTh,
+                                englishName: translateThaiToEnglish(vNameTh),
                               },
                             }));
                           }
@@ -2436,133 +2673,37 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       }}
                       className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26] cursor-pointer"
                     >
-                      <option value="">-- เลือกวัตถุดิบย่อย ({currentCategoryIngredients.length} รายการ) --</option>
-                      {(variantModalState.selectedCategory === 'ALL' || variantModalState.selectedCategory === 'เนื้อสัตว์และอาหารทะเล') && (
-                        <option value="seafood_combo" className="font-bold text-[#F27D26]">
-                          🌊 ทะเล (กุ้งสด + ปลาหมึกสด คู่กัน)
-                        </option>
-                      )}
-                      {currentCategoryIngredients.map((ing) => (
-                        <option key={ing.id} value={ing.id}>
-                          {ing.name}
-                        </option>
+                      <option value="">-- เลือกวัตถุดิบจากฐานข้อมูล ({ingredients.length} รายการ) --</option>
+                      <option value="seafood_combo" className="font-bold text-[#F27D26]">
+                        🌊 ทะเล (กุ้งสด + ปลาหมึกสด คู่กัน)
+                      </option>
+                      {groupedIngredients.map(([cat, catIngs]) => (
+                        <optgroup key={cat} label={cat}>
+                          {catIngs.map((ing) => (
+                            <option key={ing.id} value={ing.id}>
+                              {ing.name} ({ing.usageUnit || ing.baseUnit || 'g'})
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                   </div>
                 </div>
 
-                {/* Quick Selection Chips - Filtered dynamically by currentCategoryIngredients */}
-                {currentCategoryIngredients.length > 0 && (
-                  <div>
-                    <div className="text-[10px] text-stone-500 font-semibold mb-1">ปุ่มลัดเลือกด่วนในหมวดนี้:</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(variantModalState.selectedCategory === 'ALL' || variantModalState.selectedCategory === 'เนื้อสัตว์และอาหารทะเล') && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setVariantModalState((prev) => ({
-                              ...prev,
-                              selectedIngredientId: 'seafood_combo',
-                              seafoodShrimpQty: prev.seafoodShrimpQty || 4,
-                              seafoodSquidQty: prev.seafoodSquidQty || 40,
-                              variant: {
-                                ...prev.variant,
-                                proteinType: 'ทะเล',
-                                name: prev.mode === 'ADD' || !prev.variant?.name ? `${prev.menu?.name} ทะเล` : prev.variant?.name,
-                              },
-                            }));
-                          }}
-                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer border ${
-                            variantModalState.selectedIngredientId === 'seafood_combo' || variantModalState.variant?.proteinType === 'ทะเล'
-                              ? 'bg-[#0284C7] text-white border-[#0369A1] shadow-2xs'
-                              : 'bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100'
-                          }`}
-                        >
-                          🌊 ทะเล (กุ้ง+หมึก)
-                        </button>
-                      )}
-                      {currentCategoryIngredients.slice(0, 8).map((ing) => {
-                        const isSelected = variantModalState.selectedIngredientId === ing.id;
-                        const shortName = ing.name.split(' (')[0];
-                        return (
-                          <button
-                            key={ing.id}
-                            type="button"
-                            onClick={() => {
-                              const defaultQty = ing.usageUnit === 'ตัว' || ing.baseUnit === 'ตัว' ? 4 : 80;
-                              setVariantModalState((prev) => ({
-                                ...prev,
-                                selectedIngredientId: ing.id,
-                                meatQuantity: defaultQty,
-                                variant: {
-                                  ...prev.variant,
-                                  proteinType: shortName,
-                                  name: prev.mode === 'ADD' || !prev.variant?.name ? `${prev.menu?.name} ${shortName}` : prev.variant?.name,
-                                },
-                              }));
-                            }}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer border ${
-                              isSelected
-                                ? 'bg-[#F27D26] text-white border-[#c2580e] shadow-2xs'
-                                : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-100'
-                            }`}
-                          >
-                            {shortName}
-                          </button>
-                        );
-                      })}
-                    </div>
+                {/* Live Bilingual Variant Name Preview */}
+                {variantModalState.variant?.name && (
+                  <div className="px-2.5 py-1.5 bg-white/80 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                    <span className="text-stone-700 font-bold">
+                      ชื่อตัวเลือก: <strong className="text-stone-950">{variantModalState.variant.name}</strong>
+                    </span>
+                    <span className="text-amber-800 font-semibold">
+                      EN: {variantModalState.variant.englishName || translateThaiToEnglish(variantModalState.variant.name)}
+                    </span>
                   </div>
                 )}
               </div>
 
-              {/* 2. รายละเอียดตัวเลือก */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-stone-800 mb-1 font-bold text-xs">
-                    ประเภทเนื้อสัตว์ <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="เช่น หมูสับ, หมูหมัก, อกไก่, กุ้ง, ทะเล"
-                    value={variantModalState.variant.proteinType || ''}
-                    onChange={(e) =>
-                      setVariantModalState((prev) => ({
-                        ...prev,
-                        variant: {
-                          ...prev.variant,
-                          proteinType: e.target.value,
-                          name: prev.mode === 'ADD' && (!prev.variant?.name || prev.variant.name.startsWith(prev.menu?.name || ''))
-                            ? `${prev.menu?.name} ${e.target.value}`
-                            : prev.variant?.name,
-                        },
-                      }))
-                    }
-                    className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-stone-800 mb-1 font-bold text-xs">
-                    ชื่อรายการตัวเลือก
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="เช่น ข้าวกะเพรา หมูสับ"
-                    value={variantModalState.variant.name || ''}
-                    onChange={(e) =>
-                      setVariantModalState((prev) => ({
-                        ...prev,
-                        variant: { ...prev.variant, name: e.target.value },
-                      }))
-                    }
-                    className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
-                  />
-                </div>
-              </div>
-
-              {/* 3. ปริมาณเนื้อสัตว์ที่ใช้ (รองรับทั้งเนื้อสัตว์เดี่ยว และ ทะเล กุ้ง+หมึก) */}
+              {/* 2. ปริมาณเนื้อสัตว์ที่ใช้ (รองรับทั้งเนื้อสัตว์เดี่ยว และ ทะเล กุ้ง+หมึก + เลือก/เพิ่ม/ลบหน่วยวัด) */}
               {(() => {
                 const pType = (variantModalState.variant?.proteinType || '').toLowerCase();
                 const isSeafoodChoice =
@@ -2633,15 +2774,37 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   );
                 }
 
+                const activeUnit = variantModalState.meatUnit || 'g';
+                const normUnit = activeUnit.trim().toLowerCase();
+                const isCountOrBulk =
+                  isPieceLikeUnit(normUnit) || normUnit === 'kg' || normUnit === 'l' || normUnit === 'ช้อนโต๊ะ';
+                const presetQuantities =
+                  normUnit === 'kg' || normUnit === 'l'
+                    ? [0.1, 0.2, 0.5, 1]
+                    : isCountOrBulk
+                      ? [1, 2, 3, 4, 5]
+                      : [50, 60, 80, 100, 120];
+
                 return (
-                  <div>
-                    <label className="block text-stone-800 mb-1 font-bold text-xs">
-                      ปริมาณเนื้อสัตว์ที่ใช้ต่อจาน{' '}
-                      <span className="text-stone-500 font-normal">
-                        ({ingredients.find((i) => i.id === variantModalState.selectedIngredientId)?.usageUnit || 'กรัม หรือ ตัว'})
-                      </span>
-                    </label>
-                    <div className="flex items-center gap-2">
+                  <div className="space-y-2 p-3 bg-white border border-[#EAE4D9] rounded-2xl">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="block text-stone-800 font-bold text-xs">
+                        ปริมาณเนื้อสัตว์ที่ใช้ต่อจาน{' '}
+                        <span className="text-stone-500 font-normal">
+                          ({PORTION_UNIT_LABELS[activeUnit] || activeUnit})
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingCustomUnit((p) => !p)}
+                        className="text-[11px] font-bold text-[#F27D26] hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>เพิ่มหน่วยเอง</span>
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
                       <NumericInput
                         min="0"
                         step="any"
@@ -2652,31 +2815,95 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             meatQuantity: val,
                           }))
                         }
-                        className="w-32 p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
+                        className="w-28 p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
                       />
-                      <span className="text-xs text-stone-600 font-semibold">
-                        {ingredients.find((i) => i.id === variantModalState.selectedIngredientId)?.usageUnit || 'กรัม (g)'}
-                      </span>
-                      {/* Quick preset weight buttons */}
-                      <div className="flex items-center gap-1 ml-auto">
-                        {[60, 70, 80, 100, 120].map((w) => (
+
+                      {/* Unit Dropdown Selector */}
+                      <select
+                        value={activeUnit}
+                        onChange={(e) =>
+                          setVariantModalState((prev) => ({
+                            ...prev,
+                            meatUnit: e.target.value,
+                          }))
+                        }
+                        className="p-2.5 bg-stone-50 border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-bold focus:outline-none focus:border-[#F27D26] cursor-pointer"
+                        title="เลือกหน่วยวัดปริมาณ"
+                      >
+                        {portionUnits.map((u) => (
+                          <option key={u} value={u}>
+                            {PORTION_UNIT_LABELS[u] || u}
+                          </option>
+                        ))}
+                      </select>
+
+                      {/* Delete Selected Unit Button */}
+                      <button
+                        type="button"
+                        disabled={portionUnits.length <= 1}
+                        onClick={() => handleDeleteCustomUnit(activeUnit)}
+                        className="p-2 rounded-xl border border-stone-200 text-stone-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 disabled:opacity-30 cursor-pointer transition-colors"
+                        title={`ลบหน่วย "${activeUnit}" ออกจากรายการ`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Dynamic Quick Preset Quantity Buttons */}
+                      <div className="flex items-center gap-1 ml-auto flex-wrap">
+                        {presetQuantities.map((w) => (
                           <button
                             key={w}
                             type="button"
                             onClick={() =>
                               setVariantModalState((prev) => ({ ...prev, meatQuantity: w }))
                             }
-                            className={`px-2 py-1 text-[10px] font-bold rounded-lg border ${
+                            className={`px-2 py-1 text-[10px] font-bold rounded-lg border cursor-pointer ${
                               variantModalState.meatQuantity === w
                                 ? 'bg-[#F27D26] text-white border-[#c2580e]'
                                 : 'bg-stone-100 text-stone-700 border-stone-200 hover:bg-stone-200'
                             }`}
                           >
-                            {w}g
+                            {w} {activeUnit}
                           </button>
                         ))}
                       </div>
                     </div>
+
+                    {/* Inline Add Custom Unit Box */}
+                    {isAddingCustomUnit && (
+                      <div className="flex items-center gap-2 pt-2 border-t border-stone-100">
+                        <input
+                          type="text"
+                          value={customUnitInput}
+                          onChange={(e) => setCustomUnitInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddCustomUnit();
+                            }
+                          }}
+                          placeholder="พิมพ์ชื่อหน่วยใหม่ เช่น ทัพพี, ห่อ, กล่องเล็ก"
+                          className="flex-1 p-2 bg-stone-50 border border-[#D6CEBE] rounded-xl text-xs font-semibold text-stone-900 focus:outline-none focus:border-[#F27D26]"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAddCustomUnit}
+                          className="px-3 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl text-[11px] cursor-pointer"
+                        >
+                          เพิ่มหน่วย
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddingCustomUnit(false);
+                            setCustomUnitInput('');
+                          }}
+                          className="px-2.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-600 font-semibold rounded-xl text-[11px] cursor-pointer"
+                        >
+                          ยกเลิก
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -2963,9 +3190,22 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 } else {
                   const linked = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
                   const unitCost = linked?.costPerBaseUnit || 0;
-                  meatCost = unitCost * (Number(variantModalState.meatQuantity) || 0);
+                  const rawQty = Number(variantModalState.meatQuantity) || 0;
+                  const chosenUnit = variantModalState.meatUnit || linked?.usageUnit || linked?.baseUnit || 'g';
+                  let effectiveQty = rawQty;
+                  if (linked) {
+                    const conv = convertUnit(rawQty, chosenUnit, linked.baseUnit || linked.usageUnit || 'g');
+                    if (conv.success) {
+                      effectiveQty = conv.convertedQuantity;
+                    }
+                  }
+                  meatCost = unitCost * effectiveQty;
                   if (linked && unitCost > 0) {
-                    costDetail = `฿${(unitCost * 1000).toFixed(0)}/กก.`;
+                    const baseU = linked.baseUnit || linked.usageUnit || 'g';
+                    costDetail =
+                      baseU === 'g'
+                        ? `฿${(unitCost * 1000).toFixed(0)}/กก.`
+                        : `฿${unitCost.toFixed(2)}/${baseU}`;
                   } else {
                     costDetail = 'ยังไม่ได้เลือกวัตถุดิบหรือยังไม่มีราคา';
                   }
@@ -3012,7 +3252,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <button
                   type="button"
                   onClick={() =>
-                    setVariantModalState({ isOpen: false, mode: 'ADD', menu: null, variant: null, selectedIngredientId: '', meatQuantity: 80 })
+                    setVariantModalState({
+                      isOpen: false,
+                      mode: 'ADD',
+                      menu: null,
+                      variant: null,
+                      selectedIngredientId: '',
+                      meatQuantity: 80,
+                      meatUnit: 'g',
+                    })
                   }
                   className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
                 >
