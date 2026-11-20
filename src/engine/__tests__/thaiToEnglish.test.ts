@@ -26,6 +26,14 @@ describe('thaiToEnglish culinary translation & auto-sync', () => {
     expect(translateThaiToEnglish('เนื้อสัตว์และอาหารทะเล')).toBe(
       'Meats & Seafood'
     );
+    expect(translateThaiToEnglish('สันคอหมู')).toBe('Pork Collar');
+    expect(translateThaiToEnglish('น้ำปลาร้า')).toBe('Fermented Fish Sauce');
+    expect(translateThaiToEnglish('ยำหมูย่าง')).toBe('Spicy Grilled Pork Salad');
+    expect(translateThaiToEnglish('แกงเขียวหวานกุ้ง')).toBe('Green Curry with Shrimp');
+    expect(translateThaiToEnglish('กุ้งทอดกระเทียม')).toBe('Fried Garlic Shrimp');
+    expect(translateThaiToEnglish('ซอสสามรส')).toBe('Three-Flavor Sweet & Sour Sauce');
+    expect(translateThaiToEnglish('ใบมะกรูด')).not.toMatch(/Kaphrao|Namman|Phrik|Bai/i);
+    expect(translateThaiToEnglish('ใบมะกรูด')).toBe('Kaffir Lime Leaves');
   });
 
   it('auto-updates English name while Thai name changes unless manually overridden', () => {

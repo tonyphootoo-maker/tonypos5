@@ -70,18 +70,17 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   const lang = propLang ?? ctxLang;
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
-  const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
-  const [editingIngredient, setEditingIngredient] = useState<Partial<Ingredient> | null>(null);
-  const [sortOrder, setSortOrder] = useState<'default' | 'asc' | 'desc'>('default');
+  const defaultCategories = [
+    'เนื้อสัตว์และอาหารทะเล',
+    'ผักและสมุนไพร',
+    'เครื่องปรุงและซอส',
+    'ข้าวและเส้น',
+    'ไข่และเต้าหู้',
+    'ของแห้งและเบ็ดเตล็ด',
+    'บรรจุภัณฑ์',
+  ];
 
-  // Price Simulation Modal state
-  const [isImpactModalOpen, setIsImpactModalOpen] = useState(false);
-  const [simulatingIngredient, setSimulatingIngredient] = useState<Ingredient | null>(null);
-  const [simulatedNewPrice, setSimulatedNewPrice] = useState<number>(0);
-  const [priceChangeReason, setPriceChangeReason] = useState<string>('');
-
-  // Add Category Modal state
+  // Custom & Category order states with localStorage persistence
   const [isAddCategoryModalOpen, setIsAddCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryEnglishName, setNewCategoryEnglishName] = useState('');
@@ -94,7 +93,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     }
   });
 
-  // Category order state with localStorage persistence
   const [categoryOrder, setCategoryOrder] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('cost_ingredient_category_order');
@@ -103,19 +101,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       return [];
     }
   });
-
-  const [draggedCategory, setDraggedCategory] = useState<string | null>(null);
-  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
-
-  const defaultCategories = [
-    'เนื้อสัตว์และอาหารทะเล',
-    'ผักและสมุนไพร',
-    'เครื่องปรุงและซอส',
-    'ข้าวและเส้น',
-    'ไข่และเต้าหู้',
-    'ของแห้งและเบ็ดเตล็ด',
-    'บรรจุภัณฑ์',
-  ];
 
   const rawCategories = Array.from(
     new Set([
@@ -139,7 +124,28 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     });
   }, [rawCategories, categoryOrder]);
 
-  const categories: string[] = ['ALL', ...allCategories];
+  const [selectedCategory, setSelectedCategory] = useState<string>(
+    () => allCategories[0] || 'เนื้อสัตว์และอาหารทะเล'
+  );
+
+  React.useEffect(() => {
+    if (allCategories.length > 0 && !allCategories.includes(selectedCategory)) {
+      setSelectedCategory(allCategories[0]);
+    }
+  }, [allCategories, selectedCategory]);
+
+  const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
+  const [editingIngredient, setEditingIngredient] = useState<Partial<Ingredient> | null>(null);
+  const [sortOrder, setSortOrder] = useState<'default' | 'asc' | 'desc'>('default');
+
+  // Price Simulation Modal state
+  const [isImpactModalOpen, setIsImpactModalOpen] = useState(false);
+  const [simulatingIngredient, setSimulatingIngredient] = useState<Ingredient | null>(null);
+  const [simulatedNewPrice, setSimulatedNewPrice] = useState<number>(0);
+  const [priceChangeReason, setPriceChangeReason] = useState<string>('');
+
+  const [draggedCategory, setDraggedCategory] = useState<string | null>(null);
+  const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
 
   const handleMoveCategory = (catName: string, direction: 'left' | 'right') => {
     const currentIndex = allCategories.indexOf(catName);
@@ -189,15 +195,11 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     const newOrder = [...allCategories];
     const [moved] = newOrder.splice(fromIndex, 1);
 
-    if (targetCatName === 'ALL') {
-      newOrder.unshift(moved);
+    const toIndex = newOrder.indexOf(targetCatName);
+    if (toIndex === -1) {
+      newOrder.push(moved);
     } else {
-      const toIndex = newOrder.indexOf(targetCatName);
-      if (toIndex === -1) {
-        newOrder.push(moved);
-      } else {
-        newOrder.splice(toIndex, 0, moved);
-      }
+      newOrder.splice(toIndex, 0, moved);
     }
 
     setCategoryOrder(newOrder);
@@ -247,7 +249,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       (ing.englishName && ing.englishName.toLowerCase().includes(q)) ||
       getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName).toLowerCase().includes(q) ||
       (ing.notes && ing.notes.toLowerCase().includes(q));
-    const matchesCategory = selectedCategory === 'ALL' || ing.category === selectedCategory;
+    const matchesCategory = !selectedCategory || ing.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
@@ -272,10 +274,15 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     if (sortOrder !== 'default') {
       setSortOrder('default');
     }
+    const visIndex = displayedIngredients.findIndex((i) => i.id === fromId);
+    if (visIndex === -1) return;
+    const targetVisIndex = direction === 'up' ? visIndex - 1 : visIndex + 1;
+    if (targetVisIndex < 0 || targetVisIndex >= displayedIngredients.length) return;
+    const targetId = displayedIngredients[targetVisIndex].id;
+
     const fromIndex = ingredients.findIndex((i) => i.id === fromId);
-    if (fromIndex === -1) return;
-    const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
-    if (toIndex < 0 || toIndex >= ingredients.length) return;
+    const toIndex = ingredients.findIndex((i) => i.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
 
     const updated = [...ingredients];
     const [moved] = updated.splice(fromIndex, 1);
@@ -325,10 +332,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   };
 
   const handleOpenAdd = () => {
-    const defaultCat =
-      selectedCategory !== 'ALL'
-        ? (selectedCategory as IngredientCategory)
-        : ('เนื้อสัตว์และอาหารทะเล' as IngredientCategory);
+    const defaultCat = (selectedCategory || allCategories[0] || 'เนื้อสัตว์และอาหารทะเล') as IngredientCategory;
 
     const newIng: Partial<Ingredient> = {
       id: `ing_${Date.now()}`,
@@ -401,6 +405,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       notes: editingIngredient.notes,
       isReviewRequired: editingIngredient.isReviewRequired || false,
       reviewReason: editingIngredient.reviewReason,
+      displayOrder: editingIngredient.displayOrder,
       active: editingIngredient.active !== undefined ? editingIngredient.active : true,
       createdAt: editingIngredient.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -553,22 +558,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
 
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
           <Filter className="w-4 h-4 text-white/40 shrink-0 hidden sm:block mr-0.5" />
-
-          {/* ALL tab */}
-          <button
-            type="button"
-            onClick={() => setSelectedCategory('ALL')}
-            onDragOver={(e) => handleCategoryDragOver(e, 'ALL')}
-            onDrop={(e) => handleCategoryDrop(e, 'ALL')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer shrink-0 ${
-              selectedCategory === 'ALL'
-                ? 'bg-[#F27D26] text-black font-bold shadow-md shadow-[#F27D26]/20'
-                : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/5'
-            } ${dragOverCategory === 'ALL' ? 'ring-2 ring-[#F27D26] bg-[#F27D26]/20 border-[#F27D26]' : ''}`}
-            title={lang === 'th' ? 'แสดงวัตถุดิบทั้งหมด (หรือลากหมวดหมู่อื่นมาวางที่นี่เพื่อย้ายไปอันดับแรก)' : 'Show all ingredients (or drop category here to move first)'}
-          >
-            {lang === 'th' ? 'ทั้งหมด' : 'All'}
-          </button>
 
           {/* Reorderable Categories */}
           {allCategories.map((cat, index) => {
@@ -727,17 +716,15 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 <th className="py-3 px-3">{lang === 'th' ? 'น้ำหนักสุทธิ' : 'Net Yield Qty'}</th>
                 <th className="py-3 px-3">{lang === 'th' ? 'ต้นทุนจริงหลัง Yield' : 'Yield Cost'}</th>
                 <th className="py-3 px-3">{lang === 'th' ? 'ต้นทุนต่อหน่วยใช้งาน' : 'Cost / Usage Unit'}</th>
-                <th className="py-3 px-4 text-right">{lang === 'th' ? 'จัดการ' : 'Actions'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {displayedIngredients.map((ing) => {
+              {displayedIngredients.map((ing, visIndex) => {
                 const isShrimp = ing.usageUnit === 'ตัว';
                 const isDragged = draggedIngredientId === ing.id;
                 const isDragOver = dragOverIngredientId === ing.id;
-                const globalIndex = ingredients.findIndex((i) => i.id === ing.id);
-                const isFirst = globalIndex <= 0;
-                const isLast = globalIndex === -1 || globalIndex >= ingredients.length - 1;
+                const isFirst = visIndex <= 0;
+                const isLast = visIndex >= displayedIngredients.length - 1;
                 const primaryName = getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName);
                 const secondaryName =
                   lang === 'en'
@@ -816,6 +803,30 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                             ({secondaryName})
                           </span>
                         )}
+                        <div className="inline-flex items-center gap-0.5 ml-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEdit(ing);
+                            }}
+                            className="p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+                            title={lang === 'th' ? 'แก้ไขวัตถุดิบ' : 'Edit ingredient'}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteIngredient?.(ing.id);
+                            }}
+                            className="p-1 rounded-lg hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors cursor-pointer"
+                            title={lang === 'th' ? 'ลบวัตถุดิบ' : 'Delete ingredient'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                         {(!ing.purchasePrice || ing.purchasePrice <= 0) && (
                           <span
                             className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30"
@@ -874,30 +885,12 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                         </div>
                       )}
                     </td>
-                    <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEdit(ing)}
-                        className="p-1.5 rounded-lg hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer"
-                        title={lang === 'th' ? 'แก้ไขวัตถุดิบ' : 'Edit ingredient'}
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteIngredient?.(ing.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors cursor-pointer"
-                        title={lang === 'th' ? 'ลบวัตถุดิบ' : 'Delete ingredient'}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
                   </tr>
                 );
               })}
               {displayedIngredients.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-white/40 text-xs">
+                  <td colSpan={8} className="py-12 text-center text-white/40 text-xs">
                     {lang === 'th' ? 'ไม่พบรายการวัตถุดิบ' : 'No ingredients found'}
                   </td>
                 </tr>
@@ -970,7 +963,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     }
                     className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none cursor-pointer"
                   >
-                    {categories
+                    {allCategories
                       .filter((c) => c !== 'ALL')
                       .map((cat) => (
                         <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
@@ -1201,57 +1194,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     </select>
                   </div>
                 </div>
-
-                {/* Piece-based definition */}
-                {(['ตัว', 'ฟอง', 'ชิ้น', 'ลูก'].includes(editingIngredient.usageUnit || '') ||
-                  (editingIngredient.piecesPerPurchaseUnit ?? 0) > 0) && (
-                  <div className="mt-2 p-2.5 bg-[#FFC107]/10 rounded-xl border border-[#FFC107]/30 text-[11px] text-white/90 space-y-2">
-                    <div>
-                      <span className="font-bold text-[#FFC107]">
-                        {lang === 'th'
-                          ? `ของคิดเป็น${editingIngredient.usageUnit || 'ชิ้น'}:`
-                          : `Counted by ${localizeUnit(editingIngredient.usageUnit || 'ชิ้น', lang)}:`}
-                      </span>{' '}
-                      {lang === 'th'
-                        ? 'ระบุจำนวนต่อ 1 หน่วยซื้อ (เช่น 30 ฟอง/แผง หรือ 60 ตัว/กล่อง)'
-                        : 'Specify pieces per 1 purchase unit (e.g. 30 eggs/tray or 60 pcs/box)'}
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span>{lang === 'th' ? 'จำนวนต่อหน่วยซื้อ:' : 'Count per purchase unit:'}</span>
-                      <NumericInput
-                        type="number"
-                        value={editingIngredient.piecesPerPurchaseUnit || ''}
-                        onChange={(e) =>
-                          setEditingIngredient({
-                            ...editingIngredient,
-                            piecesPerPurchaseUnit: parseInt(e.target.value) || 0,
-                          })
-                        }
-                        className="w-24 p-1 bg-black/40 border border-white/20 rounded font-bold text-white"
-                        placeholder={lang === 'th' ? 'เช่น 30' : 'e.g. 30'}
-                      />
-                      <span>{localizeUnit(editingIngredient.usageUnit || 'ชิ้น', lang)}</span>
-                    </div>
-                    <label className="flex items-center gap-2 cursor-pointer text-white/80">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(editingIngredient.piecesCountAlreadyYieldAdjusted)}
-                        onChange={(e) =>
-                          setEditingIngredient({
-                            ...editingIngredient,
-                            piecesCountAlreadyYieldAdjusted: e.target.checked,
-                          })
-                        }
-                        className="w-3.5 h-3.5 accent-[#FFC107] rounded"
-                      />
-                      <span>
-                        {lang === 'th'
-                          ? 'จำนวนนี้หักเปลือก/หัวแล้ว (ไม่ต้องหัก Yield % ซ้ำ)'
-                          : 'Count is already trimmed/cleaned (do not deduct Yield % again)'}
-                      </span>
-                    </label>
-                  </div>
-                )}
               </div>
 
               {/* Calculated preview */}

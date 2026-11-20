@@ -361,9 +361,10 @@ export async function publishMenuToPublicStore(params: {
   categories: CategoryDoc[];
   dishes: DishDoc[];
   optionGroups: OptionGroupDoc[];
+  skipImageIds?: Set<string>;
 }): Promise<{ dishCount: number; imageCount: number; publishedAt: string }> {
   if (!db) throw new Error('Firestore is not initialized.');
-  const { storeId, settings, categories, dishes, optionGroups } = params;
+  const { storeId, settings, categories, dishes, optionGroups, skipImageIds } = params;
   const publishedAt = new Date().toISOString();
 
   const { publicStore, referencedImageIds } = sanitizeMenuForPublicStore({
@@ -384,6 +385,9 @@ export async function publishMenuToPublicStore(params: {
 
   let copiedImages = 0;
   for (const imageId of referencedImageIds) {
+    if (skipImageIds?.has(imageId)) {
+      continue;
+    }
     try {
       const imgDoc = await getImageDoc(imageId);
       if (imgDoc?.dataUrl) {
@@ -394,6 +398,7 @@ export async function publishMenuToPublicStore(params: {
           updatedAt: serverTimestamp(),
         });
         publicImageCache.set(`${storeId}::${imageId}`, imgDoc.dataUrl);
+        skipImageIds?.add(imageId);
         copiedImages += 1;
       }
     } catch (err) {

@@ -7,7 +7,6 @@ import {
   Plus,
   Trash2,
   Save,
-  Search,
   CheckCircle2,
   Sparkles,
   SlidersHorizontal,
@@ -809,21 +808,10 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   };
 
   // --- TAB 2: MAIN SAUCES (ซอสหลัก) ---
-  const [sauceSearch, setSauceSearch] = useState('');
   const [selectedSauce, setSelectedSauce] = useState<Sauce | null>(sauces[0] || null);
   const [isSauceModalOpen, setIsSauceModalOpen] = useState(false);
   const [editingSauce, setEditingSauce] = useState<Partial<Sauce> | null>(null);
   const [sauceFormError, setSauceFormError] = useState<string | null>(null);
-
-  const filteredSauces = useMemo(() => {
-    const q = sauceSearch.toLowerCase();
-    return sauces.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        (s.englishName || '').toLowerCase().includes(q) ||
-        getLocalizedText('en', s.thaiName || s.name, s.englishName).toLowerCase().includes(q)
-    );
-  }, [sauces, sauceSearch]);
 
   const handleOpenAddSauce = () => {
     const newSauce: Partial<Sauce> = {
@@ -1613,18 +1601,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       {/* ========================================================= */}
       {activeTab === 'SAUCE' && (
         <div className="space-y-4">
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-1 max-w-sm">
-              <Search className="w-4 h-4 text-white/40" />
-              <input
-                type="text"
-                placeholder={lang === 'en' ? 'Search sauces...' : 'ค้นหาซอสปรุงรส...'}
-                value={sauceSearch}
-                onChange={(e) => setSauceSearch(e.target.value)}
-                className="w-full bg-black/40 border border-white/15 px-3 py-2 rounded-xl text-xs text-white placeholder-white/40 focus:outline-none focus:border-[#F27D26]"
-              />
-            </div>
-
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-3xl flex items-center justify-end">
             <button
               type="button"
               onClick={handleOpenAddSauce}
@@ -1637,99 +1614,52 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
           {/* Sauces Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredSauces.map((sauce) => {
+            {sauces.map((sauce) => {
               const calc = calculateSauceCost(sauce, ingredientsMap);
               return (
                 <div
                   key={sauce.id}
                   className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5 hover:border-white/20 transition-all flex flex-col justify-between"
                 >
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F27D26]/20 text-[#F27D26]">
-                        {getLocalizedText(lang, sauce.category || 'ซอสหลัก')}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEditSauce(sauce)}
-                        className="p-1.5 rounded-xl text-white/40 hover:text-white hover:bg-white/10 cursor-pointer"
-                        title={lang === 'en' ? 'Edit Sauce Recipe' : 'แก้ไขสูตรซอส'}
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
+                  <div className="flex items-start justify-between gap-2">
                     <h3 className="font-bold text-white text-base">
                       {getLocalizedText(lang, sauce.thaiName || sauce.name, sauce.englishName)}
                     </h3>
-                    {sauce.notes && (
-                      <p className="text-[11px] text-white/40 mt-1 line-clamp-2">
-                        {getLocalizedText(lang, sauce.notes)}
-                      </p>
-                    )}
-
-                    {/* Batch stats */}
-                    <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-white/10 text-xs font-mono">
-                      <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                        <span className="text-[10px] font-sans text-white/40 block">
-                          {lang === 'en' ? 'Batch Output' : 'ปริมาณผลิต (Batch)'}
-                        </span>
-                        <span className="font-bold text-white mt-0.5 block">
-                          {sauce.productionQuantity} {localizeUnit(sauce.productionUnit, lang)}
-                        </span>
-                        <span className="text-[9px] text-white/40">Yield: {sauce.yieldPercent}%</span>
-                      </div>
-
-                      <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
-                        <span className="text-[10px] font-sans text-white/40 block">
-                          {lang === 'en' ? 'Cost per Unit' : 'ต้นทุนต่อหน่วย'}
-                        </span>
-                        {calc.isValid ? (
-                          <>
-                            <span className="font-bold text-[#FFC107] mt-0.5 block">
-                              ฿{calc.costPerGram.toFixed(4)}
-                            </span>
-                            <span className="text-[9px] text-white/40">
-                              (฿{(calc.costPerGram * 30).toFixed(2)}/30{localizeUnit(sauce.productionUnit || 'g', lang)})
-                            </span>
-                          </>
-                        ) : (
-                          <span className="font-bold text-rose-400 text-[11px] mt-0.5 block">
-                            {calc.errorMessage ? getLocalizedText(lang, calc.errorMessage) : (lang === 'en' ? 'Incomplete data' : 'ข้อมูลไม่ครบ')}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Items preview */}
-                    <div className="mt-3 space-y-1">
-                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">
-                        {lang === 'en'
-                          ? `Sauce Ingredients (${sauce.items.length})`
-                          : `วัตถุดิบในซอส (${sauce.items.length})`}
-                      </span>
-                      <div className="text-[11px] text-white/70 space-y-0.5 max-h-24 overflow-y-auto pr-1">
-                        {sauce.items.map((item, idx) => (
-                          <div key={idx} className="flex justify-between font-mono">
-                            <span className="font-sans truncate">
-                              {getLocalizedText(lang, item.ingredientName)}
-                            </span>
-                            <span>
-                              {item.quantity} {localizeUnit(item.unit, lang)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditSauce(sauce)}
+                      className="p-1.5 rounded-xl text-white/40 hover:text-white hover:bg-white/10 cursor-pointer shrink-0"
+                      title={lang === 'en' ? 'Edit Sauce Recipe' : 'แก้ไขสูตรซอส'}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
 
-                  <div className="mt-4 pt-3 border-t border-white/5 flex justify-between items-center text-xs font-mono">
-                    <span className="font-sans text-white/50">
-                      {lang === 'en' ? 'Total Batch Cost:' : 'ต้นทุนรวมทั้งสูตร:'}
-                    </span>
-                    <span className="font-bold text-white">
-                      ฿{calc.actualCost.toFixed(2)} {lang === 'en' ? 'THB' : 'บาท'}
-                    </span>
+                  {/* Batch stats */}
+                  <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-white/10 text-xs font-mono">
+                    <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                      <span className="text-[10px] font-sans text-white/40 block">
+                        {lang === 'en' ? 'Batch Output' : 'ปริมาณผลิต (Batch)'}
+                      </span>
+                      <span className="font-bold text-white mt-0.5 block">
+                        {sauce.productionQuantity} {localizeUnit(sauce.productionUnit, lang)}
+                      </span>
+                    </div>
+
+                    <div className="bg-black/30 p-2.5 rounded-xl border border-white/5">
+                      <span className="text-[10px] font-sans text-white/40 block">
+                        {lang === 'en' ? 'Cost per Unit' : 'ต้นทุนต่อหน่วย'}
+                      </span>
+                      {calc.isValid ? (
+                        <span className="font-bold text-[#FFC107] mt-0.5 block">
+                          ฿{calc.costPerGram.toFixed(4)}
+                        </span>
+                      ) : (
+                        <span className="font-bold text-rose-400 text-[11px] mt-0.5 block">
+                          {calc.errorMessage ? getLocalizedText(lang, calc.errorMessage) : (lang === 'en' ? 'Incomplete data' : 'ข้อมูลไม่ครบ')}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -2057,6 +1987,10 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                         />
 
                         <span className="text-[11px] text-white/50">{localizeUnit(item.unit, lang)}</span>
+
+                        <span className="text-[11px] font-mono font-semibold text-[#FFC107] whitespace-nowrap">
+                          ฿{(currentIng?.costPerBaseUnit ?? item.unitCost ?? 0).toFixed(4)}/{localizeUnit(item.unit, lang)}
+                        </span>
 
                         <button
                           type="button"

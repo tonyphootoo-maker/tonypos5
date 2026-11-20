@@ -1,6 +1,9 @@
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { User } from 'firebase/auth';
 import {
+  CategoryDoc,
+  DishDoc,
+  OptionGroupDoc,
   SettingsDoc,
   ShiftDoc,
 } from './types';
@@ -12,6 +15,7 @@ import {
   subscribeCollection,
   firebaseInitError,
 } from './data/db';
+import { publishMenuToPublicStore } from './data/onlineDb';
 import { resolveAppMode } from './engine/onlineOrdering';
 import { Navigation, AppPage } from './components/Navigation';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -54,6 +58,115 @@ const FINANCE_HUB_PAGE_TAB_MAP: Partial<Record<AppPage, FinanceHubTab>> = {
   cost_expenses: 'expenses',
   cost_labor: 'labor',
   cost_overhead_breakeven: 'breakeven',
+};
+
+const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> = ({
+  user,
+  settings,
+}) => {
+  const [categories, setCategories] = useState<CategoryDoc[]>([]);
+  const [dishes, setDishes] = useState<DishDoc[]>([]);
+  const [optionGroups, setOptionGroups] = useState<OptionGroupDoc[]>([]);
+  const [readyFlags, setReadyFlags] = useState({ cats: false, dishes: false, opts: false });
+
+  const lastPublishedSigRef = useRef<string>('');
+  const syncedImagesRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const unsubCats = subscribeCollection<CategoryDoc>(
+      'categories',
+      (data) => {
+        setCategories([...data].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+        setReadyFlags((prev) => (prev.cats ? prev : { ...prev, cats: true }));
+      },
+      (err) => console.warn('AutoSync categories warning:', err)
+    );
+    const unsubDishes = subscribeCollection<DishDoc>(
+      'dishes',
+      (data) => {
+        setDishes([...data].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+        setReadyFlags((prev) => (prev.dishes ? prev : { ...prev, dishes: true }));
+      },
+      (err) => console.warn('AutoSync dishes warning:', err)
+    );
+    const unsubOpts = subscribeCollection<OptionGroupDoc>(
+      'optionGroups',
+      (data) => {
+        setOptionGroups([...data].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+        setReadyFlags((prev) => (prev.opts ? prev : { ...prev, opts: true }));
+      },
+      (err) => console.warn('AutoSync optionGroups warning:', err)
+    );
+
+    return () => {
+      unsubCats();
+      unsubDishes();
+      unsubOpts();
+    };
+  }, [user.uid]);
+
+  useEffect(() => {
+    if (!readyFlags.cats || !readyFlags.dishes || !readyFlags.opts) return;
+
+    const signature = JSON.stringify({
+      storeId: user.uid,
+      shopName: settings.shopName,
+      shopAddress: settings.shopAddress || '',
+      shopPhone: settings.shopPhone || '',
+      qrImageId: settings.qrImageId || '',
+      onlineOrderingEnabled: settings.onlineOrderingEnabled !== false,
+      onlineDeliveryFee: settings.onlineDeliveryFee ?? 0,
+      onlinePickupEnabled: settings.onlinePickupEnabled !== false,
+      onlineDeliveryEnabled: settings.onlineDeliveryEnabled !== false,
+      onlineEstimatedPrepMinutes: settings.onlineEstimatedPrepMinutes ?? 20,
+      onlinePublishDefaultIndex: settings.onlinePublishDefaultIndex !== false,
+      pricesIncludeVat: Boolean(settings.pricesIncludeVat),
+      vatPercent: settings.vatPercent ?? 7,
+      categories: categories.map((c) => [c.id, c.name, c.nameTh || '', c.order ?? 0]),
+      dishes: dishes.map((d) => [
+        d.id,
+        d.name,
+        d.nameTh || '',
+        d.categoryId,
+        d.imageId || '',
+        d.description || '',
+        d.order ?? 0,
+        d.optionGroupIds || [],
+        (d.variants || []).map((v) => [v.id, v.name, v.nameTh || '', v.price]),
+      ]),
+      optionGroups: optionGroups.map((g) => [
+        g.id,
+        g.name,
+        g.nameTh || '',
+        g.minSelect,
+        g.maxSelect,
+        g.order ?? 0,
+        (g.choices || []).map((ch) => [ch.id, ch.name, ch.nameTh || '', ch.price]),
+      ]),
+    });
+
+    if (signature === lastPublishedSigRef.current) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        await publishMenuToPublicStore({
+          storeId: user.uid,
+          settings,
+          categories,
+          dishes,
+          optionGroups,
+          skipImageIds: syncedImagesRef.current,
+        });
+        lastPublishedSigRef.current = signature;
+      } catch (err) {
+        console.warn('AutoSync public storefront menu warning:', err);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [user.uid, settings, categories, dishes, optionGroups, readyFlags]);
+
+  return null;
 };
 
 export default function App() {
@@ -495,6 +608,9 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Auto-sync POS Categories, Dishes & Sort Order to Customer Online Storefront */}
+      <OwnerPublicMenuAutoSync user={user} settings={settings} />
 
       {/* Cash Shift Modal */}
       {isShiftModalOpen && (

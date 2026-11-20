@@ -473,7 +473,7 @@ export async function initializeDefaultsIfEmpty(): Promise<void> {
   const sampleDishes: DishDoc[] = [
     {
       id: 'dish_pad_kaprao',
-      name: 'Pad Kaprao with Rice',
+      name: 'Stir-Fried Holy Basil with Rice',
       nameTh: 'ข้าวกะเพราราดข้าว',
       categoryId: 'cat_main',
       order: 1,

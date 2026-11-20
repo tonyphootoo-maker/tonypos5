@@ -123,7 +123,6 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const [isIconModalOpen, setIsIconModalOpen] = useState<boolean>(false);
   const [isCloudLoading, setIsCloudLoading] = useState<boolean>(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
-  const [isSyncingPosSales, setIsSyncingPosSales] = useState<boolean>(false);
   const [isPushingToPos, setIsPushingToPos] = useState<boolean>(false);
   const [bridgeFeedback, setBridgeFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -164,8 +163,11 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.INGREDIENTS,
           (items) => {
-            setIngredients(items);
-            StorageService.saveIngredients(items);
+            const sorted = [...items].sort(
+              (a, b) => (a.displayOrder ?? Number.MAX_SAFE_INTEGER) - (b.displayOrder ?? Number.MAX_SAFE_INTEGER)
+            );
+            setIngredients(sorted);
+            StorageService.saveIngredients(sorted);
           },
           (err) => setCloudError(err.message)
         ),
@@ -182,8 +184,11 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.MENUS,
           (items) => {
-            setMenus(items);
-            StorageService.saveMenus(items);
+            const sorted = [...items].sort(
+              (a, b) => (a.displayOrder ?? Number.MAX_SAFE_INTEGER) - (b.displayOrder ?? Number.MAX_SAFE_INTEGER)
+            );
+            setMenus(sorted);
+            StorageService.saveMenus(sorted);
           },
           (err) => setCloudError(err.message)
         ),
@@ -339,12 +344,29 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   // Handlers
   const handleSaveIngredient = (ingredient: Ingredient) => {
     const existingIndex = ingredients.findIndex((i) => i.id === ingredient.id);
+    const minOrder = ingredients.reduce(
+      (min, item, idx) => Math.min(min, item.displayOrder ?? idx + 1),
+      1
+    );
+    const normalizedIngredient: Ingredient = {
+      ...ingredient,
+      displayOrder:
+        ingredient.displayOrder ??
+        (existingIndex >= 0
+          ? ingredients[existingIndex].displayOrder ?? existingIndex + 1
+          : minOrder - 1),
+    };
     const updated =
       existingIndex >= 0
-        ? ingredients.map((i, idx) => (idx === existingIndex ? ingredient : i))
-        : [ingredient, ...ingredients];
+        ? ingredients.map((i, idx) => (idx === existingIndex ? normalizedIngredient : i))
+        : [normalizedIngredient, ...ingredients];
     setIngredients(updated);
-    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.INGREDIENTS, ingredient.id, ingredient);
+    FirebaseSyncService.saveUserDoc(
+      user.uid,
+      COST_COLLECTIONS.INGREDIENTS,
+      normalizedIngredient.id,
+      normalizedIngredient
+    );
 
     const invIndex = inventory.findIndex((inv) => inv.ingredientId === ingredient.id);
     if (invIndex === -1) {
@@ -372,8 +394,12 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   };
 
   const handleReorderIngredients = (reordered: Ingredient[]) => {
-    setIngredients(reordered);
-    FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.INGREDIENTS, reordered);
+    const orderedWithIndex = reordered.map((item, idx) => ({
+      ...item,
+      displayOrder: idx + 1,
+    }));
+    setIngredients(orderedWithIndex);
+    FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.INGREDIENTS, orderedWithIndex);
   };
 
   const handleRecordPriceChange = (record: PriceHistoryRecord) => {
@@ -403,8 +429,12 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   };
 
   const handleReorderMenus = (reordered: MenuItem[]) => {
-    setMenus(reordered);
-    FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.MENUS, reordered);
+    const orderedWithIndex = reordered.map((item, idx) => ({
+      ...item,
+      displayOrder: idx + 1,
+    }));
+    setMenus(orderedWithIndex);
+    FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.MENUS, orderedWithIndex);
   };
 
   const handleUpdateVariantPrice = (
@@ -584,41 +614,6 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     onSelectCostTab('recipes');
   };
 
-  // Live bridge: pull paid bills from KinPOS dailySummaries
-  const handlePullLivePosSales = async () => {
-    setIsSyncingPosSales(true);
-    setBridgeFeedback(null);
-    try {
-      const res = await FirebaseSyncService.pullDailySales(user.uid);
-      if (res.success) {
-        setDailySales(res.data);
-        if (res.data.length > 0) {
-          await FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.DAILY_SALES, res.data);
-        }
-        setBridgeFeedback({
-          type: 'success',
-          text:
-            lang === 'th'
-              ? `ดึงยอดขายจาก POS จริงสำเร็จ (${res.data.length} วัน)`
-              : `Synced live POS sales (${res.data.length} days)`,
-        });
-      } else {
-        setBridgeFeedback({
-          type: 'error',
-          text: res.error || (lang === 'en' ? 'Sync failed' : 'ซิงค์ไม่สำเร็จ'),
-        });
-      }
-    } catch (err: unknown) {
-      setBridgeFeedback({
-        type: 'error',
-        text: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setIsSyncingPosSales(false);
-      setTimeout(() => setBridgeFeedback(null), 5000);
-    }
-  };
-
   // Live bridge: push all edited Food Cost menus, ingredients & sauces into KinPOS active POS
   const handlePushMenuToPOS = async () => {
     if (menus.length === 0 && ingredients.length === 0) return;
@@ -660,16 +655,6 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           >
             <ArrowLeft className="w-3.5 h-3.5 text-orange-600" />
             <span>{lang === 'th' ? 'กลับหน้า POS ขายหน้าร้าน' : 'Back to POS'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handlePullLivePosSales}
-            disabled={isSyncingPosSales}
-            className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60 whitespace-nowrap"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPosSales ? 'animate-spin' : ''}`} />
-            <span>{lang === 'th' ? 'ดึงยอดขายจาก POS จริง' : 'Sync Live POS Sales'}</span>
           </button>
         </div>
 
@@ -747,6 +732,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             onDeleteMenu={handleDeleteMenu}
             onReorderMenus={handleReorderMenus}
             onUpdateVariantPrice={handleUpdateVariantPrice}
+            onSaveSettings={handleSaveSettings}
             onNavigateToRecipeBuilder={handleNavigateToRecipeBuilder}
           />
         )}
@@ -763,6 +749,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             onDeleteMenu={handleDeleteMenu}
             onReorderMenus={handleReorderMenus}
             onUpdateVariantPrice={handleUpdateVariantPrice}
+            onSaveSettings={handleSaveSettings}
             onNavigateToRecipeBuilder={handleNavigateToRecipeBuilder}
           />
         )}

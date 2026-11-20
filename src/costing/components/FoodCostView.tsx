@@ -75,6 +75,87 @@ const PORTION_UNIT_LABELS_EN: Record<string, string> = {
   l: 'Litres (L)',
 };
 
+const isProteinRecipeItem = (it: RecipeItem, proteinType?: string): boolean => {
+  if (
+    it.proteinCategory === 'SHRIMP' ||
+    it.proteinCategory === 'SQUID' ||
+    it.proteinCategory === 'PORK' ||
+    it.proteinCategory === 'CHICKEN' ||
+    it.proteinCategory === 'BEEF' ||
+    it.proteinCategory === 'OTHER'
+  ) {
+    return true;
+  }
+
+  if (
+    it.type === 'SAUCE' ||
+    it.ingredientType === 'SAUCE' ||
+    it.type === 'PACKAGING' ||
+    it.ingredientType === 'PACKAGING' ||
+    it.type === 'PREPARED_ITEM' ||
+    it.ingredientType === 'PREPARED_ITEM'
+  ) {
+    return false;
+  }
+
+  const name = (it.name || '').trim().toLowerCase();
+  if (
+    name.includes('น้ำปลา') ||
+    name.includes('น้ำมัน') ||
+    name.includes('ซอส') ||
+    name.includes('ผง') ||
+    name.includes('ซีอิ๊ว') ||
+    name.includes('กะปิ') ||
+    name.includes('กุ้งแห้ง') ||
+    name.includes('ใบ') ||
+    name.includes('พริก') ||
+    name.includes('กระเทียม') ||
+    name.includes('หอม') ||
+    name.includes('ไข่') ||
+    name.includes('ผัก') ||
+    name.includes('น้ำตาล') ||
+    name.includes('เกลือ') ||
+    name.includes('ข้าว')
+  ) {
+    return false;
+  }
+
+  if (
+    name.includes('หมู') ||
+    name.includes('ไก่') ||
+    name.includes('เนื้อ') ||
+    name.includes('กุ้ง') ||
+    name.includes('หมึก') ||
+    name.includes('ไส้กรอก') ||
+    name.includes('ปลา') ||
+    name.includes('ทะเล') ||
+    name.includes('ซีฟู้ด')
+  ) {
+    return true;
+  }
+
+  if (proteinType && proteinType.trim()) {
+    const pType = proteinType.trim().toLowerCase();
+    if (name === pType || name.startsWith(pType)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const extractBaseRecipeItemsForMenu = (menuItem: MenuItem): RecipeItem[] => {
+  for (const variant of menuItem.variants || []) {
+    const nonProtein = (variant.recipeItems || []).filter(
+      (it) => !isProteinRecipeItem(it, variant.proteinType)
+    );
+    if (nonProtein.length > 0) {
+      return nonProtein.map((it) => ({ ...it }));
+    }
+  }
+  return [];
+};
+
 interface FoodCostViewProps {
   menus: MenuItem[];
   ingredients: Ingredient[];
@@ -83,6 +164,7 @@ interface FoodCostViewProps {
   lang?: 'th' | 'en';
   initialServingMode?: 'ON_RICE' | 'A_LA_CARTE';
   onSaveMenu: (menu: MenuItem) => void;
+  onSaveSettings?: (settings: RestaurantSettings) => void;
   onDeleteMenu?: (menuId: string) => void;
   onReorderMenus?: (reordered: MenuItem[]) => void;
   onUpdateVariantPrice: (
@@ -101,6 +183,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   lang: propLang,
   initialServingMode,
   onSaveMenu,
+  onSaveSettings,
   onDeleteMenu,
   onReorderMenus,
   onUpdateVariantPrice,
@@ -109,6 +192,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
   const isEn = lang === 'en';
+  const grabMultiplier = Number(settings.grabPriceMultiplier) > 0 ? Number(settings.grabPriceMultiplier) : 1.5;
+  const linemanMultiplier = Number(settings.linemanPriceMultiplier) > 0 ? Number(settings.linemanPriceMultiplier) : 1.5;
+  const robinhoodMultiplier = Number(settings.robinhoodPriceMultiplier) > 0 ? Number(settings.robinhoodPriceMultiplier) : 1.0;
   const getPortionUnitLabel = (u: string) =>
     isEn ? (PORTION_UNIT_LABELS_EN[u] || localizeUnit(u, 'en')) : (PORTION_UNIT_LABELS_TH[u] || u);
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
@@ -223,6 +309,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     meatUnit: string;
     seafoodShrimpQty?: number;
     seafoodSquidQty?: number;
+    isEnglishManuallyEdited?: boolean;
+    selectedBaseRecipeMenuId?: string;
   }>({
     isOpen: false,
     mode: 'ADD',
@@ -234,6 +322,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     meatUnit: 'g',
     seafoodShrimpQty: 4,
     seafoodSquidQty: 40,
+    isEnglishManuallyEdited: false,
+    selectedBaseRecipeMenuId: '',
   });
 
   const handleAddCustomUnit = () => {
@@ -307,6 +397,40 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   // Fast maps
   const ingredientsMap = new Map<string, Ingredient>(ingredients.map((i) => [i.id, i]));
   const saucesMap = new Map<string, Sauce>(sauces.map((s) => [s.id, s]));
+
+  // Available Base Recipes extracted from menus for Variant modal linking (3.4)
+  const baseRecipeMenuOptions = useMemo(() => {
+    return menus
+      .map((m) => ({
+        menu: m,
+        items: extractBaseRecipeItemsForMenu(m),
+      }))
+      .filter((entry) => entry.items.length > 0);
+  }, [menus]);
+
+  const computeBaseRecipeItemsCost = (items: RecipeItem[]): number => {
+    return items.reduce((sum, it) => {
+      const qty = Number(it.quantity) || 0;
+      if (qty <= 0) return sum;
+      if (it.type === 'SAUCE' || it.ingredientType === 'SAUCE') {
+        const s = saucesMap.get(it.sauceId || it.ingredientId);
+        if (s && s.actualQuantity > 0) {
+          const conv = convertUnit(qty, it.unit || s.productionUnit || 'g', s.productionUnit || 'g');
+          const effQty = conv.success ? conv.convertedQuantity : qty;
+          return sum + effQty * (s.costPerGram || 0);
+        }
+        return sum + (it.calculatedLineCost ?? qty * (it.calculatedUnitCost || 0));
+      }
+      const ing = ingredientsMap.get(it.ingredientId);
+      if (ing) {
+        const targetUnit = ing.usageUnit || ing.baseUnit || 'g';
+        const conv = convertUnit(qty, it.unit || targetUnit, targetUnit);
+        const effQty = conv.success ? conv.convertedQuantity : qty;
+        return sum + effQty * (ing.costPerBaseUnit || 0);
+      }
+      return sum + (it.calculatedLineCost ?? qty * (it.calculatedUnitCost || 0));
+    }, 0);
+  };
 
   // Custom categories with LocalStorage persistence
   const [customCategories, setCustomCategories] = useState<string[]>(() => {
@@ -691,6 +815,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const initialUnit = (defaultIng?.usageUnit || defaultIng?.baseUnit || 'g') as string;
     const initialQty = isPieceLikeUnit(initialUnit) ? (initialUnit === 'ตัว' ? 4 : 1) : 80;
     const variantTh = `${menu.name} ${defaultProtein}`;
+    const defaultBaseItems = extractBaseRecipeItemsForMenu(menu);
 
     if (initialUnit && !portionUnits.includes(initialUnit)) {
       const nextUnits = [...portionUnits, initialUnit];
@@ -700,6 +825,20 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       } catch {}
     }
 
+    const basePrice = 65;
+    const proteinItems: RecipeItem[] = defaultIng
+      ? [
+          {
+            ingredientId: defaultIng.id,
+            name: defaultIng.name,
+            quantity: initialQty,
+            unit: initialUnit,
+            calculatedUnitCost: defaultIng.costPerBaseUnit || 0,
+            calculatedLineCost: Number(((defaultIng.costPerBaseUnit || 0) * initialQty).toFixed(2)),
+          },
+        ]
+      : [];
+
     const newVariant: Partial<MenuVariant> = {
       id: `var_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       menuId: menu.id,
@@ -707,26 +846,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       thaiName: variantTh,
       englishName: translateThaiToEnglish(variantTh),
       proteinType: defaultProtein,
-      sellingPrice: 65,
-      takeawayPrice: 70,
-      deliveryPrice: 89,
-      grabPrice: 89,
-      linemanPrice: 89,
-      robinhoodPrice: 65,
+      sellingPrice: basePrice,
+      takeawayPrice: basePrice + 5,
+      deliveryPrice: Math.round(basePrice * grabMultiplier),
+      grabPrice: Math.round(basePrice * grabMultiplier),
+      linemanPrice: Math.round(basePrice * linemanMultiplier),
+      robinhoodPrice: Math.round(basePrice * robinhoodMultiplier),
       overheadCost: 6.0,
       packagingCost: 9.0,
-      recipeItems: defaultIng
-        ? [
-            {
-              ingredientId: defaultIng.id,
-              name: defaultIng.name,
-              quantity: initialQty,
-              unit: initialUnit,
-              calculatedUnitCost: defaultIng.costPerBaseUnit || 0,
-              calculatedLineCost: Number(((defaultIng.costPerBaseUnit || 0) * initialQty).toFixed(2)),
-            },
-          ]
-        : [],
+      recipeItems: [...proteinItems, ...defaultBaseItems.map((it) => ({ ...it }))],
       active: true,
     };
 
@@ -743,24 +871,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       meatUnit: initialUnit,
       seafoodShrimpQty: 4,
       seafoodSquidQty: 40,
+      isEnglishManuallyEdited: false,
+      selectedBaseRecipeMenuId: defaultBaseItems.length > 0 ? menu.id : '',
     });
   };
 
   const handleOpenEditVariant = (menu: MenuItem, variant: MenuVariant) => {
     // Detect linked ingredient if exists
     let matchedIngId = '';
-    const proteinItem = (variant.recipeItems || []).find((it) => {
-      const lower = (it.name || '').toLowerCase();
-      return (
-        lower.includes('หมู') ||
-        lower.includes('ไก่') ||
-        lower.includes('เนื้อ') ||
-        lower.includes('กุ้ง') ||
-        lower.includes('หมึก') ||
-        lower.includes('ไส้กรอก') ||
-        lower.includes('ปลา')
-      );
-    }) || (variant.recipeItems && variant.recipeItems[0]);
+    const proteinItem = (variant.recipeItems || []).find((it) =>
+      isProteinRecipeItem(it, variant.proteinType)
+    ) || (variant.recipeItems && variant.recipeItems[0]);
 
     if (proteinItem?.ingredientId) {
       matchedIngId = proteinItem.ingredientId;
@@ -795,19 +916,40 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       } catch {}
     }
 
+    const clonedVariant: Partial<MenuVariant> = JSON.parse(JSON.stringify(variant));
+    const existingTh = clonedVariant.thaiName || clonedVariant.name || '';
+    clonedVariant.name = existingTh;
+    clonedVariant.thaiName = existingTh;
+    clonedVariant.englishName = clonedVariant.englishName || translateThaiToEnglish(existingTh);
+
+    const existingNonProteins = (clonedVariant.recipeItems || []).filter(
+      (it) => !isProteinRecipeItem(it, clonedVariant.proteinType)
+    );
+    let initialBaseRecipeId = '';
+    if (existingNonProteins.length > 0) {
+      const sig = (list: RecipeItem[]) => list.map((x) => `${x.ingredientId}:${x.name}:${x.quantity}`).sort().join('|');
+      const currentSig = sig(existingNonProteins);
+      const matchedMenuOpt =
+        baseRecipeMenuOptions.find((opt) => opt.menu.id === menu.id && sig(opt.items) === currentSig) ||
+        baseRecipeMenuOptions.find((opt) => sig(opt.items) === currentSig);
+      initialBaseRecipeId = matchedMenuOpt ? matchedMenuOpt.menu.id : '__custom__';
+    }
+
     setIsAddingCustomUnit(false);
     setCustomUnitInput('');
     setVariantModalState({
       isOpen: true,
       mode: 'EDIT',
       menu,
-      variant: JSON.parse(JSON.stringify(variant)),
+      variant: clonedVariant,
       selectedCategory: isSeafoodItem ? 'เนื้อสัตว์และอาหารทะเล' : (matchedIng?.category || 'เนื้อสัตว์และอาหารทะเล'),
       selectedIngredientId: isSeafoodItem ? 'seafood_combo' : matchedIngId,
       meatQuantity: defaultQty,
       meatUnit: initialUnit,
       seafoodShrimpQty: existingShrimp?.quantity || 4,
       seafoodSquidQty: existingSquid?.quantity || 40,
+      isEnglishManuallyEdited: false,
+      selectedBaseRecipeMenuId: initialBaseRecipeId,
     });
   };
 
@@ -854,19 +996,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const chosenUnit = (variantModalState.meatUnit || linkedIng?.usageUnit || linkedIng?.baseUnit || 'g').trim();
     const qty = Number(variantModalState.meatQuantity) || (pType.includes('กุ้ง') ? 4 : isPieceLikeUnit(chosenUnit) ? 1 : 80);
 
-    // Keep existing non-protein recipe items if any
-    const existingOtherItems = (v.recipeItems || []).filter((it) => {
-      const lower = (it.name || '').toLowerCase();
-      return !(
-        lower.includes('หมู') ||
-        lower.includes('ไก่') ||
-        lower.includes('เนื้อ') ||
-        lower.includes('กุ้ง') ||
-        lower.includes('หมึก') ||
-        lower.includes('ไส้กรอก') ||
-        lower.includes('ปลา')
-      );
-    });
+    // Keep existing non-protein recipe items (base recipe herbs, sauces, packaging, etc.)
+    const existingOtherItems = (v.recipeItems || []).filter(
+      (it) => !isProteinRecipeItem(it, pType)
+    );
 
     let finalRecipeItems: RecipeItem[];
     if (isSeafoodSelected) {
@@ -922,7 +1055,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     }
 
     const derivedNameTh = v.name?.trim() || `${targetMenu.name} ${pType}`;
-    const derivedNameEn = translateThaiToEnglish(derivedNameTh) || derivedNameTh;
+    const derivedNameEn = (v.englishName || '').trim() || translateThaiToEnglish(derivedNameTh) || derivedNameTh;
+    const baseSellingPrice = Number(v.sellingPrice) || 60;
 
     const finalVariant: MenuVariant = {
       id: v.id || `var_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -934,12 +1068,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       thaiName: derivedNameTh,
       englishName: derivedNameEn,
       proteinType: pType,
-      sellingPrice: Number(v.sellingPrice) || 60,
-      takeawayPrice: Number(v.takeawayPrice) || Number(v.sellingPrice) || 65,
-      deliveryPrice: Number(v.deliveryPrice) || Number(v.sellingPrice) || 85,
-      grabPrice: Number(v.grabPrice) || Math.round((Number(v.sellingPrice) || 60) * 1.5) || 89,
-      linemanPrice: Number(v.linemanPrice) || Math.round((Number(v.sellingPrice) || 60) * 1.5) || 89,
-      robinhoodPrice: Number(v.robinhoodPrice) || Number(v.sellingPrice) || 65,
+      sellingPrice: baseSellingPrice,
+      takeawayPrice: Number(v.takeawayPrice) || baseSellingPrice,
+      deliveryPrice: Number(v.deliveryPrice) || Math.round(baseSellingPrice * grabMultiplier),
+      grabPrice: Number(v.grabPrice) || Math.round(baseSellingPrice * grabMultiplier),
+      linemanPrice: Number(v.linemanPrice) || Math.round(baseSellingPrice * linemanMultiplier),
+      robinhoodPrice: Number(v.robinhoodPrice) || Math.round(baseSellingPrice * robinhoodMultiplier),
       overheadCost: v.overheadCost !== undefined && !isNaN(Number(v.overheadCost)) ? Number(v.overheadCost) : 6.0,
       packagingCost: v.packagingCost !== undefined && !isNaN(Number(v.packagingCost)) ? Number(v.packagingCost) : 9.0,
       recipeItems: finalRecipeItems,
@@ -972,6 +1106,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedIngredientId: '',
       meatQuantity: 80,
       meatUnit: 'g',
+      isEnglishManuallyEdited: false,
+      selectedBaseRecipeMenuId: '',
     });
   };
 
@@ -1265,6 +1401,72 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <span>{isEn ? '+ Add Menu' : '+ เพิ่มเมนูใหม่'}</span>
             </button>
           </div>
+        </div>
+
+        {/* Dynamic Channel Price Multipliers Row */}
+        <div className="pt-2 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold text-stone-700 text-[11px]">
+              {isEn ? 'Auto Price Multipliers (from Dine-in):' : 'ตัวคูณราคาขายอัตโนมัติ (จากราคาหน้าร้าน):'}
+            </span>
+
+            <label className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-xl">
+              <span className="font-bold text-emerald-900 text-[11px]">GrabFood</span>
+              <span className="text-emerald-700 font-bold text-[11px]">x</span>
+              <NumericInput
+                min="0.1"
+                step="0.1"
+                value={grabMultiplier}
+                onValueChange={(val) =>
+                  onSaveSettings?.({
+                    ...settings,
+                    grabPriceMultiplier: val > 0 ? val : 1.5,
+                  })
+                }
+                className="w-14 px-1.5 py-0.5 bg-white border border-emerald-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-emerald-600"
+              />
+            </label>
+
+            <label className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 border border-amber-200 rounded-xl">
+              <span className="font-bold text-amber-900 text-[11px]">LINE MAN</span>
+              <span className="text-amber-700 font-bold text-[11px]">x</span>
+              <NumericInput
+                min="0.1"
+                step="0.1"
+                value={linemanMultiplier}
+                onValueChange={(val) =>
+                  onSaveSettings?.({
+                    ...settings,
+                    linemanPriceMultiplier: val > 0 ? val : 1.5,
+                  })
+                }
+                className="w-14 px-1.5 py-0.5 bg-white border border-amber-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-amber-600"
+              />
+            </label>
+
+            <label className="flex items-center gap-1.5 px-2 py-1 bg-purple-50 border border-purple-200 rounded-xl">
+              <span className="font-bold text-purple-900 text-[11px]">Robinhood</span>
+              <span className="text-purple-700 font-bold text-[11px]">x</span>
+              <NumericInput
+                min="0.1"
+                step="0.1"
+                value={robinhoodMultiplier}
+                onValueChange={(val) =>
+                  onSaveSettings?.({
+                    ...settings,
+                    robinhoodPriceMultiplier: val > 0 ? val : 1.0,
+                  })
+                }
+                className="w-14 px-1.5 py-0.5 bg-white border border-purple-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-purple-600"
+              />
+            </label>
+          </div>
+
+          <span className="text-[10px] text-stone-500">
+            {isEn
+              ? 'Channel prices auto-multiply whenever Dine-in price is edited'
+              : 'เมื่อใส่ราคาหน้าร้าน ระบบจะคูณราคา Grab / LINE MAN / Robinhood ให้อัตโนมัติ'}
+          </span>
         </div>
       </div>
 
@@ -2707,9 +2909,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* ADD / EDIT VARIANT MODAL (เชื่อมโยงกับข้อมูลวัตถุดิบจริง) */}
       {variantModalState.isOpen && variantModalState.menu && variantModalState.variant && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-stone-900/60 backdrop-blur-xs">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-stone-300 text-stone-900 max-h-[92vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-stone-200 pb-3">
+          <div className="bg-[#FFFDF9] rounded-3xl max-w-xl w-full shadow-2xl border border-stone-300 text-stone-900 max-h-[92vh] flex flex-col overflow-hidden">
+            {/* Locked Modal Header */}
+            <div className="shrink-0 flex items-center justify-between border-b border-stone-200 px-5 sm:px-6 pt-5 pb-3 bg-[#FFFDF9]">
               <div className="flex items-center gap-2.5">
                 <span className="w-9 h-9 rounded-xl bg-[#F27D26]/15 border border-[#F27D26]/30 text-[#F27D26] flex items-center justify-center font-bold">
                   <UtensilsCrossed className="w-4 h-4" />
@@ -2737,6 +2939,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     selectedIngredientId: '',
                     meatQuantity: 80,
                     meatUnit: 'g',
+                    isEnglishManuallyEdited: false,
+                    selectedBaseRecipeMenuId: '',
                   })
                 }
                 className="p-1.5 rounded-xl text-stone-400 hover:text-stone-700 hover:bg-stone-100 cursor-pointer"
@@ -2745,7 +2949,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveVariantModal} className="space-y-4 mt-4 text-xs">
+            <form
+              id="variant-modal-form"
+              onSubmit={handleSaveVariantModal}
+              className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-4 text-xs"
+            >
               {/* 1. เลือกวัตถุดิบจากฐานข้อมูล (เหลือเฉพาะข้อ 1. เชื่อมข้อมูลจากฐานข้อมูลโดยตรง) */}
               <div className="p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-2xl space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -2813,7 +3021,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                                 proteinType: pName,
                                 name: vNameTh,
                                 thaiName: vNameTh,
-                                englishName: translateThaiToEnglish(vNameTh),
+                                englishName: prev.isEnglishManuallyEdited
+                                  ? prev.variant?.englishName
+                                  : translateThaiToEnglish(vNameTh),
                               },
                             }));
                           }
@@ -2849,18 +3059,82 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   </div>
                 </div>
 
-                {/* Live Bilingual Variant Name Preview */}
-                {variantModalState.variant?.name && (
-                  <div className="px-2.5 py-1.5 bg-white/80 border border-amber-200 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                    <span className="text-stone-700 font-bold">
-                      {isEn ? 'Option Name (TH):' : 'ชื่อตัวเลือก:'}{' '}
-                      <strong className="text-stone-950">{variantModalState.variant.name}</strong>
-                    </span>
-                    <span className="text-amber-800 font-semibold">
-                      EN: {variantModalState.variant.englishName || translateThaiToEnglish(variantModalState.variant.name)}
-                    </span>
+                {/* Editable Bilingual Option Names (TH + Auto EN) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                      {isEn ? 'Option Name (TH)' : 'ชื่อตัวเลือก (ไทย)'} <span className="text-[#F27D26]">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={variantModalState.variant?.name || ''}
+                      onChange={(e) => {
+                        const nextTh = e.target.value;
+                        setVariantModalState((prev) => {
+                          const prevTh = prev.variant?.thaiName ?? prev.variant?.name ?? '';
+                          const autoEn = prev.isEnglishManuallyEdited
+                            ? prev.variant?.englishName || ''
+                            : computeAutoEnglishName({
+                                previousThai: prevTh,
+                                nextThai: nextTh,
+                                currentEnglish: prev.variant?.englishName,
+                              });
+                          return {
+                            ...prev,
+                            variant: {
+                              ...prev.variant,
+                              name: nextTh,
+                              thaiName: nextTh,
+                              englishName: autoEn,
+                            },
+                          };
+                        });
+                      }}
+                      placeholder={isEn ? 'e.g. Stir-Fried Holy Basil with Pork' : 'เช่น กะเพราหมูสับ'}
+                      className="w-full p-2 bg-white border border-amber-300 rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
+                    />
                   </div>
-                )}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-stone-700">
+                        {isEn ? 'Option Name (EN)' : 'ชื่อตัวเลือก (English)'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setVariantModalState((prev) => ({
+                            ...prev,
+                            isEnglishManuallyEdited: false,
+                            variant: {
+                              ...prev.variant,
+                              englishName: translateThaiToEnglish(prev.variant?.name || ''),
+                            },
+                          }))
+                        }
+                        className="text-[10px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                      >
+                        {isEn ? 'Re-translate' : 'แปลใหม่'}
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={variantModalState.variant?.englishName || ''}
+                      onChange={(e) =>
+                        setVariantModalState((prev) => ({
+                          ...prev,
+                          isEnglishManuallyEdited: true,
+                          variant: {
+                            ...prev.variant,
+                            englishName: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder={isEn ? 'Auto-translated culinary English name' : 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ'}
+                      className="w-full p-2 bg-white border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* 2. ปริมาณเนื้อสัตว์ที่ใช้ */}
@@ -3072,6 +3346,99 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 );
               })()}
 
+              {/* 3. สูตรอาหารกลาง (Base Recipe) — เชื่อมโยงสูตรกลางเข้ากับตัวเลือก */}
+              {(() => {
+                const currentNonProteinItems = (variantModalState.variant?.recipeItems || []).filter(
+                  (it) => !isProteinRecipeItem(it, variantModalState.variant?.proteinType)
+                );
+                const baseRecipeCostPreview = computeBaseRecipeItemsCost(currentNonProteinItems);
+                const selectedBaseId = variantModalState.selectedBaseRecipeMenuId || '';
+
+                return (
+                  <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-2xl space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="block text-emerald-950 font-black text-xs">
+                        {isEn ? 'Base Recipe Link' : 'สูตรอาหารกลาง (Base Recipe)'}
+                      </label>
+                      {currentNonProteinItems.length > 0 && (
+                        <span className="text-[11px] font-mono font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-200">
+                          {isEn
+                            ? `${currentNonProteinItems.length} items · ฿${baseRecipeCostPreview.toFixed(2)}`
+                            : `${currentNonProteinItems.length} รายการ · ฿${baseRecipeCostPreview.toFixed(2)}`}
+                        </span>
+                      )}
+                    </div>
+
+                    <select
+                      value={selectedBaseId}
+                      onChange={(e) => {
+                        const chosenMenuId = e.target.value;
+                        if (chosenMenuId === '__custom__') return;
+                        setVariantModalState((prev) => {
+                          const existingProteins = (prev.variant?.recipeItems || []).filter((it) =>
+                            isProteinRecipeItem(it, prev.variant?.proteinType)
+                          );
+                          if (!chosenMenuId) {
+                            return {
+                              ...prev,
+                              selectedBaseRecipeMenuId: '',
+                              variant: {
+                                ...prev.variant,
+                                recipeItems: existingProteins,
+                              },
+                            };
+                          }
+                          const matchedOpt = baseRecipeMenuOptions.find(
+                            (opt) => opt.menu.id === chosenMenuId
+                          );
+                          const clonedBase = (matchedOpt?.items || []).map((it) => ({ ...it }));
+                          return {
+                            ...prev,
+                            selectedBaseRecipeMenuId: chosenMenuId,
+                            variant: {
+                              ...prev.variant,
+                              recipeItems: [...existingProteins, ...clonedBase],
+                            },
+                          };
+                        });
+                      }}
+                      className="w-full p-2.5 bg-white border border-emerald-300 rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-emerald-600 cursor-pointer"
+                    >
+                      <option value="">
+                        {isEn
+                          ? '-- No Base Recipe (Protein Cost Only) --'
+                          : '-- ไม่ใช้สูตรอาหารกลาง (คำนวณเฉพาะเนื้อสัตว์) --'}
+                      </option>
+                      {selectedBaseId === '__custom__' && currentNonProteinItems.length > 0 && (
+                        <option value="__custom__">
+                          {isEn
+                            ? `Current Variant Base Recipe (${currentNonProteinItems.length} items)`
+                            : `สูตรอาหารกลางของตัวเลือกนี้ (${currentNonProteinItems.length} รายการ)`}
+                        </option>
+                      )}
+                      {baseRecipeMenuOptions.map(({ menu: bMenu, items }) => (
+                        <option key={bMenu.id} value={bMenu.id}>
+                          {getLocalizedText(lang, bMenu.thaiName || bMenu.name, bMenu.englishName)} ({items.length} {isEn ? 'items' : 'รายการ'})
+                        </option>
+                      ))}
+                    </select>
+
+                    {currentNonProteinItems.length > 0 && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {currentNonProteinItems.map((it, idx) => (
+                          <span
+                            key={`${it.id || it.ingredientId}-${idx}`}
+                            className="px-2 py-0.5 bg-white border border-emerald-200 rounded-lg text-[10px] text-stone-700 font-medium"
+                          >
+                            {getLocalizedText(lang, it.name)} ({it.quantity} {localizeUnit(it.unit, lang)})
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* 4. ราคาขายแต่ละช่องทาง */}
               <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl space-y-3">
                 <div className="font-black text-stone-900 text-xs">
@@ -3086,15 +3453,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       min="0"
                       value={variantModalState.variant.sellingPrice}
                       onValueChange={(price) => {
+                        const nextGrab = Math.round(price * grabMultiplier);
+                        const nextLineman = Math.round(price * linemanMultiplier);
+                        const nextRobinhood = Math.round(price * robinhoodMultiplier);
                         setVariantModalState((prev) => ({
                           ...prev,
                           variant: {
                             ...prev.variant,
                             sellingPrice: price,
-                            takeawayPrice: prev.variant?.takeawayPrice || (price > 0 ? price + 5 : 0),
-                            grabPrice: prev.variant?.grabPrice || Math.round(price * 1.5),
-                            linemanPrice: prev.variant?.linemanPrice || Math.round(price * 1.5),
-                            robinhoodPrice: prev.variant?.robinhoodPrice || price,
+                            takeawayPrice: price > 0 ? price + 5 : 0,
+                            deliveryPrice: nextGrab,
+                            grabPrice: nextGrab,
+                            linemanPrice: nextLineman,
+                            robinhoodPrice: nextRobinhood,
                           },
                         }));
                       }}
@@ -3121,7 +3492,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      {isEn ? 'GrabFood Price' : 'ราคา Grab Food'}
+                      {isEn ? `GrabFood (${grabMultiplier}x)` : `ราคา GrabFood (${grabMultiplier}x)`}
                     </label>
                     <NumericInput
                       min="0"
@@ -3129,7 +3500,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       onValueChange={(val) =>
                         setVariantModalState((prev) => ({
                           ...prev,
-                          variant: { ...prev.variant, grabPrice: val },
+                          variant: { ...prev.variant, grabPrice: val, deliveryPrice: val },
                         }))
                       }
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"
@@ -3138,7 +3509,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      {isEn ? 'LINE MAN Price' : 'ราคา Line Man'}
+                      {isEn ? `LINE MAN (${linemanMultiplier}x)` : `ราคา LINE MAN (${linemanMultiplier}x)`}
                     </label>
                     <NumericInput
                       min="0"
@@ -3155,7 +3526,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
                   <div>
                     <label className="block text-stone-700 mb-1 font-bold text-[11px]">
-                      {isEn ? 'Robinhood Price' : 'ราคา Robinhood'}
+                      {isEn ? `Robinhood (${robinhoodMultiplier}x)` : `ราคา Robinhood (${robinhoodMultiplier}x)`}
                     </label>
                     <NumericInput
                       min="0"
@@ -3379,23 +3750,38 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   }
                 }
 
+                const baseRecipeItemsForPreview = (variantModalState.variant?.recipeItems || []).filter(
+                  (it) => !isProteinRecipeItem(it, variantModalState.variant?.proteinType)
+                );
+                const baseRecipeCost = computeBaseRecipeItemsCost(baseRecipeItemsForPreview);
+                const totalFoodCost = meatCost + baseRecipeCost;
                 const sellPrice = Number(variantModalState.variant.sellingPrice) || 0;
                 const estOverhead = Number(variantModalState.variant.overheadCost ?? settings.defaultOverheadCostPerDish ?? 0);
-                const estTotalCost = meatCost + estOverhead;
+                const estTotalCost = totalFoodCost + estOverhead;
                 const estProfit = sellPrice - estTotalCost;
-                const estFc = sellPrice > 0 ? (meatCost / sellPrice) * 100 : 0;
+                const estFc = sellPrice > 0 ? (totalFoodCost / sellPrice) * 100 : 0;
 
                 return (
                   <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-mono flex-wrap gap-2">
-                    <div>
-                      <span className="text-emerald-900 font-bold">
-                        {isEn ? 'Protein Cost: ' : 'ต้นทุนเนื้อสัตว์: '}
-                      </span>
-                      <strong className="text-emerald-950 font-black">฿{meatCost.toFixed(2)}</strong>
-                      {costDetail && (
-                        <span className="text-[10px] text-emerald-700 ml-1">
-                          ({costDetail})
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <div>
+                        <span className="text-emerald-900 font-bold">
+                          {isEn ? 'Protein Cost: ' : 'ต้นทุนเนื้อสัตว์: '}
                         </span>
+                        <strong className="text-emerald-950 font-black">฿{meatCost.toFixed(2)}</strong>
+                        {costDetail && (
+                          <span className="text-[10px] text-emerald-700 ml-1">
+                            ({costDetail})
+                          </span>
+                        )}
+                      </div>
+                      {baseRecipeCost > 0 && (
+                        <div>
+                          <span className="text-emerald-900 font-bold">
+                            {isEn ? 'Base Recipe: ' : 'สูตรกลาง: '}
+                          </span>
+                          <strong className="text-emerald-950 font-black">฿{baseRecipeCost.toFixed(2)}</strong>
+                        </div>
                       )}
                     </div>
                     <div>
@@ -3420,36 +3806,39 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   </div>
                 );
               })()}
-
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-3 pt-3 border-t border-[#EAE4D9]">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setVariantModalState({
-                      isOpen: false,
-                      mode: 'ADD',
-                      menu: null,
-                      variant: null,
-                      selectedIngredientId: '',
-                      meatQuantity: 80,
-                      meatUnit: 'g',
-                    })
-                  }
-                  className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
-                >
-                  {isEn ? 'Cancel' : 'ยกเลิก'}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer"
-                >
-                  {variantModalState.mode === 'ADD'
-                    ? (isEn ? 'Save New Option' : 'บันทึกตัวเลือกใหม่')
-                    : (isEn ? 'Save Changes' : 'บันทึกการแก้ไข')}
-                </button>
-              </div>
             </form>
+
+            {/* Locked Modal Footer */}
+            <div className="shrink-0 flex justify-end gap-3 px-5 sm:px-6 py-3.5 border-t border-[#EAE4D9] bg-[#FFFDF9]">
+              <button
+                type="button"
+                onClick={() =>
+                  setVariantModalState({
+                    isOpen: false,
+                    mode: 'ADD',
+                    menu: null,
+                    variant: null,
+                    selectedIngredientId: '',
+                    meatQuantity: 80,
+                    meatUnit: 'g',
+                    isEnglishManuallyEdited: false,
+                    selectedBaseRecipeMenuId: '',
+                  })
+                }
+                className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
+              >
+                {isEn ? 'Cancel' : 'ยกเลิก'}
+              </button>
+              <button
+                type="submit"
+                form="variant-modal-form"
+                className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer"
+              >
+                {variantModalState.mode === 'ADD'
+                  ? (isEn ? 'Save New Option' : 'บันทึกตัวเลือกใหม่')
+                  : (isEn ? 'Save Changes' : 'บันทึกการแก้ไข')}
+              </button>
+            </div>
           </div>
         </div>
       )}

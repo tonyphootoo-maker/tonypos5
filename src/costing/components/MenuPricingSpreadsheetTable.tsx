@@ -98,6 +98,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
   const linemanGpPctDisplay = linemanEffectiveGpPct.toFixed(2);
   const commissionHasVat = settings.commissionVatAsCost ?? settings.grabFoodCommissionHasVat ?? true;
   const roundingStep: 1 | 5 | 10 = settings.priceRounding ?? 1;
+  const grabMultiplier = Number(settings.grabPriceMultiplier) > 0 ? Number(settings.grabPriceMultiplier) : 1.5;
+  const linemanMultiplier = Number(settings.linemanPriceMultiplier) > 0 ? Number(settings.linemanPriceMultiplier) : 1.5;
+  const robinhoodMultiplier = Number(settings.robinhoodPriceMultiplier) > 0 ? Number(settings.robinhoodPriceMultiplier) : 1.0;
 
   // State & Handlers for reordering meat variants (Drag & Drop + Up/Down arrows)
   const [draggedVariantId, setDraggedVariantId] = useState<string | null>(null);
@@ -181,17 +184,35 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
     val: number
   ) => {
     const editKey = `${variantId}_${currentServingMode}`;
+    const nextGrabPrice = field === 'sellingPrice' ? Math.round(val * grabMultiplier) : undefined;
+    const nextLinemanPrice = field === 'sellingPrice' ? Math.round(val * linemanMultiplier) : undefined;
+    const nextRobinhoodPrice = field === 'sellingPrice' ? Math.round(val * robinhoodMultiplier) : undefined;
+
     // 1. Update local state for immediate visual feedback
     setLocalEdits((prev) => ({
       ...prev,
       [editKey]: {
         ...prev[editKey],
         [field]: val,
+        ...(field === 'sellingPrice'
+          ? {
+              grabPrice: nextGrabPrice,
+              linemanPrice: nextLinemanPrice,
+              robinhoodPrice: nextRobinhoodPrice,
+            }
+          : {}),
       },
       // Keep base variantId synced for ON_RICE mode
       [variantId]: {
         ...prev[variantId],
         [field]: val,
+        ...(field === 'sellingPrice'
+          ? {
+              grabPrice: nextGrabPrice,
+              linemanPrice: nextLinemanPrice,
+              robinhoodPrice: nextRobinhoodPrice,
+            }
+          : {}),
       },
     }));
 
@@ -205,7 +226,15 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
             v.takeawayPrice && v.sellingPrice && v.takeawayPrice > v.sellingPrice
               ? v.takeawayPrice - v.sellingPrice
               : 0;
-          return { ...v, sellingPrice: val, takeawayPrice: val + boxMarkup };
+          return {
+            ...v,
+            sellingPrice: val,
+            takeawayPrice: val + boxMarkup,
+            grabPrice: nextGrabPrice,
+            linemanPrice: nextLinemanPrice,
+            robinhoodPrice: nextRobinhoodPrice,
+            deliveryPrice: nextGrabPrice ?? v.deliveryPrice,
+          };
         }
         if (field === 'grabPrice') {
           return { ...v, grabPrice: val, deliveryPrice: val };
@@ -601,7 +630,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[85px]">
                     <div>{lang === 'th' ? 'ราคาที่ต้องตั้ง' : 'Suggested'}</div>
-                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'ขาย (1.5x)' : 'Price (1.5x)'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? `ขาย (${grabMultiplier}x)` : `Price (${grabMultiplier}x)`}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#C8E6C9] text-stone-900 border-r border-black min-w-[85px]">
                     <div>{lang === 'th' ? 'ราคา' : 'Custom'}</div>
@@ -643,7 +672,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[85px]">
                     <div>{lang === 'th' ? 'ราคาที่ต้องตั้ง' : 'Suggested'}</div>
-                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'ขาย (1.5x)' : 'Price (1.5x)'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? `ขาย (${linemanMultiplier}x)` : `Price (${linemanMultiplier}x)`}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#FFF59D] text-stone-900 border-r border-black min-w-[85px]">
                     <div>{lang === 'th' ? 'ราคา' : 'Custom'}</div>

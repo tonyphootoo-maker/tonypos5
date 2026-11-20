@@ -82,17 +82,21 @@ export function sanitizeMenuForPublicStore(params: {
     publishedAt = new Date().toISOString(),
   } = params;
 
-  const publicCategories: PublicCategory[] = [...categories]
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    .map((c) => ({
-      id: c.id,
-      name: c.name || '',
-      ...(c.nameTh ? { nameTh: c.nameTh } : {}),
-      order: c.order ?? 0,
-    }));
+  const sortedCategories = [...categories].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id)
+  );
+  const categoryRankMap = new Map<string, number>();
+  sortedCategories.forEach((c, idx) => categoryRankMap.set(c.id, idx));
+
+  const publicCategories: PublicCategory[] = sortedCategories.map((c) => ({
+    id: c.id,
+    name: c.name || '',
+    ...(c.nameTh ? { nameTh: c.nameTh } : {}),
+    order: c.order ?? 0,
+  }));
 
   const publicOptionGroups: PublicOptionGroup[] = [...optionGroups]
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id))
     .map((g) => ({
       id: g.id,
       name: g.name || '',
@@ -114,7 +118,12 @@ export function sanitizeMenuForPublicStore(params: {
   }
 
   const publicDishes: PublicDish[] = [...dishes]
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .sort((a, b) => {
+      const catRankA = categoryRankMap.get(a.categoryId) ?? 999999;
+      const catRankB = categoryRankMap.get(b.categoryId) ?? 999999;
+      if (catRankA !== catRankB) return catRankA - catRankB;
+      return (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id);
+    })
     .map((d) => {
       if (d.imageId) {
         imageIdSet.add(d.imageId);

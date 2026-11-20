@@ -1,22 +1,37 @@
 /**
- * Deterministic offline Thai -> English culinary translator + RTGS phonetic transliterator.
- * Used to auto-populate editable English name fields from primary Thai input.
+ * Deterministic offline Thai -> English culinary translator.
+ * Produces authentic food-industry English terminology without phonetic karaoke romanization.
+ * Used to auto-populate editable English name fields and localize menus, ingredients, and sauces.
  */
 
 const PHRASE_DICTIONARY: Array<[string, string]> = [
   // Multi-word dishes & preparations (longest first)
   ['ผัดกะเพราหมูกรอบ', 'Stir-Fried Holy Basil with Crispy Pork'],
   ['ผัดกะเพราหมูสับ', 'Stir-Fried Holy Basil with Minced Pork'],
+  ['ผัดกะเพราหมูบด', 'Stir-Fried Holy Basil with Minced Pork'],
   ['ผัดกะเพราหมูหมัก', 'Stir-Fried Holy Basil with Marinated Pork'],
+  ['ผัดกะเพราหมูชิ้น', 'Stir-Fried Holy Basil with Sliced Pork'],
   ['ผัดกะเพราไก่', 'Stir-Fried Holy Basil with Chicken'],
+  ['ผัดกะเพราเนื้อสับ', 'Stir-Fried Holy Basil with Minced Beef'],
   ['ผัดกะเพราเนื้อ', 'Stir-Fried Holy Basil with Beef'],
   ['ผัดกะเพรากุ้ง', 'Stir-Fried Holy Basil with Shrimp'],
+  ['ผัดกะเพราปลาหมึก', 'Stir-Fried Holy Basil with Squid'],
   ['ผัดกะเพราทะเล', 'Stir-Fried Holy Basil with Seafood'],
+  ['ผัดกะเพราไข่เยี่ยวม้า', 'Stir-Fried Holy Basil with Century Egg'],
+  ['ผัดกะเพราคลุกข้าว', 'Holy Basil Mixed Fried Rice'],
+  ['ข้าวกะเพราหมูสับไข่ดาว', 'Stir-Fried Holy Basil Minced Pork & Fried Egg on Rice'],
+  ['ข้าวกะเพราหมูสับ', 'Stir-Fried Holy Basil Minced Pork on Rice'],
+  ['ข้าวกะเพราหมูกรอบ', 'Stir-Fried Holy Basil Crispy Pork on Rice'],
+  ['ข้าวกะเพราราดข้าว', 'Stir-Fried Holy Basil with Rice'],
+  ['ข้าวกะเพรา', 'Stir-Fried Holy Basil on Rice'],
+  ['กะเพราโบราณ', 'Classic Stir-Fried Holy Basil'],
   ['กะเพราหมูกรอบ', 'Holy Basil Crispy Pork'],
   ['กะเพราหมูสับ', 'Holy Basil Minced Pork'],
   ['กะเพราหมูบด', 'Holy Basil Minced Pork'],
   ['กะเพราหมูหมัก', 'Holy Basil Marinated Pork'],
+  ['กะเพราหมูชิ้น', 'Holy Basil Sliced Pork'],
   ['กะเพราไก่', 'Holy Basil Chicken'],
+  ['กะเพราเนื้อสับ', 'Holy Basil Minced Beef'],
   ['กะเพราเนื้อ', 'Holy Basil Beef'],
   ['กะเพรากุ้ง', 'Holy Basil Shrimp'],
   ['กะเพราปลาหมึก', 'Holy Basil Squid'],
@@ -30,6 +45,11 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['ข้าวผัดทะเล', 'Seafood Fried Rice'],
   ['ข้าวผัดอเมริกัน', 'American Fried Rice'],
   ['ข้าวผัดต้มยำ', 'Tom Yum Fried Rice'],
+  ['ข้าวผัดปลาเค็ม', 'Salted Fish Fried Rice'],
+  ['ข้าวผัดกุนเชียง', 'Chinese Sausage Fried Rice'],
+  ['ข้าวผัดแหนม', 'Fermented Pork Fried Rice'],
+  ['ข้าวผัดไข่', 'Egg Fried Rice'],
+  ['ข้าวผัดสับปะรด', 'Pineapple Fried Rice'],
   ['ข้าวผัด', 'Fried Rice'],
   ['ต้มยำกุ้งน้ำข้น', 'Creamy Tom Yum Kung'],
   ['ต้มยำกุ้งน้ำใส', 'Clear Tom Yum Kung'],
@@ -37,93 +57,186 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['ต้มยำทะเล', 'Seafood Tom Yum'],
   ['ต้มยำรวมมิตร', 'Mixed Tom Yum'],
   ['ต้มยำไก่', 'Chicken Tom Yum'],
+  ['ต้มยำปลา', 'Fish Tom Yum'],
   ['ต้มยำ', 'Tom Yum'],
   ['ต้มข่าไก่', 'Tom Kha Gai'],
   ['ต้มข่า', 'Coconut Galangal Soup'],
-  ['ต้มแซ่บกระดูกอ่อน', 'Spicy Pork Rib Soup'],
-  ['ต้มแซ่บ', 'Isaan Spicy Soup'],
+  ['ต้มแซ่บกระดูกอ่อน', 'Spicy Pork Cartilage Soup'],
+  ['ต้มแซ่บกระดูกหมู', 'Spicy Pork Rib Soup'],
+  ['ต้มแซ่บ', 'Isaan Spicy Herb Soup'],
+  ['ต้มโคล้งปลากรอบ', 'Spicy Smoky Crispy Fish Soup'],
+  ['ต้มโคล้ง', 'Spicy Smoky Herb Soup'],
+  ['ต้มเล้ง', 'Spicy Pork Spine Soup'],
   ['ต้มจืดเต้าหู้หมูสับ', 'Clear Tofu & Minced Pork Soup'],
+  ['ต้มจืดตำลึงหมูสับ', 'Clear Ivy Gourd & Minced Pork Soup'],
+  ['ต้มจับฉ่าย', 'Braised Mixed Vegetable Stew'],
   ['แกงจืด', 'Clear Soup'],
   ['ต้มจืด', 'Clear Soup'],
+  ['แกงเขียวหวานไก่', 'Chicken Green Curry'],
+  ['แกงเขียวหวานหมู', 'Pork Green Curry'],
+  ['แกงเขียวหวานเนื้อ', 'Beef Green Curry'],
+  ['แกงเขียวหวานลูกชิ้นปลากราย', 'Clown Featherback Fish Ball Green Curry'],
   ['แกงเขียวหวาน', 'Green Curry'],
   ['แกงแดง', 'Red Curry'],
+  ['แกงเผ็ดเป็ดย่าง', 'Roasted Duck Red Curry'],
   ['แกงเผ็ด', 'Red Curry'],
+  ['แกงพะแนงหมู', 'Pork Panang Curry'],
+  ['แกงพะแนงไก่', 'Chicken Panang Curry'],
+  ['แกงพะแนงเนื้อ', 'Beef Panang Curry'],
   ['แกงพะแนง', 'Panang Curry'],
   ['พะแนง', 'Panang Curry'],
+  ['แกงมัสมั่นไก่', 'Chicken Massaman Curry'],
+  ['แกงมัสมั่นเนื้อ', 'Beef Massaman Curry'],
   ['แกงมัสมั่น', 'Massaman Curry'],
   ['มัสมั่น', 'Massaman Curry'],
+  ['แกงส้มชะอมไข่', 'Sour Curry with Acacia Omelette'],
+  ['แกงส้มผักรวม', 'Sour Curry with Mixed Vegetables'],
   ['แกงส้ม', 'Sour Curry'],
+  ['แกงป่า', 'Jungle Curry'],
+  ['แกงคั่วหอยขม', 'Roasted Red Curry with River Snails'],
+  ['แกงคั่ว', 'Roasted Red Curry'],
+  ['แกงเหลือง', 'Southern Yellow Curry'],
+  ['คั่วกลิ้งหมูสับ', 'Southern Dry-Fried Spicy Minced Pork'],
+  ['คั่วกลิ้ง', 'Southern Dry-Fried Spicy Curry'],
+  ['ฉู่ฉี่กุ้ง', 'Shrimp in Creamy Red Curry Sauce'],
+  ['ฉู่ฉี่ปลาทู', 'Mackerel in Creamy Red Curry Sauce'],
+  ['ฉู่ฉี่', 'Choo Chee Red Curry'],
+  ['พะโล้', 'Five-Spice Braised'],
+  ['ไข่พะโล้', 'Five-Spice Braised Pork & Egg'],
   ['ผัดไทยกุ้งสด', 'Pad Thai with Fresh Shrimp'],
+  ['ผัดไทยเส้นจันท์', 'Chanthaburi-Noodle Pad Thai'],
+  ['ผัดไทย จันท์', 'Chanthaburi Pad Thai'],
   ['ผัดไทย', 'Pad Thai'],
   ['ผัดซีอิ๊ว', 'Pad See Ew'],
   ['ราดหน้า', 'Stir-Fried Noodles in Gravy'],
+  ['สุกี้แห้งหมูหมัก', 'Dry Sukiyaki with Marinated Pork'],
   ['สุกี้แห้ง', 'Dry Sukiyaki'],
   ['สุกี้น้ำ', 'Sukiyaki Soup'],
   ['สุกี้', 'Sukiyaki'],
-  ['คะน้าหมูกรอบ', 'Stir-Fried Kale with Crispy Pork'],
+  ['คะน้าหมูกรอบ', 'Stir-Fried Chinese Kale with Crispy Pork'],
+  ['คะน้าน้ำมันหอย', 'Stir-Fried Chinese Kale in Oyster Sauce'],
+  ['ผัดพริกแกงถั่วฝักยาว', 'Stir-Fried Red Curry Paste with Yardlong Beans'],
   ['ผัดพริกแกง', 'Stir-Fried Red Curry Paste'],
-  ['พริกแกง', 'Red Curry Paste'],
+  ['พริกแกงเขียวหวาน', 'Green Curry Paste'],
+  ['พริกแกงเผ็ด', 'Red Curry Paste'],
+  ['พริกแกงส้ม', 'Sour Curry Paste'],
+  ['พริกแกงมัสมั่น', 'Massaman Curry Paste'],
+  ['พริกแกงพะแนง', 'Panang Curry Paste'],
+  ['พริกแกง', 'Curry Paste'],
   ['ผัดพริกเผา', 'Stir-Fried Roasted Chili Paste'],
   ['ผัดผงกะหรี่', 'Stir-Fried Curry Powder'],
+  ['ปูผัดผงกะหรี่', 'Stir-Fried Crab in Curry Powder'],
+  ['ทะเลผัดผงกะหรี่', 'Stir-Fried Seafood in Curry Powder'],
+  ['คั่วพริกเกลือ', 'Stir-Fried with Chili & Salt'],
+  ['ผัดขิง', 'Stir-Fried with Ginger'],
+  ['ไก่ผัดเม็ดมะม่วงหิมพานต์', 'Stir-Fried Chicken with Cashew Nuts'],
+  ['ผัดเม็ดมะม่วงหิมพานต์', 'Stir-Fried with Cashew Nuts'],
+  ['ผัดหน่อไม้', 'Stir-Fried with Bamboo Shoots'],
+  ['ผัดพริกขี้หนู', 'Stir-Fried with Bird\'s Eye Chili'],
   ['ทอดกระเทียมพริกไทย', 'Fried Garlic & Pepper'],
   ['ทอดกระเทียม', 'Fried Garlic'],
   ['ผัดกระเทียม', 'Stir-Fried Garlic'],
   ['ผัดน้ำมันหอย', 'Stir-Fried Oyster Sauce'],
+  ['ผัดผักรวมมิตร', 'Stir-Fried Mixed Vegetables'],
   ['ผัดผักรวม', 'Stir-Fried Mixed Vegetables'],
+  ['กะหล่ำปลีทอดน้ำปลา', 'Stir-Fried Cabbage with Fish Sauce'],
+  ['ผัดยอดมะระหวาน', 'Stir-Fried Chayote Shoots'],
+  ['ผัดต้นหอม', 'Stir-Fried with Spring Onions'],
+  ['ข้าวไข่เจียวหมูสับ', 'Minced Pork Omelette on Rice'],
   ['ข้าวไข่เจียว', 'Omelette on Rice'],
   ['ข้าวหมูแดง', 'BBQ Pork Rice'],
   ['ข้าวหมูกรอบ', 'Crispy Pork Rice'],
+  ['ข้าวมันไก่ทอด', 'Crispy Fried Chicken Rice'],
   ['ข้าวมันไก่', 'Hainanese Chicken Rice'],
   ['ข้าวขาหมู', 'Braised Pork Leg Rice'],
   ['ข้าวหมูกระเทียม', 'Garlic Pork Rice'],
+  ['ข้าวคลุกกะปิ', 'Shrimp Paste Fried Rice'],
   ['ข้าวสวยหอมมะลิ', 'Steamed Jasmine Rice'],
   ['ข้าวสวย', 'Steamed Rice'],
   ['ข้าวเปล่า', 'Steamed Rice'],
   ['ข้าวเหนียว', 'Sticky Rice'],
+  ['ข้าวต้มกุ๊ย', 'Plain Rice Congee'],
+  ['ข้าวต้มปลา', 'Fish Rice Soup'],
+  ['ข้าวต้มหมู', 'Pork Rice Soup'],
+  ['ข้าวต้ม', 'Boiled Rice Soup'],
+  ['โจ๊กหมูใส่ไข่', 'Pork Rice Porridge with Egg'],
+  ['โจ๊ก', 'Rice Porridge'],
   ['ก๋วยเตี๋ยวต้มยำ', 'Tom Yum Noodle Soup'],
   ['ก๋วยเตี๋ยวน้ำตก', 'Boat Noodles'],
-  ['ก๋วยเตี๋ยว', 'Noodles'],
-  ['ส้มตำไทย', 'Thai Papaya Salad'],
-  ['ส้มตำปูปลาร้า', 'Papaya Salad with Fermented Fish'],
-  ['ส้มตำ', 'Papaya Salad'],
-  ['คอหมูย่าง', 'Grilled Pork Neck'],
-  ['ปีกไก่ทอด', 'Fried Chicken Wings'],
-  ['ไก่ทอด', 'Fried Chicken'],
-  ['หมูทอดกระเทียม', 'Fried Garlic Pork'],
-  ['หมูทอด', 'Fried Pork'],
-  ['ยำวุ้นเส้น', 'Glass Noodle Spicy Salad'],
-  ['ยำมาม่า', 'Instant Noodle Spicy Salad'],
-  ['ยำทะเล', 'Seafood Spicy Salad'],
-  ['ไข่เจียวหมูสับ', 'Minced Pork Omelette'],
-  ['ไข่เจียวปู', 'Crab Omelette'],
-  ['ไข่เจียวกุ้งสับ', 'Minced Shrimp Omelette'],
-  ['ข้าวไข่ข้น', 'Creamy Omelette on Rice'],
+  ['ก๋วยเตี๋ยวน้ำใส', 'Clear Broth Noodle Soup'],
+  ['ก๋วยเตี๋ยวแห้ง', 'Dry Noodles'],
   ['ก๋วยเตี๋ยวคั่วไก่', 'Stir-Fried Rice Noodles with Chicken'],
+  ['ก๋วยเตี๋ยว', 'Noodles'],
+  ['ก๋วยจั๊บญวน', 'Vietnamese Rice Noodle Soup'],
+  ['ก๋วยจั๊บ', 'Rolled Rice Noodle Soup'],
+  ['เกาเหลา', 'Clear Broth Meat & Veg Bowl'],
+  ['ขนมจีนน้ำยา', 'Fermented Rice Noodles with Fish Curry'],
+  ['ขนมจีนแกงเขียวหวาน', 'Fermented Rice Noodles with Green Curry'],
+  ['ขนมจีน', 'Fermented Rice Noodles'],
   ['มาม่าผัดขี้เมา', 'Drunken Stir-Fried Instant Noodles'],
   ['ผัดขี้เมา', 'Spicy Drunken Stir-Fry'],
   ['ผัดฉ่า', 'Sizzling Spicy Herb Stir-Fry'],
   ['ผัดพริกหยวก', 'Stir-Fried Bell Pepper'],
   ['ผัดเปรี้ยวหวาน', 'Sweet & Sour Stir-Fry'],
   ['ผัดผักบุ้งไฟแดง', 'Stir-Fried Morning Glory'],
-  ['คะน้าน้ำมันหอย', 'Stir-Fried Kale in Oyster Sauce'],
+  ['ส้มตำไทย', 'Thai Papaya Salad'],
+  ['ส้มตำปูปลาร้า', 'Papaya Salad with Fermented Fish'],
+  ['ส้มตำข้าวโพด', 'Spicy Corn Salad'],
+  ['ส้มตำ', 'Papaya Salad'],
+  ['คอหมูย่าง', 'Grilled Pork Neck'],
+  ['เสือร้องไห้', 'Grilled Beef Brisket'],
+  ['น้ำตกคอหมูย่าง', 'Spicy Grilled Pork Neck Waterfall Salad'],
+  ['น้ำตกหมู', 'Grilled Pork Waterfall Salad'],
+  ['น้ำตกเนื้อ', 'Grilled Beef Waterfall Salad'],
+  ['ลาบเป็ด', 'Spicy Minced Duck Salad (Larb)'],
   ['ลาบหมู', 'Spicy Minced Pork Salad (Larb)'],
   ['ลาบไก่', 'Spicy Minced Chicken Salad (Larb)'],
-  ['น้ำตกหมู', 'Grilled Pork Waterfall Salad'],
+  ['ลาบเนื้อ', 'Spicy Minced Beef Salad (Larb)'],
+  ['ลาบวุ้นเส้น', 'Spicy Glass Noodle Salad (Larb)'],
+  ['ลาบ', 'Spicy Salad (Larb)'],
+  ['พล่ากุ้ง', 'Spicy Lemongrass Shrimp Salad'],
+  ['ยำคอหมูย่าง', 'Spicy Grilled Pork Neck Salad'],
+  ['ยำปลากระป๋อง', 'Spicy Canned Sardine Salad'],
+  ['ยำวุ้นเส้น', 'Glass Noodle Spicy Salad'],
+  ['ยำมาม่า', 'Instant Noodle Spicy Salad'],
+  ['ยำทะเล', 'Seafood Spicy Salad'],
   ['ยำไข่ดาว', 'Crispy Fried Egg Spicy Salad'],
   ['ยำหมูยอ', 'Vietnamese Pork Sausage Salad'],
+  ['ยำหมูย่าง', 'Spicy Grilled Pork Salad'],
+  ['ปีกไก่ทอดน้ำปลา', 'Crispy Chicken Wings with Fish Sauce'],
+  ['ปีกไก่ทอด', 'Fried Chicken Wings'],
+  ['ไก่ทอดหาดใหญ่', 'Hat Yai Crispy Fried Chicken'],
+  ['ไก่ทอด', 'Fried Chicken'],
+  ['ไก่ย่าง', 'Grilled Chicken'],
+  ['หมูทอดกระเทียม', 'Fried Garlic Pork'],
+  ['หมูสามชั้นทอดน้ำปลา', 'Deep-Fried Pork Belly with Fish Sauce'],
+  ['หมูแดดเดียว', 'Sun-Dried Fried Pork'],
+  ['หมูทอด', 'Fried Pork'],
+  ['หมูย่าง', 'Grilled Pork'],
+  ['เป็ดย่าง', 'Roasted Duck'],
+  ['ปลาดุกฟู', 'Crispy Flaked Catfish Salad'],
+  ['ไข่เจียวหมูสับ', 'Minced Pork Omelette'],
+  ['ไข่เจียวปู', 'Crab Omelette'],
+  ['ไข่เจียวกุ้งสับ', 'Minced Shrimp Omelette'],
+  ['ไข่เจียวสมุนไพร', 'Herb Omelette'],
+  ['ข้าวไข่ข้น', 'Creamy Omelette on Rice'],
   ['หมูผัดกะปิ', 'Stir-Fried Pork with Shrimp Paste'],
   ['ปลาหมึกผัดไข่เค็ม', 'Stir-Fried Squid with Salted Egg'],
   ['กุ้งอบวุ้นเส้น', 'Baked Shrimp with Glass Noodles'],
   ['หมึกนึ่งมะนาว', 'Steamed Squid in Spicy Lime Sauce'],
+  ['ปลากะพงนึ่งมะนาว', 'Steamed Sea Bass in Spicy Lime Sauce'],
   ['ปลากะพงทอดน้ำปลา', 'Deep-Fried Sea Bass with Fish Sauce'],
   ['สเต็กอกไก่พริกไทยดำ', 'Black Pepper Chicken Breast Steak'],
+  ['สเต็กปลาแซลมอน', 'Grilled Salmon Steak'],
   ['สเต็กหมู', 'Pork Steak'],
   ['สเต็กไก่', 'Chicken Steak'],
   ['สเต็กเนื้อ', 'Beef Steak'],
-  ['ข้าวต้ม', 'Boiled Rice Soup'],
-  ['โจ๊ก', 'Rice Porridge'],
+  ['เฟรนช์ฟรายส์ชีส', 'Cheesy French Fries'],
   ['เฟรนช์ฟรายส์', 'French Fries'],
   ['นักเก็ตไก่', 'Chicken Nuggets'],
+  ['เกี๊ยวกรอบ', 'Crispy Wontons'],
+  ['เกี๊ยวหมู', 'Pork Wontons'],
+  ['ปอเปี๊ยะทอด', 'Fried Spring Rolls'],
 
   // Beverages & Desserts
   ['ชาไทยเย็น', 'Iced Thai Tea'],
@@ -134,20 +247,31 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['ชานมไข่มุก', 'Bubble Milk Tea'],
   ['ชานม', 'Milk Tea'],
   ['ชามะนาว', 'Iced Lemon Tea'],
+  ['ชาดำเย็น', 'Iced Black Tea'],
+  ['โอเลี้ยง', 'Thai Iced Black Coffee'],
   ['กาแฟเย็น', 'Iced Coffee'],
   ['กาแฟร้อน', 'Hot Coffee'],
+  ['เอสเปรสโซ่เย็น', 'Iced Espresso'],
   ['อเมริกาโน่เย็น', 'Iced Americano'],
   ['อเมริกาโน่', 'Americano'],
   ['ลาเต้เย็น', 'Iced Latte'],
   ['คาปูชิโน่', 'Cappuccino'],
+  ['มอคค่า', 'Mocha'],
   ['โกโก้เย็น', 'Iced Cocoa'],
+  ['นมสดปั่น', 'Fresh Milk Smoothie'],
+  ['นมเย็น', 'Iced Pink Milk'],
   ['น้ำมะนาว', 'Fresh Lime Juice'],
+  ['น้ำส้มคั้น', 'Fresh Orange Juice'],
+  ['น้ำเก๊กฮวย', 'Chrysanthemum Tea'],
+  ['น้ำกระเจี๊ยบ', 'Roselle Juice'],
+  ['น้ำลำไย', 'Longan Juice'],
   ['น้ำอัดลม', 'Soft Drink'],
   ['น้ำดื่ม', 'Drinking Water'],
   ['น้ำแข็ง', 'Ice'],
   ['ข้าวเหนียวมะม่วง', 'Mango Sticky Rice'],
   ['ทับทิมกรอบ', 'Water Chestnuts in Coconut Milk'],
   ['บัวลอย', 'Glutinous Rice Balls in Coconut Milk'],
+  ['ไอศกรีมกะทิ', 'Coconut Ice Cream'],
   ['ไอศกรีม', 'Ice Cream'],
 
   // Option Groups & Common Choices
@@ -158,12 +282,19 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['เผ็ดมาก', 'Very Spicy'],
   ['เผ็ดพิเศษ', 'Extra Spicy'],
   ['ไม่เผ็ด', 'Non-Spicy'],
+  ['พริกน้ำปลาแท้ (ถ้วยแยก)', 'Chili Fish Sauce (Side Cup)'],
   ['พริกน้ำปลา', 'Chili Fish Sauce'],
+  ['แตงกวาหั่นชิ้นเคียง', 'Sliced Cucumber Garnish'],
+  ['มะนาวฝานซีก', 'Fresh Lime Wedge'],
+  ['ผักเคียง / ต้นหอมผักชี', 'Fresh Side Herbs / Spring Onion & Coriander'],
   ['ท็อปปิ้ง', 'Toppings'],
   ['เครื่องเคียง', 'Side Dishes'],
   ['เพิ่มไข่', 'Add Egg'],
   ['ไข่ดาวไม่สุก', 'Sunny-Side Up Fried Egg'],
   ['ไข่ดาวสุก', 'Well-Done Fried Egg'],
+  ['ไข่ดาวเป็ด/ไก่', 'Duck / Chicken Fried Egg'],
+  ['ไข่ดาวกรอบ', 'Crispy Fried Egg'],
+  ['ไข่ดาว / ไข่เจียว', 'Fried Egg / Omelette'],
   ['ไข่ดาว', 'Fried Egg'],
   ['ไข่เจียว', 'Omelette'],
   ['ไข่ข้น', 'Creamy Omelette'],
@@ -194,16 +325,23 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['เลือกเส้น', 'Noodle Type'],
   ['เส้นใหญ่', 'Wide Rice Noodles'],
   ['เส้นเล็ก', 'Thin Rice Noodles'],
+  ['เส้นหมี่ขาว', 'Rice Vermicelli'],
   ['เส้นหมี่', 'Rice Vermicelli'],
+  ['เส้นจันท์แช่น้ำ', 'Soaked Chanthaburi Rice Noodles'],
+  ['เส้นจันท์', 'Chanthaburi Rice Noodles'],
+  ['วุ้นเส้นแช่น้ำ', 'Soaked Glass Noodles'],
   ['วุ้นเส้น', 'Glass Noodles'],
   ['บะหมี่เหลือง', 'Egg Noodles'],
+  ['บะหมี่กึ่งสำเร็จรูป (มาม่าซอง)', 'Instant Noodles (Packet)'],
+  ['บะหมี่กึ่งสำเร็จรูป', 'Instant Noodles'],
   ['บะหมี่', 'Egg Noodles'],
   ['มาม่า', 'Instant Noodles'],
 
-  // Proteins / Primary Variants (เนื้อสัตว์ / ตัวเลือกหลัก)
+  // Proteins / Cuts / Seafood
   ['หมูหมัก (สูตรทางร้าน)', 'House Marinated Pork'],
+  ['หมูบด (สันนอกบดมันน้อย)', 'Lean Ground Pork Loin'],
   ['หมูหมัก', 'Marinated Pork'],
-  ['หมูบด', 'Minced Pork'],
+  ['หมูบด', 'Ground Pork'],
   ['หมูสับ', 'Minced Pork'],
   ['หมูกรอบ', 'Crispy Pork'],
   ['หมูชิ้น', 'Sliced Pork'],
@@ -212,13 +350,22 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['สันในหมู', 'Pork Tenderloin'],
   ['หมูสันนอก', 'Pork Loin'],
   ['สันนอกหมู', 'Pork Loin'],
+  ['สันคอหมู', 'Pork Collar'],
   ['คอหมู', 'Pork Neck'],
   ['ซี่โครงหมู', 'Pork Ribs'],
+  ['กระดูกหมู', 'Pork Bones'],
   ['กระดูกอ่อน', 'Pork Soft Bone'],
-  ['หมูเด้ง', 'Bouncy Pork'],
+  ['กากหมู', 'Crispy Pork Cracklings'],
+  ['แคบหมู', 'Crispy Pork Rinds'],
+  ['หมูเด้ง', 'Pork Paste'],
   ['หมูยอ', 'Vietnamese Pork Sausage'],
+  ['กุนเชียง', 'Chinese Sweet Sausage'],
+  ['ไส้กรอกอีสาน', 'Isaan Fermented Pork Sausage'],
+  ['หมูหยอง', 'Pork Floss'],
+  ['หมูแผ่น', 'Crispy Pork Sheet'],
   ['เนื้อวัวโคขุน', 'Thai-French Beef'],
   ['เนื้อวัวสไลซ์', 'Sliced Beef'],
+  ['เนื้อน่องลาย', 'Beef Shank'],
   ['เนื้อโคขุน', 'Premium Beef'],
   ['เนื้อสไลซ์', 'Sliced Beef'],
   ['เนื้อสับ', 'Minced Beef'],
@@ -227,35 +374,65 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['เนื้อวัว', 'Beef'],
   ['อกไก่หั่นชิ้น', 'Sliced Chicken Breast'],
   ['อกไก่', 'Chicken Breast'],
+  ['สะโพกไก่เลาะกระดูก', 'Boneless Chicken Thigh'],
   ['สะโพกไก่', 'Chicken Thigh'],
   ['น่องไก่', 'Chicken Drumstick'],
-  ['ปีกไก่', 'Chicken Wing'],
+  ['ปีกไก่บน', 'Chicken Drumettes'],
+  ['ปีกไก่กลาง', 'Chicken Mid-Wings'],
+  ['ปีกไก่', 'Chicken Wings'],
+  ['ตีนไก่', 'Chicken Feet'],
+  ['ไก่บ้าน', 'Free-Range Chicken'],
   ['ไก่กรอบ', 'Crispy Chicken'],
   ['ไก่สับ', 'Minced Chicken'],
   ['ไก่ชิ้น', 'Sliced Chicken'],
+  ['เนื้อไก่', 'Chicken'],
+  ['กุ้งสด (XL)', 'Fresh Shrimp (XL)'],
   ['กุ้งสด', 'Fresh Shrimp'],
   ['กุ้งขาว', 'White Shrimp'],
   ['กุ้งแม่น้ำ', 'River Prawn'],
   ['กุ้งเด้ง', 'Bouncy Shrimp'],
+  ['กุ้งแห้ง', 'Dried Shrimp'],
+  ['ปลาหมึกกล้วยสด', 'Fresh Squid'],
   ['ปลาหมึกกล้วย', 'Squid'],
   ['ปลาหมึกกรอบ', 'Crispy Squid'],
   ['ปลาหมึก', 'Squid'],
+  ['หมึกสด', 'Fresh Squid'],
+  ['หมึกกรอบ', 'Crispy Squid'],
   ['หมึก', 'Squid'],
   ['ปลาดอลลี่', 'Dory Fish'],
   ['ปลากะพง', 'Sea Bass'],
   ['ปลาทับทิม', 'Red Tilapia'],
+  ['ปลานิล', 'Tilapia'],
+  ['ปลาดุก', 'Catfish'],
+  ['ปลาทู', 'Mackerel'],
+  ['ปลาอินทรีย์', 'King Mackerel'],
+  ['ปลาเค็ม', 'Salted Fish'],
+  ['ปลากรอบ', 'Crispy Dried Fish'],
+  ['ปลากระป๋อง', 'Canned Sardines'],
   ['ปลาแซลมอน', 'Salmon'],
+  ['เนื้อปลา', 'Fish Fillet'],
+  ['เนื้อปูก้อน', 'Lump Crab Meat'],
+  ['ปูม้า', 'Blue Swimming Crab'],
+  ['ปูนิ่ม', 'Soft-Shell Crab'],
   ['ปูอัด', 'Crab Stick'],
+  ['หอยแมลงภู่', 'Green Mussels'],
+  ['หอยแครง', 'Blood Cockles'],
+  ['หอยลาย', 'Short-Necked Clams'],
+  ['หอยเชลล์', 'Scallops'],
+  ['หอยนางรม', 'Oysters'],
   ['ทะเลรวม', 'Mixed Seafood'],
   ['รวมมิตรทะเล', 'Mixed Seafood'],
   ['ทะเล', 'Seafood'],
   ['รวมมิตร', 'Mixed'],
+  ['ลูกชิ้นเอ็นเนื้อ', 'Beef Tendon Balls'],
   ['ลูกชิ้นหมู', 'Pork Balls'],
   ['ลูกชิ้นเนื้อ', 'Beef Balls'],
   ['ลูกชิ้นปลา', 'Fish Balls'],
   ['ลูกชิ้น', 'Meatballs'],
+  ['เต้าหู้ไข่ไก่ (หลอด)', 'Egg Tofu (Tube)'],
   ['เต้าหู้ไข่', 'Egg Tofu'],
-  ['เต้าหู้ขาว', 'White Tofu'],
+  ['เต้าหู้ขาว', 'Firm White Tofu'],
+  ['เต้าหู้เหลือง', 'Yellow Tofu'],
   ['เต้าหู้', 'Tofu'],
   ['มังสวิรัติ', 'Vegetarian'],
   ['เบคอน', 'Bacon'],
@@ -274,82 +451,226 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['กับข้าว', 'A La Carte'],
   ['ใส่กล่อง', 'Takeaway Box'],
 
-  // Ingredients & Sauces
-  ['ซอสผัดกระทะมาตรฐาน', 'House Stir-Fry Sauce'],
+  // Sauces, Broths, Seasonings & Pantry
+  ['ซอสผัดกระทะมาตรฐาน (สูตรประจำร้าน)', 'House Standard Stir-Fry Sauce'],
+  ['ซอสผัดกระทะมาตรฐาน', 'House Standard Stir-Fry Sauce'],
+  ['ซอสผัดกระทะ', 'Wok Stir-Fry Sauce'],
   ['ซอสผัด', 'Stir-Fry Sauce'],
+  ['ซอสหอยนางรมตราแม่ครัว', 'Oyster Sauce (Maekrua)'],
   ['ซอสหอยนางรม', 'Oyster Sauce'],
   ['น้ำมันหอย', 'Oyster Sauce'],
+  ['ซีอิ๊วขาวเห็ดหอม', 'Shiitake Light Soy Sauce'],
   ['ซีอิ๊วขาว', 'Light Soy Sauce'],
+  ['ซีอิ๊วดำหวาน', 'Sweet Dark Soy Sauce'],
   ['ซีอิ๊วดำ', 'Dark Soy Sauce'],
+  ['ซอสปรุงรสฝาเขียว', 'Green Cap Seasoning Sauce'],
   ['ซอสปรุงรส', 'Seasoning Sauce'],
+  ['ซอสถั่วเหลือง', 'Soy Sauce'],
+  ['ซอสสามรส', 'Three-Flavor Sweet & Sour Sauce'],
+  ['น้ำปลาแท้ตราทิพรส', 'Fish Sauce (Tiparos)'],
   ['น้ำปลาแท้', 'Fish Sauce'],
   ['น้ำปลา', 'Fish Sauce'],
+  ['น้ำปลาร้าต้มสุก', 'Pasteurized Fermented Fish Sauce'],
+  ['น้ำปลาร้า', 'Fermented Fish Sauce'],
+  ['เต้าเจี้ยว', 'Fermented Soybean Paste'],
+  ['น้ำจิ้มสุกี้โบราณ', 'Traditional Suki Dipping Sauce'],
   ['น้ำจิ้มสุกี้', 'Suki Sauce'],
+  ['น้ำจิ้มแจ่ว', 'Isaan Spicy Dipping Sauce'],
+  ['น้ำจิ้มซีฟู้ด', 'Seafood Spicy Dipping Sauce'],
+  ['น้ำจิ้มไก่', 'Sweet Chili Dipping Sauce'],
+  ['น้ำจิ้มหมูกระทะ', 'Thai BBQ Dipping Sauce'],
+  ['น้ำซอสมะขามผัดไทย', 'Pad Thai Tamarind Sauce'],
   ['น้ำซอสมะขาม', 'Tamarind Sauce'],
+  ['มะขามเปียกแกะเมล็ด', 'Seedless Tamarind Paste'],
   ['มะขามเปียก', 'Tamarind Paste'],
+  ['น้ำซุปกระดูกหมู', 'Pork Bone Broth'],
   ['น้ำซุปกระดูกเข้มข้น', 'Rich Bone Broth'],
-  ['น้ำซุป', 'Soup Base'],
+  ['น้ำซุปต้มยำ', 'Tom Yum Broth'],
+  ['น้ำสต็อกหมู', 'Pork Stock'],
+  ['น้ำสต็อกไก่', 'Chicken Stock'],
+  ['น้ำซุป', 'Broth'],
+  ['น้ำสต็อก', 'Stock'],
   ['ซอสกะเพรา', 'Holy Basil Stir-Fry Sauce'],
   ['ซอสพริกไทยดำ', 'Black Pepper Sauce'],
   ['ซอสเทอริยากิ', 'Teriyaki Sauce'],
+  ['ซอสพริกศรีราชา', 'Sriracha Chili Sauce'],
   ['ซอสพริก', 'Chili Sauce'],
   ['ซอสมะเขือเทศ', 'Ketchup'],
-  ['น้ำจิ้มแจ่ว', 'Isaan Spicy Dipping Sauce'],
-  ['น้ำจิ้มซีฟู้ด', 'Seafood Spicy Dipping Sauce'],
+  ['มายองเนส', 'Mayonnaise'],
+  ['ผงปรุงรสหมู', 'Pork Seasoning Powder'],
+  ['ผงปรุงรสไก่', 'Chicken Seasoning Powder'],
+  ['ผงปรุงรส', 'Seasoning Powder'],
+  ['ผงชูรส', 'MSG'],
+  ['ผงพะโล้', 'Chinese Five-Spice Powder'],
+  ['ผงกะหรี่', 'Curry Powder'],
   ['พริกป่น', 'Chili Flakes'],
   ['พริกเผา', 'Roasted Chili Paste'],
+  ['น้ำพริกเผา', 'Roasted Chili Paste'],
+  ['น้ำพริกกะปิ', 'Shrimp Paste Chili Dip'],
   ['กะปิ', 'Shrimp Paste'],
   ['น้ำตาลทรายขาว', 'White Sugar'],
+  ['น้ำตาลทรายแดง', 'Brown Sugar'],
   ['น้ำตาลทราย', 'Sugar'],
   ['น้ำตาลปี๊บ', 'Palm Sugar'],
+  ['น้ำตาลมะพร้าว', 'Coconut Sugar'],
+  ['น้ำตาลกรวด', 'Rock Sugar'],
   ['น้ำตาล', 'Sugar'],
+  ['น้ำผึ้ง', 'Honey'],
+  ['น้ำส้มสายชู', 'Vinegar'],
+  ['เกลือสมุทร', 'Sea Salt'],
+  ['เกลือป่น', 'Fine Salt'],
+  ['เกลือ', 'Salt'],
+  ['น้ำมันปาล์มสำหรับผัด/ทอด', 'Palm Oil (Stir-Fry / Frying)'],
+  ['น้ำมันปาล์มสำหรับทอด', 'Palm Oil for Frying'],
   ['น้ำมันปาล์ม', 'Palm Oil'],
+  ['น้ำมันถั่วเหลือง', 'Soybean Oil'],
   ['น้ำมันพืช', 'Vegetable Oil'],
   ['น้ำมันงา', 'Sesame Oil'],
+  ['น้ำมันกระเทียมเจียว', 'Garlic Oil'],
+  ['กระเทียมเจียว', 'Crispy Fried Garlic'],
+  ['หอมเจียว', 'Crispy Fried Shallots'],
+  ['แป้งทอดกรอบ', 'Crispy Tempura Flour'],
+  ['แป้งข้าวโพด', 'Cornstarch'],
+  ['แป้งมัน', 'Tapioca Starch'],
+  ['แป้งสาลี', 'Wheat Flour'],
+  ['เกล็ดขนมปัง', 'Breadcrumbs'],
+  ['นมสด', 'Fresh Milk'],
+  ['นมข้นจืด', 'Evaporated Milk'],
+  ['นมข้นหวาน', 'Condensed Milk'],
+  ['หัวกะทิ', 'Coconut Cream'],
+  ['กะทิกล่อง', 'Coconut Milk'],
+  ['กะทิ', 'Coconut Milk'],
+  ['เนยสด', 'Butter'],
+  ['เนย', 'Butter'],
+  ['ชีส', 'Cheese'],
+  ['ถั่วลิสงคั่ว', 'Roasted Peanuts'],
+  ['ถั่วลิสง', 'Peanuts'],
+  ['เม็ดมะม่วงหิมพานต์', 'Cashew Nuts'],
+  ['งาขาว', 'White Sesame'],
+  ['งาดำ', 'Black Sesame'],
+
+  // Herbs, Vegetables & Eggs
+  ['ใบกะเพราเด็ดใบ', 'Picked Holy Basil Leaves'],
+  ['ใบกะเพราป่าออร์แกนิก', 'Organic Wild Holy Basil'],
   ['ใบกะเพรา', 'Holy Basil'],
   ['กะเพรา', 'Holy Basil'],
+  ['ใบโหระพา', 'Sweet Basil Leaves'],
   ['โหระพา', 'Sweet Basil'],
+  ['ใบมะกรูด', 'Kaffir Lime Leaves'],
+  ['มะกรูด', 'Kaffir Lime'],
+  ['ตะไคร้', 'Lemongrass'],
+  ['ข่า', 'Galangal'],
+  ['กระชาย', 'Fingerroot'],
+  ['ขิงซอย', 'Julienne Ginger'],
+  ['ขิง', 'Ginger'],
   ['พริกขี้หนูแดงจินดา', 'Red Bird\'s Eye Chili'],
+  ['พริกขี้หนูสวน', 'Thai Bird\'s Eye Chili'],
   ['พริกขี้หนู', 'Bird\'s Eye Chili'],
+  ['พริกชี้ฟ้าแดง', 'Red Spur Chili'],
   ['พริกชี้ฟ้า', 'Spur Chili'],
-  ['พริกไทยอ่อน', 'Fresh Peppercorns'],
+  ['พริกแห้ง', 'Dried Chili'],
+  ['พริกหยวก', 'Bell Pepper'],
+  ['พริกไทยดำ', 'Black Pepper'],
+  ['พริกไทยอ่อน', 'Fresh Green Peppercorns'],
+  ['พริกไทยป่น', 'Ground Pepper'],
   ['พริกไทย', 'Black Pepper'],
+  ['กระเทียมไทยแกะกลีบ', 'Peeled Thai Garlic'],
   ['กระเทียมไทย', 'Thai Garlic'],
+  ['กระเทียมจีน', 'Chinese Garlic'],
   ['กระเทียม', 'Garlic'],
-  ['หอมแดง', 'Shallot'],
+  ['หอมแดง', 'Shallots'],
   ['หอมหัวใหญ่', 'Onion'],
   ['ต้นหอม', 'Spring Onion'],
+  ['ผักชีฝรั่ง', 'Culantro'],
+  ['รากผักชี', 'Coriander Root'],
   ['ผักชี', 'Coriander'],
+  ['ใบเตย', 'Pandan Leaf'],
   ['มะนาว', 'Lime'],
   ['มะเขือเทศ', 'Tomato'],
+  ['มะเขือเปราะ', 'Thai Eggplant'],
+  ['มะเขือพวง', 'Pea Eggplant'],
+  ['ผักบุ้งจีนหั่นท่อน', 'Cut Chinese Morning Glory'],
+  ['ผักบุ้งจีน', 'Chinese Morning Glory'],
+  ['ผักบุ้ง', 'Morning Glory'],
+  ['คะน้าฮ่องกง', 'Hong Kong Kale'],
   ['คะน้า', 'Chinese Kale'],
+  ['กะหล่ำปลีซอย', 'Shredded Cabbage'],
   ['กะหล่ำปลี', 'Cabbage'],
+  ['ผักกาดขาว', 'Napa Cabbage'],
+  ['กวางตุ้ง', 'Choy Sum'],
+  ['บล็อกโคลี่', 'Broccoli'],
   ['ถั่วฝักยาว', 'Yardlong Bean'],
+  ['ถั่วงอก', 'Bean Sprouts'],
+  ['หน่อไม้', 'Bamboo Shoots'],
   ['ข้าวโพดอ่อน', 'Baby Corn'],
   ['แครอท', 'Carrot'],
+  ['แตงกวา', 'Cucumber'],
+  ['ฟักทอง', 'Pumpkin'],
   ['เห็ดฟาง', 'Straw Mushroom'],
   ['เห็ดหอม', 'Shiitake Mushroom'],
   ['เห็ดเข็มทอง', 'Enoki Mushroom'],
+  ['เห็ดนางฟ้า', 'Oyster Mushroom'],
+  ['เห็ดออรินจิ', 'King Oyster Mushroom'],
+  ['ไข่ไก่สด (เบอร์ 2)', 'Fresh Chicken Egg (Size 2)'],
+  ['ไข่ไก่สด', 'Fresh Chicken Egg'],
   ['ไข่ไก่', 'Chicken Egg'],
   ['ไข่เป็ด', 'Duck Egg'],
-  ['กะทิ', 'Coconut Milk'],
-  ['ถั่วลิสง', 'Peanuts'],
+  ['ไข่นกกระทา', 'Quail Egg'],
+  ['ข้าวสวยหอมมะลิ (หุงสุก)', 'Cooked Jasmine Rice'],
+  ['ข้าวสารหอมมะลิ', 'Jasmine Rice (Uncooked)'],
+  ['ข้าวหอมมะลิ', 'Jasmine Rice'],
+
+  // Prep descriptors
+  ['แกะกลีบ', 'Peeled'],
+  ['หั่นชิ้น', 'Sliced'],
+  ['หั่นเต๋า', 'Diced'],
+  ['หั่นท่อน', 'Cut'],
+  ['สับละเอียด', 'Finely Minced'],
+  ['เด็ดใบ', 'Picked Leaves'],
+  ['หุงสุก', 'Cooked'],
+  ['แช่น้ำ', 'Soaked'],
+  ['แช่แข็ง', 'Frozen'],
+  ['ลอกหนัง', 'Skinless'],
+  ['เลาะกระดูก', 'Boneless'],
+  ['แกะเมล็ด', 'Seedless'],
+  ['มันน้อย', 'Lean'],
+  ['สูตรประจำร้าน', 'House Signature Recipe'],
+  ['สูตรทางร้าน', 'House Recipe'],
+  ['สูตรโบราณ', 'Traditional Recipe'],
+  ['สูตรเด็ด', 'Signature Recipe'],
+  ['สำหรับผัด/ทอด', 'for Stir-Fry / Frying'],
+  ['สำหรับทอด', 'for Deep-Frying'],
+  ['สำหรับผัด', 'for Stir-Frying'],
 
   // Packaging
+  ['กล่องกระดาษคราฟท์ใส่อาหารรักษ์โลก', 'Eco Kraft Paper Food Container'],
+  ['กล่องกระดาษคราฟท์อาหารรักษ์โลก', 'Eco Kraft Paper Food Container'],
+  ['กล่องกระดาษใส่อาหารรักษ์โลก', 'Eco Paper Food Container'],
   ['กล่องกระดาษใส่อาหาร', 'Paper Food Box'],
+  ['กล่องพลาสติก PP ไมโครเวฟพร้อมฝา', 'Microwavable PP Container with Lid'],
+  ['ชุดช้อนส้อมพลาสติก + ทิชชู', 'Cutlery Set & Napkin'],
+  ['ถ้วยน้ำจิ้ม 2oz + ฝา', '2oz Sauce Cup with Lid'],
+  ['ถุงหูหิ้วพลาสติกรักษ์โลก', 'Eco Carrier Bag'],
+  ['ถ้วยซุปกระดาษ 350ml + ฝา', '350ml Paper Soup Bowl with Lid'],
+  ['กล่องกระดาษคราฟท์', 'Kraft Paper Box'],
   ['กล่องกระดาษ', 'Paper Box'],
   ['กล่องข้าว', 'Food Container Box'],
   ['กล่องพลาสติก', 'Plastic Container'],
   ['ถ้วยซุป', 'Soup Bowl'],
+  ['ถ้วยน้ำจิ้ม', 'Sauce Cup'],
+  ['ถุงหูหิ้ว', 'Carrier Bag'],
   ['ถุงหิ้ว', 'Carrier Bag'],
   ['ถุงพลาสติก', 'Plastic Bag'],
   ['ถุงร้อน', 'Hot Food Bag'],
   ['ช้อนส้อม', 'Cutlery Set'],
   ['ตะเกียบ', 'Chopsticks'],
+  ['ทิชชู', 'Napkin'],
   ['แก้วน้ำ', 'Beverage Cup'],
+  ['พร้อมฝา', 'with Lid'],
+  ['รักษ์โลก', 'Eco-Friendly'],
   ['หลอด', 'Straw'],
 
-  // Categories & Channels
+  // Categories & Channels & Overhead
   ['อาหารจานหลัก', 'Main Dishes'],
   ['อาหารจานเดียว', 'One-Dish Meals'],
   ['อาหารจานด่วน', 'Quick One-Dish Meals'],
@@ -382,60 +703,34 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['ต้มและแกง', 'Soups & Curries'],
   ['หน้าร้าน', 'Dine-in'],
   ['ทานที่ร้าน', 'Dine-in'],
+  ['กินที่ร้าน', 'Dine-in'],
   ['สั่งกลับบ้าน', 'Takeaway'],
   ['กลับบ้าน', 'Takeaway'],
   ['เดลิเวอรี', 'Delivery'],
   ['กะเพราจานด่วน / ตามสั่ง', 'Holy Basil Express / Made to Order'],
   ['เส้นและก๋วยเตี๋ยว', 'Noodles & Stir-Fried Noodles'],
   ['ชุดเครื่องเคียง', 'Side Dishes'],
-  ['ผัดไทย จันท์', 'Chanthaburi Pad Thai'],
-  ['ผัดไทยเส้นจันท์', 'Chanthaburi-Noodle Pad Thai'],
-  ['สุกี้แห้งหมูหมัก', 'Dry Sukiyaki with Marinated Pork'],
-  ['ไข่ดาว / ไข่เจียว', 'Fried Egg / Omelette'],
-  ['ไข่ดาวกรอบ', 'Crispy Fried Egg'],
-  ['ไข่ดาว', 'Fried Egg'],
-  ['น้ำจิ้มสุกี้โบราณ', 'Traditional Suki Dipping Sauce'],
-  ['น้ำซอสมะขามผัดไทย', 'Pad Thai Tamarind Sauce'],
-  ['ซอสผัดกระทะมาตรฐาน (สูตรประจำร้าน)', 'House Standard Stir-Fry Sauce'],
-  ['หมูหมัก (สูตรทางร้าน)', 'House Marinated Pork'],
-  ['หมูบด (สันนอกบดมันน้อย)', 'Lean Ground Pork Loin'],
-  ['อกไก่หั่นชิ้น', 'Sliced Chicken Breast'],
-  ['เนื้อวัวสไลซ์', 'Sliced Beef'],
-  ['ปลาหมึกกล้วยสด', 'Fresh Squid'],
-  ['ไข่ไก่สด (เบอร์ 2)', 'Fresh Chicken Egg (Size 2)'],
-  ['เต้าหู้ไข่ไก่ (หลอด)', 'Egg Tofu (Tube)'],
-  ['ใบกะเพราเด็ดใบ', 'Picked Holy Basil Leaves'],
-  ['ใบกะเพราป่าออร์แกนิก', 'Organic Wild Holy Basil'],
-  ['ใบโหระพา', 'Sweet Basil Leaves'],
-  ['กระเทียมไทยแกะกลีบ', 'Peeled Thai Garlic'],
-  ['ผักบุ้งจีนหั่นท่อน', 'Cut Chinese Morning Glory'],
-  ['ผักบุ้งจีน', 'Chinese Morning Glory'],
-  ['คะน้าฮ่องกง', 'Hong Kong Kale'],
-  ['กะหล่ำปลีซอย', 'Shredded Cabbage'],
-  ['ข้าวสวยหอมมะลิ (หุงสุก)', 'Cooked Jasmine Rice'],
-  ['เส้นจันท์แช่น้ำ', 'Soaked Chanthaburi Rice Noodles'],
-  ['วุ้นเส้นแช่น้ำ', 'Soaked Glass Noodles'],
-  ['บะหมี่กึ่งสำเร็จรูป (มาม่าซอง)', 'Instant Noodles (Packet)'],
-  ['น้ำมันปาล์มสำหรับผัด/ทอด', 'Palm Oil (Stir-Fry / Frying)'],
-  ['น้ำมันปาล์มสำหรับทอด', 'Palm Oil for Frying'],
-  ['ซอสหอยนางรมตราแม่ครัว', 'Oyster Sauce (Maekrua)'],
-  ['ซีอิ๊วขาวเห็ดหอม', 'Shiitake Light Soy Sauce'],
-  ['น้ำปลาแท้ตราทิพรส', 'Fish Sauce (Tiparos)'],
-  ['มะขามเปียกแกะเมล็ด', 'Seedless Tamarind Paste'],
-  ['กล่องกระดาษใส่อาหารรักษ์โลก', 'Eco Paper Food Container'],
+  ['ซอสหลัก', 'Master Sauces'],
   ['เจริญโภคภัณฑ์สด (ตลาดไท)', 'CPF Fresh (Talaad Thai)'],
   ['มหาชัยซีฟู้ดส์', 'Mahachai Seafoods'],
   ['ผักสดสวนลุงชาติ', 'Uncle Chat Fresh Garden'],
   ['ย่งฮั้วฮวด เครื่องปรุงและบรรจุภัณฑ์', 'Yong Huat Seasonings & Packaging'],
+  ['ค่าเช่าที่', 'Rent'],
   ['ค่าเช่า', 'Rent'],
   ['ค่าไฟ', 'Electricity'],
   ['ค่าน้ำ', 'Water'],
   ['ค่าแก๊ส', 'Cooking Gas (LPG)'],
+  ['ค่าจ้างพนักงาน', 'Staff Wages'],
   ['ค่าแรง', 'Labor Cost'],
   ['ค่าแพ็กเกจจิ้ง', 'Packaging Cost'],
+  ['ค่าโฆษณา', 'Advertising'],
+  ['ซ่อมบำรุง', 'Maintenance'],
+  ['ค่าอุปกรณ์', 'Equipment'],
+  ['เบ็ดเตล็ด', 'Miscellaneous'],
   ['โซนในร้าน', 'Indoor Zone'],
   ['โซนกลางแจ้ง', 'Outdoor Zone'],
   ['อื่นๆ', 'Other'],
+  ['อื่น ๆ', 'Other'],
   ['ทั่วไป', 'General'],
 ];
 
@@ -443,41 +738,83 @@ const SINGLE_WORD_DICTIONARY: Record<string, string> = {
   'หมู': 'Pork',
   'ไก่': 'Chicken',
   'เนื้อ': 'Beef',
+  'เป็ด': 'Duck',
   'กุ้ง': 'Shrimp',
   'ปลา': 'Fish',
   'ปู': 'Crab',
   'หอย': 'Shellfish',
   'ไข่': 'Egg',
   'ข้าว': 'Rice',
+  'เส้น': 'Noodles',
+  'ผัก': 'Vegetables',
+  'เห็ด': 'Mushroom',
+  'พริก': 'Chili',
+  'กระเทียม': 'Garlic',
+  'หอม': 'Onion',
+  'น้ำปลา': 'Fish Sauce',
+  'น้ำมัน': 'Oil',
+  'ซอส': 'Sauce',
+  'น้ำจิ้ม': 'Dipping Sauce',
+  'น้ำซุป': 'Broth',
+  'น้ำตาล': 'Sugar',
+  'เกลือ': 'Salt',
+  'กะทิ': 'Coconut Milk',
+  'ชีส': 'Cheese',
+  'เนย': 'Butter',
+  'นม': 'Milk',
+  'แป้ง': 'Flour',
+  'ผง': 'Powder',
+  'ใบ': 'Leaves',
+  'ซอย': 'Sliced',
+  'บด': 'Ground',
+  'สับ': 'Minced',
+  'แล่': 'Filleted',
+  'ตากแห้ง': 'Sun-Dried',
   'ผัด': 'Stir-Fried',
   'ทอด': 'Fried',
   'ต้ม': 'Boiled',
+  'ตุ๋น': 'Braised',
   'แกง': 'Curry',
   'ย่าง': 'Grilled',
+  'ปิ้ง': 'Charcoal-Grilled',
+  'เผา': 'Char-Grilled',
   'นึ่ง': 'Steamed',
   'อบ': 'Baked',
   'ยำ': 'Spicy Salad',
   'ลวก': 'Blanched',
+  'คั่ว': 'Dry-Roasted',
+  'คลุก': 'Tossed',
+  'หมัก': 'Marinated',
+  'เจียว': 'Crispy Fried',
+  'ตัก': 'Scoop',
   'เผ็ด': 'Spicy',
   'หวาน': 'Sweet',
   'เค็ม': 'Salty',
   'เปรี้ยว': 'Sour',
+  'จืด': 'Mild',
   'มัน': 'Rich',
   'ร้อน': 'Hot',
   'เย็น': 'Iced',
-  'ปั่น': 'Frappe',
+  'ปั่น': 'Smoothie',
   'แห้ง': 'Dry',
   'น้ำ': 'Soup',
   'เพิ่ม': 'Extra',
   'ไม่': 'No',
   'แยก': 'Separate',
   'ใส่': 'With',
-  'และ': 'and',
-  'กับ': 'with',
+  'รวม': 'Mixed',
   'สด': 'Fresh',
   'กรอบ': 'Crispy',
+  'นุ่ม': 'Tender',
   'สุก': 'Cooked',
   'ดิบ': 'Raw',
+  'อ่อน': 'Young',
+  'แก่': 'Mature',
+  'แดง': 'Red',
+  'เขียว': 'Green',
+  'ขาว': 'White',
+  'ดำ': 'Black',
+  'เหลือง': 'Yellow',
   'ชิ้น': 'Piece',
   'ชุด': 'Set',
   'จาน': 'Plate',
@@ -489,95 +826,80 @@ const SINGLE_WORD_DICTIONARY: Record<string, string> = {
   'ขวด': 'Bottle',
   'ซอง': 'Sachet',
   'แพ็ค': 'Pack',
+  'แพค': 'Pack',
   'กระป๋อง': 'Can',
-  'สูตรทางร้าน': 'House Recipe',
-  'สูตรโบราณ': 'Traditional Recipe',
+  'ฝา': 'Lid',
   'สูตร': 'Recipe',
+  'เมนู': 'Menu',
+  'วัตถุดิบ': 'Ingredient',
+  'เครื่องปรุง': 'Seasoning',
+  'สมุนไพร': 'Herbs',
+  'อาหาร': 'Food',
+  'จานเดียว': 'One-Dish Meal',
+  'ต้นตำรับ': 'Original',
+  'ไทย': 'Thai',
 };
 
-// RTGS Consonant Initial & Final Mapping for fallback phonetic transliteration
-const CONSONANT_INITIAL: Record<string, string> = {
-  ก: 'k', ข: 'kh', ฃ: 'kh', ค: 'kh', ฅ: 'kh', ฆ: 'kh', ง: 'ng',
-  จ: 'ch', ฉ: 'ch', ช: 'ch', ซ: 's', ฌ: 'ch', ญ: 'y',
-  ฎ: 'd', ฏ: 't', ฐ: 'th', ฑ: 'th', ฒ: 'th', ณ: 'n',
-  ด: 'd', ต: 't', ถ: 'th', ท: 'th', ธ: 'th', น: 'n',
-  บ: 'b', ป: 'p', ผ: 'ph', ฝ: 'f', พ: 'ph', ฟ: 'f', ภ: 'ph', ม: 'm',
-  ย: 'y', ร: 'r', ล: 'l', ว: 'w',
-  ศ: 's', ษ: 's', ส: 's', ห: 'h', ฬ: 'l', อ: '', ฮ: 'h',
-};
-
-const VOWEL_MAP: Record<string, string> = {
-  'ะ': 'a', 'ั': 'a', 'า': 'a', 'ำ': 'am',
-  'ิ': 'i', 'ี': 'i', 'ึ': 'ue', 'ื': 'ue',
-  'ุ': 'u', 'ู': 'u',
-  'เ': 'e', 'แ': 'ae', 'โ': 'o', 'ใ': 'ai', 'ไ': 'ai',
-  'ฤ': 'rue', 'ฤๅ': 'rue', 'ฦ': 'lue', 'ฦๅ': 'lue',
-  '็': '', '์': '', '่': '', '้': '', '๊': '', '๋': '', 'ๆ': '', 'ฯ': '',
-};
+// Non-semantic Thai grammatical particles to omit cleanly instead of transliterating
+const THAI_STOPWORDS = [
+  'สำหรับ',
+  'พร้อม',
+  'อย่าง',
+  'สูตร',
+  'ตรา',
+  'และ',
+  'กับ',
+  'หรือ',
+  'ของ',
+  'ใน',
+  'ที่',
+  'จาก',
+  'โดย',
+  'เพื่อ',
+  'แบบ',
+  'ด้วย',
+  'เป็น',
+  'มี',
+  'ให้',
+  'ได้',
+  'ต่อ',
+  'ละ',
+  'ฯ',
+  'ๆ',
+].sort((a, b) => b.length - a.length);
 
 const COMBINED_MAP: Array<[string, string]> = [
   ...PHRASE_DICTIONARY,
   ...Object.entries(SINGLE_WORD_DICTIONARY),
 ].sort((a, b) => b[0].length - a[0].length);
 
-function romanizeThaiToken(token: string): string {
-  // Simple readable syllable-ish RTGS transliterator for unrecognized Thai words
-  let out = '';
-  const chars = Array.from(token);
-  let pendingLeadingVowel = '';
-
-  for (let i = 0; i < chars.length; i++) {
-    const ch = chars[i];
-    if (ch === 'เ' || ch === 'แ' || ch === 'โ' || ch === 'ใ' || ch === 'ไ') {
-      pendingLeadingVowel = VOWEL_MAP[ch] || '';
-      continue;
-    }
-    if (ch in CONSONANT_INITIAL) {
-      out += CONSONANT_INITIAL[ch];
-      if (pendingLeadingVowel) {
-        out += pendingLeadingVowel;
-        pendingLeadingVowel = '';
-      }
-      continue;
-    }
-    if (ch in VOWEL_MAP) {
-      out += VOWEL_MAP[ch];
-      continue;
-    }
-    out += ch;
-  }
-  if (pendingLeadingVowel) {
-    out += pendingLeadingVowel;
-  }
-  const cleaned = out.replace(/[^a-zA-Z0-9\s\-()'./]/g, '').trim();
-  if (!cleaned) return '';
-  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-}
+const HAS_THAI_RE = /[\u0E00-\u0E7F]/;
 
 function toTitleCase(text: string): string {
-  const lowercaseWords = new Set(['with', 'and', 'on', 'in', 'the', 'of', 'for', 'or']);
+  const lowercaseWords = new Set(['with', 'and', 'on', 'in', 'the', 'of', 'for', 'or', 'by', 'to', 'a']);
   return text
     .split(/\s+/)
     .filter(Boolean)
     .map((word, idx) => {
-      if (idx > 0 && lowercaseWords.has(word.toLowerCase())) {
-        return word.toLowerCase();
+      const lower = word.toLowerCase();
+      if (idx > 0 && lowercaseWords.has(lower)) {
+        return lower;
       }
       if (/^[A-Z0-9()-]+$/.test(word) && word.length <= 4) {
         return word;
+      }
+      if (word.startsWith('(') && word.length > 1) {
+        return '(' + word.charAt(1).toUpperCase() + word.slice(2);
       }
       return word.charAt(0).toUpperCase() + word.slice(1);
     })
     .join(' ');
 }
 
-export function translateThaiToEnglish(input: string): string {
-  const trimmed = (input || '').trim();
+function translateTokensGreedy(thaiInput: string): string {
+  const trimmed = thaiInput.trim();
   if (!trimmed) return '';
-  // Already English / Latin / Numbers only
-  if (!/[\u0E00-\u0E7F]/.test(trimmed)) {
-    return trimmed;
-  }
+  if (!HAS_THAI_RE.test(trimmed)) return trimmed;
 
   const outputParts: string[] = [];
   let cursor = 0;
@@ -585,14 +907,12 @@ export function translateThaiToEnglish(input: string): string {
   while (cursor < trimmed.length) {
     const remaining = trimmed.slice(cursor);
 
-    // Skip whitespace
     const wsMatch = remaining.match(/^\s+/);
     if (wsMatch) {
       cursor += wsMatch[0].length;
       continue;
     }
 
-    // Preserve ASCII segments (e.g. (XL), 100g, LINE MAN)
     const asciiMatch = remaining.match(/^[^\u0E00-\u0E7F]+/);
     if (asciiMatch) {
       const seg = asciiMatch[0].trim();
@@ -601,7 +921,7 @@ export function translateThaiToEnglish(input: string): string {
       continue;
     }
 
-    // Try longest dictionary phrase match at current cursor
+    // Try exact longest culinary dictionary phrase / word match
     let matched = false;
     for (const [thPhrase, enTranslation] of COMBINED_MAP) {
       if (remaining.startsWith(thPhrase)) {
@@ -613,29 +933,142 @@ export function translateThaiToEnglish(input: string): string {
     }
     if (matched) continue;
 
-    // Fallback: consume contiguous Thai run up to next dictionary hit or non-Thai char
-    let nextHitIdx = remaining.length;
-    for (let j = 1; j < remaining.length; j++) {
-      if (!/[\u0E00-\u0E7F]/.test(remaining[j])) {
-        nextHitIdx = j;
-        break;
-      }
-      const sub = remaining.slice(j);
-      if (COMBINED_MAP.some(([thPhrase]) => sub.startsWith(thPhrase))) {
-        nextHitIdx = j;
+    // Skip Thai filler grammatical particles cleanly
+    let stopMatched = false;
+    for (const sw of THAI_STOPWORDS) {
+      if (remaining.startsWith(sw)) {
+        cursor += sw.length;
+        stopMatched = true;
         break;
       }
     }
+    if (stopMatched) continue;
 
-    const unknownChunk = remaining.slice(0, nextHitIdx);
-    const romanized = romanizeThaiToken(unknownChunk);
-    if (romanized) {
-      outputParts.push(romanized);
-    }
-    cursor += nextHitIdx;
+    // Advance 1 character cleanly until next recognized culinary term (never emit karaoke syllables)
+    cursor += 1;
   }
 
-  return toTitleCase(outputParts.join(' ').replace(/\s+/g, ' ').trim());
+  return outputParts
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b(Sauce)\s+\1\b/gi, '$1')
+    .replace(/\b(Broth)\s+\1\b/gi, '$1')
+    .replace(/\b(Curry)\s+\1\b/gi, '$1')
+    .trim();
+}
+
+function translateCompoundClause(input: string, depth = 0): string {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return '';
+  if (!HAS_THAI_RE.test(trimmed)) return trimmed;
+  if (depth > 4) return translateTokensGreedy(trimmed);
+
+  // Direct exact dictionary match first
+  for (const [thPhrase, enTranslation] of PHRASE_DICTIONARY) {
+    if (trimmed === thPhrase) {
+      return enTranslation;
+    }
+  }
+
+  // Handle slash-separated pairs like "ก / ข"
+  if (trimmed.includes(' / ')) {
+    const parts = trimmed
+      .split(/\s*\/\s*/)
+      .map((p) => translateCompoundClause(p, depth + 1))
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join(' / ');
+  }
+
+  // Handle parenthetical suffixes like "หมูบด (มันน้อย)"
+  const parenMatch = trimmed.match(/^(.+?)\s*\(([^()]+)\)$/);
+  if (parenMatch) {
+    const mainPart = translateCompoundClause(parenMatch[1], depth + 1);
+    const subPart = translateCompoundClause(parenMatch[2], depth + 1);
+    if (mainPart && subPart) return `${mainPart} (${subPart})`;
+    if (mainPart) return mainPart;
+    if (subPart) return subPart;
+  }
+
+  // Structured Thai culinary compound grammar (natural English menu syntax)
+  const suffixRules: Array<[RegExp, (innerEn: string) => string]> = [
+    [/^(.+?)ราดข้าว$/, (x) => `${x} on Rice`],
+    [/^(.+?)กับข้าว$/, (x) => `${x} (A La Carte)`],
+    [/^(.+?)ทอดกระเทียมพริกไทย$/, (x) => `Fried Garlic & Pepper ${x}`],
+    [/^(.+?)ทอดกระเทียม$/, (x) => `Fried Garlic ${x}`],
+    [/^(.+?)ผัดผงกะหรี่$/, (x) => `Stir-Fried ${x} in Curry Powder`],
+    [/^(.+?)ผัดพริกเผา$/, (x) => `Stir-Fried ${x} with Roasted Chili Paste`],
+    [/^(.+?)ผัดพริกแกง$/, (x) => `Stir-Fried ${x} with Red Curry Paste`],
+    [/^(.+?)ผัดน้ำมันหอย$/, (x) => `Stir-Fried ${x} in Oyster Sauce`],
+    [/^(.+?)ผัดกะเพรา$/, (x) => `Stir-Fried Holy Basil with ${x}`],
+    [/^(.+?)นึ่งมะนาว$/, (x) => `Steamed ${x} in Spicy Lime Sauce`],
+  ];
+
+  for (const [regex, formatter] of suffixRules) {
+    const m = trimmed.match(regex);
+    if (m && m[1].trim()) {
+      const inner = translateCompoundClause(m[1].trim(), depth + 1);
+      if (inner) return formatter(inner);
+    }
+  }
+
+  const prefixRules: Array<[RegExp, (innerEn: string) => string]> = [
+    [/^ข้าวผัดกะเพรา(.+)$/, (x) => `Holy Basil & ${x} Fried Rice`],
+    [/^ข้าวผัด(.+)$/, (x) => `${x} Fried Rice`],
+    [/^ข้าวต้ม(.+)$/, (x) => `${x} Rice Soup`],
+    [/^ข้าวกะเพรา(.+)$/, (x) => `Stir-Fried Holy Basil with ${x} on Rice`],
+    [/^ผัดกะเพรา(.+)$/, (x) => `Stir-Fried Holy Basil with ${x}`],
+    [/^กะเพรา(.+)$/, (x) => `Holy Basil ${x}`],
+    [/^ต้มยำ(.+)$/, (x) => `Tom Yum ${x}`],
+    [/^ต้มข่า(.+)$/, (x) => `Coconut Galangal Soup with ${x}`],
+    [/^ต้มแซ่บ(.+)$/, (x) => `Spicy ${x} Soup`],
+    [/^ต้มจืด(.+)$/, (x) => `Clear ${x} Soup`],
+    [/^แกงเขียวหวาน(.+)$/, (x) => `Green Curry with ${x}`],
+    [/^แกงเผ็ด(.+)$/, (x) => `Red Curry with ${x}`],
+    [/^แกงแดง(.+)$/, (x) => `Red Curry with ${x}`],
+    [/^แกงพะแนง(.+)$/, (x) => `Panang Curry with ${x}`],
+    [/^พะแนง(.+)$/, (x) => `Panang Curry with ${x}`],
+    [/^แกงมัสมั่น(.+)$/, (x) => `Massaman Curry with ${x}`],
+    [/^แกงส้ม(.+)$/, (x) => `Sour Curry with ${x}`],
+    [/^ลาบ(.+)$/, (x) => `Spicy ${x} Salad (Larb)`],
+    [/^น้ำตก(.+)$/, (x) => `Grilled ${x} Waterfall Salad`],
+    [/^ยำ(.+)$/, (x) => `Spicy ${x} Salad`],
+    [/^ส้มตำ(.+)$/, (x) => `Papaya Salad with ${x}`],
+    [/^ก๋วยเตี๋ยว(.+)$/, (x) => `${x} Noodles`],
+    [/^ผัดซีอิ๊ว(.+)$/, (x) => `Pad See Ew with ${x}`],
+    [/^ราดหน้า(.+)$/, (x) => `Stir-Fried Noodles in Gravy with ${x}`],
+    [/^ผัดไทย(.+)$/, (x) => `Pad Thai with ${x}`],
+    [/^สุกี้แห้ง(.+)$/, (x) => `Dry Sukiyaki with ${x}`],
+    [/^สุกี้น้ำ(.+)$/, (x) => `Sukiyaki Soup with ${x}`],
+    [/^ซอส(.+)$/, (x) => (x.toLowerCase().includes('sauce') ? x : `${x} Sauce`)],
+    [/^น้ำจิ้ม(.+)$/, (x) => (x.toLowerCase().includes('sauce') ? x : `${x} Dipping Sauce`)],
+    [/^น้ำซุป(.+)$/, (x) => (x.toLowerCase().includes('broth') || x.toLowerCase().includes('soup') ? x : `${x} Broth`)],
+    [/^น้ำสต็อก(.+)$/, (x) => `${x} Stock`],
+    [/^ไม่ใส่(.+)$/, (x) => `No ${x}`],
+    [/^เพิ่ม(.+)$/, (x) => `Extra ${x}`],
+    [/^แยก(.+)$/, (x) => `Separate ${x}`],
+  ];
+
+  for (const [regex, formatter] of prefixRules) {
+    const m = trimmed.match(regex);
+    if (m && m[1].trim()) {
+      const inner = translateCompoundClause(m[1].trim(), depth + 1);
+      if (inner) return formatter(inner);
+    }
+  }
+
+  return translateTokensGreedy(trimmed);
+}
+
+export function translateThaiToEnglish(input: string): string {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return '';
+  if (!HAS_THAI_RE.test(trimmed)) {
+    return trimmed;
+  }
+
+  const translated = translateCompoundClause(trimmed);
+  if (!translated) return '';
+  return toTitleCase(translated.replace(/\s+/g, ' ').trim());
 }
 
 const DEFAULT_PLACEHOLDER_EN_VALUES = new Set([
@@ -678,8 +1111,6 @@ export function computeAutoEnglishName(params: {
 
   return translateThaiToEnglish(nextThai);
 }
-
-const HAS_THAI_RE = /[\u0E00-\u0E7F]/;
 
 /**
  * Resolves the display string for any named record/field based on current app language.
@@ -745,6 +1176,5 @@ const UNIT_EN_MAP: Record<string, string> = {
 export function localizeUnit(unit: string | undefined | null, lang: 'th' | 'en'): string {
   const raw = (unit || '').trim();
   if (!raw || lang === 'th') return raw;
-  return UNIT_EN_MAP[raw] || (HAS_THAI_RE.test(raw) ? translateThaiToEnglish(raw) : raw);
+  return UNIT_EN_MAP[raw] || (HAS_THAI_RE.test(raw) ? translateThaiToEnglish(raw) || raw : raw);
 }
-

@@ -48,6 +48,7 @@ import {
 } from '../data/onlineDb';
 import { formatMoney } from '../engine/calculations';
 import { toDateSafe } from '../engine/onlineOrdering';
+import { getLocalizedText } from '../utils/thaiToEnglish';
 import { useLanguage } from '../contexts/LanguageContext';
 
 interface CartEntry {
@@ -272,20 +273,42 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     return map;
   }, [store]);
 
+  const sortedCategories = useMemo(() => {
+    return [...(store?.categories || [])].sort(
+      (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id)
+    );
+  }, [store?.categories]);
+
+  const categoryRankMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sortedCategories.forEach((cat, idx) => map.set(cat.id, idx));
+    return map;
+  }, [sortedCategories]);
+
   const filteredDishes = useMemo(() => {
     const all = store?.dishes || [];
     const q = searchQuery.trim().toLowerCase();
-    return all.filter((d) => {
-      if (selectedCategoryId !== 'all' && d.categoryId !== selectedCategoryId) return false;
-      if (q) {
-        const matchEn = d.name.toLowerCase().includes(q);
-        const matchTh = (d.nameTh || '').toLowerCase().includes(q);
-        const matchDesc = (d.description || '').toLowerCase().includes(q);
-        if (!matchEn && !matchTh && !matchDesc) return false;
-      }
-      return d.variants && d.variants.length > 0;
-    });
-  }, [store, selectedCategoryId, searchQuery]);
+    return all
+      .filter((d) => {
+        if (selectedCategoryId !== 'all' && d.categoryId !== selectedCategoryId) return false;
+        if (q) {
+          const matchEn = d.name.toLowerCase().includes(q);
+          const matchTh = (d.nameTh || '').toLowerCase().includes(q);
+          const matchLoc = getLocalizedText(lang, d.nameTh || d.name, d.name).toLowerCase().includes(q);
+          const matchDesc = (d.description || '').toLowerCase().includes(q);
+          if (!matchEn && !matchTh && !matchLoc && !matchDesc) return false;
+        }
+        return d.variants && d.variants.length > 0;
+      })
+      .sort((a, b) => {
+        if (selectedCategoryId === 'all') {
+          const rankA = categoryRankMap.get(a.categoryId) ?? 999999;
+          const rankB = categoryRankMap.get(b.categoryId) ?? 999999;
+          if (rankA !== rankB) return rankA - rankB;
+        }
+        return (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id);
+      });
+  }, [store, selectedCategoryId, searchQuery, lang, categoryRankMap]);
 
   const openDishModal = (dish: PublicDish) => {
     const defaultVariant = dish.variants[0] || null;
@@ -334,7 +357,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       if (!grp) continue;
       const count = (selectedOptions[gId] || []).length;
       if (count < grp.minSelect) {
-        const gLabel = lang === 'th' && grp.nameTh ? grp.nameTh : grp.name;
+        const gLabel = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
         setOptionValidationMsg(
           lang === 'th'
             ? `กรุณาเลือก "${gLabel}" อย่างน้อย ${grp.minSelect} รายการ`
@@ -357,9 +380,9 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
           optionsExtra += choice.price;
           flatOptions.push({
             groupId: grp.id,
-            groupName: lang === 'th' && grp.nameTh ? grp.nameTh : grp.name,
+            groupName: getLocalizedText(lang, grp.nameTh || grp.name, grp.name),
             choiceId: choice.id,
-            choiceName: lang === 'th' && choice.nameTh ? choice.nameTh : choice.name,
+            choiceName: getLocalizedText(lang, choice.nameTh || choice.name, choice.name),
             price: choice.price,
           });
         }
@@ -367,9 +390,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     }
 
     const unitPrice = Math.max(0, selectedVariant.price + optionsExtra);
-    const dishLabel = lang === 'th' && activeDish.nameTh ? activeDish.nameTh : activeDish.name;
-    const varLabel =
-      lang === 'th' && selectedVariant.nameTh ? selectedVariant.nameTh : selectedVariant.name;
+    const dishLabel = getLocalizedText(lang, activeDish.nameTh || activeDish.name, activeDish.name);
+    const varLabel = getLocalizedText(lang, selectedVariant.nameTh || selectedVariant.name, selectedVariant.name);
     const optionSig = flatOptions.map((o) => o.choiceId).sort().join(',');
     const noteTrim = itemNote.trim();
     const key = `${activeDish.id}::${selectedVariant.id}::${optionSig}::${noteTrim}`;
@@ -667,7 +689,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
             >
               {lang === 'th' ? 'ทั้งหมด' : 'All'}
             </button>
-            {(store.categories || []).map((cat) => (
+            {sortedCategories.map((cat) => (
               <button
                 key={cat.id}
                 type="button"
@@ -678,7 +700,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
-                {lang === 'th' && cat.nameTh ? cat.nameTh : cat.name}
+                {getLocalizedText(lang, cat.nameTh || cat.name, cat.name)}
               </button>
             ))}
           </div>
@@ -708,7 +730,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {filteredDishes.map((dish) => {
-              const title = lang === 'th' && dish.nameTh ? dish.nameTh : dish.name;
+              const title = getLocalizedText(lang, dish.nameTh || dish.name, dish.name);
               const minPrice = Math.min(...dish.variants.map((v) => v.price));
               const photoUrl = dish.imageId ? dishImages[dish.imageId] : null;
               return (
@@ -784,7 +806,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
           <div className="bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl max-h-[90dvh] flex flex-col overflow-hidden">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
               <h3 className="font-extrabold text-base text-slate-900 truncate">
-                {lang === 'th' && activeDish.nameTh ? activeDish.nameTh : activeDish.name}
+                {getLocalizedText(lang, activeDish.nameTh || activeDish.name, activeDish.name)}
               </h3>
               <button
                 type="button"
@@ -815,7 +837,9 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                             : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        <span className="text-xs">{lang === 'th' && v.nameTh ? v.nameTh : v.name}</span>
+                        <span className="text-xs">
+                          {getLocalizedText(lang, v.nameTh || v.name, v.name)}
+                        </span>
                         <span className="text-xs font-extrabold text-orange-600 tabular-nums">
                           ฿{formatMoney(v.price)}
                         </span>
@@ -830,7 +854,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 const grp = optionGroupMap.get(gId);
                 if (!grp || grp.choices.length === 0) return null;
                 const selectedIds = selectedOptions[gId] || [];
-                const grpTitle = lang === 'th' && grp.nameTh ? grp.nameTh : grp.name;
+                const grpTitle = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
 
                 return (
                   <div key={grp.id} className="space-y-2">
@@ -871,7 +895,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                                 {checked ? '✓' : ''}
                               </span>
                               <span className="text-xs">
-                                {lang === 'th' && ch.nameTh ? ch.nameTh : ch.name}
+                                {getLocalizedText(lang, ch.nameTh || ch.name, ch.name)}
                               </span>
                             </div>
                             <span className="text-xs font-bold text-slate-600 tabular-nums">

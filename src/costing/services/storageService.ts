@@ -114,6 +114,18 @@ export function migrateSettings(rawSettings: any): RestaurantSettings {
       : 3.0,
     grabFoodCommissionPercent: grabPercent,
     lineManCommissionPercent: linemanPercent,
+    grabPriceMultiplier:
+      typeof rawSettings.grabPriceMultiplier === 'number' && Number.isFinite(rawSettings.grabPriceMultiplier) && rawSettings.grabPriceMultiplier > 0
+        ? rawSettings.grabPriceMultiplier
+        : 1.5,
+    linemanPriceMultiplier:
+      typeof rawSettings.linemanPriceMultiplier === 'number' && Number.isFinite(rawSettings.linemanPriceMultiplier) && rawSettings.linemanPriceMultiplier > 0
+        ? rawSettings.linemanPriceMultiplier
+        : 1.5,
+    robinhoodPriceMultiplier:
+      typeof rawSettings.robinhoodPriceMultiplier === 'number' && Number.isFinite(rawSettings.robinhoodPriceMultiplier) && rawSettings.robinhoodPriceMultiplier > 0
+        ? rawSettings.robinhoodPriceMultiplier
+        : 1.0,
   };
 }
 
