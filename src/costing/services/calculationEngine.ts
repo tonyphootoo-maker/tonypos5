@@ -1,6 +1,7 @@
 import {
   Ingredient,
   Sauce,
+  MenuItem,
   MenuVariant,
   RecipeCostBreakdown,
   RecipeItem,
@@ -747,6 +748,134 @@ export function calculateChannelSuggestedPrices(
     suggestedDeliveryPrice: suggestedDeliveryPriceByFc,
     effectiveDeliveryGpPercent,
   };
+}
+
+export type MultipliedDeliveryChannel = 'grab' | 'lineman' | 'robinhood';
+
+export interface ChannelMultiplierSet {
+  grab: number;
+  lineman: number;
+  robinhood: number;
+}
+
+export interface MultipliedChannelPrices {
+  dineInPrice: number;
+  grabPrice: number;
+  linemanPrice: number;
+  robinhoodPrice: number;
+}
+
+/**
+ * Resolves active GrabFood, LINE MAN, and Robinhood multipliers from RestaurantSettings
+ * with standard defaults (GrabFood 1.5x, LINE MAN 1.5x, Robinhood 1.0x).
+ */
+export function resolveChannelMultipliers(
+  settings?: Pick<
+    RestaurantSettings,
+    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
+  > | null
+): ChannelMultiplierSet {
+  const grabRaw = Number(settings?.grabPriceMultiplier);
+  const linemanRaw = Number(settings?.linemanPriceMultiplier);
+  const robinhoodRaw = Number(settings?.robinhoodPriceMultiplier);
+
+  return {
+    grab: Number.isFinite(grabRaw) && grabRaw > 0 ? grabRaw : 1.5,
+    lineman: Number.isFinite(linemanRaw) && linemanRaw > 0 ? linemanRaw : 1.5,
+    robinhood: Number.isFinite(robinhoodRaw) && robinhoodRaw > 0 ? robinhoodRaw : 1.0,
+  };
+}
+
+/**
+ * Immediately computes GrabFood, LINE MAN, and Robinhood selling prices from a base Dine-in price
+ * and active channel multipliers (no manual trigger required).
+ */
+export function calculateMultipliedChannelPrices(
+  baseSellingPrice: number,
+  settings?: Pick<
+    RestaurantSettings,
+    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
+  > | null
+): MultipliedChannelPrices {
+  const safeBase = Number.isFinite(baseSellingPrice) ? Math.max(0, baseSellingPrice) : 0;
+  const multipliers = resolveChannelMultipliers(settings);
+
+  return {
+    dineInPrice: safeBase,
+    grabPrice: safeBase > 0 ? Math.round(safeBase * multipliers.grab) : 0,
+    linemanPrice: safeBase > 0 ? Math.round(safeBase * multipliers.lineman) : 0,
+    robinhoodPrice: safeBase > 0 ? Math.round(safeBase * multipliers.robinhood) : 0,
+  };
+}
+
+/**
+ * Updates a MenuVariant's GrabFood, LINE MAN, and Robinhood prices immediately whenever
+ * either its base Dine-in price or the channel multiplier values change.
+ */
+export function applyChannelMultipliersToVariant(
+  variant: MenuVariant,
+  settings?: Pick<
+    RestaurantSettings,
+    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
+  > | null,
+  options?: {
+    baseSellingPriceOverride?: number;
+    channels?: MultipliedDeliveryChannel[];
+  }
+): MenuVariant {
+  const basePrice =
+    options?.baseSellingPriceOverride !== undefined
+      ? Math.max(0, Number(options.baseSellingPriceOverride) || 0)
+      : Math.max(0, Number(variant.sellingPrice) || 0);
+  const multiplied = calculateMultipliedChannelPrices(basePrice, settings);
+  const targetChannels = options?.channels ?? ['grab', 'lineman', 'robinhood'];
+  const updateGrab = targetChannels.includes('grab');
+  const updateLineman = targetChannels.includes('lineman');
+  const updateRobinhood = targetChannels.includes('robinhood');
+
+  return {
+    ...variant,
+    sellingPrice: basePrice,
+    ...(updateGrab
+      ? {
+          grabPrice: multiplied.grabPrice,
+          deliveryPrice: multiplied.grabPrice,
+        }
+      : {}),
+    ...(updateLineman ? { linemanPrice: multiplied.linemanPrice } : {}),
+    ...(updateRobinhood ? { robinhoodPrice: multiplied.robinhoodPrice } : {}),
+  };
+}
+
+/**
+ * Recalculates multiplied channel prices across an array of MenuItem records.
+ */
+export function recalculateMenusWithChannelMultipliers(
+  menus: MenuItem[],
+  settings?: Pick<
+    RestaurantSettings,
+    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
+  > | null,
+  options?: {
+    channels?: MultipliedDeliveryChannel[];
+    resolveBaseSellingPrice?: (menu: MenuItem, variant: MenuVariant) => number;
+    updatedAt?: string;
+  }
+): MenuItem[] {
+  const updatedAt = options?.updatedAt ?? new Date().toISOString();
+  return menus.map((menu) => ({
+    ...menu,
+    updatedAt,
+    variants: menu.variants.map((variant) => {
+      const baseSell = options?.resolveBaseSellingPrice
+        ? options.resolveBaseSellingPrice(menu, variant)
+        : (Number(variant.sellingPrice) || 0);
+      return applyChannelMultipliersToVariant(variant, settings, {
+        baseSellingPriceOverride: baseSell,
+        channels: options?.channels,
+      });
+    }),
+  }));
 }
 
 /**

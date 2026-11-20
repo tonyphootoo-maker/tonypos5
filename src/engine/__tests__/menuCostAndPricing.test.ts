@@ -15,11 +15,19 @@ import {
   calculateSauceCost,
   calculateVariantCostBreakdown,
   calculateChannelSuggestedPrices,
+  resolveChannelMultipliers,
+  calculateMultipliedChannelPrices,
+  applyChannelMultipliersToVariant,
+  recalculateMenusWithChannelMultipliers,
   getEffectiveDeliveryGpPercent,
   runFullSpecificationTests,
   runSection11SpecificationTests,
 } from '../../costing/services/calculationEngine';
-import { Ingredient, MenuVariant, RestaurantSettings, Sauce } from '../../costing/types';
+import {
+  resolveVariantBaseSellingPrice,
+  computeChannelPriceFromMultiplier,
+} from '../../costing/services/spreadsheetCostHelper';
+import { Ingredient, MenuItem, MenuVariant, RestaurantSettings, Sauce } from '../../costing/types';
 
 function makeSettings(overrides: Partial<RestaurantSettings> = {}): RestaurantSettings {
   return {
@@ -473,6 +481,106 @@ describe('Menu Costing, Sauce Validation, Units, Pricing, Delivery GP+VAT & Sale
       const sec11Tests = runSection11SpecificationTests();
       const failedSec11 = sec11Tests.filter((t) => !t.passed);
       expect(failedSec11, `Failed Section 11 tests: ${JSON.stringify(failedSec11)}`).toHaveLength(0);
+    });
+  });
+
+  describe('9. Channel Price Multipliers & Canonical Dine-In Price Resolution', () => {
+    const kaprowMenu: MenuItem = {
+      id: 'menu_kaprow',
+      name: 'กะเพรา',
+      category: 'ผัดและกะเพรา',
+      active: true,
+      variants: [],
+      createdAt: '',
+      updatedAt: '',
+    };
+
+    const makeVar = (overrides: Partial<MenuVariant>): MenuVariant => ({
+      id: 'v1',
+      menuId: 'menu_kaprow',
+      name: 'กะเพราหมูสับ',
+      proteinType: 'หมูบด',
+      sellingPrice: 60,
+      takeawayPrice: 65,
+      deliveryPrice: 85,
+      overheadCost: 25,
+      recipeItems: [],
+      active: true,
+      ...overrides,
+    });
+
+    it('resolves untouched Kaprow seed prices to template baseline while preserving any custom user price edits', () => {
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'หมูหมัก', sellingPrice: 65 }))).toBe(79);
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'หมูบด', sellingPrice: 60 }))).toBe(69);
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'เนื้อ', sellingPrice: 85 }))).toBe(129);
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'ทะเล', name: 'กะเพราทะเล', sellingPrice: 95 }))).toBe(129);
+
+      // User-edited prices must NEVER be overridden back to template defaults
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'เนื้อ', sellingPrice: 80 }))).toBe(80);
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'ทะเล', name: 'กะเพราทะเล', sellingPrice: 140 }))).toBe(140);
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'เนื้อสับ', sellingPrice: 110 }))).toBe(110);
+      expect(resolveVariantBaseSellingPrice(kaprowMenu, makeVar({ proteinType: 'หมูบด', sellingPrice: 0 }))).toBe(0);
+    });
+
+    it('multiplies Dine-in price accurately across GrabFood, LINE MAN, and Robinhood multipliers', () => {
+      expect(computeChannelPriceFromMultiplier(69, 1.5)).toBe(104);
+      expect(computeChannelPriceFromMultiplier(79, 1.5)).toBe(119);
+      expect(computeChannelPriceFromMultiplier(129, 1.5)).toBe(194);
+      expect(computeChannelPriceFromMultiplier(129, 1.8)).toBe(232);
+      expect(computeChannelPriceFromMultiplier(100, 1.35)).toBe(135);
+      expect(computeChannelPriceFromMultiplier(79, 1.0)).toBe(79);
+      expect(computeChannelPriceFromMultiplier(0, 1.5)).toBe(0);
+    });
+
+    it('recalculates GrabFood, LINE MAN, and Robinhood prices immediately upon updating base price or multipliers', () => {
+      // Default multipliers: GrabFood 1.5x, LINE MAN 1.5x, Robinhood 1.0x
+      expect(resolveChannelMultipliers(undefined)).toEqual({
+        grab: 1.5,
+        lineman: 1.5,
+        robinhood: 1.0,
+      });
+
+      const baseMultiplied = calculateMultipliedChannelPrices(80);
+      expect(baseMultiplied).toEqual({
+        dineInPrice: 80,
+        grabPrice: 120,
+        linemanPrice: 120,
+        robinhoodPrice: 80,
+      });
+
+      // 1. Base price change triggers immediate recalculation across all 3 channels
+      const initialVar = makeVar({ sellingPrice: 80, grabPrice: 120, linemanPrice: 120, robinhoodPrice: 80 });
+      const afterBaseChange = applyChannelMultipliersToVariant(
+        initialVar,
+        { grabPriceMultiplier: 1.5, linemanPriceMultiplier: 1.5, robinhoodPriceMultiplier: 1.0 },
+        { baseSellingPriceOverride: 100 }
+      );
+      expect(afterBaseChange.sellingPrice).toBe(100);
+      expect(afterBaseChange.grabPrice).toBe(150);
+      expect(afterBaseChange.deliveryPrice).toBe(150);
+      expect(afterBaseChange.linemanPrice).toBe(150);
+      expect(afterBaseChange.robinhoodPrice).toBe(100);
+
+      // 2. Multiplier change triggers immediate recalculation across menu variants
+      const menuWithVar: MenuItem = { ...kaprowMenu, variants: [afterBaseChange] };
+      const afterMultiplierUpdate = recalculateMenusWithChannelMultipliers(
+        [menuWithVar],
+        { grabPriceMultiplier: 1.8, linemanPriceMultiplier: 1.6, robinhoodPriceMultiplier: 1.2 },
+        { resolveBaseSellingPrice: resolveVariantBaseSellingPrice }
+      );
+      const updatedVar = afterMultiplierUpdate[0].variants[0];
+      expect(updatedVar.grabPrice).toBe(180);
+      expect(updatedVar.deliveryPrice).toBe(180);
+      expect(updatedVar.linemanPrice).toBe(160);
+      expect(updatedVar.robinhoodPrice).toBe(120);
+
+      // 3. Clearing base price to 0 resets multiplied channel prices cleanly to 0
+      expect(calculateMultipliedChannelPrices(0, { grabPriceMultiplier: 1.8 })).toEqual({
+        dineInPrice: 0,
+        grabPrice: 0,
+        linemanPrice: 0,
+        robinhoodPrice: 0,
+      });
     });
   });
 });

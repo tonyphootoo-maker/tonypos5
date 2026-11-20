@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MenuItem,
   MenuVariant,
@@ -9,11 +9,15 @@ import {
 } from '../types';
 import {
   calculateVariantCostBreakdown,
+  calculateMultipliedChannelPrices,
   getDeliveryCommissionPercent,
   getEffectiveDeliveryGpPercent,
   getDeliveryPackagingCost,
-  roundUpToStep,
 } from '../services/calculationEngine';
+import {
+  resolveVariantBaseSellingPrice,
+  computeChannelPriceFromMultiplier,
+} from '../services/spreadsheetCostHelper';
 import { convertUnit } from '../engine/units';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
 import { Plus, SlidersHorizontal, Store, Bike, Smartphone, Flame, LayoutGrid, UtensilsCrossed, Edit2, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
@@ -97,7 +101,6 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
   const linemanGpRateWithVat = linemanEffectiveGpPct / 100;
   const linemanGpPctDisplay = linemanEffectiveGpPct.toFixed(2);
   const commissionHasVat = settings.commissionVatAsCost ?? settings.grabFoodCommissionHasVat ?? true;
-  const roundingStep: 1 | 5 | 10 = settings.priceRounding ?? 1;
   const grabMultiplier = Number(settings.grabPriceMultiplier) > 0 ? Number(settings.grabPriceMultiplier) : 1.5;
   const linemanMultiplier = Number(settings.linemanPriceMultiplier) > 0 ? Number(settings.linemanPriceMultiplier) : 1.5;
   const robinhoodMultiplier = Number(settings.robinhoodPriceMultiplier) > 0 ? Number(settings.robinhoodPriceMultiplier) : 1.0;
@@ -178,15 +181,91 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
     >
   >({});
 
+  // Sync or clear local channel price overrides in real time whenever header multipliers or external menu change
+  const lastEmittedMenuRef = useRef<MenuItem | null>(null);
+  const prevMultipliersRef = useRef({
+    grab: grabMultiplier,
+    lineman: linemanMultiplier,
+    robinhood: robinhoodMultiplier,
+  });
+
+  useEffect(() => {
+    if (menu !== lastEmittedMenuRef.current) {
+      setLocalEdits({});
+    }
+  }, [menu]);
+
+  useEffect(() => {
+    const prevM = prevMultipliersRef.current;
+    const grabChanged = prevM.grab !== grabMultiplier;
+    const linemanChanged = prevM.lineman !== linemanMultiplier;
+    const robinhoodChanged = prevM.robinhood !== robinhoodMultiplier;
+    prevMultipliersRef.current = {
+      grab: grabMultiplier,
+      lineman: linemanMultiplier,
+      robinhood: robinhoodMultiplier,
+    };
+
+    if (!grabChanged && !linemanChanged && !robinhoodChanged) return;
+
+    setLocalEdits((prev) => {
+      if (Object.keys(prev).length === 0) return prev;
+      const next: typeof prev = {};
+      for (const [k, entry] of Object.entries(prev)) {
+        const updatedEntry = { ...entry };
+        if (grabChanged) {
+          if (updatedEntry.sellingPrice !== undefined) {
+            updatedEntry.grabPrice = computeChannelPriceFromMultiplier(
+              updatedEntry.sellingPrice,
+              grabMultiplier
+            );
+          } else {
+            delete updatedEntry.grabPrice;
+          }
+        }
+        if (linemanChanged) {
+          if (updatedEntry.sellingPrice !== undefined) {
+            updatedEntry.linemanPrice = computeChannelPriceFromMultiplier(
+              updatedEntry.sellingPrice,
+              linemanMultiplier
+            );
+          } else {
+            delete updatedEntry.linemanPrice;
+          }
+        }
+        if (robinhoodChanged) {
+          if (updatedEntry.sellingPrice !== undefined) {
+            updatedEntry.robinhoodPrice = computeChannelPriceFromMultiplier(
+              updatedEntry.sellingPrice,
+              robinhoodMultiplier
+            );
+          } else {
+            delete updatedEntry.robinhoodPrice;
+          }
+        }
+        next[k] = updatedEntry;
+      }
+      return next;
+    });
+  }, [grabMultiplier, linemanMultiplier, robinhoodMultiplier]);
+
   const handleCellChange = (
     variantId: string,
     field: 'sellingPrice' | 'proteinWeight' | 'grabPrice' | 'linemanPrice' | 'robinhoodPrice',
     val: number
   ) => {
     const editKey = `${variantId}_${currentServingMode}`;
-    const nextGrabPrice = field === 'sellingPrice' ? Math.round(val * grabMultiplier) : undefined;
-    const nextLinemanPrice = field === 'sellingPrice' ? Math.round(val * linemanMultiplier) : undefined;
-    const nextRobinhoodPrice = field === 'sellingPrice' ? Math.round(val * robinhoodMultiplier) : undefined;
+    const multiplied =
+      field === 'sellingPrice'
+        ? calculateMultipliedChannelPrices(val, {
+            grabPriceMultiplier: grabMultiplier,
+            linemanPriceMultiplier: linemanMultiplier,
+            robinhoodPriceMultiplier: robinhoodMultiplier,
+          })
+        : null;
+    const nextGrabPrice = multiplied ? multiplied.grabPrice : undefined;
+    const nextLinemanPrice = multiplied ? multiplied.linemanPrice : undefined;
+    const nextRobinhoodPrice = multiplied ? multiplied.robinhoodPrice : undefined;
 
     // 1. Update local state for immediate visual feedback
     setLocalEdits((prev) => ({
@@ -216,8 +295,14 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
       },
     }));
 
-    // 2. Update and persist in menu if in standard ON_RICE mode
-    if (currentServingMode === 'ON_RICE') {
+    // 2. Persist price changes immediately across all serving modes; proteinWeight persists in ON_RICE
+    const isPriceField =
+      field === 'sellingPrice' ||
+      field === 'grabPrice' ||
+      field === 'linemanPrice' ||
+      field === 'robinhoodPrice';
+
+    if (isPriceField || currentServingMode === 'ON_RICE') {
       const updatedVariants = menu.variants.map((v) => {
         if (v.id !== variantId) return v;
 
@@ -281,6 +366,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
         updatedAt: new Date().toISOString(),
       };
 
+      lastEmittedMenuRef.current = updatedMenu;
       onSaveMenu(updatedMenu);
     }
   };
@@ -714,7 +800,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   </th>
                   <th className="py-2.5 px-2 bg-white text-stone-900 border-r border-black min-w-[85px]">
                     <div>{lang === 'th' ? 'ราคาที่ต้องตั้ง' : 'Suggested'}</div>
-                    <div className="text-[10px] text-stone-600">{lang === 'th' ? 'ขาย (แนะนำ)' : 'Price'}</div>
+                    <div className="text-[10px] text-stone-600">{lang === 'th' ? `ขาย (${robinhoodMultiplier}x)` : `Price (${robinhoodMultiplier}x)`}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#EDE9FE] text-purple-900 border-r border-black min-w-[85px]">
                     <div>{lang === 'th' ? 'ราคา' : 'Custom'}</div>
@@ -775,71 +861,44 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 (pName.includes('กุ้ง') && pName.includes('หมึก'));
               const editKey = `${v.id}_${currentServingMode}`;
 
-              // Template defaults matching Excel template if not customized
-              let baseSellingPrice = v.sellingPrice || 69;
+              // Canonical Dine-in selling price & baseline weight (no hardcoded channel overrides)
+              const baseSellingPrice = resolveVariantBaseSellingPrice(menu, v);
               let baseWeight = 80;
-              let baseGrabPrice = v.grabPrice || (v as any).grabPrice || v.deliveryPrice || 109;
-              let baseLinemanPrice = v.linemanPrice || (v as any).linemanPrice || v.deliveryPrice || 109;
-              let baseRobinhoodPrice = v.robinhoodPrice || (v as any).robinhoodPrice || baseSellingPrice;
 
-              // Standard baseline defaults (applicable for both ON_RICE and A_LA_CARTE; all values user-editable)
               if (menu.name.includes('กะเพรา') || v.menuId === 'menu_kaprow') {
                 if (pName.includes('หมูหมัก')) {
-                  baseSellingPrice = v.sellingPrice === 65 ? 79 : v.sellingPrice;
                   baseWeight = 70;
-                  baseGrabPrice = v.grabPrice || 109;
-                  baseLinemanPrice = v.linemanPrice || 109;
-                  baseRobinhoodPrice = v.robinhoodPrice || 79;
                 } else if (pName.includes('หมูบด') || pName.includes('หมูสับ')) {
-                  baseSellingPrice = v.sellingPrice === 60 ? 69 : v.sellingPrice;
                   baseWeight = 80;
-                  baseGrabPrice = v.grabPrice || 109;
-                  baseLinemanPrice = v.linemanPrice || 109;
-                  baseRobinhoodPrice = v.robinhoodPrice || 69;
                 } else if (pName.includes('ไก่')) {
-                  baseSellingPrice = v.sellingPrice === 60 ? 69 : v.sellingPrice;
                   baseWeight = 80;
-                  baseGrabPrice = v.grabPrice || 109;
-                  baseLinemanPrice = v.linemanPrice || 109;
-                  baseRobinhoodPrice = v.robinhoodPrice || 69;
-                } else if (pName.includes('เนื้อวัวสไลซ์') || (pName.includes('เนื้อ') && !pName.includes('สับ') && v.sellingPrice <= 85)) {
-                  baseSellingPrice = 129;
+                } else if (pName.includes('เนื้อวัวสไลซ์') || (pName.includes('เนื้อ') && !pName.includes('สับ'))) {
                   baseWeight = 120;
-                  baseGrabPrice = v.grabPrice || 149;
-                  baseLinemanPrice = v.linemanPrice || 149;
-                  baseRobinhoodPrice = v.robinhoodPrice || 129;
                 } else if (pName.includes('เนื้อวัว สับ') || pName.includes('เนื้อสับ')) {
-                  baseSellingPrice = 99;
                   baseWeight = 60;
-                  baseGrabPrice = v.grabPrice || 149;
-                  baseLinemanPrice = v.linemanPrice || 149;
-                  baseRobinhoodPrice = v.robinhoodPrice || 99;
-                } else if (pName.includes('กุ้ง')) {
-                  baseSellingPrice = v.sellingPrice <= 85 ? 109 : v.sellingPrice;
+                } else if (pName.includes('กุ้ง') && !isSeafood) {
                   baseWeight = 4;
-                  baseGrabPrice = v.grabPrice || 139;
-                  baseLinemanPrice = v.linemanPrice || 139;
-                  baseRobinhoodPrice = v.robinhoodPrice || 109;
-                } else if (pName.includes('หมึก') || pName.includes('ปลาหมึก')) {
-                  baseSellingPrice = v.sellingPrice <= 85 ? 109 : v.sellingPrice;
+                } else if ((pName.includes('หมึก') || pName.includes('ปลาหมึก')) && !isSeafood) {
                   baseWeight = 80;
-                  baseGrabPrice = v.grabPrice || 139;
-                  baseLinemanPrice = v.linemanPrice || 139;
-                  baseRobinhoodPrice = v.robinhoodPrice || 109;
                 } else if (isSeafood) {
-                  baseSellingPrice = 129;
                   baseWeight = 80;
-                  baseGrabPrice = 159;
-                  baseLinemanPrice = 159;
-                  baseRobinhoodPrice = 129;
                 } else if (pName.includes('ไส้กรอก')) {
-                  baseSellingPrice = 79;
                   baseWeight = 80;
-                  baseGrabPrice = v.grabPrice || 119;
-                  baseLinemanPrice = v.linemanPrice || 119;
-                  baseRobinhoodPrice = v.robinhoodPrice || 79;
                 }
               }
+
+              const baseGrabPrice =
+                typeof v.grabPrice === 'number' && v.grabPrice > 0
+                  ? v.grabPrice
+                  : computeChannelPriceFromMultiplier(baseSellingPrice, grabMultiplier);
+              const baseLinemanPrice =
+                typeof v.linemanPrice === 'number' && v.linemanPrice > 0
+                  ? v.linemanPrice
+                  : computeChannelPriceFromMultiplier(baseSellingPrice, linemanMultiplier);
+              const baseRobinhoodPrice =
+                typeof v.robinhoodPrice === 'number' && v.robinhoodPrice > 0
+                  ? v.robinhoodPrice
+                  : computeChannelPriceFromMultiplier(baseSellingPrice, robinhoodMultiplier);
 
               // 1. Selling price at restaurant (USER EDITABLE)
               const sellingPrice =
@@ -992,14 +1051,38 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 }
               });
 
+              // Resolved channel prices (real-time local edits or multiplied stored values)
+              const grabPrice =
+                localEdits[editKey]?.grabPrice !== undefined
+                  ? localEdits[editKey]!.grabPrice!
+                  : (localEdits[v.id]?.grabPrice !== undefined
+                      ? localEdits[v.id]!.grabPrice!
+                      : baseGrabPrice);
+              const linemanPrice =
+                localEdits[editKey]?.linemanPrice !== undefined
+                  ? localEdits[editKey]!.linemanPrice!
+                  : (localEdits[v.id]?.linemanPrice !== undefined
+                      ? localEdits[v.id]!.linemanPrice!
+                      : baseLinemanPrice);
+              const robinhoodPrice =
+                localEdits[editKey]?.robinhoodPrice !== undefined
+                  ? localEdits[editKey]!.robinhoodPrice!
+                  : (localEdits[v.id]?.robinhoodPrice !== undefined
+                      ? localEdits[v.id]!.robinhoodPrice!
+                      : baseRobinhoodPrice);
+
               // Canonical breakdown from calculationEngine (zero magic fallbacks, clean separation of packaging)
               const editedVariant: MenuVariant = {
                 ...v,
                 sellingPrice,
+                grabPrice,
+                linemanPrice,
+                robinhoodPrice,
+                deliveryPrice: grabPrice,
                 recipeItems: effectiveRecipeItems,
               };
               const grabBd = calculateVariantCostBreakdown(
-                { ...editedVariant, deliveryPrice: localEdits[editKey]?.grabPrice ?? localEdits[v.id]?.grabPrice ?? baseGrabPrice },
+                { ...editedVariant, deliveryPrice: grabPrice },
                 menu.name,
                 ingredientsMap,
                 saucesMap,
@@ -1007,7 +1090,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 'grab'
               );
               const linemanBd = calculateVariantCostBreakdown(
-                { ...editedVariant, deliveryPrice: localEdits[editKey]?.linemanPrice ?? localEdits[v.id]?.linemanPrice ?? baseLinemanPrice },
+                { ...editedVariant, deliveryPrice: linemanPrice },
                 menu.name,
                 ingredientsMap,
                 saucesMap,
@@ -1068,17 +1151,8 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               );
               const takeawayProfit = Number((netTakeawayPrice - totalCostNum - packagingAmount).toFixed(2));
 
-              // 13-17. Grab Food calculations (effective GP + packaging + rounding step)
-              const grabSuggestedPrice = roundUpToStep(
-                (sellingPrice + deliveryPkgAmount) / Math.max(0.01, 1 - grabGpRateWithVat),
-                roundingStep
-              );
-              const grabPrice =
-                localEdits[editKey]?.grabPrice !== undefined
-                  ? localEdits[editKey]!.grabPrice!
-                  : (localEdits[v.id]?.grabPrice !== undefined
-                      ? localEdits[v.id]!.grabPrice!
-                      : baseGrabPrice);
+              // 13-17. Grab Food calculations (multiplier-based suggested price + effective GP + packaging)
+              const grabSuggestedPrice = computeChannelPriceFromMultiplier(sellingPrice, grabMultiplier);
               const grabNetSelling = extractNetPriceFromMenuPrice(
                 grabPrice,
                 isVariantVatInclusive,
@@ -1093,16 +1167,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               const grabMargin = grabNetSelling > 0 ? Number(((grabProfit / grabNetSelling) * 100).toFixed(1)) : 0;
 
               // 18-22. Line Man calculations
-              const linemanSuggestedPrice = roundUpToStep(
-                (sellingPrice + deliveryPkgAmount) / Math.max(0.01, 1 - linemanGpRateWithVat),
-                roundingStep
-              );
-              const linemanPrice =
-                localEdits[editKey]?.linemanPrice !== undefined
-                  ? localEdits[editKey]!.linemanPrice!
-                  : (localEdits[v.id]?.linemanPrice !== undefined
-                      ? localEdits[v.id]!.linemanPrice!
-                      : baseLinemanPrice);
+              const linemanSuggestedPrice = computeChannelPriceFromMultiplier(sellingPrice, linemanMultiplier);
               const linemanNetSelling = extractNetPriceFromMenuPrice(
                 linemanPrice,
                 isVariantVatInclusive,
@@ -1117,13 +1182,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               const linemanMargin = linemanNetSelling > 0 ? Number(((linemanProfit / linemanNetSelling) * 100).toFixed(1)) : 0;
 
               // 23-27. Robinhood calculations (0% GP)
-              const robinhoodSuggestedPrice = roundUpToStep(sellingPrice + deliveryPkgAmount, roundingStep);
-              const robinhoodPrice =
-                localEdits[editKey]?.robinhoodPrice !== undefined
-                  ? localEdits[editKey]!.robinhoodPrice!
-                  : (localEdits[v.id]?.robinhoodPrice !== undefined
-                      ? localEdits[v.id]!.robinhoodPrice!
-                      : baseRobinhoodPrice);
+              const robinhoodSuggestedPrice = computeChannelPriceFromMultiplier(sellingPrice, robinhoodMultiplier);
               const robinhoodNetSelling = extractNetPriceFromMenuPrice(
                 robinhoodPrice,
                 isVariantVatInclusive,

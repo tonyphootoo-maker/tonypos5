@@ -34,6 +34,8 @@ import {
 import {
   calculateVariantCostBreakdown,
   calculateChannelSuggestedPrices,
+  calculateMultipliedChannelPrices,
+  recalculateMenusWithChannelMultipliers,
   getEffectiveDeliveryGpPercent,
   roundUpToStep,
 } from '../services/calculationEngine';
@@ -43,6 +45,10 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { convertUnit, isPieceLikeUnit } from '../engine/units';
 import { NumericInput } from './common/NumericInput';
 import { MenuPricingSpreadsheetTable } from './MenuPricingSpreadsheetTable';
+import {
+  resolveVariantBaseSellingPrice,
+  computeChannelPriceFromMultiplier,
+} from '../services/spreadsheetCostHelper';
 
 const PORTION_UNITS_STORAGE_KEY = 'kinpos_custom_portion_units';
 const DEFAULT_PORTION_UNITS = [
@@ -164,6 +170,7 @@ interface FoodCostViewProps {
   lang?: 'th' | 'en';
   initialServingMode?: 'ON_RICE' | 'A_LA_CARTE';
   onSaveMenu: (menu: MenuItem) => void;
+  onBatchUpdateMenus?: (menus: MenuItem[]) => void;
   onSaveSettings?: (settings: RestaurantSettings) => void;
   onDeleteMenu?: (menuId: string) => void;
   onReorderMenus?: (reordered: MenuItem[]) => void;
@@ -183,6 +190,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   lang: propLang,
   initialServingMode,
   onSaveMenu,
+  onBatchUpdateMenus,
   onSaveSettings,
   onDeleteMenu,
   onReorderMenus,
@@ -603,8 +611,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
   menus.forEach((menu) => {
     menu.variants.forEach((variant) => {
+      const baseSell = resolveVariantBaseSellingPrice(menu, variant);
+      const effectiveChannelPrice =
+        activeChannel === 'LINEMAN'
+          ? (typeof variant.linemanPrice === 'number' && variant.linemanPrice > 0
+              ? variant.linemanPrice
+              : computeChannelPriceFromMultiplier(baseSell, linemanMultiplier))
+          : (typeof variant.grabPrice === 'number' && variant.grabPrice > 0
+              ? variant.grabPrice
+              : computeChannelPriceFromMultiplier(baseSell, grabMultiplier));
       const breakdown = calculateVariantCostBreakdown(
-        variant,
+        {
+          ...variant,
+          sellingPrice: baseSell,
+          deliveryPrice: effectiveChannelPrice,
+        },
         menu.name,
         ingredientsMap,
         saucesMap,
@@ -736,6 +757,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedCategory !== 'ALL'
         ? selectedCategory
         : (categories.find((c) => c !== 'ALL') || 'ผัดและกะเพรา');
+    const initialMenuSell = 60;
+    const initialMultiplied = calculateMultipliedChannelPrices(initialMenuSell, settings);
 
     const newMenu: Partial<MenuItem> = {
       id: `menu_${Date.now()}`,
@@ -751,9 +774,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           thaiName: 'ธรรมดา',
           englishName: 'Regular',
           proteinType: 'หมูสับ',
-          sellingPrice: 60,
-          takeawayPrice: 65,
-          deliveryPrice: 85,
+          sellingPrice: initialMenuSell,
+          takeawayPrice: initialMenuSell + 5,
+          deliveryPrice: initialMultiplied.grabPrice,
+          grabPrice: initialMultiplied.grabPrice,
+          linemanPrice: initialMultiplied.linemanPrice,
+          robinhoodPrice: initialMultiplied.robinhoodPrice,
           overheadCost: 6.0,
           recipeItems: [],
           active: true,
@@ -917,6 +943,18 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     }
 
     const clonedVariant: Partial<MenuVariant> = JSON.parse(JSON.stringify(variant));
+    const resolvedSell = resolveVariantBaseSellingPrice(menu, variant);
+    clonedVariant.sellingPrice = resolvedSell;
+    if (!(typeof clonedVariant.grabPrice === 'number' && clonedVariant.grabPrice > 0)) {
+      clonedVariant.grabPrice = computeChannelPriceFromMultiplier(resolvedSell, grabMultiplier);
+    }
+    if (!(typeof clonedVariant.linemanPrice === 'number' && clonedVariant.linemanPrice > 0)) {
+      clonedVariant.linemanPrice = computeChannelPriceFromMultiplier(resolvedSell, linemanMultiplier);
+    }
+    if (!(typeof clonedVariant.robinhoodPrice === 'number' && clonedVariant.robinhoodPrice > 0)) {
+      clonedVariant.robinhoodPrice = computeChannelPriceFromMultiplier(resolvedSell, robinhoodMultiplier);
+    }
+    clonedVariant.deliveryPrice = clonedVariant.grabPrice;
     const existingTh = clonedVariant.thaiName || clonedVariant.name || '';
     clonedVariant.name = existingTh;
     clonedVariant.thaiName = existingTh;
@@ -1331,6 +1369,79 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const grabCommissionPct = settings.grabFoodCommissionPercent ?? 30;
   const linemanCommissionPct = settings.lineManCommissionPercent ?? 25;
 
+  // Real-time multiplier update: immediately recalculate target channel price on every menu variant
+  const handleChannelMultiplierChange = (
+    channel: 'grab' | 'lineman' | 'robinhood',
+    nextVal: number
+  ) => {
+    if (!Number.isFinite(nextVal) || nextVal <= 0) return;
+
+    const nextSettings: RestaurantSettings = {
+      ...settings,
+      ...(channel === 'grab' ? { grabPriceMultiplier: nextVal } : {}),
+      ...(channel === 'lineman' ? { linemanPriceMultiplier: nextVal } : {}),
+      ...(channel === 'robinhood' ? { robinhoodPriceMultiplier: nextVal } : {}),
+    };
+    onSaveSettings?.(nextSettings);
+
+    const nowIso = new Date().toISOString();
+    const updatedMenus = recalculateMenusWithChannelMultipliers(menus, nextSettings, {
+      channels: [channel],
+      resolveBaseSellingPrice: resolveVariantBaseSellingPrice,
+      updatedAt: nowIso,
+    });
+
+    if (onBatchUpdateMenus) {
+      onBatchUpdateMenus(updatedMenus);
+    } else {
+      updatedMenus.forEach((m) => onSaveMenu(m));
+    }
+
+    // Keep open Variant Modal synced in real time if currently open
+    if (variantModalState.isOpen && variantModalState.variant) {
+      const modalSell = Number(variantModalState.variant.sellingPrice) || 0;
+      const modalNextChannelPrice = computeChannelPriceFromMultiplier(modalSell, nextVal);
+      setVariantModalState((prev) => ({
+        ...prev,
+        variant: prev.variant
+          ? {
+              ...prev.variant,
+              ...(channel === 'grab'
+                ? { grabPrice: modalNextChannelPrice, deliveryPrice: modalNextChannelPrice }
+                : {}),
+              ...(channel === 'lineman' ? { linemanPrice: modalNextChannelPrice } : {}),
+              ...(channel === 'robinhood' ? { robinhoodPrice: modalNextChannelPrice } : {}),
+            }
+          : prev.variant,
+      }));
+    }
+
+    // Keep open Breakdown Modal synced in real time if currently open
+    if (selectedBreakdown) {
+      const updatedMenu = updatedMenus.find((m) => m.id === selectedBreakdown.menu.id);
+      const updatedVariant = updatedMenu?.variants.find((v) => v.id === selectedBreakdown.variant.id);
+      if (updatedMenu && updatedVariant) {
+        const activeChannelPrice =
+          activeChannel === 'LINEMAN'
+            ? (updatedVariant.linemanPrice ?? updatedVariant.deliveryPrice)
+            : (updatedVariant.grabPrice ?? updatedVariant.deliveryPrice);
+        const updatedBreakdown = calculateVariantCostBreakdown(
+          { ...updatedVariant, deliveryPrice: activeChannelPrice },
+          updatedMenu.name,
+          ingredientsMap,
+          saucesMap,
+          nextSettings,
+          activeChannel === 'LINEMAN' ? 'lineman' : 'grab'
+        );
+        setSelectedBreakdown({
+          menu: updatedMenu,
+          variant: updatedVariant,
+          breakdown: updatedBreakdown,
+        });
+      }
+    }
+  };
+
   return (
     <div className="space-y-4 pb-8">
       {/* Consolidated Ultra-Compact Control Header */}
@@ -1414,15 +1525,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <span className="font-bold text-emerald-900 text-[11px]">GrabFood</span>
               <span className="text-emerald-700 font-bold text-[11px]">x</span>
               <NumericInput
+                type="text"
+                inputMode="decimal"
                 min="0.1"
                 step="0.1"
                 value={grabMultiplier}
-                onValueChange={(val) =>
-                  onSaveSettings?.({
-                    ...settings,
-                    grabPriceMultiplier: val > 0 ? val : 1.5,
-                  })
-                }
+                fallbackValue={1.5}
+                onValueChange={(val) => handleChannelMultiplierChange('grab', val)}
                 className="w-14 px-1.5 py-0.5 bg-white border border-emerald-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-emerald-600"
               />
             </label>
@@ -1431,15 +1540,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <span className="font-bold text-amber-900 text-[11px]">LINE MAN</span>
               <span className="text-amber-700 font-bold text-[11px]">x</span>
               <NumericInput
+                type="text"
+                inputMode="decimal"
                 min="0.1"
                 step="0.1"
                 value={linemanMultiplier}
-                onValueChange={(val) =>
-                  onSaveSettings?.({
-                    ...settings,
-                    linemanPriceMultiplier: val > 0 ? val : 1.5,
-                  })
-                }
+                fallbackValue={1.5}
+                onValueChange={(val) => handleChannelMultiplierChange('lineman', val)}
                 className="w-14 px-1.5 py-0.5 bg-white border border-amber-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-amber-600"
               />
             </label>
@@ -1448,15 +1555,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <span className="font-bold text-purple-900 text-[11px]">Robinhood</span>
               <span className="text-purple-700 font-bold text-[11px]">x</span>
               <NumericInput
+                type="text"
+                inputMode="decimal"
                 min="0.1"
                 step="0.1"
                 value={robinhoodMultiplier}
-                onValueChange={(val) =>
-                  onSaveSettings?.({
-                    ...settings,
-                    robinhoodPriceMultiplier: val > 0 ? val : 1.0,
-                  })
-                }
+                fallbackValue={1.0}
+                onValueChange={(val) => handleChannelMultiplierChange('robinhood', val)}
                 className="w-14 px-1.5 py-0.5 bg-white border border-purple-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-purple-600"
               />
             </label>
@@ -2034,9 +2139,41 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive));
                 const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
                 const scRate = settings.serviceChargePercent ?? 0;
-                const deliveryGross = selectedBreakdown.variant.deliveryPrice || 0;
-                const deliveryNetExVat = extractNetPriceFromMenuPrice(
-                  deliveryGross,
+                const resolvedBaseSell = resolveVariantBaseSellingPrice(
+                  selectedBreakdown.menu,
+                  selectedBreakdown.variant
+                );
+                const grabGross =
+                  typeof selectedBreakdown.variant.grabPrice === 'number' &&
+                  selectedBreakdown.variant.grabPrice > 0
+                    ? selectedBreakdown.variant.grabPrice
+                    : computeChannelPriceFromMultiplier(resolvedBaseSell, grabMultiplier);
+                const linemanGross =
+                  typeof selectedBreakdown.variant.linemanPrice === 'number' &&
+                  selectedBreakdown.variant.linemanPrice > 0
+                    ? selectedBreakdown.variant.linemanPrice
+                    : computeChannelPriceFromMultiplier(resolvedBaseSell, linemanMultiplier);
+                const robinhoodGross =
+                  typeof selectedBreakdown.variant.robinhoodPrice === 'number' &&
+                  selectedBreakdown.variant.robinhoodPrice > 0
+                    ? selectedBreakdown.variant.robinhoodPrice
+                    : computeChannelPriceFromMultiplier(resolvedBaseSell, robinhoodMultiplier);
+                const grabNetExVat = extractNetPriceFromMenuPrice(
+                  grabGross,
+                  isVatInclusive,
+                  vatRate,
+                  scIncluded,
+                  scRate
+                );
+                const linemanNetExVat = extractNetPriceFromMenuPrice(
+                  linemanGross,
+                  isVatInclusive,
+                  vatRate,
+                  scIncluded,
+                  scRate
+                );
+                const robinhoodNetExVat = extractNetPriceFromMenuPrice(
+                  robinhoodGross,
                   isVatInclusive,
                   vatRate,
                   scIncluded,
@@ -2044,10 +2181,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 );
                 const effectiveGrabPct = getEffectiveDeliveryGpPercent(settings, 'grab');
                 const effectiveLinemanPct = getEffectiveDeliveryGpPercent(settings, 'lineman');
-                const grabGpFee = deliveryGross * (effectiveGrabPct / 100);
-                const linemanGpFee = deliveryGross * (effectiveLinemanPct / 100);
-                const grabProfit = deliveryNetExVat - grabGpFee - baseCost - pkgCostToUse;
-                const linemanProfit = deliveryNetExVat - linemanGpFee - baseCost - pkgCostToUse;
+                const grabGpFee = grabGross * (effectiveGrabPct / 100);
+                const linemanGpFee = linemanGross * (effectiveLinemanPct / 100);
+                const grabProfit = grabNetExVat - grabGpFee - baseCost - pkgCostToUse;
+                const linemanProfit = linemanNetExVat - linemanGpFee - baseCost - pkgCostToUse;
+                const robinhoodProfit = robinhoodNetExVat - baseCost - pkgCostToUse;
 
                 return (
                   <div className="bg-stone-100 border border-stone-300 rounded-2xl p-3.5">
@@ -2056,11 +2194,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         ? 'Net Profit Comparison by Delivery Channel'
                         : 'เปรียบเทียบกำไรสุทธิแยกตามช่องทาง Delivery'}
                     </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono">
                       {/* GrabFood Card */}
                       <div className="p-3 rounded-xl bg-white border border-[#00B14F]/40 shadow-2xs">
                         <div className="flex items-center justify-between mb-1">
-                          <span className="font-sans font-black text-[#00873e]">GrabFood</span>
+                          <span className="font-sans font-black text-[#00873e]">GrabFood ({grabMultiplier}x)</span>
                           <span className="text-[10px] text-stone-500 font-bold">
                             GP {grabCommissionPct}%
                             {effectiveGrabPct > grabCommissionPct
@@ -2072,10 +2210,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           <div className="flex justify-between">
                             <span className="font-sans text-stone-600">
                               {isEn ? 'Selling Price' : 'ราคาขาย'}
-                              {isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:
+                              {isVatInclusive ? ` (Net ฿${grabNetExVat.toFixed(2)})` : ''}:
                             </span>
                             <span className="text-stone-900 font-bold">
-                              ฿{deliveryGross}
+                              ฿{grabGross}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
@@ -2106,7 +2244,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       {/* LINE MAN Card */}
                       <div className="p-3 rounded-xl bg-white border border-[#05963c]/40 shadow-2xs">
                         <div className="flex items-center justify-between mb-1">
-                          <span className="font-sans font-black text-[#05963c]">LINE MAN</span>
+                          <span className="font-sans font-black text-[#05963c]">LINE MAN ({linemanMultiplier}x)</span>
                           <span className="text-[10px] text-stone-500 font-bold">
                             GP {linemanCommissionPct}%
                             {effectiveLinemanPct > linemanCommissionPct
@@ -2118,10 +2256,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           <div className="flex justify-between">
                             <span className="font-sans text-stone-600">
                               {isEn ? 'Selling Price' : 'ราคาขาย'}
-                              {isVatInclusive ? ` (Net ฿${deliveryNetExVat.toFixed(2)})` : ''}:
+                              {isVatInclusive ? ` (Net ฿${linemanNetExVat.toFixed(2)})` : ''}:
                             </span>
                             <span className="text-stone-900 font-bold">
-                              ฿{deliveryGross}
+                              ฿{linemanGross}
                             </span>
                           </div>
                           <div className="flex justify-between text-rose-600 font-semibold">
@@ -2144,6 +2282,45 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             </span>
                             <span className={`font-black ${linemanProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
                               ฿{linemanProfit.toFixed(2)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Robinhood Card */}
+                      <div className="p-3 rounded-xl bg-white border border-purple-500/40 shadow-2xs">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-sans font-black text-purple-700">Robinhood ({robinhoodMultiplier}x)</span>
+                          <span className="text-[10px] text-purple-600 font-bold">GP 0%</span>
+                        </div>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex justify-between">
+                            <span className="font-sans text-stone-600">
+                              {isEn ? 'Selling Price' : 'ราคาขาย'}
+                              {isVatInclusive ? ` (Net ฿${robinhoodNetExVat.toFixed(2)})` : ''}:
+                            </span>
+                            <span className="text-stone-900 font-bold">
+                              ฿{robinhoodGross}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-emerald-700 font-semibold">
+                            <span className="font-sans text-stone-600">
+                              {isEn ? 'GP Fee (0%):' : 'หัก GP (0%):'}
+                            </span>
+                            <span>฿0.00</span>
+                          </div>
+                          <div className="flex justify-between text-rose-600 font-semibold">
+                            <span className="font-sans text-stone-600">
+                              {isEn ? 'Delivery Packaging:' : 'ค่ากล่อง Delivery:'}
+                            </span>
+                            <span>-฿{pkgCostToUse.toFixed(2)}</span>
+                          </div>
+                          <div className="flex justify-between pt-1 border-t border-stone-200 font-bold">
+                            <span className="font-sans text-stone-800">
+                              {isEn ? 'Net Profit After GP:' : 'กำไรสุทธิหลัง GP:'}
+                            </span>
+                            <span className={`font-black ${robinhoodProfit < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                              ฿{robinhoodProfit.toFixed(2)}
                             </span>
                           </div>
                         </div>
@@ -3453,19 +3630,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       min="0"
                       value={variantModalState.variant.sellingPrice}
                       onValueChange={(price) => {
-                        const nextGrab = Math.round(price * grabMultiplier);
-                        const nextLineman = Math.round(price * linemanMultiplier);
-                        const nextRobinhood = Math.round(price * robinhoodMultiplier);
+                        const multiplied = calculateMultipliedChannelPrices(price, settings);
                         setVariantModalState((prev) => ({
                           ...prev,
                           variant: {
                             ...prev.variant,
                             sellingPrice: price,
                             takeawayPrice: price > 0 ? price + 5 : 0,
-                            deliveryPrice: nextGrab,
-                            grabPrice: nextGrab,
-                            linemanPrice: nextLineman,
-                            robinhoodPrice: nextRobinhood,
+                            deliveryPrice: multiplied.grabPrice,
+                            grabPrice: multiplied.grabPrice,
+                            linemanPrice: multiplied.linemanPrice,
+                            robinhoodPrice: multiplied.robinhoodPrice,
                           },
                         }));
                       }}

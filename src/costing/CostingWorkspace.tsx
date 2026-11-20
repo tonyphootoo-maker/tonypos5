@@ -153,6 +153,12 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           'default',
           (cloudSettings) => {
             if (cloudSettings) {
+              if (
+                settingsSaveTimerRef.current !== null ||
+                Date.now() < pendingSettingsSyncUntilRef.current
+              ) {
+                return;
+              }
               setSettings(cloudSettings);
               StorageService.saveSettings(cloudSettings);
             }
@@ -184,6 +190,13 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           user.uid,
           COST_COLLECTIONS.MENUS,
           (items) => {
+            if (
+              menuBatchSaveTimerRef.current !== null ||
+              menuSingleSaveTimersRef.current.size > 0 ||
+              Date.now() < pendingMenuSyncUntilRef.current
+            ) {
+              return;
+            }
             const sorted = [...items].sort(
               (a, b) => (a.displayOrder ?? Number.MAX_SAFE_INTEGER) - (b.displayOrder ?? Number.MAX_SAFE_INTEGER)
             );
@@ -415,12 +428,57 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.SAUCES, sauce.id, sauce);
   };
 
+  const menuBatchSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuSingleSaveTimersRef = React.useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pendingMenuSyncUntilRef = React.useRef<number>(0);
+  const settingsSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSettingsSyncUntilRef = React.useRef<number>(0);
+
+  useEffect(() => {
+    return () => {
+      if (menuBatchSaveTimerRef.current) {
+        clearTimeout(menuBatchSaveTimerRef.current);
+      }
+      menuSingleSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+      menuSingleSaveTimersRef.current.clear();
+      if (settingsSaveTimerRef.current) {
+        clearTimeout(settingsSaveTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleSaveMenu = (menu: MenuItem) => {
+    pendingMenuSyncUntilRef.current = Date.now() + 1500;
     setMenus((prev) => {
       const exists = prev.some((m) => m.id === menu.id);
-      return exists ? prev.map((m) => (m.id === menu.id ? menu : m)) : [...prev, menu];
+      const next = exists ? prev.map((m) => (m.id === menu.id ? menu : m)) : [...prev, menu];
+      StorageService.saveMenus(next);
+      return next;
     });
-    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.MENUS, menu.id, menu);
+    const prevTimer = menuSingleSaveTimersRef.current.get(menu.id);
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+    }
+    const timer = setTimeout(() => {
+      menuSingleSaveTimersRef.current.delete(menu.id);
+      pendingMenuSyncUntilRef.current = Date.now() + 1200;
+      FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.MENUS, menu.id, menu);
+    }, 250);
+    menuSingleSaveTimersRef.current.set(menu.id, timer);
+  };
+
+  const handleBatchUpdateMenus = (updatedMenus: MenuItem[]) => {
+    pendingMenuSyncUntilRef.current = Date.now() + 1500;
+    setMenus(updatedMenus);
+    StorageService.saveMenus(updatedMenus);
+    if (menuBatchSaveTimerRef.current) {
+      clearTimeout(menuBatchSaveTimerRef.current);
+    }
+    menuBatchSaveTimerRef.current = setTimeout(() => {
+      menuBatchSaveTimerRef.current = null;
+      pendingMenuSyncUntilRef.current = Date.now() + 1200;
+      FirebaseSyncService.batchSaveUser(user.uid, COST_COLLECTIONS.MENUS, updatedMenus);
+    }, 300);
   };
 
   const handleDeleteMenu = (menuId: string) => {
@@ -586,8 +644,17 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   };
 
   const handleSaveSettings = (newSettings: RestaurantSettings) => {
+    pendingSettingsSyncUntilRef.current = Date.now() + 1500;
     setSettings(newSettings);
-    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.SETTINGS, 'default', newSettings);
+    StorageService.saveSettings(newSettings);
+    if (settingsSaveTimerRef.current) {
+      clearTimeout(settingsSaveTimerRef.current);
+    }
+    settingsSaveTimerRef.current = setTimeout(() => {
+      settingsSaveTimerRef.current = null;
+      pendingSettingsSyncUntilRef.current = Date.now() + 1200;
+      FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.SETTINGS, 'default', newSettings);
+    }, 250);
   };
 
   const handleReloadAllData = () => {
@@ -729,6 +796,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             lang={lang}
             initialServingMode="ON_RICE"
             onSaveMenu={handleSaveMenu}
+            onBatchUpdateMenus={handleBatchUpdateMenus}
             onDeleteMenu={handleDeleteMenu}
             onReorderMenus={handleReorderMenus}
             onUpdateVariantPrice={handleUpdateVariantPrice}
@@ -746,6 +814,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             lang={lang}
             initialServingMode="A_LA_CARTE"
             onSaveMenu={handleSaveMenu}
+            onBatchUpdateMenus={handleBatchUpdateMenus}
             onDeleteMenu={handleDeleteMenu}
             onReorderMenus={handleReorderMenus}
             onUpdateVariantPrice={handleUpdateVariantPrice}
@@ -760,6 +829,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             sauces={sauces}
             settings={settings}
             lang={lang}
+            onSaveSettings={handleSaveSettings}
             onSaveNewMenu={(newMenu) => {
               handleSaveMenu(newMenu);
             }}

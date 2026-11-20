@@ -22,7 +22,12 @@ import {
   Box,
 } from 'lucide-react';
 import { Ingredient, Sauce, MenuItem, RestaurantSettings } from '../types';
-import { calculateChannelSuggestedPrices, roundUpToStep } from '../services/calculationEngine';
+import {
+  calculateChannelSuggestedPrices,
+  calculateMultipliedChannelPrices,
+  resolveChannelMultipliers,
+  roundUpToStep,
+} from '../services/calculationEngine';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
 import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -44,6 +49,7 @@ interface QuickCostCalculatorViewProps {
   sauces: Sauce[];
   settings: RestaurantSettings;
   lang?: 'th' | 'en';
+  onSaveSettings?: (settings: RestaurantSettings) => void;
   onSaveNewMenu?: (menu: MenuItem) => void;
   onNavigateToTab?: (tabId: string) => void;
 }
@@ -53,6 +59,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   sauces,
   settings,
   lang: propLang,
+  onSaveSettings,
   onSaveNewMenu,
   onNavigateToTab,
 }) => {
@@ -67,7 +74,18 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   const [sellingPrice, setSellingPrice] = useState<number>(75);
   const [targetFcPercent, setTargetFcPercent] = useState<number>(settings.targetFoodCostPercent || 40);
   const [deliveryGpPercent, setDeliveryGpPercent] = useState<number>(settings.grabFoodCommissionPercent || 30);
+  const initialMultipliers = resolveChannelMultipliers(settings);
+  const [grabMultiplier, setGrabMultiplier] = useState<number>(initialMultipliers.grab);
+  const [linemanMultiplier, setLinemanMultiplier] = useState<number>(initialMultipliers.lineman);
+  const [robinhoodMultiplier, setRobinhoodMultiplier] = useState<number>(initialMultipliers.robinhood);
   const [savedSuccessMsg, setSavedSuccessMsg] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const resolved = resolveChannelMultipliers(settings);
+    setGrabMultiplier(resolved.grab);
+    setLinemanMultiplier(resolved.lineman);
+    setRobinhoodMultiplier(resolved.robinhood);
+  }, [settings.grabPriceMultiplier, settings.linemanPriceMultiplier, settings.robinhoodPriceMultiplier]);
 
   // Active view tab in Extra Costs section: 'PACKAGING' | 'SEASONING' | 'BOTH'
   const [activeExtraTab, setActiveExtraTab] = useState<'PACKAGING' | 'SEASONING' | 'BOTH'>('BOTH');
@@ -429,6 +447,32 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   const suggestedDeliveryPrice = suggestedPricing.suggestedDeliveryPriceByFc;
   const effectiveDeliveryGpPercent = suggestedPricing.effectiveDeliveryGpPercent;
 
+  const multipliedChannelPrices = useMemo(
+    () =>
+      calculateMultipliedChannelPrices(sellingPrice, {
+        grabPriceMultiplier: grabMultiplier,
+        linemanPriceMultiplier: linemanMultiplier,
+        robinhoodPriceMultiplier: robinhoodMultiplier,
+      }),
+    [sellingPrice, grabMultiplier, linemanMultiplier, robinhoodMultiplier]
+  );
+
+  const handleQuickMultiplierChange = (
+    channel: 'grab' | 'lineman' | 'robinhood',
+    nextVal: number
+  ) => {
+    if (!Number.isFinite(nextVal) || nextVal <= 0) return;
+    if (channel === 'grab') setGrabMultiplier(nextVal);
+    if (channel === 'lineman') setLinemanMultiplier(nextVal);
+    if (channel === 'robinhood') setRobinhoodMultiplier(nextVal);
+    onSaveSettings?.({
+      ...settings,
+      ...(channel === 'grab' ? { grabPriceMultiplier: nextVal } : {}),
+      ...(channel === 'lineman' ? { linemanPriceMultiplier: nextVal } : {}),
+      ...(channel === 'robinhood' ? { robinhoodPriceMultiplier: nextVal } : {}),
+    });
+  };
+
   // Status benchmark badge
   const getBenchmarkStatus = (fcPercent: number) => {
     if (fcPercent <= 32) {
@@ -587,7 +631,10 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
           proteinType: 'มาตรฐาน',
           sellingPrice: Math.round(sellingPrice),
           takeawayPrice: Math.round(sellingPrice + totalPackagingCost),
-          deliveryPrice: Math.round(suggestedDeliveryPrice),
+          deliveryPrice: multipliedChannelPrices.grabPrice || Math.round(suggestedDeliveryPrice),
+          grabPrice: multipliedChannelPrices.grabPrice,
+          linemanPrice: multipliedChannelPrices.linemanPrice,
+          robinhoodPrice: multipliedChannelPrices.robinhoodPrice,
           overheadCost: Math.round(totalQFactorCost),
           packagingCost: totalPackagingCost,
           directFoodCost: directFoodCost,
@@ -1407,6 +1454,76 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                     ? `Covers packaging ฿${totalPackagingCost.toFixed(2)} & Effective GP ${effectiveDeliveryGpPercent.toFixed(1)}%, rounded up to ฿${suggestedDeliveryPrice}`
                     : `ครอบคลุมค่ากล่อง ฿${totalPackagingCost.toFixed(2)} และ Effective GP ${effectiveDeliveryGpPercent.toFixed(1)}% ปัดขึ้นเป็น ฿${suggestedDeliveryPrice}`}
                 </p>
+              </div>
+
+              {/* Real-time Multiplied Channel Prices (GrabFood / LINE MAN / Robinhood) */}
+              <div className="p-3.5 bg-white border border-[#EAE4D9] rounded-xl space-y-2.5 text-xs">
+                <div className="font-bold text-stone-800">
+                  {lang === 'en'
+                    ? 'Auto-Multiplied Channel Prices (Real-Time)'
+                    : 'ราคาขายแต่ละแพลตฟอร์มอัตโนมัติ (คำนวณเรียลไทม์)'}
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="p-2 bg-emerald-50/70 border border-emerald-200 rounded-lg space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-emerald-900 text-[11px]">GrabFood</span>
+                      <span className="text-[10px] text-emerald-700 font-mono">x</span>
+                    </div>
+                    <NumericInput
+                      type="text"
+                      inputMode="decimal"
+                      min="0.1"
+                      step="0.1"
+                      value={grabMultiplier}
+                      fallbackValue={1.5}
+                      onValueChange={(val) => handleQuickMultiplierChange('grab', val)}
+                      className="w-full px-1.5 py-0.5 bg-white border border-emerald-300 rounded text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-emerald-600"
+                    />
+                    <div className="font-mono font-black text-sm text-emerald-900 text-center">
+                      ฿{multipliedChannelPrices.grabPrice}
+                    </div>
+                  </div>
+
+                  <div className="p-2 bg-amber-50/70 border border-amber-200 rounded-lg space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-900 text-[11px]">LINE MAN</span>
+                      <span className="text-[10px] text-amber-700 font-mono">x</span>
+                    </div>
+                    <NumericInput
+                      type="text"
+                      inputMode="decimal"
+                      min="0.1"
+                      step="0.1"
+                      value={linemanMultiplier}
+                      fallbackValue={1.5}
+                      onValueChange={(val) => handleQuickMultiplierChange('lineman', val)}
+                      className="w-full px-1.5 py-0.5 bg-white border border-amber-300 rounded text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-amber-600"
+                    />
+                    <div className="font-mono font-black text-sm text-amber-900 text-center">
+                      ฿{multipliedChannelPrices.linemanPrice}
+                    </div>
+                  </div>
+
+                  <div className="p-2 bg-purple-50/70 border border-purple-200 rounded-lg space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-purple-900 text-[11px]">Robinhood</span>
+                      <span className="text-[10px] text-purple-700 font-mono">x</span>
+                    </div>
+                    <NumericInput
+                      type="text"
+                      inputMode="decimal"
+                      min="0.1"
+                      step="0.1"
+                      value={robinhoodMultiplier}
+                      fallbackValue={1.0}
+                      onValueChange={(val) => handleQuickMultiplierChange('robinhood', val)}
+                      className="w-full px-1.5 py-0.5 bg-white border border-purple-300 rounded text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-purple-600"
+                    />
+                    <div className="font-mono font-black text-sm text-purple-900 text-center">
+                      ฿{multipliedChannelPrices.robinhoodPrice}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 

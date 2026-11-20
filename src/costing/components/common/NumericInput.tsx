@@ -116,8 +116,8 @@ export const NumericInput: React.FC<NumericInputProps> = ({
 
     if (trimmed === '') {
       userTypedZeroRef.current = false;
-      setText('');
-      emitParentChange(e, '', fallbackValue);
+      setText(fallbackValue > 0 ? String(fallbackValue) : '');
+      emitParentChange(e, fallbackValue > 0 ? String(fallbackValue) : '', fallbackValue);
       if (onBlur) onBlur(e);
       return;
     }
@@ -147,6 +147,25 @@ export const NumericInput: React.FC<NumericInputProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       (e.target as HTMLInputElement).blur();
+    } else if (type !== 'number' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      const stepNum = Number(props.step);
+      if (Number.isFinite(stepNum) && stepNum > 0) {
+        e.preventDefault();
+        const current = parseFloat(text);
+        const base = Number.isFinite(current) ? current : fallbackValue;
+        const delta = e.key === 'ArrowUp' ? stepNum : -stepNum;
+        let next = Number((base + delta).toFixed(4));
+        const minNum = props.min !== undefined ? Number(props.min) : NaN;
+        const maxNum = props.max !== undefined ? Number(props.max) : NaN;
+        if (Number.isFinite(minNum)) next = Math.max(minNum, next);
+        if (Number.isFinite(maxNum)) next = Math.min(maxNum, next);
+        userTypedZeroRef.current = next === 0;
+        const nextStr = String(next);
+        setText(nextStr);
+        if (!commitOnBlurOnly) {
+          emitParentChange(e, nextStr, next);
+        }
+      }
     }
     if (onKeyDown) {
       onKeyDown(e);

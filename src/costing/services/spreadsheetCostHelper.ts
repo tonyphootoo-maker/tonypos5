@@ -25,6 +25,61 @@ export interface SpreadsheetRowMetrics {
   takeawayProfit: number;
 }
 
+export function computeChannelPriceFromMultiplier(
+  sellingPrice: number,
+  multiplier: number
+): number {
+  const safePrice = Number.isFinite(sellingPrice) ? Math.max(0, sellingPrice) : 0;
+  const safeMult = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  return Math.round(safePrice * safeMult);
+}
+
+/**
+ * Canonical Dine-in selling price resolver shared by FoodCostView and MenuPricingSpreadsheetTable.
+ * Preserves Excel-template seed prices only when a seed variant still holds its exact initial seed price,
+ * while never overriding any user-edited sellingPrice (including 0 when clearing an input).
+ */
+export function resolveVariantBaseSellingPrice(menu: MenuItem, v: MenuVariant): number {
+  const pName = (v.proteinType || v.name || '').toLowerCase();
+  const isSeafood = Boolean(
+    v.proteinType?.includes('ทะเล') ||
+      pName.includes('ทะเล') ||
+      v.proteinType?.includes('ซีฟู้ด') ||
+      pName.includes('ซีฟู้ด') ||
+      (pName.includes('กุ้ง') && pName.includes('หมึก'))
+  );
+
+  const hasExplicitPrice = v.sellingPrice !== undefined && v.sellingPrice !== null;
+  let baseSellingPrice = hasExplicitPrice ? v.sellingPrice : 69;
+
+  if (menu.name.includes('กะเพรา') || v.menuId === 'menu_kaprow') {
+    if (pName.includes('หมูหมัก')) {
+      baseSellingPrice = v.sellingPrice === 65 ? 79 : baseSellingPrice;
+    } else if (pName.includes('หมูบด') || pName.includes('หมูสับ')) {
+      baseSellingPrice = v.sellingPrice === 60 ? 69 : baseSellingPrice;
+    } else if (pName.includes('ไก่')) {
+      baseSellingPrice = v.sellingPrice === 60 ? 69 : baseSellingPrice;
+    } else if (
+      pName.includes('เนื้อวัวสไลซ์') ||
+      (pName.includes('เนื้อ') && !pName.includes('สับ'))
+    ) {
+      baseSellingPrice = v.sellingPrice === 85 || !hasExplicitPrice ? 129 : baseSellingPrice;
+    } else if (pName.includes('เนื้อวัว สับ') || pName.includes('เนื้อสับ')) {
+      baseSellingPrice = v.sellingPrice === 85 || !hasExplicitPrice ? 99 : baseSellingPrice;
+    } else if (pName.includes('กุ้ง') && !isSeafood) {
+      baseSellingPrice = v.sellingPrice === 85 || !hasExplicitPrice ? 109 : baseSellingPrice;
+    } else if ((pName.includes('หมึก') || pName.includes('ปลาหมึก')) && !isSeafood) {
+      baseSellingPrice = v.sellingPrice === 85 || !hasExplicitPrice ? 109 : baseSellingPrice;
+    } else if (isSeafood) {
+      baseSellingPrice = v.sellingPrice === 95 || !hasExplicitPrice ? 129 : baseSellingPrice;
+    } else if (pName.includes('ไส้กรอก')) {
+      baseSellingPrice = !hasExplicitPrice ? 79 : baseSellingPrice;
+    }
+  }
+
+  return baseSellingPrice;
+}
+
 /**
  * Deterministic cost & profit calculation matching MenuPricingSpreadsheetTable.tsx 1:1
  * so Food Cost ("ต้นทุนอาหาร") and Menu Management ("จัดการเมนู") always show identical figures.
@@ -60,39 +115,30 @@ export function calculateSpreadsheetRowMetrics(params: {
   );
 
   // Template defaults matching Food Cost spreadsheet when not customized
-  let baseSellingPrice = v.sellingPrice || 69;
+  const baseSellingPrice = resolveVariantBaseSellingPrice(menu, v);
   let baseWeight = 80;
 
   if (menu.name.includes('กะเพรา') || v.menuId === 'menu_kaprow') {
     if (pName.includes('หมูหมัก')) {
-      baseSellingPrice = v.sellingPrice === 65 ? 79 : v.sellingPrice;
       baseWeight = 70;
     } else if (pName.includes('หมูบด') || pName.includes('หมูสับ')) {
-      baseSellingPrice = v.sellingPrice === 60 ? 69 : v.sellingPrice;
       baseWeight = 80;
     } else if (pName.includes('ไก่')) {
-      baseSellingPrice = v.sellingPrice === 60 ? 69 : v.sellingPrice;
       baseWeight = 80;
     } else if (
       pName.includes('เนื้อวัวสไลซ์') ||
-      (pName.includes('เนื้อ') && !pName.includes('สับ') && v.sellingPrice <= 85)
+      (pName.includes('เนื้อ') && !pName.includes('สับ'))
     ) {
-      baseSellingPrice = 129;
       baseWeight = 120;
     } else if (pName.includes('เนื้อวัว สับ') || pName.includes('เนื้อสับ')) {
-      baseSellingPrice = 99;
       baseWeight = 60;
-    } else if (pName.includes('กุ้ง')) {
-      baseSellingPrice = v.sellingPrice <= 85 ? 109 : v.sellingPrice;
+    } else if (pName.includes('กุ้ง') && !isSeafood) {
       baseWeight = 4;
-    } else if (pName.includes('หมึก') || pName.includes('ปลาหมึก')) {
-      baseSellingPrice = v.sellingPrice <= 85 ? 109 : v.sellingPrice;
+    } else if ((pName.includes('หมึก') || pName.includes('ปลาหมึก')) && !isSeafood) {
       baseWeight = 80;
     } else if (isSeafood) {
-      baseSellingPrice = 129;
       baseWeight = 80;
     } else if (pName.includes('ไส้กรอก')) {
-      baseSellingPrice = 79;
       baseWeight = 80;
     }
   }
