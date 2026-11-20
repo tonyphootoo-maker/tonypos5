@@ -1451,7 +1451,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1.5 font-black text-stone-900 text-sm sm:text-base mr-1">
               <UtensilsCrossed className="w-4 h-4 text-[#F27D26]" />
-              <span>{isEn ? 'Food Cost & Pricing' : 'ต้นทุนอาหาร'}</span>
+              <span>{isEn ? 'Food Cost / Menu' : 'ต้นทุนอาหาร / เมนู'}</span>
             </div>
 
             {/* Metric 1: Avg Food Cost (Compact) */}

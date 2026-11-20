@@ -1738,23 +1738,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       <span className="text-[#FFC107]">฿{portion.costPerPortion.toFixed(2)}</span>
                     </div>
                   </div>
-
-                  {/* Dishes using */}
-                  <div className="mt-3">
-                    <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider block mb-1">
-                      {lang === 'en' ? 'Used in Dishes:' : 'เมนูที่ใช้ปริมาณนี้:'}
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {(lang === 'en' ? portion.dishesUsingEn : portion.dishesUsing).map((dish, i) => (
-                        <span
-                          key={i}
-                          className="px-2 py-0.5 rounded-lg text-[10px] bg-white/5 text-white/70 border border-white/5"
-                        >
-                          {dish}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               </div>
             ))}

@@ -146,15 +146,6 @@ export const Navigation: React.FC<Props> = ({
           icon: <Layers className="w-5 h-5 text-amber-600" />,
         },
         {
-          id: 'menu_cost',
-          label: t.nav.menuCost,
-          desc: {
-            th: 'เพิ่ม ลบ แก้ไข เมนู หมวดหมู่ และช่องทางขายหน้าร้าน',
-            en: 'Add, edit & delete POS dishes, categories & channels',
-          },
-          icon: <UtensilsCrossed className="w-5 h-5 text-red-600" />,
-        },
-        {
           id: 'option_groups',
           label: t.nav.optionGroups,
           desc: {
@@ -197,7 +188,7 @@ export const Navigation: React.FC<Props> = ({
         },
         {
           id: 'cost_food_cost',
-          label: lang === 'th' ? 'ต้นทุนอาหาร' : 'Food Cost',
+          label: lang === 'th' ? 'ต้นทุนอาหาร / เมนู' : 'Food Cost / Menu',
           desc: {
             th: 'วิเคราะห์ต้นทุนอาหาร & ตารางราคาขาย',
             en: 'Menu food cost & channel pricing sheet',
