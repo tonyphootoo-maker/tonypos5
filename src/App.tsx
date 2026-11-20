@@ -29,6 +29,10 @@ import { UnifiedFinanceHubPage, FinanceHubTab } from './pages/UnifiedFinanceHubP
 import { BackupPage } from './pages/BackupPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CostingWorkspace, CostingTabId } from './costing/CostingWorkspace';
+import { MenuItem as CostMenuItem } from './costing/types';
+import { COST_COLLECTIONS } from './costing/services/firebaseSyncService';
+import { StorageService } from './costing/services/storageService';
+import { resolveCostVariantDisplayNames } from './costing/services/spreadsheetCostHelper';
 import {
   UtensilsCrossed,
   Lock,
@@ -67,6 +71,7 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
   const [categories, setCategories] = useState<CategoryDoc[]>([]);
   const [dishes, setDishes] = useState<DishDoc[]>([]);
   const [optionGroups, setOptionGroups] = useState<OptionGroupDoc[]>([]);
+  const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
   const [readyFlags, setReadyFlags] = useState({ cats: false, dishes: false, opts: false });
 
   const lastPublishedSigRef = useRef<string>('');
@@ -97,11 +102,21 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
       },
       (err) => console.warn('AutoSync optionGroups warning:', err)
     );
+    const unsubCostMenus = subscribeCollection<CostMenuItem>(
+      COST_COLLECTIONS.MENUS,
+      (cloudMenus) => {
+        if (cloudMenus.length > 0) {
+          setCostMenus([...cloudMenus].sort((a, b) => (a.displayOrder || 99) - (b.displayOrder || 99)));
+        }
+      },
+      (err) => console.warn('AutoSync costMenus warning:', err)
+    );
 
     return () => {
       unsubCats();
       unsubDishes();
       unsubOpts();
+      unsubCostMenus();
     };
   }, [user.uid]);
 
@@ -132,7 +147,10 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
         d.description || '',
         d.order ?? 0,
         d.optionGroupIds || [],
-        (d.variants || []).map((v) => [v.id, v.name, v.nameTh || '', v.price]),
+        (d.variants || []).map((v) => {
+          const resolved = resolveCostVariantDisplayNames(d, v, costMenus);
+          return [v.id, resolved.name, resolved.nameTh || v.nameTh || '', v.price];
+        }),
       ]),
       optionGroups: optionGroups.map((g) => [
         g.id,
@@ -155,6 +173,7 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
           categories,
           dishes,
           optionGroups,
+          costMenus,
           skipImageIds: syncedImagesRef.current,
         });
         lastPublishedSigRef.current = signature;
@@ -164,7 +183,7 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [user.uid, settings, categories, dishes, optionGroups, readyFlags]);
+  }, [user.uid, settings, categories, dishes, optionGroups, costMenus, readyFlags]);
 
   return null;
 };

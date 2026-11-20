@@ -59,7 +59,11 @@ import {
   importCostingVariantToDishVariant,
   importCostingIngredientAsDishVariant,
 } from '../costing/services/posBridge';
-import { calculateSpreadsheetRowMetrics } from '../costing/services/spreadsheetCostHelper';
+import {
+  calculateSpreadsheetRowMetrics,
+  resolveCostVariantLabel,
+  resolveCostVariantDisplayNames,
+} from '../costing/services/spreadsheetCostHelper';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { SaveOrderModal } from '../components/SaveOrderModal';
 import { PaymentModal } from '../components/PaymentModal';
@@ -474,11 +478,19 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     const packagingCostSnapshot = isDineIn ? 0 : roundTo2(variantCostCalc.packagingCost);
     const totalUnitCostSnapshot = roundTo2(foodCostSnapshot + packagingCostSnapshot);
 
+    const resolvedVariantNames = resolveCostVariantDisplayNames(
+      selectedDishForOptions,
+      variant,
+      costMenus
+    );
+    const displayVariantTh = resolvedVariantNames.nameTh || variant.nameTh || variant.name;
+    const displayVariantEn = resolvedVariantNames.name || variant.name || displayVariantTh;
+
     const newItem: OrderItem = {
       dishId: selectedDishForOptions.id,
       dishName: lang === 'th' && selectedDishForOptions.nameTh ? selectedDishForOptions.nameTh : selectedDishForOptions.name,
       variantId: variant.id,
-      variantName: lang === 'th' && variant.nameTh ? variant.nameTh : variant.name,
+      variantName: lang === 'th' ? displayVariantTh : displayVariantEn,
       unitPrice,
       dishCostSnapshot: foodCostSnapshot,
       optionsCostSnapshot: optionsCost,
@@ -833,13 +845,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     return menu.variants || [];
   };
 
-  const getCostVariantLabel = (cv: CostMenuVariant): string => {
-    const p = (cv.proteinType || '').trim();
-    if (p && p !== 'ทั่วไป' && p !== 'Standard') {
-      return p;
-    }
-    return (cv.name || p || 'มาตรฐาน').trim();
-  };
+  const getCostVariantLabel = (cv: CostMenuVariant): string => resolveCostVariantLabel(cv);
 
   const stripDishPrefix = (raw: string): string =>
     raw
@@ -930,7 +936,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
     const cLabel = getCostVariantLabel(cv).toLowerCase();
     const cProt = (cv.proteinType || '').trim().toLowerCase();
-    const cName = (cv.name || '').trim().toLowerCase();
+    const cName = (cv.thaiName || cv.name || '').trim().toLowerCase();
+    const cEn = (cv.englishName || '').trim().toLowerCase();
 
     return posVariants.find((pv) => {
       const pTh = (pv.nameTh || '').trim().toLowerCase();
@@ -939,7 +946,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       if (pTh === 'มาตรฐาน' || pEn === 'standard') return false;
       return (
         (pTh && (pTh === cLabel || pTh === cProt || pTh === cName)) ||
-        (pEn && (pEn === cLabel || pEn === cProt || pEn === cName))
+        (pEn && (pEn === cLabel || pEn === cProt || pEn === cName || (cEn && pEn === cEn)))
       );
     });
   };
@@ -1017,6 +1024,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       );
     });
 
+    const labelEn = cv.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
     let updatedVariants: DishVariant[];
     if (existingMatched) {
       updatedVariants = strippedPlaceholder.map((pv) =>
@@ -1024,6 +1032,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           ? {
               ...pv,
               nameTh: labelTh,
+              name: labelEn,
               price: newPrice,
               costMenuId: costMenu.id,
               costVariantId: cv.id,
@@ -1036,7 +1045,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         {
           id: cv.id || `var_${Date.now()}`,
           nameTh: labelTh,
-          name: translateThaiToEnglish(labelTh) || labelTh,
+          name: labelEn,
           price: newPrice,
           costMenuId: costMenu.id,
           costVariantId: cv.id,
@@ -1091,8 +1100,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
         const exactVar = pool.find((cv) => {
           const p = (cv.proteinType || '').trim().toLowerCase();
-          const n = (cv.name || '').trim().toLowerCase();
-          return (vTh && (p === vTh || n === vTh)) || (vEn && (p === vEn || n === vEn));
+          const n = (cv.thaiName || cv.name || '').trim().toLowerCase();
+          const e = (cv.englishName || '').trim().toLowerCase();
+          return (vTh && (p === vTh || n === vTh)) || (vEn && (p === vEn || n === vEn || (e && e === vEn)));
         });
         if (exactVar) return { menu: matchedMenu, variant: exactVar };
 
@@ -1102,7 +1112,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
         const partialVar = pool.find((cv) => {
           const p = (cv.proteinType || '').trim().toLowerCase();
-          const n = (cv.name || '').trim().toLowerCase();
+          const n = (cv.thaiName || cv.name || '').trim().toLowerCase();
           return (
             (vTh.length >= 2 && (n.includes(vTh) || p.includes(vTh) || (p && vTh.includes(p)))) ||
             (vEn.length >= 2 && (n.includes(vEn) || p.includes(vEn)))
@@ -1314,6 +1324,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             );
             const vTh = getCostVariantLabel(cv);
             const vEn =
+              cv.englishName?.trim() ||
               (existingMatched?.name && existingMatched.name !== 'Standard'
                 ? existingMatched.name.trim()
                 : '') ||
@@ -2549,7 +2560,16 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                               <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0" />
                             )}
                             <span className="font-extrabold text-xs text-neutral-900 truncate">
-                              {lang === 'th' && v.nameTh ? v.nameTh : v.name}
+                              {(() => {
+                                const resolved = resolveCostVariantDisplayNames(
+                                  selectedDishForOptions,
+                                  v,
+                                  costMenus
+                                );
+                                const displayTh = resolved.nameTh || v.nameTh || v.name;
+                                const displayEn = resolved.name || v.name || displayTh;
+                                return lang === 'th' ? displayTh : displayEn;
+                              })()}
                             </span>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
@@ -3546,12 +3566,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 {posPickerSourceTab === 'menus' && selectedCostMenu && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {selectedMenuVariants.map(({ variant, sellingPrice, cost }) => {
-                      const displayProtein =
-                        variant.proteinType &&
-                        variant.proteinType !== 'ทั่วไป' &&
-                        variant.proteinType !== 'Standard'
-                          ? variant.proteinType
-                          : variant.name;
+                      const displayOptionLabel = getCostVariantLabel(variant);
                       return (
                         <button
                           key={`${selectedCostMenu.id}_${variant.id}`}
@@ -3565,7 +3580,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                                 costMenuId: selectedCostMenu.id,
                                 costIngredients,
                                 costSauces,
-                                preferredNameTh: displayProtein,
+                                preferredNameTh: displayOptionLabel,
                               });
                               converted.price = sellingPrice;
                               appendImportedVariant(converted);
@@ -3577,7 +3592,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                         >
                           <div className="min-w-0">
                             <div className="font-black text-sm text-neutral-900 truncate">
-                              {getLocalizedText(lang, displayProtein, variant.englishName)}
+                              {getLocalizedText(lang, displayOptionLabel, variant.englishName)}
                             </div>
                             <div className="text-[11px] text-neutral-500">
                               {lang === 'th' ? 'ต้นทุน' : 'Cost'} ฿{formatMoney(cost)}

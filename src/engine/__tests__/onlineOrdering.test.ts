@@ -16,6 +16,11 @@ import {
 import { buildPeriodPnl } from '../calculations';
 import { convertDailySummariesToSalesRecords } from '../../costing/services/firebaseSyncService';
 import {
+  resolveCostVariantDisplayNames,
+  resolveCostVariantLabel,
+} from '../../costing/services/spreadsheetCostHelper';
+import type { MenuItem as CostMenuItem } from '../../costing/types';
+import {
   CategoryDoc,
   DailySummaryDoc,
   DishDoc,
@@ -534,6 +539,85 @@ describe('Online Ordering Engine', () => {
         deliveryAddress: '99 Rama 9 Bangkok',
       })
     ).toBe('https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=99%20Rama%209%20Bangkok');
+  });
+
+  it('resolves POS and Customer storefront option names from Food Cost item name (ชื่อรายการ) instead of proteinType', () => {
+    const costMenu: CostMenuItem = {
+      id: 'menu_kaprow',
+      name: 'กะเพรา',
+      thaiName: 'กะเพรา',
+      englishName: 'Stir-Fried Holy Basil',
+      category: 'ผัดและกะเพรา',
+      active: true,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      variants: [
+        {
+          id: 'var_kaprow_pork',
+          menuId: 'menu_kaprow',
+          name: 'กะเพราหมูสับ ราดข้าว',
+          thaiName: 'กะเพราหมูสับ ราดข้าว',
+          englishName: 'Stir-Fried Holy Basil with Minced Pork on Rice',
+          proteinType: 'หมูสับ',
+          sellingPrice: 69,
+          takeawayPrice: 74,
+          deliveryPrice: 104,
+          overheadCost: 6,
+          recipeItems: [],
+          active: true,
+        },
+      ],
+    };
+
+    expect(resolveCostVariantLabel(costMenu.variants[0])).toBe('กะเพราหมูสับ ราดข้าว');
+
+    const staleDish: DishDoc = {
+      id: 'cost_dish_menu_kaprow',
+      name: 'Stir-Fried Holy Basil',
+      nameTh: 'กะเพรา',
+      categoryId: 'cat_main',
+      costMenuId: 'menu_kaprow',
+      order: 1,
+      optionGroupIds: [],
+      variants: [
+        {
+          id: 'var_kaprow_pork',
+          name: 'Minced Pork',
+          nameTh: 'หมูสับ',
+          price: 69,
+          costMenuId: 'menu_kaprow',
+          costVariantId: 'var_kaprow_pork',
+          ingredients: [],
+          subRecipes: [],
+          packaging: [],
+        },
+      ],
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      version: 1,
+    };
+
+    expect(resolveCostVariantDisplayNames(staleDish, staleDish.variants[0], [costMenu])).toEqual({
+      name: 'Stir-Fried Holy Basil with Minced Pork on Rice',
+      nameTh: 'กะเพราหมูสับ ราดข้าว',
+    });
+
+    const { publicStore } = sanitizeMenuForPublicStore({
+      storeId: 'store_1',
+      settings: mockSettings,
+      categories: mockCategories,
+      dishes: [staleDish],
+      optionGroups: mockOptionGroups,
+      costMenus: [costMenu],
+      publishedAt: nowIso,
+    });
+
+    expect(publicStore.dishes[0].variants[0]).toEqual({
+      id: 'var_kaprow_pork',
+      name: 'Stir-Fried Holy Basil with Minced Pork on Rice',
+      nameTh: 'กะเพราหมูสับ ราดข้าว',
+      price: 69,
+    });
   });
 });
 

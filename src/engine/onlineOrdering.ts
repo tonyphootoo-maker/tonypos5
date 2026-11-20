@@ -16,6 +16,8 @@ import {
   SubRecipeDoc,
 } from '../types';
 import { DailySalesRecord } from '../costing/types/domain';
+import { MenuItem as CostMenuItem } from '../costing/types';
+import { resolveCostVariantDisplayNames } from '../costing/services/spreadsheetCostHelper';
 import {
   calculateDishVariantCost,
   calculateIngredientEffectiveCost,
@@ -68,6 +70,7 @@ export function sanitizeMenuForPublicStore(params: {
   categories: CategoryDoc[];
   dishes: DishDoc[];
   optionGroups: OptionGroupDoc[];
+  costMenus?: CostMenuItem[];
   publishedAt?: string;
 }): {
   publicStore: PublicStoreDoc;
@@ -79,6 +82,7 @@ export function sanitizeMenuForPublicStore(params: {
     categories,
     dishes,
     optionGroups,
+    costMenus = [],
     publishedAt = new Date().toISOString(),
   } = params;
 
@@ -137,12 +141,15 @@ export function sanitizeMenuForPublicStore(params: {
         ...(d.description ? { description: d.description } : {}),
         order: d.order ?? 0,
         optionGroupIds: Array.isArray(d.optionGroupIds) ? [...d.optionGroupIds] : [],
-        variants: (d.variants || []).map((v) => ({
-          id: v.id,
-          name: v.name || 'Standard',
-          ...(v.nameTh ? { nameTh: v.nameTh } : {}),
-          price: Math.max(0, Number(v.price) || 0),
-        })),
+        variants: (d.variants || []).map((v) => {
+          const resolved = resolveCostVariantDisplayNames(d, v, costMenus);
+          return {
+            id: v.id,
+            name: resolved.name || v.name || 'Standard',
+            ...(resolved.nameTh ? { nameTh: resolved.nameTh } : v.nameTh ? { nameTh: v.nameTh } : {}),
+            price: Math.max(0, Number(v.price) || 0),
+          };
+        }),
       };
     });
 

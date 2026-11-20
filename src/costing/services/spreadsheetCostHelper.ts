@@ -1,6 +1,102 @@
 import { Ingredient, MenuItem, MenuVariant } from '../types';
+import { DishDoc, DishVariant } from '../../types';
+import { translateThaiToEnglish } from '../../utils/thaiToEnglish';
 
 export type SpreadsheetServingMode = 'ON_RICE' | 'A_LA_CARTE';
+
+function normalizePosCostId(raw: string): string {
+  const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return cleaned || `id_${Date.now()}`;
+}
+
+export function resolveCostVariantLabel(v: MenuVariant): string {
+  const itemLabel = (v.thaiName || v.name || '').trim();
+  if (itemLabel) {
+    return itemLabel;
+  }
+  const p = (v.proteinType || '').trim();
+  if (p && p !== 'ทั่วไป' && p !== 'Standard') {
+    return p;
+  }
+  return 'มาตรฐาน';
+}
+
+export function resolveCostVariantDisplayNames(
+  dish: Pick<DishDoc, 'id' | 'name' | 'nameTh' | 'costMenuId'>,
+  variant: Pick<DishVariant, 'id' | 'name' | 'nameTh' | 'costMenuId' | 'costVariantId'>,
+  costMenus: MenuItem[] = []
+): { name: string; nameTh?: string } {
+  if (!costMenus || costMenus.length === 0) {
+    return { name: variant.name, ...(variant.nameTh ? { nameTh: variant.nameTh } : {}) };
+  }
+
+  let matchedVariant: MenuVariant | undefined;
+
+  const targetMenuId = variant.costMenuId || dish.costMenuId;
+  if (targetMenuId) {
+    const targetMenu = costMenus.find((m) => m.id === targetMenuId);
+    if (targetMenu) {
+      matchedVariant = (targetMenu.variants || []).find(
+        (cv) =>
+          (variant.costVariantId && cv.id === variant.costVariantId) || cv.id === variant.id
+      );
+    }
+  }
+
+  if (!matchedVariant) {
+    for (const cm of costMenus) {
+      const found = (cm.variants || []).find(
+        (cv) =>
+          (variant.costVariantId && cv.id === variant.costVariantId) || cv.id === variant.id
+      );
+      if (found) {
+        matchedVariant = found;
+        break;
+      }
+    }
+  }
+
+  if (!matchedVariant) {
+    const dTh = (dish.nameTh || '').trim().toLowerCase();
+    const dEn = (dish.name || '').trim().toLowerCase();
+    const matchedMenu =
+      (targetMenuId ? costMenus.find((m) => m.id === targetMenuId) : undefined) ||
+      (dish.id?.startsWith('cost_dish_')
+        ? costMenus.find((m) => `cost_dish_${normalizePosCostId(m.id)}` === dish.id)
+        : undefined) ||
+      costMenus.find((m) => {
+        const mTh = (m.thaiName || m.name || '').trim().toLowerCase();
+        const mEn = (m.englishName || '').trim().toLowerCase();
+        return (dTh && (mTh === dTh || mEn === dTh)) || (dEn && (mTh === dEn || mEn === dEn));
+      });
+
+    if (matchedMenu) {
+      const vTh = (variant.nameTh || '').trim().toLowerCase();
+      const vEn = (variant.name || '').trim().toLowerCase();
+      matchedVariant = (matchedMenu.variants || []).find((cv) => {
+        const cvTh = (cv.thaiName || cv.name || '').trim().toLowerCase();
+        const cvEn = (cv.englishName || '').trim().toLowerCase();
+        const cvProt = (cv.proteinType || '').trim().toLowerCase();
+        return (
+          (vTh && (cvTh === vTh || cvProt === vTh)) ||
+          (vEn && (cvEn === vEn || cvTh === vEn || cvProt === vEn))
+        );
+      });
+    }
+  }
+
+  if (matchedVariant) {
+    const labelTh = resolveCostVariantLabel(matchedVariant);
+    const labelEn =
+      matchedVariant.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
+    return {
+      name: labelEn,
+      nameTh: labelTh,
+    };
+  }
+
+  return { name: variant.name, ...(variant.nameTh ? { nameTh: variant.nameTh } : {}) };
+}
 
 export interface SpreadsheetRowMetrics {
   isSeafood: boolean;

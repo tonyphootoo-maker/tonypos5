@@ -3390,15 +3390,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 }
 
                 const activeUnit = variantModalState.meatUnit || 'g';
-                const normUnit = activeUnit.trim().toLowerCase();
-                const isCountOrBulk =
-                  isPieceLikeUnit(normUnit) || normUnit === 'kg' || normUnit === 'l' || normUnit === 'ช้อนโต๊ะ';
-                const presetQuantities =
-                  normUnit === 'kg' || normUnit === 'l'
-                    ? [0.1, 0.2, 0.5, 1]
-                    : isCountOrBulk
-                      ? [1, 2, 3, 4, 5]
-                      : [50, 60, 80, 100, 120];
 
                 return (
                   <div className="space-y-2 p-3 bg-white border border-[#EAE4D9] rounded-2xl">
@@ -3462,26 +3453,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-
-                      {/* Dynamic Quick Preset Quantity Buttons */}
-                      <div className="flex items-center gap-1 ml-auto flex-wrap">
-                        {presetQuantities.map((w) => (
-                          <button
-                            key={w}
-                            type="button"
-                            onClick={() =>
-                              setVariantModalState((prev) => ({ ...prev, meatQuantity: w }))
-                            }
-                            className={`px-2 py-1 text-[10px] font-bold rounded-lg border cursor-pointer ${
-                              variantModalState.meatQuantity === w
-                                ? 'bg-[#F27D26] text-white border-[#c2580e]'
-                                : 'bg-stone-100 text-stone-700 border-stone-200 hover:bg-stone-200'
-                            }`}
-                          >
-                            {w} {localizeUnit(activeUnit, lang)}
-                          </button>
-                        ))}
-                      </div>
                     </div>
 
                     {/* Inline Add Custom Unit Box */}
@@ -3931,10 +3902,39 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 const baseRecipeCost = computeBaseRecipeItemsCost(baseRecipeItemsForPreview);
                 const totalFoodCost = meatCost + baseRecipeCost;
                 const sellPrice = Number(variantModalState.variant.sellingPrice) || 0;
-                const estOverhead = Number(variantModalState.variant.overheadCost ?? settings.defaultOverheadCostPerDish ?? 0);
+                const taxRate =
+                  typeof settings.vatRatePercent === 'number' && Number.isFinite(settings.vatRatePercent)
+                    ? Math.max(0, settings.vatRatePercent)
+                    : 7;
+                const isVatInclusive =
+                  variantModalState.variant.taxType === 'INCLUSIVE' ||
+                  (variantModalState.variant.taxType !== 'EXCLUSIVE' &&
+                    variantModalState.variant.taxType !== 'NONE' &&
+                    Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive));
+                const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
+                const scRate =
+                  typeof settings.serviceChargePercent === 'number' && Number.isFinite(settings.serviceChargePercent)
+                    ? Math.max(0, settings.serviceChargePercent)
+                    : 0;
+                const taxDivisor = isVatInclusive
+                  ? (1 + (scIncluded ? scRate / 100 : 0)) * (1 + taxRate / 100)
+                  : 1;
+                const netSellPrice = taxDivisor > 0 ? sellPrice / taxDivisor : sellPrice;
+
+                let estOverhead = 0;
+                if (typeof settings.overheadRatePercent === 'number' && Number.isFinite(settings.overheadRatePercent)) {
+                  const rate = Math.max(0, settings.overheadRatePercent) / 100;
+                  const baseAmount = settings.overheadCalculationBase === 'FOOD_COST' ? totalFoodCost : netSellPrice;
+                  estOverhead = rate * baseAmount;
+                } else {
+                  estOverhead = Number(variantModalState.variant.overheadCost ?? settings.defaultOverheadCostPerDish ?? 0);
+                }
+
+                const estPackagingCost = Number(variantModalState.variant.packagingCost) || 0;
                 const estTotalCost = totalFoodCost + estOverhead;
-                const estProfit = sellPrice - estTotalCost;
-                const estFc = sellPrice > 0 ? (totalFoodCost / sellPrice) * 100 : 0;
+                const estTotalWithPackaging = estTotalCost + estPackagingCost;
+                const estProfit = netSellPrice - estTotalCost;
+                const estFc = netSellPrice > 0 ? (totalFoodCost / netSellPrice) * 100 : 0;
 
                 return (
                   <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-mono flex-wrap gap-2">
@@ -3958,6 +3958,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                           <strong className="text-emerald-950 font-black">฿{baseRecipeCost.toFixed(2)}</strong>
                         </div>
                       )}
+                      <div>
+                        <span className="text-stone-800 font-bold">
+                          {isEn ? 'Total Actual Cost: ' : 'ต้นทุนรวมจริงทั้งหมด: '}
+                        </span>
+                        <strong className="text-[#B45309] font-black">฿{estTotalCost.toFixed(2)}</strong>
+                        <span className="text-[10px] text-stone-600 ml-1 font-sans">
+                          {isEn
+                            ? `(Raw ฿${totalFoodCost.toFixed(2)} + OH ฿${estOverhead.toFixed(2)}${estPackagingCost > 0 ? ` • w/ Box ฿${estTotalWithPackaging.toFixed(2)}` : ''})`
+                            : `(วัตถุดิบรวม ฿${totalFoodCost.toFixed(2)} + โสหุ้ย ฿${estOverhead.toFixed(2)}${estPackagingCost > 0 ? ` • รวมกล่อง ฿${estTotalWithPackaging.toFixed(2)}` : ''})`}
+                        </span>
+                      </div>
                     </div>
                     <div>
                       <span className="text-stone-700 font-bold">

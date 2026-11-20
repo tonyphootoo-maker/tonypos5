@@ -41,7 +41,10 @@ import {
   importCostingVariantToDishVariant,
   importCostingIngredientAsDishVariant,
 } from '../costing/services/posBridge';
-import { calculateSpreadsheetRowMetrics } from '../costing/services/spreadsheetCostHelper';
+import {
+  calculateSpreadsheetRowMetrics,
+  resolveCostVariantLabel,
+} from '../costing/services/spreadsheetCostHelper';
 import { ConfirmModal } from '../components/ConfirmModal';
 import {
   UtensilsCrossed,
@@ -237,13 +240,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
     return menu.variants || [];
   };
 
-  const getCostVariantLabel = (cv: CostMenuVariant): string => {
-    const p = (cv.proteinType || '').trim();
-    if (p && p !== 'ทั่วไป' && p !== 'Standard') {
-      return p;
-    }
-    return (cv.name || p || 'มาตรฐาน').trim();
-  };
+  const getCostVariantLabel = (cv: CostMenuVariant): string => resolveCostVariantLabel(cv);
 
   const stripDishPrefix = (raw: string): string =>
     raw
@@ -338,7 +335,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
     const cLabel = getCostVariantLabel(cv).toLowerCase();
     const cProt = (cv.proteinType || '').trim().toLowerCase();
-    const cName = (cv.name || '').trim().toLowerCase();
+    const cName = (cv.thaiName || cv.name || '').trim().toLowerCase();
+    const cEn = (cv.englishName || '').trim().toLowerCase();
 
     return posVariants.find((pv) => {
       const pTh = (pv.nameTh || '').trim().toLowerCase();
@@ -347,7 +345,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       if (pTh === 'มาตรฐาน' || pEn === 'standard') return false;
       return (
         (pTh && (pTh === cLabel || pTh === cProt || pTh === cName)) ||
-        (pEn && (pEn === cLabel || pEn === cProt || pEn === cName))
+        (pEn && (pEn === cLabel || pEn === cProt || pEn === cName || (cEn && pEn === cEn)))
       );
     });
   };
@@ -425,6 +423,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       );
     });
 
+    const labelEn = cv.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
     let updatedVariants: DishVariant[];
     if (existingMatched) {
       updatedVariants = strippedPlaceholder.map((pv) =>
@@ -432,6 +431,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           ? {
               ...pv,
               nameTh: labelTh,
+              name: labelEn,
               price: newPrice,
               costMenuId: costMenu.id,
               costVariantId: cv.id,
@@ -444,7 +444,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
         {
           id: cv.id || `var_${Date.now()}`,
           nameTh: labelTh,
-          name: translateThaiToEnglish(labelTh) || labelTh,
+          name: labelEn,
           price: newPrice,
           costMenuId: costMenu.id,
           costVariantId: cv.id,
@@ -507,10 +507,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
         const exactVar = pool.find((cv) => {
           const p = (cv.proteinType || '').trim().toLowerCase();
-          const n = (cv.name || '').trim().toLowerCase();
+          const n = (cv.thaiName || cv.name || '').trim().toLowerCase();
+          const e = (cv.englishName || '').trim().toLowerCase();
           return (
             (vTh && (p === vTh || n === vTh)) ||
-            (vEn && (p === vEn || n === vEn))
+            (vEn && (p === vEn || n === vEn || (e && e === vEn)))
           );
         });
         if (exactVar) return { menu: matchedMenu, variant: exactVar };
@@ -521,7 +522,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
         const partialVar = pool.find((cv) => {
           const p = (cv.proteinType || '').trim().toLowerCase();
-          const n = (cv.name || '').trim().toLowerCase();
+          const n = (cv.thaiName || cv.name || '').trim().toLowerCase();
           return (
             (vTh.length >= 2 && (n.includes(vTh) || p.includes(vTh) || (p && vTh.includes(p)))) ||
             (vEn.length >= 2 && (n.includes(vEn) || p.includes(vEn)))
@@ -743,6 +744,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           );
           const vTh = getCostVariantLabel(cv);
           const vEn =
+            cv.englishName?.trim() ||
             (existingMatched?.name && existingMatched.name !== 'Standard'
               ? existingMatched.name.trim()
               : '') ||
@@ -2637,12 +2639,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {selectedMenuVariants.map(({ variant, sellingPrice, cost, dineInProfit, takeawayProfit }) => {
-                          const displayProtein =
-                            variant.proteinType &&
-                            variant.proteinType !== 'ทั่วไป' &&
-                            variant.proteinType !== 'Standard'
-                              ? variant.proteinType
-                              : variant.name;
+                          const displayOptionLabel = getCostVariantLabel(variant);
 
                           return (
                             <button
@@ -2652,16 +2649,12 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                               onClick={async () => {
                                 setIsImportingCostOption(true);
                                 try {
-                                  const alreadyExists = (editingDish.variants || []).some(
-                                    (ev) => (ev.nameTh || ev.name) === displayProtein
-                                  );
-                                  const preferredNameTh = alreadyExists ? variant.name : displayProtein;
                                   const converted = await importCostingVariantToDishVariant({
                                     variant,
                                     costMenuId: selectedCostMenu.id,
                                     costIngredients,
                                     costSauces,
-                                    preferredNameTh,
+                                    preferredNameTh: displayOptionLabel,
                                   });
                                   converted.price = sellingPrice;
                                   await appendImportedVariant(converted);
@@ -2674,11 +2667,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0">
                                   <div className="font-black text-sm text-neutral-900 truncate">
-                                    {getLocalizedText(lang, displayProtein, variant.englishName)}
+                                    {getLocalizedText(lang, displayOptionLabel, variant.englishName)}
                                   </div>
                                   <div className="text-[11px] text-neutral-500 truncate">
-                                    {getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)} •{' '}
-                                    {getLocalizedText(lang, variant.name, variant.englishName)}
+                                    {getLocalizedText(lang, selectedCostMenu.name, selectedCostMenu.englishName)}
                                   </div>
                                 </div>
                                 <span className="text-xs font-black text-orange-600 shrink-0">

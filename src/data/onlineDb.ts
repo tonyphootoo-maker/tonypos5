@@ -39,6 +39,7 @@ import {
   SubRecipeDoc,
 } from '../types';
 import { DailySalesRecord } from '../costing/types/domain';
+import { MenuItem as CostMenuItem } from '../costing/types';
 import { COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
 import { StorageService } from '../costing/services/storageService';
 import {
@@ -361,10 +362,11 @@ export async function publishMenuToPublicStore(params: {
   categories: CategoryDoc[];
   dishes: DishDoc[];
   optionGroups: OptionGroupDoc[];
+  costMenus?: CostMenuItem[];
   skipImageIds?: Set<string>;
 }): Promise<{ dishCount: number; imageCount: number; publishedAt: string }> {
   if (!db) throw new Error('Firestore is not initialized.');
-  const { storeId, settings, categories, dishes, optionGroups, skipImageIds } = params;
+  const { storeId, settings, categories, dishes, optionGroups, costMenus, skipImageIds } = params;
   const publishedAt = new Date().toISOString();
 
   const { publicStore, referencedImageIds } = sanitizeMenuForPublicStore({
@@ -373,6 +375,7 @@ export async function publishMenuToPublicStore(params: {
     categories,
     dishes,
     optionGroups,
+    costMenus,
     publishedAt,
   });
 

@@ -54,6 +54,9 @@ import {
 } from '../engine/onlineOrdering';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { MenuItem as CostMenuItem } from '../costing/types';
+import { COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
+import { StorageService } from '../costing/services/storageService';
 
 interface Props {
   user: FirebaseUser;
@@ -141,6 +144,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   const [ingredients, setIngredients] = useState<IngredientDoc[]>([]);
   const [subRecipes, setSubRecipes] = useState<SubRecipeDoc[]>([]);
   const [packaging, setPackaging] = useState<PackagingDoc[]>([]);
+  const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
 
   const [periodFilter, setPeriodFilter] = useState<OnlinePeriodFilter>('today');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
@@ -187,6 +191,11 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
       subscribeCollection<IngredientDoc>('ingredients', setIngredients),
       subscribeCollection<SubRecipeDoc>('subRecipes', setSubRecipes),
       subscribeCollection<PackagingDoc>('packaging', setPackaging),
+      subscribeCollection<CostMenuItem>(COST_COLLECTIONS.MENUS, (cloudMenus) => {
+        if (cloudMenus.length > 0) {
+          setCostMenus([...cloudMenus].sort((a, b) => (a.displayOrder || 99) - (b.displayOrder || 99)));
+        }
+      }),
       subscribeOwnerOnlineOrders(
         user.uid,
         (list) => {
@@ -288,6 +297,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
         categories,
         dishes,
         optionGroups,
+        costMenus,
       });
 
       await updateSettings(

@@ -19,6 +19,12 @@ import { fetchCollection, saveDocument } from '../../data/db';
 import { calculateIngredientCostPerBaseUnit } from '../../engine/calculations';
 import { translateThaiToEnglish } from '../../utils/thaiToEnglish';
 import { convertUnit } from '../engine/units';
+import {
+  resolveCostVariantLabel,
+  resolveCostVariantDisplayNames,
+} from './spreadsheetCostHelper';
+
+export { resolveCostVariantLabel, resolveCostVariantDisplayNames };
 
 function mapUnitToPosPurchaseUnit(unit: string): {
   purchaseUnit: string;
@@ -69,14 +75,6 @@ function convertRecipeQtyToPosBase(
 function normalizePosId(raw: string): string {
   const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '_');
   return cleaned || `id_${Date.now()}`;
-}
-
-function resolveCostVariantLabel(v: CostMenuVariant): string {
-  const p = (v.proteinType || '').trim();
-  if (p && p !== 'ทั่วไป' && p !== 'Standard') {
-    return p;
-  }
-  return (v.name || p || 'มาตรฐาน').trim();
 }
 
 interface SharedPosContext {
@@ -400,8 +398,8 @@ async function syncSingleMenuWithContext(
         preserved.push({
           ...match,
           id: oldVar.id,
-          name: oldVar.name || match.name,
-          nameTh: oldVar.nameTh || match.nameTh,
+          name: match.name || oldVar.name,
+          nameTh: match.nameTh || oldVar.nameTh,
         });
       }
     }
@@ -623,10 +621,12 @@ export async function syncAllCostingToPOS(
       if (!dv.costVariantId) return dv;
       const cv = activeCostVariantMap.get(dv.costVariantId);
       if (!cv) return dv;
+      const labelTh = resolveCostVariantLabel(cv);
+      const labelEn = cv.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
       const nextPrice = Number(cv.sellingPrice) || dv.price;
-      if (nextPrice !== dv.price) {
+      if (nextPrice !== dv.price || dv.nameTh !== labelTh || dv.name !== labelEn) {
         dishChanged = true;
-        return { ...dv, price: nextPrice };
+        return { ...dv, price: nextPrice, nameTh: labelTh, name: labelEn };
       }
       return dv;
     });
@@ -827,8 +827,12 @@ export async function importCostingVariantToDishVariant(params: {
     vPkgs.push({ packagingId: pkgId, quantity: 1 });
   }
 
-  const labelTh = preferredNameTh?.trim() || v.proteinType?.trim() || v.name;
-  const labelEn = translateThaiToEnglish(labelTh) || labelTh;
+  const itemLabelTh = (v.thaiName || v.name || '').trim();
+  const labelTh = preferredNameTh?.trim() || itemLabelTh || v.proteinType?.trim() || 'มาตรฐาน';
+  const labelEn =
+    (!preferredNameTh?.trim() || preferredNameTh.trim() === itemLabelTh) && v.englishName?.trim()
+      ? v.englishName.trim()
+      : translateThaiToEnglish(labelTh) || labelTh;
 
   return {
     id: `var_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
