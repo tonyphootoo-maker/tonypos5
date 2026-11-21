@@ -177,6 +177,43 @@ export function resolveVariantBaseSellingPrice(menu: MenuItem, v: MenuVariant): 
 }
 
 /**
+ * Canonical Takeaway price resolver ("ราคาใส่กล่อง") shared across FoodCostView and MenuPricingSpreadsheetTable.
+ * Preserves any user-entered takeawayPrice directly while scaling template box markup cleanly if Dine-in price is edited.
+ */
+export function resolveVariantTakeawayPrice(
+  menu: MenuItem,
+  v: MenuVariant,
+  sellingPriceOverride?: number
+): number {
+  const baseSellingPrice = resolveVariantBaseSellingPrice(menu, v);
+  const effectiveSelling =
+    sellingPriceOverride !== undefined
+      ? Math.max(0, Number(sellingPriceOverride) || 0)
+      : baseSellingPrice;
+  const storedSell = Number(v.sellingPrice) || 0;
+  const hasExplicitTakeaway =
+    v.takeawayPrice !== undefined && v.takeawayPrice !== null;
+  const storedTakeaway = hasExplicitTakeaway ? Math.max(0, Number(v.takeawayPrice) || 0) : 0;
+
+  if (
+    sellingPriceOverride === undefined &&
+    hasExplicitTakeaway &&
+    storedSell === baseSellingPrice
+  ) {
+    return storedTakeaway;
+  }
+
+  const boxMarkup =
+    hasExplicitTakeaway && storedTakeaway > storedSell
+      ? storedTakeaway - storedSell
+      : 0;
+  if (effectiveSelling <= 0) {
+    return hasExplicitTakeaway ? storedTakeaway : 0;
+  }
+  return effectiveSelling + boxMarkup;
+}
+
+/**
  * Deterministic cost & profit calculation matching MenuPricingSpreadsheetTable.tsx 1:1
  * so Food Cost ("ต้นทุนอาหาร") and Menu Management ("จัดการเมนู") always show identical figures.
  */

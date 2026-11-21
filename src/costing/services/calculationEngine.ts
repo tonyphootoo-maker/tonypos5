@@ -820,14 +820,23 @@ export function applyChannelMultipliersToVariant(
   > | null,
   options?: {
     baseSellingPriceOverride?: number;
+    baseTakeawayPriceOverride?: number;
     channels?: MultipliedDeliveryChannel[];
   }
 ): MenuVariant {
-  const basePrice =
+  const baseSellingPrice =
     options?.baseSellingPriceOverride !== undefined
       ? Math.max(0, Number(options.baseSellingPriceOverride) || 0)
       : Math.max(0, Number(variant.sellingPrice) || 0);
-  const multiplied = calculateMultipliedChannelPrices(basePrice, settings);
+  const hasExplicitTakeaway =
+    variant.takeawayPrice !== undefined && variant.takeawayPrice !== null;
+  const baseTakeawayPrice =
+    options?.baseTakeawayPriceOverride !== undefined
+      ? Math.max(0, Number(options.baseTakeawayPriceOverride) || 0)
+      : hasExplicitTakeaway
+      ? Math.max(0, Number(variant.takeawayPrice) || 0)
+      : baseSellingPrice;
+  const multiplied = calculateMultipliedChannelPrices(baseTakeawayPrice, settings);
   const targetChannels = options?.channels ?? ['grab', 'lineman', 'robinhood'];
   const updateGrab = targetChannels.includes('grab');
   const updateLineman = targetChannels.includes('lineman');
@@ -835,7 +844,10 @@ export function applyChannelMultipliersToVariant(
 
   return {
     ...variant,
-    sellingPrice: basePrice,
+    sellingPrice: baseSellingPrice,
+    ...(options?.baseTakeawayPriceOverride !== undefined || !hasExplicitTakeaway
+      ? { takeawayPrice: baseTakeawayPrice }
+      : {}),
     ...(updateGrab
       ? {
           grabPrice: multiplied.grabPrice,
@@ -859,6 +871,7 @@ export function recalculateMenusWithChannelMultipliers(
   options?: {
     channels?: MultipliedDeliveryChannel[];
     resolveBaseSellingPrice?: (menu: MenuItem, variant: MenuVariant) => number;
+    resolveBaseTakeawayPrice?: (menu: MenuItem, variant: MenuVariant) => number;
     updatedAt?: string;
   }
 ): MenuItem[] {
@@ -870,8 +883,12 @@ export function recalculateMenusWithChannelMultipliers(
       const baseSell = options?.resolveBaseSellingPrice
         ? options.resolveBaseSellingPrice(menu, variant)
         : (Number(variant.sellingPrice) || 0);
+      const baseTakeaway = options?.resolveBaseTakeawayPrice
+        ? options.resolveBaseTakeawayPrice(menu, variant)
+        : undefined;
       return applyChannelMultipliersToVariant(variant, settings, {
-        baseSellingPriceOverride: baseSell,
+        ...(options?.resolveBaseSellingPrice ? { baseSellingPriceOverride: baseSell } : {}),
+        ...(baseTakeaway !== undefined ? { baseTakeawayPriceOverride: baseTakeaway } : {}),
         channels: options?.channels,
       });
     }),

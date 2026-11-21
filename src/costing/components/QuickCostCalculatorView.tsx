@@ -447,14 +447,16 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
   const suggestedDeliveryPrice = suggestedPricing.suggestedDeliveryPriceByFc;
   const effectiveDeliveryGpPercent = suggestedPricing.effectiveDeliveryGpPercent;
 
+  const takeawaySellingPrice = sellingPrice > 0 ? Math.round(sellingPrice + totalPackagingCost) : 0;
+
   const multipliedChannelPrices = useMemo(
     () =>
-      calculateMultipliedChannelPrices(sellingPrice, {
+      calculateMultipliedChannelPrices(takeawaySellingPrice, {
         grabPriceMultiplier: grabMultiplier,
         linemanPriceMultiplier: linemanMultiplier,
         robinhoodPriceMultiplier: robinhoodMultiplier,
       }),
-    [sellingPrice, grabMultiplier, linemanMultiplier, robinhoodMultiplier]
+    [takeawaySellingPrice, grabMultiplier, linemanMultiplier, robinhoodMultiplier]
   );
 
   const handleQuickMultiplierChange = (
@@ -1458,10 +1460,17 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
 
               {/* Real-time Multiplied Channel Prices (GrabFood / LINE MAN / Robinhood) */}
               <div className="p-3.5 bg-white border border-[#EAE4D9] rounded-xl space-y-2.5 text-xs">
-                <div className="font-bold text-stone-800">
-                  {lang === 'en'
-                    ? 'Auto-Multiplied Channel Prices (Real-Time)'
-                    : 'ราคาขายแต่ละแพลตฟอร์มอัตโนมัติ (คำนวณเรียลไทม์)'}
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="font-bold text-stone-800">
+                    {lang === 'en'
+                      ? 'Auto-Multiplied Channel Prices (Real-Time)'
+                      : 'ราคาขายแต่ละแพลตฟอร์มอัตโนมัติ (คำนวณเรียลไทม์)'}
+                  </span>
+                  <span className="text-[10px] text-stone-500 font-mono">
+                    {lang === 'en'
+                      ? `From Takeaway ฿${takeawaySellingPrice}`
+                      : `จากราคาใส่กล่อง ฿${takeawaySellingPrice}`}
+                  </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   <div className="p-2 bg-emerald-50/70 border border-emerald-200 rounded-lg space-y-1">

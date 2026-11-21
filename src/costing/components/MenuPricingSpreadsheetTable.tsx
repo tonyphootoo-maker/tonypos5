@@ -16,6 +16,7 @@ import {
 } from '../services/calculationEngine';
 import {
   resolveVariantBaseSellingPrice,
+  resolveVariantTakeawayPrice,
   computeChannelPriceFromMultiplier,
 } from '../services/spreadsheetCostHelper';
 import { convertUnit } from '../engine/units';
@@ -171,6 +172,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
       string,
       {
         sellingPrice?: number;
+        takeawayPrice?: number;
         proteinWeight?: number;
         grabPrice?: number;
         linemanPrice?: number;
@@ -214,9 +216,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
       for (const [k, entry] of Object.entries(prev)) {
         const updatedEntry = { ...entry };
         if (grabChanged) {
-          if (updatedEntry.sellingPrice !== undefined) {
+          if (updatedEntry.takeawayPrice !== undefined) {
             updatedEntry.grabPrice = computeChannelPriceFromMultiplier(
-              updatedEntry.sellingPrice,
+              updatedEntry.takeawayPrice,
               grabMultiplier
             );
           } else {
@@ -224,9 +226,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
           }
         }
         if (linemanChanged) {
-          if (updatedEntry.sellingPrice !== undefined) {
+          if (updatedEntry.takeawayPrice !== undefined) {
             updatedEntry.linemanPrice = computeChannelPriceFromMultiplier(
-              updatedEntry.sellingPrice,
+              updatedEntry.takeawayPrice,
               linemanMultiplier
             );
           } else {
@@ -234,9 +236,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
           }
         }
         if (robinhoodChanged) {
-          if (updatedEntry.sellingPrice !== undefined) {
+          if (updatedEntry.takeawayPrice !== undefined) {
             updatedEntry.robinhoodPrice = computeChannelPriceFromMultiplier(
-              updatedEntry.sellingPrice,
+              updatedEntry.takeawayPrice,
               robinhoodMultiplier
             );
           } else {
@@ -251,13 +253,28 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
 
   const handleCellChange = (
     variantId: string,
-    field: 'sellingPrice' | 'proteinWeight' | 'grabPrice' | 'linemanPrice' | 'robinhoodPrice',
+    field: 'sellingPrice' | 'takeawayPrice' | 'proteinWeight' | 'grabPrice' | 'linemanPrice' | 'robinhoodPrice',
     val: number
   ) => {
     const editKey = `${variantId}_${currentServingMode}`;
+    const targetVariant = menu.variants.find((item) => item.id === variantId);
+    const existingBoxMarkup =
+      targetVariant &&
+      targetVariant.takeawayPrice !== undefined &&
+      targetVariant.sellingPrice !== undefined &&
+      targetVariant.takeawayPrice >= targetVariant.sellingPrice
+        ? targetVariant.takeawayPrice - targetVariant.sellingPrice
+        : 0;
+    const computedTakeawayForSell = val > 0 ? val + existingBoxMarkup : 0;
+    const multiplierBase =
+      field === 'takeawayPrice'
+        ? val
+        : field === 'sellingPrice'
+        ? computedTakeawayForSell
+        : undefined;
     const multiplied =
-      field === 'sellingPrice'
-        ? calculateMultipliedChannelPrices(val, {
+      multiplierBase !== undefined
+        ? calculateMultipliedChannelPrices(multiplierBase, {
             grabPriceMultiplier: grabMultiplier,
             linemanPriceMultiplier: linemanMultiplier,
             robinhoodPriceMultiplier: robinhoodMultiplier,
@@ -275,6 +292,14 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
         [field]: val,
         ...(field === 'sellingPrice'
           ? {
+              takeawayPrice: computedTakeawayForSell,
+              grabPrice: nextGrabPrice,
+              linemanPrice: nextLinemanPrice,
+              robinhoodPrice: nextRobinhoodPrice,
+            }
+          : {}),
+        ...(field === 'takeawayPrice'
+          ? {
               grabPrice: nextGrabPrice,
               linemanPrice: nextLinemanPrice,
               robinhoodPrice: nextRobinhoodPrice,
@@ -287,6 +312,14 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
         [field]: val,
         ...(field === 'sellingPrice'
           ? {
+              takeawayPrice: computedTakeawayForSell,
+              grabPrice: nextGrabPrice,
+              linemanPrice: nextLinemanPrice,
+              robinhoodPrice: nextRobinhoodPrice,
+            }
+          : {}),
+        ...(field === 'takeawayPrice'
+          ? {
               grabPrice: nextGrabPrice,
               linemanPrice: nextLinemanPrice,
               robinhoodPrice: nextRobinhoodPrice,
@@ -298,6 +331,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
     // 2. Persist price changes immediately across all serving modes; proteinWeight persists in ON_RICE
     const isPriceField =
       field === 'sellingPrice' ||
+      field === 'takeawayPrice' ||
       field === 'grabPrice' ||
       field === 'linemanPrice' ||
       field === 'robinhoodPrice';
@@ -308,13 +342,24 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
 
         if (field === 'sellingPrice') {
           const boxMarkup =
-            v.takeawayPrice && v.sellingPrice && v.takeawayPrice > v.sellingPrice
+            v.takeawayPrice !== undefined && v.sellingPrice !== undefined && v.takeawayPrice >= v.sellingPrice
               ? v.takeawayPrice - v.sellingPrice
               : 0;
+          const nextTakeaway = val > 0 ? val + boxMarkup : 0;
           return {
             ...v,
             sellingPrice: val,
-            takeawayPrice: val + boxMarkup,
+            takeawayPrice: nextTakeaway,
+            grabPrice: nextGrabPrice,
+            linemanPrice: nextLinemanPrice,
+            robinhoodPrice: nextRobinhoodPrice,
+            deliveryPrice: nextGrabPrice ?? v.deliveryPrice,
+          };
+        }
+        if (field === 'takeawayPrice') {
+          return {
+            ...v,
+            takeawayPrice: val,
             grabPrice: nextGrabPrice,
             linemanPrice: nextLinemanPrice,
             robinhoodPrice: nextRobinhoodPrice,
@@ -566,7 +611,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   <th colSpan={2} className="bg-[#FAF8F5] border-r border-black py-1 font-bold text-stone-900">
                     {lang === 'th' ? 'ข้อมูลเมนู' : 'Menu Info'}
                   </th>
-                  <th colSpan={8} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">
+                  <th colSpan={9} className="bg-[#FFF9C4] text-stone-950 font-black border-r border-black py-1">
                     {lang === 'th' ? 'ต้นทุนวัตถุดิบ & การตั้งราคาหน้าร้าน' : 'Ingredient Cost & Dine-In Pricing'}
                   </th>
                   <th colSpan={2} className="bg-cyan-700 !text-white font-black py-1.5 tracking-wide">
@@ -656,6 +701,10 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                     <div>{lang === 'th' ? 'ราคาตั้งขาย' : 'Selling Price'}</div>
                     <div className="text-[10px] text-stone-700">{lang === 'th' ? 'ที่ร้าน (บาท) ✏️' : 'Dine-in (฿) ✏️'}</div>
                   </th>
+                  <th className="py-2.5 px-2 bg-[#FFE082] text-stone-900 border-r border-black min-w-[85px]">
+                    <div>{lang === 'th' ? 'ราคาใส่กล่อง' : 'Takeaway Price'}</div>
+                    <div className="text-[10px] text-stone-700">{lang === 'th' ? '(Takeaway) ✏️' : '(Box) ✏️'}</div>
+                  </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
                     <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
                     <div className="text-[10px] text-stone-700">{lang === 'th' ? '(กรัม / ตัว) ✏️' : '(g / pc) ✏️'}</div>
@@ -699,9 +748,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               {/* GRAB COLUMNS */}
               {currentChannel === 'GRAB' && (
                 <>
-                  <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[75px]">
-                    <div>{lang === 'th' ? 'ราคาหน้าร้าน' : 'Store Price'}</div>
-                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(อ้างอิง)' : '(Ref)'}</div>
+                  <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[85px]">
+                    <div>{lang === 'th' ? 'ราคาใส่กล่อง' : 'Takeaway Price'}</div>
+                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(ฐานคำนวณ)' : '(Base)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
                     <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
@@ -741,9 +790,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               {/* LINEMAN COLUMNS */}
               {currentChannel === 'LINEMAN' && (
                 <>
-                  <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[75px]">
-                    <div>{lang === 'th' ? 'ราคาหน้าร้าน' : 'Store Price'}</div>
-                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(อ้างอิง)' : '(Ref)'}</div>
+                  <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[85px]">
+                    <div>{lang === 'th' ? 'ราคาใส่กล่อง' : 'Takeaway Price'}</div>
+                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(ฐานคำนวณ)' : '(Base)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
                     <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
@@ -783,9 +832,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               {/* ROBINHOOD COLUMNS */}
               {currentChannel === 'ROBINHOOD' && (
                 <>
-                  <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[75px]">
-                    <div>{lang === 'th' ? 'ราคาหน้าร้าน' : 'Store Price'}</div>
-                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(อ้างอิง)' : '(Ref)'}</div>
+                  <th className="py-2.5 px-2 bg-[#FAF8F5] text-stone-700 border-r border-black min-w-[85px]">
+                    <div>{lang === 'th' ? 'ราคาใส่กล่อง' : 'Takeaway Price'}</div>
+                    <div className="text-[10px] text-stone-500">{lang === 'th' ? '(ฐานคำนวณ)' : '(Base)'}</div>
                   </th>
                   <th className="py-2.5 px-2 bg-[#BBDEFB] text-stone-900 border-r border-black min-w-[105px]">
                     <div>{lang === 'th' ? 'น้ำหนักเนื้อที่ใช้' : 'Protein Weight'}</div>
@@ -861,8 +910,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 (pName.includes('กุ้ง') && pName.includes('หมึก'));
               const editKey = `${v.id}_${currentServingMode}`;
 
-              // Canonical Dine-in selling price & baseline weight (no hardcoded channel overrides)
+              // Canonical Dine-in & Takeaway prices (no hardcoded channel overrides)
               const baseSellingPrice = resolveVariantBaseSellingPrice(menu, v);
+              const baseTakeawayPrice = resolveVariantTakeawayPrice(menu, v);
               let baseWeight = 80;
 
               if (menu.name.includes('กะเพรา') || v.menuId === 'menu_kaprow') {
@@ -890,23 +940,29 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               const baseGrabPrice =
                 typeof v.grabPrice === 'number' && v.grabPrice > 0
                   ? v.grabPrice
-                  : computeChannelPriceFromMultiplier(baseSellingPrice, grabMultiplier);
+                  : computeChannelPriceFromMultiplier(baseTakeawayPrice, grabMultiplier);
               const baseLinemanPrice =
                 typeof v.linemanPrice === 'number' && v.linemanPrice > 0
                   ? v.linemanPrice
-                  : computeChannelPriceFromMultiplier(baseSellingPrice, linemanMultiplier);
+                  : computeChannelPriceFromMultiplier(baseTakeawayPrice, linemanMultiplier);
               const baseRobinhoodPrice =
                 typeof v.robinhoodPrice === 'number' && v.robinhoodPrice > 0
                   ? v.robinhoodPrice
-                  : computeChannelPriceFromMultiplier(baseSellingPrice, robinhoodMultiplier);
+                  : computeChannelPriceFromMultiplier(baseTakeawayPrice, robinhoodMultiplier);
 
-              // 1. Selling price at restaurant (USER EDITABLE)
+              // 1. Selling price at restaurant & Takeaway price (USER EDITABLE)
               const sellingPrice =
                 localEdits[editKey]?.sellingPrice !== undefined
                   ? localEdits[editKey]!.sellingPrice!
                   : (localEdits[v.id]?.sellingPrice !== undefined
                       ? localEdits[v.id]!.sellingPrice!
                       : baseSellingPrice);
+              const takeawayPrice =
+                localEdits[editKey]?.takeawayPrice !== undefined
+                  ? localEdits[editKey]!.takeawayPrice!
+                  : (localEdits[v.id]?.takeawayPrice !== undefined
+                      ? localEdits[v.id]!.takeawayPrice!
+                      : baseTakeawayPrice);
 
               // 2. Find protein recipe item
               const proteinItem = (v.recipeItems || []).find((it) => {
@@ -1137,11 +1193,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   : getDeliveryPackagingCost(settings, 'grab');
 
               const dineInProfit = Number((netDineInPrice - totalCostNum).toFixed(2));
-              const boxMarkup =
-                v.takeawayPrice && v.sellingPrice && v.takeawayPrice > v.sellingPrice
-                  ? v.takeawayPrice - v.sellingPrice
-                  : 0;
-              const effectiveTakeawayPrice = sellingPrice + boxMarkup;
+              const effectiveTakeawayPrice = takeawayPrice;
               const netTakeawayPrice = extractNetPriceFromMenuPrice(
                 effectiveTakeawayPrice,
                 isVariantVatInclusive,
@@ -1151,8 +1203,8 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               );
               const takeawayProfit = Number((netTakeawayPrice - totalCostNum - packagingAmount).toFixed(2));
 
-              // 13-17. Grab Food calculations (multiplier-based suggested price + effective GP + packaging)
-              const grabSuggestedPrice = computeChannelPriceFromMultiplier(sellingPrice, grabMultiplier);
+              // 13-17. Grab Food calculations (multiplier-based suggested price from Takeaway + effective GP + packaging)
+              const grabSuggestedPrice = computeChannelPriceFromMultiplier(effectiveTakeawayPrice, grabMultiplier);
               const grabNetSelling = extractNetPriceFromMenuPrice(
                 grabPrice,
                 isVariantVatInclusive,
@@ -1167,7 +1219,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               const grabMargin = grabNetSelling > 0 ? Number(((grabProfit / grabNetSelling) * 100).toFixed(1)) : 0;
 
               // 18-22. Line Man calculations
-              const linemanSuggestedPrice = computeChannelPriceFromMultiplier(sellingPrice, linemanMultiplier);
+              const linemanSuggestedPrice = computeChannelPriceFromMultiplier(effectiveTakeawayPrice, linemanMultiplier);
               const linemanNetSelling = extractNetPriceFromMenuPrice(
                 linemanPrice,
                 isVariantVatInclusive,
@@ -1182,7 +1234,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               const linemanMargin = linemanNetSelling > 0 ? Number(((linemanProfit / linemanNetSelling) * 100).toFixed(1)) : 0;
 
               // 23-27. Robinhood calculations (0% GP)
-              const robinhoodSuggestedPrice = computeChannelPriceFromMultiplier(sellingPrice, robinhoodMultiplier);
+              const robinhoodSuggestedPrice = computeChannelPriceFromMultiplier(effectiveTakeawayPrice, robinhoodMultiplier);
               const robinhoodNetSelling = extractNetPriceFromMenuPrice(
                 robinhoodPrice,
                 isVariantVatInclusive,
@@ -1386,6 +1438,16 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                           className="w-16 px-1.5 py-1 text-center font-bold text-stone-900 bg-white border border-blue-400 rounded focus:outline-none focus:ring-2 focus:ring-blue-600 text-xs font-mono"
                         />
                       </td>
+                      <td className="p-1 bg-[#FFF8E1] border-r border-black">
+                        <NumericInput
+                          min="0"
+                          value={takeawayPrice}
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'takeawayPrice', val)
+                          }
+                          className="w-16 px-1.5 py-1 text-center font-bold text-stone-900 bg-white border border-amber-400 rounded focus:outline-none focus:ring-2 focus:ring-amber-600 text-xs font-mono"
+                        />
+                      </td>
 
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
                         {renderProteinWeightInput(false)}
@@ -1430,7 +1492,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   {/* GRAB DATA CELLS */}
                   {currentChannel === 'GRAB' && (
                     <>
-                      <td className="py-2 px-2 bg-[#FAF8F5] text-stone-600 font-bold border-r border-black">฿{sellingPrice}</td>
+                      <td className="py-2 px-2 bg-[#FAF8F5] text-stone-600 font-bold border-r border-black">฿{effectiveTakeawayPrice}</td>
                       {/* น้ำหนักเนื้อที่ใช้ (EDITABLE) */}
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
                         {renderProteinWeightInput(false)}
@@ -1473,7 +1535,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   {/* LINEMAN DATA CELLS */}
                   {currentChannel === 'LINEMAN' && (
                     <>
-                      <td className="py-2 px-2 bg-[#FAF8F5] text-stone-600 font-bold border-r border-black">฿{sellingPrice}</td>
+                      <td className="py-2 px-2 bg-[#FAF8F5] text-stone-600 font-bold border-r border-black">฿{effectiveTakeawayPrice}</td>
                       {/* น้ำหนักเนื้อที่ใช้ (EDITABLE) */}
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
                         {renderProteinWeightInput(false)}
@@ -1516,7 +1578,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                   {/* ROBINHOOD DATA CELLS */}
                   {currentChannel === 'ROBINHOOD' && (
                     <>
-                      <td className="py-2 px-2 bg-[#FAF8F5] text-stone-600 font-bold border-r border-black">฿{sellingPrice}</td>
+                      <td className="py-2 px-2 bg-[#FAF8F5] text-stone-600 font-bold border-r border-black">฿{effectiveTakeawayPrice}</td>
                       {/* น้ำหนักเนื้อที่ใช้ (EDITABLE) */}
                       <td className="p-1 bg-[#BBDEFB] border-r border-black">
                         {renderProteinWeightInput(false)}

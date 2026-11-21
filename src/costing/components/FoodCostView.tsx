@@ -47,6 +47,7 @@ import { NumericInput } from './common/NumericInput';
 import { MenuPricingSpreadsheetTable } from './MenuPricingSpreadsheetTable';
 import {
   resolveVariantBaseSellingPrice,
+  resolveVariantTakeawayPrice,
   computeChannelPriceFromMultiplier,
 } from '../services/spreadsheetCostHelper';
 
@@ -612,14 +613,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   menus.forEach((menu) => {
     menu.variants.forEach((variant) => {
       const baseSell = resolveVariantBaseSellingPrice(menu, variant);
+      const baseTakeaway = resolveVariantTakeawayPrice(menu, variant);
       const effectiveChannelPrice =
         activeChannel === 'LINEMAN'
           ? (typeof variant.linemanPrice === 'number' && variant.linemanPrice > 0
               ? variant.linemanPrice
-              : computeChannelPriceFromMultiplier(baseSell, linemanMultiplier))
+              : computeChannelPriceFromMultiplier(baseTakeaway, linemanMultiplier))
           : (typeof variant.grabPrice === 'number' && variant.grabPrice > 0
               ? variant.grabPrice
-              : computeChannelPriceFromMultiplier(baseSell, grabMultiplier));
+              : computeChannelPriceFromMultiplier(baseTakeaway, grabMultiplier));
       const breakdown = calculateVariantCostBreakdown(
         {
           ...variant,
@@ -758,7 +760,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         ? selectedCategory
         : (categories.find((c) => c !== 'ALL') || 'ผัดและกะเพรา');
     const initialMenuSell = 60;
-    const initialMultiplied = calculateMultipliedChannelPrices(initialMenuSell, settings);
+    const initialTakeaway = initialMenuSell + 5;
+    const initialMultiplied = calculateMultipliedChannelPrices(initialTakeaway, settings);
 
     const newMenu: Partial<MenuItem> = {
       id: `menu_${Date.now()}`,
@@ -775,7 +778,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           englishName: 'Regular',
           proteinType: 'หมูสับ',
           sellingPrice: initialMenuSell,
-          takeawayPrice: initialMenuSell + 5,
+          takeawayPrice: initialTakeaway,
           deliveryPrice: initialMultiplied.grabPrice,
           grabPrice: initialMultiplied.grabPrice,
           linemanPrice: initialMultiplied.linemanPrice,
@@ -852,6 +855,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     }
 
     const basePrice = 65;
+    const baseTakeaway = basePrice + 5;
     const proteinItems: RecipeItem[] = defaultIng
       ? [
           {
@@ -873,11 +877,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       englishName: translateThaiToEnglish(variantTh),
       proteinType: defaultProtein,
       sellingPrice: basePrice,
-      takeawayPrice: basePrice + 5,
-      deliveryPrice: Math.round(basePrice * grabMultiplier),
-      grabPrice: Math.round(basePrice * grabMultiplier),
-      linemanPrice: Math.round(basePrice * linemanMultiplier),
-      robinhoodPrice: Math.round(basePrice * robinhoodMultiplier),
+      takeawayPrice: baseTakeaway,
+      deliveryPrice: Math.round(baseTakeaway * grabMultiplier),
+      grabPrice: Math.round(baseTakeaway * grabMultiplier),
+      linemanPrice: Math.round(baseTakeaway * linemanMultiplier),
+      robinhoodPrice: Math.round(baseTakeaway * robinhoodMultiplier),
       overheadCost: 6.0,
       packagingCost: 9.0,
       recipeItems: [...proteinItems, ...defaultBaseItems.map((it) => ({ ...it }))],
@@ -944,15 +948,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
     const clonedVariant: Partial<MenuVariant> = JSON.parse(JSON.stringify(variant));
     const resolvedSell = resolveVariantBaseSellingPrice(menu, variant);
+    const resolvedTakeaway = resolveVariantTakeawayPrice(menu, variant);
     clonedVariant.sellingPrice = resolvedSell;
+    clonedVariant.takeawayPrice = resolvedTakeaway;
     if (!(typeof clonedVariant.grabPrice === 'number' && clonedVariant.grabPrice > 0)) {
-      clonedVariant.grabPrice = computeChannelPriceFromMultiplier(resolvedSell, grabMultiplier);
+      clonedVariant.grabPrice = computeChannelPriceFromMultiplier(resolvedTakeaway, grabMultiplier);
     }
     if (!(typeof clonedVariant.linemanPrice === 'number' && clonedVariant.linemanPrice > 0)) {
-      clonedVariant.linemanPrice = computeChannelPriceFromMultiplier(resolvedSell, linemanMultiplier);
+      clonedVariant.linemanPrice = computeChannelPriceFromMultiplier(resolvedTakeaway, linemanMultiplier);
     }
     if (!(typeof clonedVariant.robinhoodPrice === 'number' && clonedVariant.robinhoodPrice > 0)) {
-      clonedVariant.robinhoodPrice = computeChannelPriceFromMultiplier(resolvedSell, robinhoodMultiplier);
+      clonedVariant.robinhoodPrice = computeChannelPriceFromMultiplier(resolvedTakeaway, robinhoodMultiplier);
     }
     clonedVariant.deliveryPrice = clonedVariant.grabPrice;
     const existingTh = clonedVariant.thaiName || clonedVariant.name || '';
@@ -1388,6 +1394,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const updatedMenus = recalculateMenusWithChannelMultipliers(menus, nextSettings, {
       channels: [channel],
       resolveBaseSellingPrice: resolveVariantBaseSellingPrice,
+      resolveBaseTakeawayPrice: resolveVariantTakeawayPrice,
       updatedAt: nowIso,
     });
 
@@ -1399,8 +1406,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
     // Keep open Variant Modal synced in real time if currently open
     if (variantModalState.isOpen && variantModalState.variant) {
-      const modalSell = Number(variantModalState.variant.sellingPrice) || 0;
-      const modalNextChannelPrice = computeChannelPriceFromMultiplier(modalSell, nextVal);
+      const modalTakeaway =
+        variantModalState.variant.takeawayPrice !== undefined &&
+        variantModalState.variant.takeawayPrice !== null
+          ? Number(variantModalState.variant.takeawayPrice) || 0
+          : Number(variantModalState.variant.sellingPrice) || 0;
+      const modalNextChannelPrice = computeChannelPriceFromMultiplier(modalTakeaway, nextVal);
       setVariantModalState((prev) => ({
         ...prev,
         variant: prev.variant
@@ -1518,7 +1529,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         <div className="pt-2 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-stone-700 text-[11px]">
-              {isEn ? 'Auto Price Multipliers (from Dine-in):' : 'ตัวคูณราคาขายอัตโนมัติ (จากราคาหน้าร้าน):'}
+              {isEn ? 'Auto Price Multipliers (from Takeaway):' : 'ตัวคูณราคาขายอัตโนมัติ (จากราคาใส่กล่อง Takeaway):'}
             </span>
 
             <label className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -1569,8 +1580,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
           <span className="text-[10px] text-stone-500">
             {isEn
-              ? 'Channel prices auto-multiply whenever Dine-in price is edited'
-              : 'เมื่อใส่ราคาหน้าร้าน ระบบจะคูณราคา Grab / LINE MAN / Robinhood ให้อัตโนมัติ'}
+              ? 'Channel prices auto-multiply whenever Takeaway price is edited'
+              : 'เมื่อใส่ราคาใส่กล่อง (Takeaway) ระบบจะคูณราคา Grab / LINE MAN / Robinhood ให้อัตโนมัติ'}
           </span>
         </div>
       </div>
@@ -2139,7 +2150,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     Boolean(settings.pricesIncludeVat ?? settings.salesVatInclusive));
                 const scIncluded = Boolean(settings.serviceChargeIncludedInPrice);
                 const scRate = settings.serviceChargePercent ?? 0;
-                const resolvedBaseSell = resolveVariantBaseSellingPrice(
+                const resolvedBaseTakeaway = resolveVariantTakeawayPrice(
                   selectedBreakdown.menu,
                   selectedBreakdown.variant
                 );
@@ -2147,17 +2158,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   typeof selectedBreakdown.variant.grabPrice === 'number' &&
                   selectedBreakdown.variant.grabPrice > 0
                     ? selectedBreakdown.variant.grabPrice
-                    : computeChannelPriceFromMultiplier(resolvedBaseSell, grabMultiplier);
+                    : computeChannelPriceFromMultiplier(resolvedBaseTakeaway, grabMultiplier);
                 const linemanGross =
                   typeof selectedBreakdown.variant.linemanPrice === 'number' &&
                   selectedBreakdown.variant.linemanPrice > 0
                     ? selectedBreakdown.variant.linemanPrice
-                    : computeChannelPriceFromMultiplier(resolvedBaseSell, linemanMultiplier);
+                    : computeChannelPriceFromMultiplier(resolvedBaseTakeaway, linemanMultiplier);
                 const robinhoodGross =
                   typeof selectedBreakdown.variant.robinhoodPrice === 'number' &&
                   selectedBreakdown.variant.robinhoodPrice > 0
                     ? selectedBreakdown.variant.robinhoodPrice
-                    : computeChannelPriceFromMultiplier(resolvedBaseSell, robinhoodMultiplier);
+                    : computeChannelPriceFromMultiplier(resolvedBaseTakeaway, robinhoodMultiplier);
                 const grabNetExVat = extractNetPriceFromMenuPrice(
                   grabGross,
                   isVatInclusive,
@@ -3570,19 +3581,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                         </option>
                       ))}
                     </select>
-
-                    {currentNonProteinItems.length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-0.5">
-                        {currentNonProteinItems.map((it, idx) => (
-                          <span
-                            key={`${it.id || it.ingredientId}-${idx}`}
-                            className="px-2 py-0.5 bg-white border border-emerald-200 rounded-lg text-[10px] text-stone-700 font-medium"
-                          >
-                            {getLocalizedText(lang, it.name)} ({it.quantity} {localizeUnit(it.unit, lang)})
-                          </span>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -3601,19 +3599,29 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       min="0"
                       value={variantModalState.variant.sellingPrice}
                       onValueChange={(price) => {
-                        const multiplied = calculateMultipliedChannelPrices(price, settings);
-                        setVariantModalState((prev) => ({
-                          ...prev,
-                          variant: {
-                            ...prev.variant,
-                            sellingPrice: price,
-                            takeawayPrice: price > 0 ? price + 5 : 0,
-                            deliveryPrice: multiplied.grabPrice,
-                            grabPrice: multiplied.grabPrice,
-                            linemanPrice: multiplied.linemanPrice,
-                            robinhoodPrice: multiplied.robinhoodPrice,
-                          },
-                        }));
+                        setVariantModalState((prev) => {
+                          if (!prev.variant) return prev;
+                          const prevSell = Number(prev.variant.sellingPrice) || 0;
+                          const prevTakeaway = Number(prev.variant.takeawayPrice) || 0;
+                          const boxMarkup =
+                            prevSell > 0 && prev.variant.takeawayPrice !== undefined && prevTakeaway >= prevSell
+                              ? prevTakeaway - prevSell
+                              : 5;
+                          const nextTakeaway = price > 0 ? price + boxMarkup : 0;
+                          const multiplied = calculateMultipliedChannelPrices(nextTakeaway, settings);
+                          return {
+                            ...prev,
+                            variant: {
+                              ...prev.variant,
+                              sellingPrice: price,
+                              takeawayPrice: nextTakeaway,
+                              deliveryPrice: multiplied.grabPrice,
+                              grabPrice: multiplied.grabPrice,
+                              linemanPrice: multiplied.linemanPrice,
+                              robinhoodPrice: multiplied.robinhoodPrice,
+                            },
+                          };
+                        });
                       }}
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"
                     />
@@ -3626,12 +3634,20 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <NumericInput
                       min="0"
                       value={variantModalState.variant.takeawayPrice}
-                      onValueChange={(val) =>
+                      onValueChange={(val) => {
+                        const multiplied = calculateMultipliedChannelPrices(val, settings);
                         setVariantModalState((prev) => ({
                           ...prev,
-                          variant: { ...prev.variant, takeawayPrice: val },
-                        }))
-                      }
+                          variant: {
+                            ...prev.variant,
+                            takeawayPrice: val,
+                            deliveryPrice: multiplied.grabPrice,
+                            grabPrice: multiplied.grabPrice,
+                            linemanPrice: multiplied.linemanPrice,
+                            robinhoodPrice: multiplied.robinhoodPrice,
+                          },
+                        }));
+                      }}
                       className="w-full p-2 bg-white border border-stone-300 rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26]"
                     />
                   </div>
@@ -3706,14 +3722,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </div>
               </div>
 
-              {/* POS Integration: Code / SKU, Out-of-Stock Status & Available Channels */}
+              {/* POS Integration: Code / SKU & Out-of-Stock Status */}
               <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-stone-900 text-xs flex items-center gap-1.5">
                     <span>{isEn ? '📡 POS Integration Data' : '📡 ข้อมูลเชื่อมต่อระบบ POS (POS Integration)'}</span>
                   </span>
                   <span className="text-[10px] text-stone-500 font-mono">
-                    {isEn ? 'SKU & Channel Availability' : 'SKU และช่องทางจำหน่าย'}
+                    {isEn ? 'SKU & Stock Status' : 'SKU และสถานะการขาย'}
                   </span>
                 </div>
 
@@ -3794,58 +3810,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       {isEn ? 'Active in System' : 'เปิดใช้งานในระบบ (Active)'}
                     </span>
                   </label>
-                </div>
-
-                {/* Channel selection */}
-                <div className="pt-1 border-t border-stone-200">
-                  <label className="block text-stone-700 mb-1.5 font-bold text-[11px]">
-                    {isEn ? 'Available Channels:' : 'ช่องทางจำหน่ายที่เปิดขาย (Available Channels):'}
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { id: 'DINE_IN', label: isEn ? 'Dine-in' : 'หน้าร้าน (Dine-in)' },
-                      { id: 'TAKEAWAY', label: isEn ? 'Takeaway' : 'ใส่กล่อง (Takeaway)' },
-                      { id: 'GRAB', label: 'GrabFood' },
-                      { id: 'LINEMAN', label: 'LINE MAN' },
-                    ].map((ch) => {
-                      const currentChannels = variantModalState.variant?.availableChannels || [
-                        'DINE_IN',
-                        'TAKEAWAY',
-                        'GRAB',
-                        'LINEMAN',
-                      ];
-                      const isChecked = currentChannels.includes(ch.id);
-                      return (
-                        <label
-                          key={ch.id}
-                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer border transition-colors ${
-                            isChecked
-                              ? 'bg-[#F27D26]/10 border-[#F27D26] text-[#B45309]'
-                              : 'bg-white border-stone-200 text-stone-500'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              const nextChannels = e.target.checked
-                                ? [...currentChannels, ch.id]
-                                : currentChannels.filter((c) => c !== ch.id);
-                              setVariantModalState((prev) => ({
-                                ...prev,
-                                variant: {
-                                  ...prev.variant,
-                                  availableChannels: nextChannels,
-                                },
-                              }));
-                            }}
-                            className="sr-only"
-                          />
-                          <span>{ch.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
 

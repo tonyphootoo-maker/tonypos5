@@ -25,6 +25,7 @@ import {
 } from '../../costing/services/calculationEngine';
 import {
   resolveVariantBaseSellingPrice,
+  resolveVariantTakeawayPrice,
   computeChannelPriceFromMultiplier,
 } from '../../costing/services/spreadsheetCostHelper';
 import { Ingredient, MenuItem, MenuVariant, RestaurantSettings, Sauce } from '../../costing/types';
@@ -532,7 +533,7 @@ describe('Menu Costing, Sauce Validation, Units, Pricing, Delivery GP+VAT & Sale
       expect(computeChannelPriceFromMultiplier(0, 1.5)).toBe(0);
     });
 
-    it('recalculates GrabFood, LINE MAN, and Robinhood prices immediately upon updating base price or multipliers', () => {
+    it('recalculates GrabFood, LINE MAN, and Robinhood prices immediately from Takeaway price', () => {
       // Default multipliers: GrabFood 1.5x, LINE MAN 1.5x, Robinhood 1.0x
       expect(resolveChannelMultipliers(undefined)).toEqual({
         grab: 1.5,
@@ -548,33 +549,49 @@ describe('Menu Costing, Sauce Validation, Units, Pricing, Delivery GP+VAT & Sale
         robinhoodPrice: 80,
       });
 
-      // 1. Base price change triggers immediate recalculation across all 3 channels
-      const initialVar = makeVar({ sellingPrice: 80, grabPrice: 120, linemanPrice: 120, robinhoodPrice: 80 });
-      const afterBaseChange = applyChannelMultipliersToVariant(
+      // 1. Takeaway price change triggers immediate recalculation across all 3 channels without overwriting Dine-in price
+      const initialVar = makeVar({
+        sellingPrice: 80,
+        takeawayPrice: 85,
+        grabPrice: 128,
+        linemanPrice: 128,
+        robinhoodPrice: 85,
+      });
+      const afterTakeawayChange = applyChannelMultipliersToVariant(
         initialVar,
         { grabPriceMultiplier: 1.5, linemanPriceMultiplier: 1.5, robinhoodPriceMultiplier: 1.0 },
-        { baseSellingPriceOverride: 100 }
+        { baseTakeawayPriceOverride: 100 }
       );
-      expect(afterBaseChange.sellingPrice).toBe(100);
-      expect(afterBaseChange.grabPrice).toBe(150);
-      expect(afterBaseChange.deliveryPrice).toBe(150);
-      expect(afterBaseChange.linemanPrice).toBe(150);
-      expect(afterBaseChange.robinhoodPrice).toBe(100);
+      expect(afterTakeawayChange.sellingPrice).toBe(80);
+      expect(afterTakeawayChange.takeawayPrice).toBe(100);
+      expect(afterTakeawayChange.grabPrice).toBe(150);
+      expect(afterTakeawayChange.deliveryPrice).toBe(150);
+      expect(afterTakeawayChange.linemanPrice).toBe(150);
+      expect(afterTakeawayChange.robinhoodPrice).toBe(100);
 
-      // 2. Multiplier change triggers immediate recalculation across menu variants
-      const menuWithVar: MenuItem = { ...kaprowMenu, variants: [afterBaseChange] };
+      // 2. Multiplier change triggers immediate recalculation from resolved Takeaway price
+      const menuWithVar: MenuItem = { ...kaprowMenu, variants: [afterTakeawayChange] };
       const afterMultiplierUpdate = recalculateMenusWithChannelMultipliers(
         [menuWithVar],
         { grabPriceMultiplier: 1.8, linemanPriceMultiplier: 1.6, robinhoodPriceMultiplier: 1.2 },
-        { resolveBaseSellingPrice: resolveVariantBaseSellingPrice }
+        {
+          resolveBaseSellingPrice: resolveVariantBaseSellingPrice,
+          resolveBaseTakeawayPrice: resolveVariantTakeawayPrice,
+        }
       );
       const updatedVar = afterMultiplierUpdate[0].variants[0];
+      expect(updatedVar.sellingPrice).toBe(80);
+      expect(updatedVar.takeawayPrice).toBe(100);
       expect(updatedVar.grabPrice).toBe(180);
       expect(updatedVar.deliveryPrice).toBe(180);
       expect(updatedVar.linemanPrice).toBe(160);
       expect(updatedVar.robinhoodPrice).toBe(120);
 
-      // 3. Clearing base price to 0 resets multiplied channel prices cleanly to 0
+      // 3. resolveVariantTakeawayPrice preserves box markup on template price adjustments
+      const templateKaprowVar = makeVar({ proteinType: 'หมูหมัก', sellingPrice: 65, takeawayPrice: 70 });
+      expect(resolveVariantTakeawayPrice(kaprowMenu, templateKaprowVar)).toBe(84);
+
+      // 4. Clearing Takeaway price to 0 resets multiplied channel prices cleanly to 0
       expect(calculateMultipliedChannelPrices(0, { grabPriceMultiplier: 1.8 })).toEqual({
         dineInPrice: 0,
         grabPrice: 0,
