@@ -284,11 +284,11 @@ export const Navigation: React.FC<Props> = ({
         <div className="p-4 bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 text-white flex items-center justify-between shadow-[0_4px_0_rgba(154,52,18,0.3),0_10px_20px_-6px_rgba(234,88,12,0.3)] shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center font-black text-white text-lg border border-white/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_3px_0_rgba(0,0,0,0.16)]">
-              K
+              T
             </div>
             <div className="leading-tight">
               <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-base tracking-tight">KinPOS</span>
+                <span className="font-extrabold text-base tracking-tight">Tony&apos;s POS</span>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-white/20 text-white">
                   Pro
                 </span>
@@ -422,11 +422,11 @@ export const Navigation: React.FC<Props> = ({
             className="flex items-center gap-2.5 cursor-pointer select-none"
           >
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 flex items-center justify-center text-white font-black text-lg border border-orange-300/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_3px_0_#c2410c,0_8px_16px_-4px_rgba(234,88,12,0.35)]">
-              K
+              T
             </div>
             <div className="leading-tight">
               <div className="font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
-                <span>KinPOS</span>
+                <span>Tony&apos;s POS</span>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700 border border-orange-200">
                   Pro
                 </span>

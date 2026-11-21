@@ -16,7 +16,7 @@ interface Props {
 export const PWAInstallButton: React.FC<Props> = ({
   lang: propLang,
   variant = 'header',
-  appName = 'KinPOS',
+  appName = "Tony's POS",
   theme = 'orange',
   onActionTaken,
 }) => {
@@ -80,7 +80,7 @@ export const PWAInstallButton: React.FC<Props> = ({
     return null;
   }
 
-  const isCustomApp = appName !== 'KinPOS';
+  const isCustomApp = appName !== "Tony's POS";
   const isRiderApp = appName.toLowerCase().includes('rider');
   const labelText =
     lang === 'th'

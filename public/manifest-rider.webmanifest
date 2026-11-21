@@ -1,8 +1,8 @@
 {
   "id": "./?mode=rider",
-  "name": "KinPOS Rider - งานจัดส่ง",
-  "short_name": "KinPOS Rider",
-  "description": "ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ KinPOS",
+  "name": "Tony's POS Rider - งานจัดส่ง",
+  "short_name": "Tony's POS Rider",
+  "description": "ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ Tony's POS",
   "start_url": "./?mode=rider",
   "scope": "./",
   "display": "standalone",

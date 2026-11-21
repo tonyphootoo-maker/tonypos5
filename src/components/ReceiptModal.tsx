@@ -287,8 +287,8 @@ export const ReceiptModal: React.FC<Props> = ({
               {settings.receiptFooter && <p>{settings.receiptFooter}</p>}
               <p className="text-[9px] text-neutral-400">
                 {lang === 'th'
-                  ? 'KinPOS Engine - ยืนยันข้อมูลผ่านระบบคลาวด์'
-                  : 'KinPOS Engine - Cloud Verified'}
+                  ? "Tony's POS Engine - ยืนยันข้อมูลผ่านระบบคลาวด์"
+                  : "Tony's POS Engine - Cloud Verified"}
               </p>
             </div>
           </div>

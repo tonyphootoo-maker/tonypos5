@@ -42,7 +42,7 @@ export const BackupPage: React.FC<Props> = ({ settings, lang: propLang }) => {
       const url = URL.createObjectURL(blob);
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `KinPOS_Full_Backup_${timestamp}.json`;
+      const filename = `TonysPOS_Full_Backup_${timestamp}.json`;
 
       const link = document.createElement('a');
       link.href = url;

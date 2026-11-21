@@ -156,7 +156,7 @@ export function sanitizeMenuForPublicStore(params: {
   const publicStore: PublicStoreDoc = {
     id: storeId,
     storeId,
-    shopName: settings.shopName || 'KinPOS Restaurant',
+    shopName: settings.shopName || "Tony's POS Restaurant",
     ...(settings.shopAddress ? { shopAddress: settings.shopAddress } : {}),
     ...(settings.shopPhone ? { shopPhone: settings.shopPhone } : {}),
     ...(settings.qrImageId ? { qrImageId: settings.qrImageId } : {}),

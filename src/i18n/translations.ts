@@ -1,6 +1,6 @@
 export const translations = {
   en: {
-    appName: 'KinPOS Restaurant & Food Cost',
+    appName: "Tony's POS Restaurant & Food Cost",
     tagline: 'Professional POS, Food Cost Engineering & Restaurant Finance',
     // Navigation
     nav: {
@@ -417,7 +417,7 @@ export const translations = {
     },
   },
   th: {
-    appName: 'KinPOS ระบบจัดการร้านอาหารและต้นทุน',
+    appName: "Tony's POS ระบบจัดการร้านอาหารและต้นทุน",
     tagline: 'ระบบขายหน้าร้าน คำนวณต้นทุนอาหาร และวิเคราะห์การเงินครบวงจร',
     nav: {
       tablesPos: 'โต๊ะ / จุดขาย (POS)',

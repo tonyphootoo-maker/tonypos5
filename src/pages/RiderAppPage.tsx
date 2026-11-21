@@ -65,10 +65,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
   // Keep dedicated Rider PWA manifest & iOS touch icon synchronized in document head
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    document.title = lang === 'th' ? 'KinPOS Rider - งานจัดส่ง' : 'KinPOS Rider - Delivery Dispatch';
+    document.title = lang === 'th' ? "Tony's POS Rider - งานจัดส่ง" : "Tony's POS Rider - Delivery Dispatch";
 
     const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-    if (appleTitle) appleTitle.setAttribute('content', 'KinPOS Rider');
+    if (appleTitle) appleTitle.setAttribute('content', "Tony's POS Rider");
 
     const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
     if (appleIcon) appleIcon.setAttribute('href', './rider-apple-touch-icon.png');
@@ -214,7 +214,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                 <Bike className="w-6 h-6" />
               </div>
               <div className="min-w-0">
-                <h1 className="font-extrabold text-base text-white truncate">KinPOS Rider</h1>
+                <h1 className="font-extrabold text-base text-white truncate">Tony&apos;s POS Rider</h1>
                 <p className="text-xs text-slate-400 truncate">
                   {store?.shopName || (lang === 'th' ? 'งานจัดส่งอาหาร' : 'Delivery Dispatch')}
                 </p>
@@ -222,7 +222,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              <PWAInstallButton lang={lang} variant="button" appName="KinPOS Rider" theme="emerald" />
+              <PWAInstallButton lang={lang} variant="button" appName="Tony's POS Rider" theme="emerald" />
               <button
                 type="button"
                 onClick={toggleLang}
@@ -277,7 +277,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-4 space-y-3">
-        <PWAInstallButton lang={lang} variant="rider-banner" appName="KinPOS Rider" theme="emerald" />
+        <PWAInstallButton lang={lang} variant="rider-banner" appName="Tony's POS Rider" theme="emerald" />
 
         {errorMsg && (
           <div className="p-3.5 rounded-2xl bg-rose-950/70 border border-rose-700 text-rose-200 text-xs font-bold flex items-center gap-2">
