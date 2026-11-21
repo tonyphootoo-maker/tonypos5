@@ -16,7 +16,6 @@ import {
   Sparkles,
   Calculator,
   BookOpen,
-  FlaskConical,
   Beef,
   ShoppingCart,
   Boxes,
@@ -203,15 +202,6 @@ export const Navigation: React.FC<Props> = ({
             en: 'Standardized dish recipe cards',
           },
           icon: <BookOpen className="w-5 h-5 text-orange-700" />,
-        },
-        {
-          id: 'cost_sauces',
-          label: lang === 'th' ? 'ซอส & น้ำซุปสูตรกลาง' : 'Batch Sauces & Broths',
-          desc: {
-            th: 'คำนวณต้นทุนซอสปรุงหม้อใหญ่ต่อกรัม',
-            en: 'Batch sauce yield & cost per gram',
-          },
-          icon: <FlaskConical className="w-5 h-5 text-amber-700" />,
         },
         {
           id: 'cost_ingredients',

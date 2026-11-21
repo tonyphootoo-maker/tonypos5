@@ -1171,7 +1171,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                        <th className="py-2.5 px-3">{lang === 'en' ? 'Type' : 'หมวดหมู่'}</th>
                         <th className="py-2.5 px-3">{lang === 'en' ? 'Recipe Item' : 'ชื่อรายการในสูตร'}</th>
                         <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
                         <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
@@ -1186,22 +1185,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
                         return (
                           <tr key={`${item.id || 'item'}-${index}`} className="hover:bg-white/5 transition-colors">
-                            <td className="py-2.5 px-3 font-sans">
-                              {item.type === 'SAUCE' ? (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-[#F27D26]/20 text-[#F27D26] border border-[#F27D26]/30">
-                                  🧪 {lang === 'en' ? 'Sauce' : 'ซอสปรุง'}
-                                </span>
-                              ) : item.type === 'PREPARED_ITEM' ? (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                  🥗 {lang === 'en' ? 'Side Dish' : 'เครื่องเคียง'}
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                  🌿 {lang === 'en' ? 'Base Ing.' : 'วัตถุดิบกลาง'}
-                                </span>
-                              )}
-                            </td>
-
                             <td className="py-2.5 px-3 font-sans font-medium text-white">
                               {item.type === 'SAUCE' ? (
                                 <select
