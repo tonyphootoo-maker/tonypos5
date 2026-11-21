@@ -7,16 +7,16 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Tony's POS" />
+    <meta name="apple-mobile-web-app-title" content="Tony's Kit" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="icon" href="./favicon.ico" sizes="any" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
-    <title>Tony's POS - Restaurant POS &amp; Food Cost Engine</title>
+    <title>Tony's Kit - Restaurant POS &amp; Food Cost Engine</title>
     <meta name="description" content="Bilingual Thai/English restaurant POS, live food cost calculation, recipe engineering, floor plan tables, shifts, and financial P&amp;L reporting." />
-    <meta property="og:title" content="Tony's POS - Restaurant POS &amp; Food Cost Engine" />
+    <meta property="og:title" content="Tony's Kit - Restaurant POS &amp; Food Cost Engine" />
     <meta property="og:description" content="Bilingual Thai/English restaurant POS, live food cost calculation, recipe engineering, floor plan tables, shifts, and financial P&amp;L reporting." />
     <meta property="og:type" content="website" />
     <script>
@@ -68,9 +68,9 @@
         var isRider = mode === 'rider' || pathLower === '/rider' || pathLower.endsWith('/rider');
         var isOrder = mode === 'order' || pathLower === '/order' || pathLower.endsWith('/order');
         if (isRider) {
-          document.title = "Tony's POS Rider - งานจัดส่ง";
+          document.title = "Tony's Kit Rider - งานจัดส่ง";
           var appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-          if (appleTitle) appleTitle.setAttribute('content', "Tony's POS Rider");
+          if (appleTitle) appleTitle.setAttribute('content', "Tony's Kit Rider");
           var themeMeta = document.querySelector('meta[name="theme-color"]');
           if (themeMeta) themeMeta.setAttribute('content', '#0f172a');
           var appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
@@ -87,7 +87,7 @@
             document.head.appendChild(ml);
           }
         } else if (isOrder) {
-          document.title = "สั่งอาหารออนไลน์ | Tony's POS Online Order";
+          document.title = "สั่งอาหารออนไลน์ | Tony's Kit Online Order";
           var orderTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
           if (orderTitle) orderTitle.setAttribute('content', 'สั่งอาหาร');
         }
@@ -95,14 +95,14 @@
     </script>
     <noscript>
       <div style="padding: 2rem; color: #fff; background: #991b1b; text-align: center; font-family: sans-serif;">
-        JavaScript is required to run Tony's POS. Please enable JavaScript in your browser settings. / กรุณาเปิดใช้งาน JavaScript ในเบราว์เซอร์ของคุณ
+        JavaScript is required to run Tony's Kit. Please enable JavaScript in your browser settings. / กรุณาเปิดใช้งาน JavaScript ในเบราว์เซอร์ของคุณ
       </div>
     </noscript>
     <div id="root">
       <div id="boot-msg" style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Plus Jakarta Sans', 'Noto Sans Thai', system-ui, sans-serif; color: #0f172a; background: linear-gradient(180deg, #f6f8fc 0%, #e9eef5 100%); text-align: center; padding: 1.5rem;">
         <div style="width: 60px; height: 60px; border-radius: 18px; background: linear-gradient(135deg, #f97316, #ea580c); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 26px; margin-bottom: 16px; box-shadow: 0 5px 0 #c2410c, 0 14px 28px rgba(234, 88, 12, 0.28); border: 1px solid rgba(255,255,255,0.4);">T</div>
-        <h2 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">Tony's POS</h2>
-        <p id="boot-status" style="margin: 8px 0 0; font-size: 13px; color: #ea580c; font-weight: 600;">Loading Tony's POS... / กำลังโหลด...</p>
+        <h2 style="margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.5px;">Tony's Kit</h2>
+        <p id="boot-status" style="margin: 8px 0 0; font-size: 13px; color: #ea580c; font-weight: 600;">Loading Tony's Kit... / กำลังโหลด...</p>
       </div>
     </div>
     <script type="module" src="./src/main.tsx"></script>

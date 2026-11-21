@@ -29,7 +29,7 @@ import {
   INITIAL_SALES_ORDERS,
   INITIAL_WASTE_LOG,
 } from '../data/initialData';
-import { calculateIngredientCost } from './calculationEngine';
+import { calculateIngredientCost, deriveGpMultiplierFromSettings } from './calculationEngine';
 import { generateId, generateOrderNumber } from '../utils/id';
 
 export { generateId, generateOrderNumber };
@@ -100,6 +100,37 @@ export function migrateSettings(rawSettings: any): RestaurantSettings {
   const grabPercent = rawSettings.grabFoodCommissionPercent ?? (rawSettings.channels?.find((c: any) => c.channelId === 'grab')?.commissionPercent ?? 30);
   const linemanPercent = rawSettings.lineManCommissionPercent ?? (rawSettings.channels?.find((c: any) => c.channelId === 'lineman')?.commissionPercent ?? 25);
 
+  const normalizedForGp: Partial<RestaurantSettings> = {
+    ...INITIAL_SETTINGS,
+    ...rawSettings,
+    vatRatePercent: vatRate,
+    incomeTaxRatePercent: incomeTaxRate,
+    grabFoodCommissionPercent: grabPercent,
+    lineManCommissionPercent: linemanPercent,
+  };
+
+  const gpDerivedGrab = deriveGpMultiplierFromSettings(normalizedForGp, 'grab');
+  const gpDerivedLineman = deriveGpMultiplierFromSettings(normalizedForGp, 'lineman');
+  const gpDerivedRobinhood = deriveGpMultiplierFromSettings(normalizedForGp, 'robinhood');
+  const needsGpMigration = !rawSettings.gpMultiplierMigrated;
+
+  const rawGrabMult = Number(rawSettings.grabPriceMultiplier);
+  const rawLinemanMult = Number(rawSettings.linemanPriceMultiplier);
+  const rawRobinhoodMult = Number(rawSettings.robinhoodPriceMultiplier);
+
+  const resolvedGrabMultiplier =
+    Number.isFinite(rawGrabMult) && rawGrabMult > 0 && !(needsGpMigration && rawGrabMult === 1.5)
+      ? rawGrabMult
+      : gpDerivedGrab;
+  const resolvedLinemanMultiplier =
+    Number.isFinite(rawLinemanMult) && rawLinemanMult > 0 && !(needsGpMigration && rawLinemanMult === 1.5)
+      ? rawLinemanMult
+      : gpDerivedLineman;
+  const resolvedRobinhoodMultiplier =
+    Number.isFinite(rawRobinhoodMult) && rawRobinhoodMult > 0
+      ? rawRobinhoodMult
+      : gpDerivedRobinhood;
+
   return {
     ...INITIAL_SETTINGS,
     ...rawSettings,
@@ -114,18 +145,10 @@ export function migrateSettings(rawSettings: any): RestaurantSettings {
       : 3.0,
     grabFoodCommissionPercent: grabPercent,
     lineManCommissionPercent: linemanPercent,
-    grabPriceMultiplier:
-      typeof rawSettings.grabPriceMultiplier === 'number' && Number.isFinite(rawSettings.grabPriceMultiplier) && rawSettings.grabPriceMultiplier > 0
-        ? rawSettings.grabPriceMultiplier
-        : 1.5,
-    linemanPriceMultiplier:
-      typeof rawSettings.linemanPriceMultiplier === 'number' && Number.isFinite(rawSettings.linemanPriceMultiplier) && rawSettings.linemanPriceMultiplier > 0
-        ? rawSettings.linemanPriceMultiplier
-        : 1.5,
-    robinhoodPriceMultiplier:
-      typeof rawSettings.robinhoodPriceMultiplier === 'number' && Number.isFinite(rawSettings.robinhoodPriceMultiplier) && rawSettings.robinhoodPriceMultiplier > 0
-        ? rawSettings.robinhoodPriceMultiplier
-        : 1.0,
+    grabPriceMultiplier: resolvedGrabMultiplier,
+    linemanPriceMultiplier: resolvedLinemanMultiplier,
+    robinhoodPriceMultiplier: resolvedRobinhoodMultiplier,
+    gpMultiplierMigrated: true,
   };
 }
 
@@ -778,7 +801,7 @@ export const StorageService = {
     const dateSegment = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `TONYS_POS_BACKUP_${dateSegment}.json`);
+    link.setAttribute('download', `TONYS_KIT_BACKUP_${dateSegment}.json`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

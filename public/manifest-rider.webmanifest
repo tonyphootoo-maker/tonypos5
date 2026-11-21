@@ -1,8 +1,8 @@
 {
   "id": "./?mode=rider",
-  "name": "Tony's POS Rider - งานจัดส่ง",
-  "short_name": "Tony's POS Rider",
-  "description": "ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ Tony's POS",
+  "name": "Tony's Kit Rider - งานจัดส่ง",
+  "short_name": "Tony's Kit Rider",
+  "description": "ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ Tony's Kit",
   "start_url": "./?mode=rider",
   "scope": "./",
   "display": "standalone",

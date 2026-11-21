@@ -267,11 +267,11 @@ export default function App() {
               setSettings((prev) =>
                 prev || {
                   id: 'main',
-                  shopName: "Tony's POS Restaurant",
+                  shopName: "Tony's Kit Restaurant",
                   shopAddress: 'Bangkok, Thailand',
                   shopPhone: '02-123-4567',
                   taxId: '0105558000000',
-                  receiptHeader: "Welcome to Tony's POS",
+                  receiptHeader: "Welcome to Tony's Kit",
                   receiptFooter: 'Thank you for your visit!',
                   targetFoodCostPercent: 30,
                   vatPercent: 7,
@@ -400,7 +400,7 @@ export default function App() {
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_5px_0_#c2410c,0_16px_30px_rgba(234,88,12,0.28)] border border-orange-300/60 mb-4">
           <UtensilsCrossed className="w-8 h-8 text-white" />
         </div>
-        <h1 className="text-2xl font-black tracking-tight text-slate-900">Tony&apos;s POS</h1>
+        <h1 className="text-2xl font-black tracking-tight text-slate-900">Tony&apos;s Kit</h1>
         <p className="text-xs text-orange-600 font-bold mt-1">
           {t.common.loading}
         </p>
@@ -431,7 +431,7 @@ export default function App() {
               <UtensilsCrossed className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-2xl font-black tracking-tight text-slate-900 pt-2">
-              Tony&apos;s POS
+              Tony&apos;s Kit
             </h1>
             <p className="text-xs text-slate-500 font-medium">
               {t.tagline}
@@ -498,8 +498,8 @@ export default function App() {
         {/* Footer */}
         <div className="text-center text-[11px] text-slate-400">
           {lang === 'th'
-            ? "Tony's POS • ระบบซิงค์ข้อมูลออฟไลน์และเรียลไทม์หลายหน้าจอ"
-            : "Tony's POS • Multi-Tab Offline & Real-Time Sync Engine"}
+            ? "Tony's Kit • ระบบซิงค์ข้อมูลออฟไลน์และเรียลไทม์หลายหน้าจอ"
+            : "Tony's Kit • Multi-Tab Offline & Real-Time Sync Engine"}
         </div>
       </div>
     );

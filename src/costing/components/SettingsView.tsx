@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { RestaurantSettings } from '../types';
+import { deriveGpMultiplierFromSettings } from '../services/calculationEngine';
 import { NumericInput } from './common/NumericInput';
 import { AppIconService } from '../services/appIconService';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -66,7 +67,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveSettings(localSettings);
+    const gpOrVatChanged =
+      (localSettings.grabFoodCommissionPercent ?? 30) !== (settings.grabFoodCommissionPercent ?? 30) ||
+      (localSettings.lineManCommissionPercent ?? 25) !== (settings.lineManCommissionPercent ?? 25) ||
+      (localSettings.robinhoodCommissionPercent ?? 0) !== (settings.robinhoodCommissionPercent ?? 0) ||
+      (localSettings.vatRatePercent ?? 7) !== (settings.vatRatePercent ?? 7) ||
+      (localSettings.commissionVatAsCost ?? localSettings.grabFoodCommissionHasVat ?? true) !==
+        (settings.commissionVatAsCost ?? settings.grabFoodCommissionHasVat ?? true) ||
+      !localSettings.gpMultiplierMigrated;
+
+    const nextSettings: RestaurantSettings = gpOrVatChanged
+      ? {
+          ...localSettings,
+          grabPriceMultiplier: deriveGpMultiplierFromSettings(localSettings, 'grab'),
+          linemanPriceMultiplier: deriveGpMultiplierFromSettings(localSettings, 'lineman'),
+          robinhoodPriceMultiplier: deriveGpMultiplierFromSettings(localSettings, 'robinhood'),
+          gpMultiplierMigrated: true,
+        }
+      : {
+          ...localSettings,
+          gpMultiplierMigrated: true,
+        };
+
+    setLocalSettings(nextSettings);
+    onSaveSettings(nextSettings);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
@@ -400,7 +424,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-white/40 mt-1.5 block">
-                {lang === 'en' ? 'Formula: GP = Grab Sales × GP%' : 'สูตร: GP = ยอดขาย Grab × GP%'}
+                {lang === 'en'
+                  ? `Auto delivery multiplier from Takeaway: x${deriveGpMultiplierFromSettings(localSettings, 'grab')}`
+                  : `ตัวคูณราคาอัตโนมัติ (จากราคาใส่กล่อง): x${deriveGpMultiplierFromSettings(localSettings, 'grab')}`}
               </span>
             </div>
 
@@ -440,7 +466,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-white/40 mt-1.5 block">
-                {lang === 'en' ? 'Formula: GP = LINE MAN Sales × GP%' : 'สูตร: GP = ยอดขาย LINE MAN × GP%'}
+                {lang === 'en'
+                  ? `Auto delivery multiplier from Takeaway: x${deriveGpMultiplierFromSettings(localSettings, 'lineman')}`
+                  : `ตัวคูณราคาอัตโนมัติ (จากราคาใส่กล่อง): x${deriveGpMultiplierFromSettings(localSettings, 'lineman')}`}
               </span>
             </div>
           </div>

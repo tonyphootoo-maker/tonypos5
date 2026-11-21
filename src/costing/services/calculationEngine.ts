@@ -766,36 +766,60 @@ export interface MultipliedChannelPrices {
 }
 
 /**
- * Resolves active GrabFood, LINE MAN, and Robinhood multipliers from RestaurantSettings
- * with standard defaults (GrabFood 1.5x, LINE MAN 1.5x, Robinhood 1.0x).
+ * Derives the delivery price multiplier directly from the Owner-Defined GP%
+ * configured in Settings (plus VAT on GP when enabled).
+ * Example: 30% Grab GP + 7% VAT = 32.1% -> 1.321x of Takeaway price.
+ */
+export function deriveGpMultiplierFromSettings(
+  settings: Partial<RestaurantSettings> | null | undefined,
+  channel: MultipliedDeliveryChannel
+): number {
+  if (channel === 'robinhood') {
+    const robinhoodGp =
+      typeof settings?.robinhoodCommissionPercent === 'number' &&
+      Number.isFinite(settings.robinhoodCommissionPercent)
+        ? Math.max(0, settings.robinhoodCommissionPercent)
+        : 0;
+    return Number((1 + robinhoodGp / 100).toFixed(4));
+  }
+  const effectiveGpPercent = getEffectiveDeliveryGpPercent(settings ?? {}, channel);
+  return Number((1 + Math.max(0, effectiveGpPercent) / 100).toFixed(4));
+}
+
+/**
+ * Resolves active GrabFood, LINE MAN, and Robinhood multipliers from RestaurantSettings,
+ * defaulting to Takeaway × Owner-Defined GP% (1 + effectiveGP% / 100) rather than hardcoded 1.5x.
  */
 export function resolveChannelMultipliers(
-  settings?: Pick<
-    RestaurantSettings,
-    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
-  > | null
+  settings?: Partial<RestaurantSettings> | null
 ): ChannelMultiplierSet {
   const grabRaw = Number(settings?.grabPriceMultiplier);
   const linemanRaw = Number(settings?.linemanPriceMultiplier);
   const robinhoodRaw = Number(settings?.robinhoodPriceMultiplier);
 
   return {
-    grab: Number.isFinite(grabRaw) && grabRaw > 0 ? grabRaw : 1.5,
-    lineman: Number.isFinite(linemanRaw) && linemanRaw > 0 ? linemanRaw : 1.5,
-    robinhood: Number.isFinite(robinhoodRaw) && robinhoodRaw > 0 ? robinhoodRaw : 1.0,
+    grab:
+      Number.isFinite(grabRaw) && grabRaw > 0
+        ? grabRaw
+        : deriveGpMultiplierFromSettings(settings, 'grab'),
+    lineman:
+      Number.isFinite(linemanRaw) && linemanRaw > 0
+        ? linemanRaw
+        : deriveGpMultiplierFromSettings(settings, 'lineman'),
+    robinhood:
+      Number.isFinite(robinhoodRaw) && robinhoodRaw > 0
+        ? robinhoodRaw
+        : deriveGpMultiplierFromSettings(settings, 'robinhood'),
   };
 }
 
 /**
- * Immediately computes GrabFood, LINE MAN, and Robinhood selling prices from a base Dine-in price
+ * Immediately computes GrabFood, LINE MAN, and Robinhood selling prices from a base Takeaway price
  * and active channel multipliers (no manual trigger required).
  */
 export function calculateMultipliedChannelPrices(
   baseSellingPrice: number,
-  settings?: Pick<
-    RestaurantSettings,
-    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
-  > | null
+  settings?: Partial<RestaurantSettings> | null
 ): MultipliedChannelPrices {
   const safeBase = Number.isFinite(baseSellingPrice) ? Math.max(0, baseSellingPrice) : 0;
   const multipliers = resolveChannelMultipliers(settings);
@@ -810,14 +834,11 @@ export function calculateMultipliedChannelPrices(
 
 /**
  * Updates a MenuVariant's GrabFood, LINE MAN, and Robinhood prices immediately whenever
- * either its base Dine-in price or the channel multiplier values change.
+ * either its base Takeaway price or the channel multiplier values change.
  */
 export function applyChannelMultipliersToVariant(
   variant: MenuVariant,
-  settings?: Pick<
-    RestaurantSettings,
-    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
-  > | null,
+  settings?: Partial<RestaurantSettings> | null,
   options?: {
     baseSellingPriceOverride?: number;
     baseTakeawayPriceOverride?: number;
@@ -864,10 +885,7 @@ export function applyChannelMultipliersToVariant(
  */
 export function recalculateMenusWithChannelMultipliers(
   menus: MenuItem[],
-  settings?: Pick<
-    RestaurantSettings,
-    'grabPriceMultiplier' | 'linemanPriceMultiplier' | 'robinhoodPriceMultiplier'
-  > | null,
+  settings?: Partial<RestaurantSettings> | null,
   options?: {
     channels?: MultipliedDeliveryChannel[];
     resolveBaseSellingPrice?: (menu: MenuItem, variant: MenuVariant) => number;

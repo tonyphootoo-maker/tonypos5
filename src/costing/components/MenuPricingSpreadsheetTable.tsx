@@ -10,6 +10,7 @@ import {
 import {
   calculateVariantCostBreakdown,
   calculateMultipliedChannelPrices,
+  resolveChannelMultipliers,
   getDeliveryCommissionPercent,
   getEffectiveDeliveryGpPercent,
   getDeliveryPackagingCost,
@@ -102,9 +103,10 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
   const linemanGpRateWithVat = linemanEffectiveGpPct / 100;
   const linemanGpPctDisplay = linemanEffectiveGpPct.toFixed(2);
   const commissionHasVat = settings.commissionVatAsCost ?? settings.grabFoodCommissionHasVat ?? true;
-  const grabMultiplier = Number(settings.grabPriceMultiplier) > 0 ? Number(settings.grabPriceMultiplier) : 1.5;
-  const linemanMultiplier = Number(settings.linemanPriceMultiplier) > 0 ? Number(settings.linemanPriceMultiplier) : 1.5;
-  const robinhoodMultiplier = Number(settings.robinhoodPriceMultiplier) > 0 ? Number(settings.robinhoodPriceMultiplier) : 1.0;
+  const resolvedMultipliers = resolveChannelMultipliers(settings);
+  const grabMultiplier = resolvedMultipliers.grab;
+  const linemanMultiplier = resolvedMultipliers.lineman;
+  const robinhoodMultiplier = resolvedMultipliers.robinhood;
 
   // State & Handlers for reordering meat variants (Drag & Drop + Up/Down arrows)
   const [draggedVariantId, setDraggedVariantId] = useState<string | null>(null);

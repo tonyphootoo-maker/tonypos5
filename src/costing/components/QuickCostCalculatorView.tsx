@@ -26,6 +26,7 @@ import {
   calculateChannelSuggestedPrices,
   calculateMultipliedChannelPrices,
   resolveChannelMultipliers,
+  deriveGpMultiplierFromSettings,
   roundUpToStep,
 } from '../services/calculationEngine';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
@@ -85,7 +86,18 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
     setGrabMultiplier(resolved.grab);
     setLinemanMultiplier(resolved.lineman);
     setRobinhoodMultiplier(resolved.robinhood);
-  }, [settings.grabPriceMultiplier, settings.linemanPriceMultiplier, settings.robinhoodPriceMultiplier]);
+  }, [
+    settings.grabPriceMultiplier,
+    settings.linemanPriceMultiplier,
+    settings.robinhoodPriceMultiplier,
+    settings.grabFoodCommissionPercent,
+    settings.lineManCommissionPercent,
+    settings.robinhoodCommissionPercent,
+    settings.commissionVatAsCost,
+    settings.grabFoodCommissionHasVat,
+    settings.lineManCommissionHasVat,
+    settings.vatRatePercent,
+  ]);
 
   // Active view tab in Extra Costs section: 'PACKAGING' | 'SEASONING' | 'BOTH'
   const [activeExtraTab, setActiveExtraTab] = useState<'PACKAGING' | 'SEASONING' | 'BOTH'>('BOTH');
@@ -472,6 +484,7 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
       ...(channel === 'grab' ? { grabPriceMultiplier: nextVal } : {}),
       ...(channel === 'lineman' ? { linemanPriceMultiplier: nextVal } : {}),
       ...(channel === 'robinhood' ? { robinhoodPriceMultiplier: nextVal } : {}),
+      gpMultiplierMigrated: true,
     });
   };
 
@@ -1482,9 +1495,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       type="text"
                       inputMode="decimal"
                       min="0.1"
-                      step="0.1"
+                      step="0.01"
                       value={grabMultiplier}
-                      fallbackValue={1.5}
+                      fallbackValue={deriveGpMultiplierFromSettings(settings, 'grab')}
                       onValueChange={(val) => handleQuickMultiplierChange('grab', val)}
                       className="w-full px-1.5 py-0.5 bg-white border border-emerald-300 rounded text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-emerald-600"
                     />
@@ -1502,9 +1515,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       type="text"
                       inputMode="decimal"
                       min="0.1"
-                      step="0.1"
+                      step="0.01"
                       value={linemanMultiplier}
-                      fallbackValue={1.5}
+                      fallbackValue={deriveGpMultiplierFromSettings(settings, 'lineman')}
                       onValueChange={(val) => handleQuickMultiplierChange('lineman', val)}
                       className="w-full px-1.5 py-0.5 bg-white border border-amber-300 rounded text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-amber-600"
                     />
@@ -1522,9 +1535,9 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                       type="text"
                       inputMode="decimal"
                       min="0.1"
-                      step="0.1"
+                      step="0.01"
                       value={robinhoodMultiplier}
-                      fallbackValue={1.0}
+                      fallbackValue={deriveGpMultiplierFromSettings(settings, 'robinhood')}
                       onValueChange={(val) => handleQuickMultiplierChange('robinhood', val)}
                       className="w-full px-1.5 py-0.5 bg-white border border-purple-300 rounded text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-purple-600"
                     />

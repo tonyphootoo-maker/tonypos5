@@ -1280,7 +1280,7 @@ export const UnifiedFinanceHubPage: React.FC<Props> = ({
     const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((r) => r.join(',')).join('\n');
     const link = document.createElement('a');
     link.setAttribute('href', encodeURI(csvContent));
-    link.setAttribute('download', `TonysPOS_Finance_PNL_${period}_${dateParam}.csv`);
+    link.setAttribute('download', `TonysKit_Finance_PNL_${period}_${dateParam}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

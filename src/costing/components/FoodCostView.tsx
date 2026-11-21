@@ -36,6 +36,8 @@ import {
   calculateChannelSuggestedPrices,
   calculateMultipliedChannelPrices,
   recalculateMenusWithChannelMultipliers,
+  resolveChannelMultipliers,
+  deriveGpMultiplierFromSettings,
   getEffectiveDeliveryGpPercent,
   roundUpToStep,
 } from '../services/calculationEngine';
@@ -201,9 +203,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
   const isEn = lang === 'en';
-  const grabMultiplier = Number(settings.grabPriceMultiplier) > 0 ? Number(settings.grabPriceMultiplier) : 1.5;
-  const linemanMultiplier = Number(settings.linemanPriceMultiplier) > 0 ? Number(settings.linemanPriceMultiplier) : 1.5;
-  const robinhoodMultiplier = Number(settings.robinhoodPriceMultiplier) > 0 ? Number(settings.robinhoodPriceMultiplier) : 1.0;
+  const resolvedMultipliers = resolveChannelMultipliers(settings);
+  const grabMultiplier = resolvedMultipliers.grab;
+  const linemanMultiplier = resolvedMultipliers.lineman;
+  const robinhoodMultiplier = resolvedMultipliers.robinhood;
   const getPortionUnitLabel = (u: string) =>
     isEn ? (PORTION_UNIT_LABELS_EN[u] || localizeUnit(u, 'en')) : (PORTION_UNIT_LABELS_TH[u] || u);
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
@@ -1387,6 +1390,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       ...(channel === 'grab' ? { grabPriceMultiplier: nextVal } : {}),
       ...(channel === 'lineman' ? { linemanPriceMultiplier: nextVal } : {}),
       ...(channel === 'robinhood' ? { robinhoodPriceMultiplier: nextVal } : {}),
+      gpMultiplierMigrated: true,
     };
     onSaveSettings?.(nextSettings);
 
@@ -1529,7 +1533,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         <div className="pt-2 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-bold text-stone-700 text-[11px]">
-              {isEn ? 'Auto Price Multipliers (from Takeaway):' : 'ตัวคูณราคาขายอัตโนมัติ (จากราคาใส่กล่อง Takeaway):'}
+              {isEn
+                ? 'Delivery Pricing (Takeaway × Owner-Defined GP%):'
+                : 'ตั้งราคาขายเดลิเวอรี (ราคาใส่กล่อง Takeaway × ค่า GP เดลิเวอรี):'}
             </span>
 
             <label className="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -1539,11 +1545,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 type="text"
                 inputMode="decimal"
                 min="0.1"
-                step="0.1"
+                step="0.01"
                 value={grabMultiplier}
-                fallbackValue={1.5}
+                fallbackValue={deriveGpMultiplierFromSettings(settings, 'grab')}
                 onValueChange={(val) => handleChannelMultiplierChange('grab', val)}
-                className="w-14 px-1.5 py-0.5 bg-white border border-emerald-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-emerald-600"
+                className="w-16 px-1.5 py-0.5 bg-white border border-emerald-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-emerald-600"
               />
             </label>
 
@@ -1554,11 +1560,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 type="text"
                 inputMode="decimal"
                 min="0.1"
-                step="0.1"
+                step="0.01"
                 value={linemanMultiplier}
-                fallbackValue={1.5}
+                fallbackValue={deriveGpMultiplierFromSettings(settings, 'lineman')}
                 onValueChange={(val) => handleChannelMultiplierChange('lineman', val)}
-                className="w-14 px-1.5 py-0.5 bg-white border border-amber-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-amber-600"
+                className="w-16 px-1.5 py-0.5 bg-white border border-amber-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-amber-600"
               />
             </label>
 
@@ -1569,19 +1575,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 type="text"
                 inputMode="decimal"
                 min="0.1"
-                step="0.1"
+                step="0.01"
                 value={robinhoodMultiplier}
-                fallbackValue={1.0}
+                fallbackValue={deriveGpMultiplierFromSettings(settings, 'robinhood')}
                 onValueChange={(val) => handleChannelMultiplierChange('robinhood', val)}
-                className="w-14 px-1.5 py-0.5 bg-white border border-purple-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-purple-600"
+                className="w-16 px-1.5 py-0.5 bg-white border border-purple-300 rounded-lg text-center font-mono font-bold text-stone-900 text-xs focus:outline-none focus:border-purple-600"
               />
             </label>
           </div>
 
           <span className="text-[10px] text-stone-500">
             {isEn
-              ? 'Channel prices auto-multiply whenever Takeaway price is edited'
-              : 'เมื่อใส่ราคาใส่กล่อง (Takeaway) ระบบจะคูณราคา Grab / LINE MAN / Robinhood ให้อัตโนมัติ'}
+              ? `Auto-calculated from Takeaway price × Owner-Defined GP% (Grab +${getEffectiveDeliveryGpPercent(settings, 'grab').toFixed(1)}%, LINE MAN +${getEffectiveDeliveryGpPercent(settings, 'lineman').toFixed(1)}%)`
+              : `คำนวณอัตโนมัติจาก ราคาหน้าร้านใส่กล่อง × ค่า GP เดลิเวอรี (Grab +${getEffectiveDeliveryGpPercent(settings, 'grab').toFixed(1)}%, LINE MAN +${getEffectiveDeliveryGpPercent(settings, 'lineman').toFixed(1)}%)`}
           </span>
         </div>
       </div>

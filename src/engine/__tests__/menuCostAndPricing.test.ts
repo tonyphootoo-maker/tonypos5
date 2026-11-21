@@ -15,6 +15,7 @@ import {
   calculateSauceCost,
   calculateVariantCostBreakdown,
   calculateChannelSuggestedPrices,
+  deriveGpMultiplierFromSettings,
   resolveChannelMultipliers,
   calculateMultipliedChannelPrices,
   applyChannelMultipliersToVariant,
@@ -23,6 +24,7 @@ import {
   runFullSpecificationTests,
   runSection11SpecificationTests,
 } from '../../costing/services/calculationEngine';
+import { migrateSettings } from '../../costing/services/storageService';
 import {
   resolveVariantBaseSellingPrice,
   resolveVariantTakeawayPrice,
@@ -533,19 +535,19 @@ describe('Menu Costing, Sauce Validation, Units, Pricing, Delivery GP+VAT & Sale
       expect(computeChannelPriceFromMultiplier(0, 1.5)).toBe(0);
     });
 
-    it('recalculates GrabFood, LINE MAN, and Robinhood prices immediately from Takeaway price', () => {
-      // Default multipliers: GrabFood 1.5x, LINE MAN 1.5x, Robinhood 1.0x
+    it('recalculates GrabFood, LINE MAN, and Robinhood prices immediately from Takeaway price using Owner-Defined GP% defaults', () => {
+      // Default multipliers derived from Owner-Defined GP% (Grab 30% + 7% VAT = 32.1%, LINE MAN 25% + 7% VAT = 26.75%, Robinhood 0%)
       expect(resolveChannelMultipliers(undefined)).toEqual({
-        grab: 1.5,
-        lineman: 1.5,
+        grab: 1.321,
+        lineman: 1.2675,
         robinhood: 1.0,
       });
 
       const baseMultiplied = calculateMultipliedChannelPrices(80);
       expect(baseMultiplied).toEqual({
         dineInPrice: 80,
-        grabPrice: 120,
-        linemanPrice: 120,
+        grabPrice: 106,
+        linemanPrice: 101,
         robinhoodPrice: 80,
       });
 
@@ -598,6 +600,49 @@ describe('Menu Costing, Sauce Validation, Units, Pricing, Delivery GP+VAT & Sale
         linemanPrice: 0,
         robinhoodPrice: 0,
       });
+    });
+
+    it('derives multipliers from Owner-Defined GP% (VAT on vs off) and migrates legacy 1.5x defaults once', () => {
+      expect(
+        deriveGpMultiplierFromSettings(
+          { grabFoodCommissionPercent: 30, commissionVatAsCost: true, vatRatePercent: 7 },
+          'grab'
+        )
+      ).toBe(1.321);
+      expect(
+        deriveGpMultiplierFromSettings(
+          { grabFoodCommissionPercent: 30, commissionVatAsCost: false, vatRatePercent: 7 },
+          'grab'
+        )
+      ).toBe(1.3);
+      expect(
+        deriveGpMultiplierFromSettings(
+          { lineManCommissionPercent: 25, commissionVatAsCost: false, vatRatePercent: 7 },
+          'lineman'
+        )
+      ).toBe(1.25);
+
+      // Legacy unmigrated 1.5 multipliers are upgraded to Owner-Defined GP%
+      const migratedLegacy = migrateSettings({
+        grabFoodCommissionPercent: 30,
+        lineManCommissionPercent: 25,
+        commissionVatAsCost: true,
+        vatRatePercent: 7,
+        grabPriceMultiplier: 1.5,
+        linemanPriceMultiplier: 1.5,
+      });
+      expect(migratedLegacy.grabPriceMultiplier).toBe(1.321);
+      expect(migratedLegacy.linemanPriceMultiplier).toBe(1.2675);
+      expect(migratedLegacy.gpMultiplierMigrated).toBe(true);
+
+      // Once migrated, an explicit custom multiplier (even 1.5) is respected
+      const preservedCustom = migrateSettings({
+        grabPriceMultiplier: 1.5,
+        linemanPriceMultiplier: 1.4,
+        gpMultiplierMigrated: true,
+      });
+      expect(preservedCustom.grabPriceMultiplier).toBe(1.5);
+      expect(preservedCustom.linemanPriceMultiplier).toBe(1.4);
     });
   });
 });

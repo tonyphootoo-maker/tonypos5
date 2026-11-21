@@ -271,9 +271,11 @@ export interface RestaurantSettings {
   grabFoodCommissionHasVat?: boolean; // C-01: delivery GP must include 7% VAT: effective GP = GP% * 1.07 (defaults to true)
   lineManCommissionPercent?: number;
   lineManCommissionHasVat?: boolean; // C-01: delivery GP must include 7% VAT (defaults to true)
-  grabPriceMultiplier?: number; // Default 1.5x of Dine-in price
-  linemanPriceMultiplier?: number; // Default 1.5x of Dine-in price
-  robinhoodPriceMultiplier?: number; // Default 1.0x of Dine-in price
+  robinhoodCommissionPercent?: number; // Default 0% GP
+  grabPriceMultiplier?: number; // Default derived from Owner-Defined GrabFood GP% (1 + effectiveGP/100) of Takeaway price
+  linemanPriceMultiplier?: number; // Default derived from Owner-Defined LINE MAN GP% (1 + effectiveGP/100) of Takeaway price
+  robinhoodPriceMultiplier?: number; // Default 1.0x (or 1 + robinhoodGP/100) of Takeaway price
+  gpMultiplierMigrated?: boolean; // Tracks one-time migration away from legacy 1.5x default multipliers
   commissionVatAsCost?: boolean; // Unified toggle: delivery GP includes VAT as cost
   priceRounding?: 1 | 5 | 10; // Suggested menu price rounding step (1, 5, or 10 THB)
   defaultTicketSize?: number; // Optional fallback ticket size if no live ticket average

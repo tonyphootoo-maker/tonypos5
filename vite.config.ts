@@ -33,8 +33,8 @@ export default defineConfig(({mode}) => {
         ],
         manifest: {
           id: './',
-          name: "Tony's POS - Restaurant POS & Food Cost",
-          short_name: "Tony's POS",
+          name: "Tony's Kit - Restaurant POS & Food Cost",
+          short_name: "Tony's Kit",
           description:
             'Bilingual Thai/English restaurant POS, live food cost calculation, recipe engineering, floor plan tables, shifts, and financial P&L reporting.',
           theme_color: '#ea580c',

@@ -31,11 +31,18 @@ import {
   DailySalesRecord,
   SalesChannel,
 } from './types/domain';
-import { StorageService } from './services/storageService';
+import { StorageService, migrateSettings } from './services/storageService';
 import { FirebaseSyncService, COST_COLLECTIONS } from './services/firebaseSyncService';
 import { subscribeCollection } from '../data/db';
 import { DailySummaryDoc } from '../types';
-import { calculateIngredientCost } from './services/calculationEngine';
+import {
+  calculateIngredientCost,
+  recalculateMenusWithChannelMultipliers,
+} from './services/calculationEngine';
+import {
+  resolveVariantBaseSellingPrice,
+  resolveVariantTakeawayPrice,
+} from './services/spreadsheetCostHelper';
 import { upsertDailySalesRecord, normalizeUpsertChannelId } from './engine/calculations';
 import { formatPeriodCalculationLabel, normalizeToMonthly } from '../engine/calculations';
 import { syncAllCostingToPOS } from './services/posBridge';
@@ -159,8 +166,21 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
               ) {
                 return;
               }
-              setSettings(cloudSettings);
-              StorageService.saveSettings(cloudSettings);
+              const migratedCloud = migrateSettings(cloudSettings);
+              setSettings(migratedCloud);
+              StorageService.saveSettings(migratedCloud);
+              if (
+                !cloudSettings.gpMultiplierMigrated &&
+                (migratedCloud.grabPriceMultiplier !== cloudSettings.grabPriceMultiplier ||
+                  migratedCloud.linemanPriceMultiplier !== cloudSettings.linemanPriceMultiplier)
+              ) {
+                FirebaseSyncService.saveUserDoc(
+                  user.uid,
+                  COST_COLLECTIONS.SETTINGS,
+                  'default',
+                  migratedCloud
+                );
+              }
             }
           },
           (err) => setCloudError(err.message)
@@ -643,18 +663,32 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     FirebaseSyncService.deleteUserDoc(user.uid, COST_COLLECTIONS.EMPLOYEES, id);
   };
 
-  const handleSaveSettings = (newSettings: RestaurantSettings) => {
+  const handleSaveSettings = (newSettings: RestaurantSettings, syncMenuPrices = false) => {
+    const normalizedSettings = migrateSettings(newSettings);
+    const multipliersChanged =
+      normalizedSettings.grabPriceMultiplier !== settings.grabPriceMultiplier ||
+      normalizedSettings.linemanPriceMultiplier !== settings.linemanPriceMultiplier ||
+      normalizedSettings.robinhoodPriceMultiplier !== settings.robinhoodPriceMultiplier;
+
     pendingSettingsSyncUntilRef.current = Date.now() + 1500;
-    setSettings(newSettings);
-    StorageService.saveSettings(newSettings);
+    setSettings(normalizedSettings);
+    StorageService.saveSettings(normalizedSettings);
     if (settingsSaveTimerRef.current) {
       clearTimeout(settingsSaveTimerRef.current);
     }
     settingsSaveTimerRef.current = setTimeout(() => {
       settingsSaveTimerRef.current = null;
       pendingSettingsSyncUntilRef.current = Date.now() + 1200;
-      FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.SETTINGS, 'default', newSettings);
+      FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.SETTINGS, 'default', normalizedSettings);
     }, 250);
+
+    if (syncMenuPrices && multipliersChanged && menus.length > 0) {
+      const updatedMenus = recalculateMenusWithChannelMultipliers(menus, normalizedSettings, {
+        resolveBaseSellingPrice: resolveVariantBaseSellingPrice,
+        resolveBaseTakeawayPrice: resolveVariantTakeawayPrice,
+      });
+      handleBatchUpdateMenus(updatedMenus);
+    }
   };
 
   const handleReloadAllData = () => {
@@ -1133,7 +1167,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           <SettingsView
             settings={settings}
             lang={lang}
-            onSaveSettings={handleSaveSettings}
+            onSaveSettings={(updated) => handleSaveSettings(updated, true)}
             onOpenIconModal={() => setIsIconModalOpen(true)}
           />
         )}

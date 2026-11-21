@@ -288,7 +288,7 @@ export const Navigation: React.FC<Props> = ({
             </div>
             <div className="leading-tight">
               <div className="flex items-center gap-1.5">
-                <span className="font-extrabold text-base tracking-tight">Tony&apos;s POS</span>
+                <span className="font-extrabold text-base tracking-tight">Tony&apos;s Kit</span>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-white/20 text-white">
                   Pro
                 </span>
@@ -426,7 +426,7 @@ export const Navigation: React.FC<Props> = ({
             </div>
             <div className="leading-tight">
               <div className="font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
-                <span>Tony&apos;s POS</span>
+                <span>Tony&apos;s Kit</span>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-orange-100 text-orange-700 border border-orange-200">
                   Pro
                 </span>
