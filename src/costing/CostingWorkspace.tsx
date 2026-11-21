@@ -417,6 +417,30 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
       const nextInv = [...inventory, newInv];
       setInventory(nextInv);
       FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.INVENTORY, newInv.id || newInv.ingredientId, newInv);
+    } else {
+      const existingInv = inventory[invIndex];
+      const nextUnit = ingredient.usageUnit || existingInv.unit;
+      const convertedStock =
+        existingInv.unit !== nextUnit
+          ? convertUnitQuantity(existingInv.currentStock, existingInv.unit, nextUnit)
+          : existingInv.currentStock;
+      const updatedInv: InventoryItem = {
+        ...existingInv,
+        ingredientName: ingredient.name,
+        unit: nextUnit,
+        currentStock: convertedStock,
+        currentQuantity: convertedStock,
+        costPerUnit: ingredient.costPerBaseUnit,
+        lastUpdated: new Date().toISOString(),
+      };
+      const nextInv = inventory.map((inv, idx) => (idx === invIndex ? updatedInv : inv));
+      setInventory(nextInv);
+      FirebaseSyncService.saveUserDoc(
+        user.uid,
+        COST_COLLECTIONS.INVENTORY,
+        updatedInv.id || updatedInv.ingredientId,
+        updatedInv
+      );
     }
   };
 
@@ -899,6 +923,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             onDeleteIngredient={handleDeleteIngredient}
             onReorderIngredients={handleReorderIngredients}
             onRecordPriceChange={handleRecordPriceChange}
+            onSaveSettings={(updated) => handleSaveSettings(updated, false)}
           />
         )}
 

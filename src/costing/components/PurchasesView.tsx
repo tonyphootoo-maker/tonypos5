@@ -391,6 +391,11 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                 <div>
                   <label className="block font-bold text-white/80 mb-1">
                     {lang === 'en' ? 'Quantity Purchased' : 'จำนวนที่ซื้อ'}
+                    {selectedIngredient?.purchaseUnit ? (
+                      <span className="ml-1 text-[#F27D26]">
+                        ({localizeUnit(selectedIngredient.purchaseUnit, lang)})
+                      </span>
+                    ) : null}
                   </label>
                   <NumericInput
                     type="number"

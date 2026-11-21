@@ -8,6 +8,9 @@ import {
   isPieceLikeUnit,
   normalizeUnitToken,
 } from '../../costing/engine/units';
+import { calculateIngredientCost } from '../../costing/services/calculationEngine';
+import { convertUnitQuantity } from '../../costing/services/transactionService';
+import { mergeUniqueUnits } from '../../costing/utils/customUnits';
 
 describe('thaiToEnglish culinary translation & auto-sync', () => {
   it('translates Thai dishes, sauces, drinks, and categories into English', () => {
@@ -89,5 +92,47 @@ describe('portion unit normalization & conversion', () => {
     const sameCustom = convertUnit(1, 'ไม้', 'ไม้');
     expect(sameCustom.success).toBe(true);
     expect(sameCustom.convertedQuantity).toBe(1);
+  });
+
+  it('supports user-added custom purchase units in costing, conversion, and unit merging', () => {
+    expect(isPieceLikeUnit('แกลลอน')).toBe(true);
+    expect(isPieceLikeUnit('กระสอบ')).toBe(true);
+
+    // Direct same-unit custom purchase unit calculation
+    const gallonCost = calculateIngredientCost({
+      name: 'น้ำมันพืชแกลลอน',
+      purchaseQuantity: 1,
+      purchaseUnit: 'แกลลอน',
+      purchasePrice: 280,
+      usageUnit: 'แกลลอน',
+      yieldPercent: 100,
+    });
+    expect(gallonCost.isValid).toBe(true);
+    expect(gallonCost.costPerBaseUnit).toBeCloseTo(280, 6);
+
+    // Multi-unit custom purchase unit with sub-unit count (1 ลัง = 24 ขวด)
+    const crateCost = calculateIngredientCost({
+      name: 'ซอสปรุงรส',
+      purchaseQuantity: 1,
+      purchaseUnit: 'ลัง',
+      piecesPerPurchaseUnit: 24,
+      purchasePrice: 480,
+      usageUnit: 'ขวด',
+      yieldPercent: 100,
+    });
+    expect(crateCost.isValid).toBe(true);
+    expect(crateCost.costPerBaseUnit).toBeCloseTo(20, 6);
+
+    // Case-insensitive L/ml and custom unit quantity conversion
+    expect(convertUnitQuantity(2, 'L', 'ml')).toBe(2000);
+    expect(convertUnitQuantity(5, 'แกลลอน', 'แกลลอน')).toBe(5);
+
+    // Deduplicated custom unit merging
+    expect(mergeUniqueUnits(['g', 'kg'], ['แกลลอน', 'g', ' ลัง '])).toEqual([
+      'g',
+      'kg',
+      'แกลลอน',
+      'ลัง',
+    ]);
   });
 });

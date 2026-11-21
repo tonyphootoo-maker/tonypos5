@@ -38,6 +38,16 @@ import {
 import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NumericInput } from './common/NumericInput';
+import { convertUnit } from '../engine/units';
+import {
+  DEFAULT_PURCHASE_UNITS,
+  DEFAULT_USAGE_UNITS,
+  loadCustomPurchaseUnits,
+  saveCustomPurchaseUnits,
+  syncUnitToPortionUnitsStorage,
+  mergeUniqueUnits,
+  getUnitOptionLabel,
+} from '../utils/customUnits';
 
 interface IngredientsViewProps {
   ingredients: Ingredient[];
@@ -51,6 +61,7 @@ interface IngredientsViewProps {
   onDeleteIngredient?: (id: string) => void;
   onReorderIngredients?: (reordered: Ingredient[]) => void;
   onRecordPriceChange: (record: PriceHistoryRecord) => void;
+  onSaveSettings?: (settings: RestaurantSettings) => void;
 }
 
 export const IngredientsView: React.FC<IngredientsViewProps> = ({
@@ -65,6 +76,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   onDeleteIngredient,
   onReorderIngredients,
   onRecordPriceChange,
+  onSaveSettings,
 }) => {
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
@@ -137,6 +149,108 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
   const [editingIngredient, setEditingIngredient] = useState<Partial<Ingredient> | null>(null);
   const [sortOrder, setSortOrder] = useState<'default' | 'asc' | 'desc'>('default');
+
+  // Custom Purchase Units state (persisted in localStorage + RestaurantSettings + existing ingredients)
+  const [customPurchaseUnits, setCustomPurchaseUnits] = useState<string[]>(() =>
+    mergeUniqueUnits(loadCustomPurchaseUnits(), settings.customPurchaseUnits)
+  );
+  const [isAddingPurchaseUnit, setIsAddingPurchaseUnit] = useState(false);
+  const [newPurchaseUnitInput, setNewPurchaseUnitInput] = useState('');
+
+  React.useEffect(() => {
+    if (settings.customPurchaseUnits && settings.customPurchaseUnits.length > 0) {
+      setCustomPurchaseUnits((prev) => {
+        const merged = mergeUniqueUnits(prev, settings.customPurchaseUnits);
+        if (merged.length !== prev.length) {
+          saveCustomPurchaseUnits(merged);
+          return merged;
+        }
+        return prev;
+      });
+    }
+  }, [settings.customPurchaseUnits]);
+
+  const purchaseUnitOptions = React.useMemo(
+    () =>
+      mergeUniqueUnits(
+        DEFAULT_PURCHASE_UNITS,
+        customPurchaseUnits,
+        settings.customPurchaseUnits,
+        ingredients.map((i) => i.purchaseUnit),
+        editingIngredient?.purchaseUnit ? [editingIngredient.purchaseUnit] : []
+      ),
+    [customPurchaseUnits, settings.customPurchaseUnits, ingredients, editingIngredient?.purchaseUnit]
+  );
+
+  const usageUnitOptions = React.useMemo(
+    () =>
+      mergeUniqueUnits(
+        DEFAULT_USAGE_UNITS,
+        customPurchaseUnits,
+        settings.customPurchaseUnits,
+        ingredients.map((i) => i.usageUnit),
+        editingIngredient?.purchaseUnit ? [editingIngredient.purchaseUnit] : [],
+        editingIngredient?.usageUnit ? [editingIngredient.usageUnit] : []
+      ),
+    [
+      customPurchaseUnits,
+      settings.customPurchaseUnits,
+      ingredients,
+      editingIngredient?.purchaseUnit,
+      editingIngredient?.usageUnit,
+    ]
+  );
+
+  const handleAddCustomPurchaseUnit = () => {
+    const trimmed = newPurchaseUnitInput.trim();
+    if (!trimmed) return;
+    const nextCustom = mergeUniqueUnits(customPurchaseUnits, [trimmed]);
+    setCustomPurchaseUnits(nextCustom);
+    saveCustomPurchaseUnits(nextCustom);
+    syncUnitToPortionUnitsStorage(trimmed);
+    if (onSaveSettings) {
+      onSaveSettings({
+        ...settings,
+        customPurchaseUnits: mergeUniqueUnits(settings.customPurchaseUnits, nextCustom),
+      });
+    }
+    if (editingIngredient) {
+      const currentUsage = editingIngredient.usageUnit || 'g';
+      const compatible = convertUnit(1, trimmed, currentUsage).success;
+      const hasSubUnitPieces = Number(editingIngredient.piecesPerPurchaseUnit) > 0;
+      setEditingIngredient({
+        ...editingIngredient,
+        purchaseUnit: trimmed as UnitType,
+        actualUnit: trimmed as UnitType,
+        baseUnit: trimmed as UnitType,
+        ...(!compatible && !hasSubUnitPieces ? { usageUnit: trimmed as UnitType } : {}),
+      });
+    }
+    setNewPurchaseUnitInput('');
+    setIsAddingPurchaseUnit(false);
+  };
+
+  const handleDeleteCustomPurchaseUnit = (unitToDelete: string) => {
+    if (DEFAULT_PURCHASE_UNITS.includes(unitToDelete)) return;
+    const nextCustom = customPurchaseUnits.filter((u) => u !== unitToDelete);
+    setCustomPurchaseUnits(nextCustom);
+    saveCustomPurchaseUnits(nextCustom);
+    if (onSaveSettings) {
+      onSaveSettings({
+        ...settings,
+        customPurchaseUnits: (settings.customPurchaseUnits || []).filter((u) => u !== unitToDelete),
+      });
+    }
+    if (editingIngredient && editingIngredient.purchaseUnit === unitToDelete) {
+      setEditingIngredient({
+        ...editingIngredient,
+        purchaseUnit: 'g',
+        actualUnit: 'g',
+        baseUnit: 'g',
+        usageUnit: 'g',
+      });
+    }
+  };
 
   // Price Simulation Modal state
   const [isImpactModalOpen, setIsImpactModalOpen] = useState(false);
@@ -353,6 +467,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       active: true,
       createdAt: new Date().toISOString(),
     };
+    setIsAddingPurchaseUnit(false);
+    setNewPurchaseUnitInput('');
     setEditingIngredient(newIng);
     setIsEditingModalOpen(true);
   };
@@ -364,6 +480,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       ? ing.actualQuantity
       : Number(((pQty * yPct) / 100).toFixed(1));
     const thName = ing.thaiName || ing.name || '';
+    setIsAddingPurchaseUnit(false);
+    setNewPurchaseUnitInput('');
     setEditingIngredient({
       ...ing,
       thaiName: thName,
@@ -398,10 +516,16 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       actualUnit: editingIngredient.actualUnit || editingIngredient.purchaseUnit || 'g',
       yieldPercent: Number(editingIngredient.yieldPercent) || 100,
       actualCost: calc.actualCost,
-      baseUnit: editingIngredient.baseUnit || editingIngredient.actualUnit || editingIngredient.purchaseUnit || 'g',
+      baseUnit:
+        editingIngredient.usageUnit ||
+        editingIngredient.baseUnit ||
+        editingIngredient.actualUnit ||
+        editingIngredient.purchaseUnit ||
+        'g',
       costPerBaseUnit: calc.costPerBaseUnit,
       usageUnit: editingIngredient.usageUnit || 'g',
       piecesPerPurchaseUnit: editingIngredient.piecesPerPurchaseUnit,
+      piecesCountAlreadyYieldAdjusted: editingIngredient.piecesCountAlreadyYieldAdjusted,
       notes: editingIngredient.notes,
       isReviewRequired: editingIngredient.isReviewRequired || false,
       reviewReason: editingIngredient.reviewReason,
@@ -1039,30 +1163,62 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-white/60 mb-1">
-                      {lang === 'th' ? 'หน่วยซื้อ' : 'Purchase Unit'}
-                    </label>
-                    <select
-                      value={editingIngredient.purchaseUnit || 'g'}
-                      onChange={(e) => {
-                        const newUnit = e.target.value as UnitType;
-                        setEditingIngredient({
-                          ...editingIngredient,
-                          purchaseUnit: newUnit,
-                          actualUnit: newUnit,
-                          baseUnit: newUnit,
-                        });
-                      }}
-                      className="w-full p-2 bg-black/40 border border-white/15 rounded-xl text-white cursor-pointer"
-                    >
-                      <option value="g" className="bg-[#1a1a1a]">{lang === 'th' ? 'g (กรัม)' : 'g (Gram)'}</option>
-                      <option value="kg" className="bg-[#1a1a1a]">{lang === 'th' ? 'kg (กิโลกรัม)' : 'kg (Kilogram)'}</option>
-                      <option value="ml" className="bg-[#1a1a1a]">{lang === 'th' ? 'ml (มิลลิลิตร)' : 'ml (Milliliter)'}</option>
-                      <option value="L" className="bg-[#1a1a1a]">{lang === 'th' ? 'L (ลิตร)' : 'L (Liter)'}</option>
-                      <option value="ชิ้น" className="bg-[#1a1a1a]">{lang === 'th' ? 'ชิ้น' : 'pc'}</option>
-                      <option value="กล่อง" className="bg-[#1a1a1a]">{lang === 'th' ? 'กล่อง' : 'box'}</option>
-                      <option value="ถุง" className="bg-[#1a1a1a]">{lang === 'th' ? 'ถุง' : 'bag'}</option>
-                    </select>
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <label className="block text-white/60">
+                        {lang === 'th' ? 'หน่วยซื้อ' : 'Purchase Unit'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingPurchaseUnit((prev) => !prev)}
+                        className="text-[10px] font-bold text-[#F27D26] hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>{lang === 'th' ? 'เพิ่มหน่วย' : 'Add Unit'}</span>
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <select
+                        value={editingIngredient.purchaseUnit || 'g'}
+                        onChange={(e) => {
+                          const newUnit = e.target.value as UnitType;
+                          const currentUsage = editingIngredient.usageUnit || 'g';
+                          const compatible = convertUnit(1, newUnit, currentUsage).success;
+                          const hasSubUnitPieces = Number(editingIngredient.piecesPerPurchaseUnit) > 0;
+                          setEditingIngredient({
+                            ...editingIngredient,
+                            purchaseUnit: newUnit,
+                            actualUnit: newUnit,
+                            baseUnit: newUnit,
+                            ...(!compatible && !hasSubUnitPieces ? { usageUnit: newUnit } : {}),
+                          });
+                        }}
+                        className="w-full p-2 bg-black/40 border border-white/15 rounded-xl text-white cursor-pointer"
+                      >
+                        {purchaseUnitOptions.map((u) => (
+                          <option key={u} value={u} className="bg-[#1a1a1a] text-white">
+                            {getUnitOptionLabel(u, lang)}
+                          </option>
+                        ))}
+                      </select>
+                      {editingIngredient.purchaseUnit &&
+                        customPurchaseUnits.includes(editingIngredient.purchaseUnit) &&
+                        !DEFAULT_PURCHASE_UNITS.includes(editingIngredient.purchaseUnit) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleDeleteCustomPurchaseUnit(editingIngredient.purchaseUnit!)
+                            }
+                            className="p-2 rounded-xl border border-white/15 text-white/40 hover:text-rose-400 hover:bg-rose-500/15 cursor-pointer shrink-0"
+                            title={
+                              lang === 'th'
+                                ? `ลบหน่วยซื้อ "${editingIngredient.purchaseUnit}"`
+                                : `Delete unit "${editingIngredient.purchaseUnit}"`
+                            }
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                    </div>
                   </div>
 
                   <div>
@@ -1084,6 +1240,47 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Inline Add Custom Purchase Unit Input */}
+                {isAddingPurchaseUnit && (
+                  <div className="flex flex-wrap items-center gap-2 p-2.5 bg-black/40 border border-[#F27D26]/40 rounded-xl">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={newPurchaseUnitInput}
+                      onChange={(e) => setNewPurchaseUnitInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomPurchaseUnit();
+                        }
+                      }}
+                      placeholder={
+                        lang === 'th'
+                          ? 'พิมพ์ชื่อหน่วยซื้อใหม่ เช่น ลัง, แกลลอน, กระสอบ, มัด...'
+                          : 'New purchase unit e.g. crate, gallon, sack...'
+                      }
+                      className="flex-1 min-w-[160px] p-2 bg-black/50 border border-white/15 rounded-xl text-white text-xs focus:border-[#F27D26] focus:outline-none placeholder-white/30"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomPurchaseUnit}
+                      className="px-3 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl text-[11px] cursor-pointer"
+                    >
+                      {lang === 'th' ? 'เพิ่มหน่วยซื้อ' : 'Add Unit'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingPurchaseUnit(false);
+                        setNewPurchaseUnitInput('');
+                      }}
+                      className="px-2.5 py-2 bg-white/10 hover:bg-white/20 text-white/80 font-semibold rounded-xl text-[11px] cursor-pointer"
+                    >
+                      {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
+                    </button>
+                  </div>
+                )}
 
                 {/* Row 2: Actual Quantity after trimming */}
                 <div className="grid grid-cols-3 gap-3 pt-2.5 border-t border-white/10">
@@ -1185,15 +1382,68 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       }
                       className="w-full p-2 bg-black/40 border border-white/15 rounded-xl text-white cursor-pointer"
                     >
-                      <option value="g" className="bg-[#1a1a1a]">{lang === 'th' ? 'g (กรัม)' : 'g (Gram)'}</option>
-                      <option value="ตัว" className="bg-[#1a1a1a]">{lang === 'th' ? 'ตัว (คิดเป็นตัว เช่น กุ้ง)' : 'pc (Counted item e.g. Shrimp)'}</option>
-                      <option value="ฟอง" className="bg-[#1a1a1a]">{lang === 'th' ? 'ฟอง (ไข่ไก่)' : 'egg (Egg)'}</option>
-                      <option value="ml" className="bg-[#1a1a1a]">{lang === 'th' ? 'ml (มิลลิลิตร)' : 'ml (Milliliter)'}</option>
-                      <option value="ชิ้น" className="bg-[#1a1a1a]">{lang === 'th' ? 'ชิ้น' : 'pc'}</option>
-                      <option value="จาน" className="bg-[#1a1a1a]">{lang === 'th' ? 'จาน' : 'plate'}</option>
+                      {usageUnitOptions.map((u) => (
+                        <option key={u} value={u} className="bg-[#1a1a1a] text-white">
+                          {getUnitOptionLabel(u, lang)}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
+
+                {/* Sub-unit piece conversion when Purchase Unit differs from Usage Unit (e.g. 1 ลัง = 24 ขวด, 1 แผง = 30 ฟอง) */}
+                {(() => {
+                  const pUnit = editingIngredient.purchaseUnit || 'g';
+                  const uUnit = editingIngredient.usageUnit || 'g';
+                  const needsPieceConversion = !convertUnit(1, pUnit, uUnit).success;
+                  const hasPieces = Number(editingIngredient.piecesPerPurchaseUnit) > 0;
+                  if (!needsPieceConversion && !hasPieces) return null;
+
+                  return (
+                    <div className="pt-2.5 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                      <div>
+                        <label className="block text-amber-300 font-bold mb-1">
+                          {lang === 'th'
+                            ? `จำนวน (${localizeUnit(uUnit, lang)}) ต่อ 1 ${localizeUnit(pUnit, lang)}`
+                            : `Qty (${localizeUnit(uUnit, lang)}) per 1 ${localizeUnit(pUnit, lang)}`}
+                        </label>
+                        <NumericInput
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={editingIngredient.piecesPerPurchaseUnit ?? ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setEditingIngredient({
+                              ...editingIngredient,
+                              piecesPerPurchaseUnit: Number.isFinite(val) && val > 0 ? val : undefined,
+                            });
+                          }}
+                          className="w-full p-2 bg-black/40 border border-amber-500/40 rounded-xl font-mono font-bold text-amber-200 focus:border-[#F27D26]"
+                          placeholder={lang === 'th' ? 'เช่น 24, 30, 60' : 'e.g. 24, 30, 60'}
+                        />
+                      </div>
+                      <label className="flex items-center gap-2 p-2 bg-black/30 rounded-xl border border-white/10 cursor-pointer text-[11px] text-white/80">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(editingIngredient.piecesCountAlreadyYieldAdjusted)}
+                          onChange={(e) =>
+                            setEditingIngredient({
+                              ...editingIngredient,
+                              piecesCountAlreadyYieldAdjusted: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 accent-[#F27D26] cursor-pointer"
+                        />
+                        <span>
+                          {lang === 'th'
+                            ? 'จำนวนหน่วยย่อยที่กรอกเป็นจำนวนสุทธิหลังตัดแต่งแล้ว'
+                            : 'Sub-unit count already accounts for trim yield'}
+                        </span>
+                      </label>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Calculated preview */}

@@ -87,6 +87,15 @@ const UNIT_ALIASES: Record<string, string> = {
   'จาน': 'serving',
   'มัด': 'มัด',
   'ชุด': 'ชุด',
+  'หลอด': 'หลอด',
+  'ซอง': 'ซอง',
+  'ลัง': 'ลัง',
+  'กระสอบ': 'กระสอบ',
+  'ก้อน': 'ก้อน',
+  'ใบ': 'ใบ',
+  'แผ่น': 'แผ่น',
+  'ไม้': 'ไม้',
+  'หัว': 'หัว',
 };
 
 export function normalizeUnitToken(unit: string | undefined | null): string {
@@ -125,12 +134,25 @@ const COUNT_UNITS = new Set([
   'serving',
   'มัด',
   'ชุด',
+  'หลอด',
+  'ซอง',
+  'ลัง',
+  'กระสอบ',
+  'ก้อน',
+  'ใบ',
+  'แผ่น',
+  'ไม้',
+  'หัว',
   'custom',
 ]);
 
 export function isPieceLikeUnit(unit: string | undefined | null): boolean {
   const norm = normalizeUnitToken(unit);
-  return COUNT_UNITS.has(norm);
+  if (!norm) return false;
+  if (MASS_TO_GRAM[norm] || VOLUME_TO_ML[norm]) return false;
+  if (COUNT_UNITS.has(norm)) return true;
+  // Treat any user-defined non-mass, non-volume custom unit as countable
+  return true;
 }
 
 export interface ConversionResult {

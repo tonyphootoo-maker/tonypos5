@@ -3,15 +3,24 @@ export type UnitType =
   | 'kg'
   | 'ml'
   | 'l'
+  | 'L'
   | 'ตัว'
   | 'ฟอง'
   | 'ชิ้น'
   | 'แพ็ค'
   | 'ขวด'
+  | 'กล่อง'
+  | 'ถุง'
   | 'จาน'
   | 'ถ้วย'
   | 'มัด'
-  | 'ชุด';
+  | 'ชุด'
+  | 'หลอด'
+  | 'แผง'
+  | 'ซอง'
+  | 'กระป๋อง'
+  | 'ลัง'
+  | (string & {});
 
 export type IngredientCategory =
   | 'เนื้อสัตว์และอาหารทะเล'
@@ -297,6 +306,7 @@ export interface RestaurantSettings {
   laborTargetPercent?: number;
   serviceChargeTreatment?: 'staff_pool' | 'retained';
   primaryLanguage?: 'th' | 'en';
+  customPurchaseUnits?: string[];
 }
 
 export interface InventoryItem {

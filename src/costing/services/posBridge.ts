@@ -53,7 +53,8 @@ function mapUnitToPosPurchaseUnit(unit: string): {
   if (u === 'cup' || u === 'ถ้วย' || u === 'ถ้วยตวง') {
     return { purchaseUnit: 'ml', baseUnit: 'ml', multiplierToBase: 240 };
   }
-  return { purchaseUnit: 'piece', baseUnit: 'piece', multiplierToBase: 1 };
+  const rawTrimmed = (unit || '').trim();
+  return { purchaseUnit: rawTrimmed || 'piece', baseUnit: 'piece', multiplierToBase: 1 };
 }
 
 function convertRecipeQtyToPosBase(

@@ -52,8 +52,13 @@ import {
   resolveVariantTakeawayPrice,
   computeChannelPriceFromMultiplier,
 } from '../services/spreadsheetCostHelper';
+import {
+  CUSTOM_PORTION_UNITS_STORAGE_KEY,
+  loadCustomPurchaseUnits,
+  mergeUniqueUnits,
+} from '../utils/customUnits';
 
-const PORTION_UNITS_STORAGE_KEY = 'kinpos_custom_portion_units';
+const PORTION_UNITS_STORAGE_KEY = CUSTOM_PORTION_UNITS_STORAGE_KEY;
 const DEFAULT_PORTION_UNITS = [
   'g',
   'kg',
@@ -295,17 +300,43 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
   // Customizable portion units persisted in localStorage
   const [portionUnits, setPortionUnits] = useState<string[]>(() => {
+    let savedUnits: string[] = [];
     try {
       const saved = localStorage.getItem(PORTION_UNITS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          savedUnits = parsed;
         }
       }
     } catch {}
-    return DEFAULT_PORTION_UNITS;
+    return mergeUniqueUnits(
+      savedUnits.length > 0 ? savedUnits : DEFAULT_PORTION_UNITS,
+      loadCustomPurchaseUnits(),
+      settings.customPurchaseUnits,
+      ingredients.flatMap((i) => [i.usageUnit, i.purchaseUnit])
+    );
   });
+
+  React.useEffect(() => {
+    const incoming = mergeUniqueUnits(
+      loadCustomPurchaseUnits(),
+      settings.customPurchaseUnits,
+      ingredients.flatMap((i) => [i.usageUnit, i.purchaseUnit])
+    );
+    if (incoming.length === 0) return;
+    setPortionUnits((prev) => {
+      const merged = mergeUniqueUnits(prev, incoming);
+      if (merged.length !== prev.length) {
+        try {
+          localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(merged));
+        } catch {}
+        return merged;
+      }
+      return prev;
+    });
+  }, [ingredients, settings.customPurchaseUnits]);
+
   const [isAddingCustomUnit, setIsAddingCustomUnit] = useState(false);
   const [customUnitInput, setCustomUnitInput] = useState('');
 
@@ -1085,7 +1116,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     } else {
       let effectiveQtyForBase = qty;
       if (linkedIng) {
-        const conv = convertUnit(qty, chosenUnit, linkedIng.baseUnit || linkedIng.usageUnit || 'g');
+        const conv = convertUnit(qty, chosenUnit, linkedIng.usageUnit || linkedIng.baseUnit || 'g');
         if (conv.success) {
           effectiveQtyForBase = conv.convertedQuantity;
         }
@@ -3917,14 +3948,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   const chosenUnit = variantModalState.meatUnit || linked?.usageUnit || linked?.baseUnit || 'g';
                   let effectiveQty = rawQty;
                   if (linked) {
-                    const conv = convertUnit(rawQty, chosenUnit, linked.baseUnit || linked.usageUnit || 'g');
+                    const conv = convertUnit(rawQty, chosenUnit, linked.usageUnit || linked.baseUnit || 'g');
                     if (conv.success) {
                       effectiveQty = conv.convertedQuantity;
                     }
                   }
                   meatCost = unitCost * effectiveQty;
                   if (linked && unitCost > 0) {
-                    const baseU = linked.baseUnit || linked.usageUnit || 'g';
+                    const baseU = linked.usageUnit || linked.baseUnit || 'g';
                     costDetail =
                       baseU === 'g'
                         ? (isEn ? `฿${(unitCost * 1000).toFixed(0)}/kg` : `฿${(unitCost * 1000).toFixed(0)}/กก.`)

@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { StorageService } from './storageService';
 import { generateId } from '../utils/id';
+import { normalizeUnitToken } from '../engine/units';
 
 export interface ConsumedIngredientDetail {
   ingredientId: string;
@@ -98,17 +99,19 @@ export function convertUnitQuantity(
   fromUnit: UnitType | string,
   toUnit: UnitType | string
 ): number {
-  if (fromUnit === toUnit) return quantity;
+  const normFrom = normalizeUnitToken(fromUnit);
+  const normTo = normalizeUnitToken(toUnit);
+  if (fromUnit === toUnit || (normFrom && normFrom === normTo)) return quantity;
 
   // Weight conversions
-  if (fromUnit === 'kg' && toUnit === 'g') return quantity * 1000;
-  if (fromUnit === 'g' && toUnit === 'kg') return quantity / 1000;
+  if (normFrom === 'kg' && normTo === 'g') return quantity * 1000;
+  if (normFrom === 'g' && normTo === 'kg') return quantity / 1000;
 
   // Volume conversions
-  if (fromUnit === 'l' && toUnit === 'ml') return quantity * 1000;
-  if (fromUnit === 'ml' && toUnit === 'l') return quantity / 1000;
+  if (normFrom === 'l' && normTo === 'ml') return quantity * 1000;
+  if (normFrom === 'ml' && normTo === 'l') return quantity / 1000;
 
-  // Discrete / piece units or unhandled pairs return as-is
+  // Discrete / piece / custom units or unhandled pairs return as-is
   return quantity;
 }
 
