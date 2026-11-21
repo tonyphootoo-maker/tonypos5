@@ -17,8 +17,6 @@ import {
   Calculator,
   BookOpen,
   Beef,
-  ShoppingCart,
-  Boxes,
   FileSpreadsheet,
   Layers,
   ShoppingBag,
@@ -211,29 +209,6 @@ export const Navigation: React.FC<Props> = ({
             en: 'AP/EP costing, yield lab & price history',
           },
           icon: <Beef className="w-5 h-5 text-rose-600" />,
-        },
-      ],
-    },
-    {
-      title: { th: 'จัดซื้อ คลังสต็อก & ของเสีย', en: 'Purchasing & Inventory' },
-      items: [
-        {
-          id: 'cost_purchases',
-          label: lang === 'th' ? 'บันทึกการจัดซื้อ & ราคา' : 'Purchases & Price Log',
-          desc: {
-            th: 'บันทึกบิลซื้อ ซัพพลายเออร์ & อัปเดตสต็อก',
-            en: 'Purchase invoices & ingredient price logs',
-          },
-          icon: <ShoppingCart className="w-5 h-5 text-emerald-600" />,
-        },
-        {
-          id: 'cost_inventory',
-          label: lang === 'th' ? 'คลังสต็อก & บันทึกของเสีย' : 'Inventory & Waste Log',
-          desc: {
-            th: 'ตรวจนับสต็อก ปรับยอด และบันทึก Waste',
-            en: 'Stock balances, adjustments & waste log',
-          },
-          icon: <Boxes className="w-5 h-5 text-teal-600" />,
         },
       ],
     },
