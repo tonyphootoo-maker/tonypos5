@@ -1,16 +1,41 @@
-import React, { useState, useEffect } from 'react';
-import { SettingsDoc, Language } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  SettingsDoc,
+  Language,
+  DishDoc,
+  OptionGroupDoc,
+  CategoryDoc,
+  ChannelDoc,
+  IngredientDoc,
+  SubRecipeDoc,
+  PackagingDoc,
+} from '../types';
 import { translations } from '../i18n/translations';
 import { useLanguage } from '../contexts/LanguageContext';
 import {
+  auth,
   updateSettings,
   saveImageDoc,
   getImageDoc,
   rebuildSummariesFromBills,
   auditSummariesAgainstBills,
+  fetchCollection,
+  saveDocument,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
 import { PWAInstallButton } from '../components/PWAInstallButton';
+import {
+  MenuItem as CostMenuItem,
+  Ingredient as CostIngredient,
+  Sauce as CostSauce,
+} from '../costing/types';
+import { COST_COLLECTIONS, FirebaseSyncService } from '../costing/services/firebaseSyncService';
+import { StorageService } from '../costing/services/storageService';
+import {
+  buildRetranslatePreview,
+  RetranslateEntityType,
+  RetranslatePreviewItem,
+} from '../utils/retranslateScanner';
 import {
   Settings,
   Store,
@@ -27,6 +52,8 @@ import {
   BookOpen,
   ChevronDown,
   ChevronUp,
+  Languages,
+  X,
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -59,6 +86,29 @@ export const SettingsPage: React.FC<Props> = ({
   const [isRebuilding, setIsRebuilding] = useState(false);
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
   const [isRebuildConfirmOpen, setIsRebuildConfirmOpen] = useState(false);
+
+  // Batch re-translation state (R7)
+  const [isScanningTranslations, setIsScanningTranslations] = useState(false);
+  const [isApplyingTranslations, setIsApplyingTranslations] = useState(false);
+  const [isRetranslateModalOpen, setIsRetranslateModalOpen] = useState(false);
+  const [retranslateItems, setRetranslateItems] = useState<RetranslatePreviewItem[]>([]);
+  const [retranslateStats, setRetranslateStats] = useState<{
+    skippedManualCount: number;
+    unresolvedCount: number;
+  }>({ skippedManualCount: 0, unresolvedCount: 0 });
+  const [retranslateFeedback, setRetranslateFeedback] = useState<string | null>(null);
+  const loadedDatasetRef = useRef<{
+    dishes: DishDoc[];
+    optionGroups: OptionGroupDoc[];
+    categories: CategoryDoc[];
+    channels: ChannelDoc[];
+    ingredients: IngredientDoc[];
+    subRecipes: SubRecipeDoc[];
+    packaging: PackagingDoc[];
+    costMenus: CostMenuItem[];
+    costIngredients: CostIngredient[];
+    costSauces: CostSauce[];
+  } | null>(null);
 
   useEffect(() => {
     setForm({ ...settings });
@@ -143,6 +193,347 @@ export const SettingsPage: React.FC<Props> = ({
       console.error('Rebuild error:', err);
     } finally {
       setIsRebuilding(false);
+    }
+  };
+
+  const getEntityTypeLabel = (entityType: RetranslateEntityType): string => {
+    const labels: Record<RetranslateEntityType, { th: string; en: string }> = {
+      dish: { th: 'เมนู (POS)', en: 'Dish (POS)' },
+      dishVariant: { th: 'ตัวเลือกหลัก (POS)', en: 'Variant (POS)' },
+      optionGroup: { th: 'กลุ่มตัวเลือกย่อย', en: 'Option Group' },
+      optionChoice: { th: 'ตัวเลือกย่อย', en: 'Option Choice' },
+      category: { th: 'หมวดหมู่เมนู', en: 'Category' },
+      channel: { th: 'ช่องทางขาย', en: 'Sales Channel' },
+      ingredient: { th: 'วัตถุดิบ (POS)', en: 'Ingredient (POS)' },
+      subRecipe: { th: 'สูตรย่อย (POS)', en: 'Sub-Recipe (POS)' },
+      packaging: { th: 'บรรจุภัณฑ์ (POS)', en: 'Packaging (POS)' },
+      costMenu: { th: 'เมนู (ต้นทุน)', en: 'Menu (Costing)' },
+      costVariant: { th: 'ตัวเลือก (ต้นทุน)', en: 'Variant (Costing)' },
+      costIngredient: { th: 'วัตถุดิบ (ต้นทุน)', en: 'Ingredient (Costing)' },
+      costSauce: { th: 'ซอส/พริกแกง (ต้นทุน)', en: 'Sauce (Costing)' },
+    };
+    return labels[entityType]?.[lang] || entityType;
+  };
+
+  const handleScanRetranslations = async () => {
+    setIsScanningTranslations(true);
+    setRetranslateFeedback(null);
+    try {
+      const safeFetch = async <T,>(colName: string): Promise<T[]> => {
+        try {
+          return await fetchCollection<T>(colName);
+        } catch {
+          return [];
+        }
+      };
+
+      const [
+        dishes,
+        optionGroups,
+        categories,
+        channels,
+        ingredients,
+        subRecipes,
+        packaging,
+        cloudCostMenus,
+        cloudCostIngredients,
+        cloudCostSauces,
+      ] = await Promise.all([
+        safeFetch<DishDoc>('dishes'),
+        safeFetch<OptionGroupDoc>('optionGroups'),
+        safeFetch<CategoryDoc>('categories'),
+        safeFetch<ChannelDoc>('channels'),
+        safeFetch<IngredientDoc>('ingredients'),
+        safeFetch<SubRecipeDoc>('subRecipes'),
+        safeFetch<PackagingDoc>('packaging'),
+        safeFetch<CostMenuItem>(COST_COLLECTIONS.MENUS),
+        safeFetch<CostIngredient>(COST_COLLECTIONS.INGREDIENTS),
+        safeFetch<CostSauce>(COST_COLLECTIONS.SAUCES),
+      ]);
+
+      const costMenus =
+        cloudCostMenus.length > 0 ? cloudCostMenus : StorageService.getMenus();
+      const costIngredients =
+        cloudCostIngredients.length > 0 ? cloudCostIngredients : StorageService.getIngredients();
+      const costSauces =
+        cloudCostSauces.length > 0 ? cloudCostSauces : StorageService.getSauces();
+
+      const dataset = {
+        dishes,
+        optionGroups,
+        categories,
+        channels,
+        ingredients,
+        subRecipes,
+        packaging,
+        costMenus,
+        costIngredients,
+        costSauces,
+      };
+      loadedDatasetRef.current = dataset;
+
+      const scanResult = buildRetranslatePreview(dataset);
+      setRetranslateItems(scanResult.items);
+      setRetranslateStats({
+        skippedManualCount: scanResult.skippedManualCount,
+        unresolvedCount: scanResult.unresolvedCount,
+      });
+      setIsRetranslateModalOpen(true);
+    } catch (err) {
+      console.error('Failed to scan translations:', err);
+      setRetranslateFeedback(
+        lang === 'th'
+          ? 'ไม่สามารถสแกนรายการแปลภาษาได้ในขณะนี้'
+          : 'Failed to scan translations.'
+      );
+    } finally {
+      setIsScanningTranslations(false);
+    }
+  };
+
+  const handleApplyRetranslations = async () => {
+    const dataset = loadedDatasetRef.current;
+    if (!dataset || retranslateItems.length === 0) {
+      setIsRetranslateModalOpen(false);
+      return;
+    }
+
+    setIsApplyingTranslations(true);
+    try {
+      const uid = auth?.currentUser?.uid;
+
+      const dishUpdates = new Map<string, string>();
+      const dishVariantUpdates = new Map<string, Map<string, string>>();
+      const optionGroupUpdates = new Map<string, string>();
+      const optionChoiceUpdates = new Map<string, Map<string, string>>();
+      const categoryUpdates = new Map<string, string>();
+      const channelUpdates = new Map<string, string>();
+      const ingredientUpdates = new Map<string, string>();
+      const subRecipeUpdates = new Map<string, string>();
+      const packagingUpdates = new Map<string, string>();
+      const costMenuUpdates = new Map<string, string>();
+      const costVariantUpdates = new Map<string, Map<string, string>>();
+      const costIngredientUpdates = new Map<string, string>();
+      const costSauceUpdates = new Map<string, string>();
+
+      for (const item of retranslateItems) {
+        switch (item.entityType) {
+          case 'dish':
+            dishUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'dishVariant': {
+            if (!item.parentId) break;
+            const m = dishVariantUpdates.get(item.parentId) || new Map<string, string>();
+            m.set(item.id, item.newEnglish);
+            dishVariantUpdates.set(item.parentId, m);
+            break;
+          }
+          case 'optionGroup':
+            optionGroupUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'optionChoice': {
+            if (!item.parentId) break;
+            const m = optionChoiceUpdates.get(item.parentId) || new Map<string, string>();
+            m.set(item.id, item.newEnglish);
+            optionChoiceUpdates.set(item.parentId, m);
+            break;
+          }
+          case 'category':
+            categoryUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'channel':
+            channelUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'ingredient':
+            ingredientUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'subRecipe':
+            subRecipeUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'packaging':
+            packagingUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'costMenu':
+            costMenuUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'costVariant': {
+            if (!item.parentId) break;
+            const m = costVariantUpdates.get(item.parentId) || new Map<string, string>();
+            m.set(item.id, item.newEnglish);
+            costVariantUpdates.set(item.parentId, m);
+            break;
+          }
+          case 'costIngredient':
+            costIngredientUpdates.set(item.id, item.newEnglish);
+            break;
+          case 'costSauce':
+            costSauceUpdates.set(item.id, item.newEnglish);
+            break;
+        }
+      }
+
+      const saveTasks: Promise<unknown>[] = [];
+
+      for (const dish of dataset.dishes) {
+        const newDishName = dishUpdates.get(dish.id);
+        const varMap = dishVariantUpdates.get(dish.id);
+        if (!newDishName && !varMap) continue;
+        const updatedDish: DishDoc = {
+          ...dish,
+          ...(newDishName ? { name: newDishName, nameEnManual: false } : {}),
+          variants: (dish.variants || []).map((v) => {
+            const nextVarEn = varMap?.get(v.id);
+            return nextVarEn ? { ...v, name: nextVarEn, nameEnManual: false } : v;
+          }),
+        };
+        saveTasks.push(saveDocument('dishes', updatedDish, false));
+      }
+
+      for (const grp of dataset.optionGroups) {
+        const newGrpName = optionGroupUpdates.get(grp.id);
+        const choiceMap = optionChoiceUpdates.get(grp.id);
+        if (!newGrpName && !choiceMap) continue;
+        const updatedGrp: OptionGroupDoc = {
+          ...grp,
+          ...(newGrpName ? { name: newGrpName, nameEnManual: false } : {}),
+          choices: (grp.choices || []).map((c) => {
+            const nextChoiceEn = choiceMap?.get(c.id);
+            return nextChoiceEn ? { ...c, name: nextChoiceEn, nameEnManual: false } : c;
+          }),
+        };
+        saveTasks.push(saveDocument('optionGroups', updatedGrp, false));
+      }
+
+      for (const cat of dataset.categories) {
+        const nextEn = categoryUpdates.get(cat.id);
+        if (!nextEn) continue;
+        saveTasks.push(
+          saveDocument('categories', { ...cat, name: nextEn, nameEnManual: false }, false)
+        );
+      }
+
+      for (const ch of dataset.channels) {
+        const nextEn = channelUpdates.get(ch.id);
+        if (!nextEn) continue;
+        saveTasks.push(
+          saveDocument('channels', { ...ch, name: nextEn, nameEnManual: false }, false)
+        );
+      }
+
+      for (const ing of dataset.ingredients) {
+        const nextEn = ingredientUpdates.get(ing.id);
+        if (!nextEn) continue;
+        saveTasks.push(
+          saveDocument('ingredients', { ...ing, name: nextEn, nameEnManual: false }, false)
+        );
+      }
+
+      for (const sub of dataset.subRecipes) {
+        const nextEn = subRecipeUpdates.get(sub.id);
+        if (!nextEn) continue;
+        saveTasks.push(
+          saveDocument('subRecipes', { ...sub, name: nextEn, nameEnManual: false }, false)
+        );
+      }
+
+      for (const pkg of dataset.packaging) {
+        const nextEn = packagingUpdates.get(pkg.id);
+        if (!nextEn) continue;
+        saveTasks.push(
+          saveDocument('packaging', { ...pkg, name: nextEn, nameEnManual: false }, false)
+        );
+      }
+
+      if (costMenuUpdates.size > 0 || costVariantUpdates.size > 0) {
+        const updatedMenus = dataset.costMenus.map((cm) => {
+          const newMenuEn = costMenuUpdates.get(cm.id);
+          const varMap = costVariantUpdates.get(cm.id);
+          if (!newMenuEn && !varMap) return cm;
+          const nextMenu: CostMenuItem = {
+            ...cm,
+            ...(newMenuEn ? { englishName: newMenuEn, englishNameManual: false } : {}),
+            variants: (cm.variants || []).map((cv) => {
+              const nextVarEn = varMap?.get(cv.id);
+              return nextVarEn
+                ? { ...cv, englishName: nextVarEn, englishNameManual: false }
+                : cv;
+            }),
+            updatedAt: new Date().toISOString(),
+          };
+          if (uid) {
+            saveTasks.push(
+              FirebaseSyncService.saveUserDoc(uid, COST_COLLECTIONS.MENUS, nextMenu.id, nextMenu)
+            );
+          }
+          return nextMenu;
+        });
+        StorageService.saveMenus(updatedMenus);
+      }
+
+      if (costIngredientUpdates.size > 0) {
+        const updatedIngs = dataset.costIngredients.map((ci) => {
+          const nextEn = costIngredientUpdates.get(ci.id);
+          if (!nextEn) return ci;
+          const nextIng: CostIngredient = {
+            ...ci,
+            englishName: nextEn,
+            englishNameManual: false,
+            updatedAt: new Date().toISOString(),
+          };
+          if (uid) {
+            saveTasks.push(
+              FirebaseSyncService.saveUserDoc(
+                uid,
+                COST_COLLECTIONS.INGREDIENTS,
+                nextIng.id,
+                nextIng
+              )
+            );
+          }
+          return nextIng;
+        });
+        StorageService.saveIngredients(updatedIngs);
+      }
+
+      if (costSauceUpdates.size > 0) {
+        const updatedSauces = dataset.costSauces.map((cs) => {
+          const nextEn = costSauceUpdates.get(cs.id);
+          if (!nextEn) return cs;
+          const nextSauce: CostSauce = {
+            ...cs,
+            englishName: nextEn,
+            englishNameManual: false,
+            updatedAt: new Date().toISOString(),
+          };
+          if (uid) {
+            saveTasks.push(
+              FirebaseSyncService.saveUserDoc(uid, COST_COLLECTIONS.SAUCES, nextSauce.id, nextSauce)
+            );
+          }
+          return nextSauce;
+        });
+        StorageService.saveSauces(updatedSauces);
+      }
+
+      await Promise.all(saveTasks);
+
+      const appliedCount = retranslateItems.length;
+      setIsRetranslateModalOpen(false);
+      setRetranslateItems([]);
+      setRetranslateFeedback(
+        lang === 'th'
+          ? `อัปเดตชื่อภาษาอังกฤษสำเร็จ ${appliedCount} รายการ`
+          : `Updated English translations for ${appliedCount} items.`
+      );
+    } catch (err) {
+      console.error('Failed to apply re-translations:', err);
+      setRetranslateFeedback(
+        lang === 'th'
+          ? 'บันทึกการอัปเดตชื่อภาษาอังกฤษไม่สำเร็จ'
+          : 'Failed to save updated English names.'
+      );
+    } finally {
+      setIsApplyingTranslations(false);
     }
   };
 
@@ -723,6 +1114,51 @@ export const SettingsPage: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* Batch Re-translate Auto-Generated English Names (R7) */}
+      <div className="p-5 bg-white rounded-3xl border border-neutral-200 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-extrabold text-sm text-neutral-900 flex items-center gap-2">
+              <Languages className="w-5 h-5 text-orange-600 shrink-0" />
+              <span>
+                {lang === 'th'
+                  ? 'แปลชื่อภาษาอังกฤษที่สร้างอัตโนมัติใหม่'
+                  : 'Re-translate auto-generated names'}
+              </span>
+            </h3>
+            <p className="text-[11px] text-neutral-500 mt-1">
+              {lang === 'th'
+                ? 'สแกนเมนู ตัวเลือก กลุ่มตัวเลือก หมวดหมู่ วัตถุดิบ และซอส โดยคงชื่อภาษาอังกฤษที่คุณแก้ไขเองไว้ทั้งหมด'
+                : 'Scan menus, variants, options, categories, ingredients, and sauces while preserving manually edited English names.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={isScanningTranslations}
+            onClick={handleScanRetranslations}
+            className="px-4 py-2 bg-neutral-100 hover:bg-orange-50 text-neutral-800 hover:text-orange-700 rounded-xl text-xs font-bold border border-neutral-300 hover:border-orange-300 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+          >
+            <Languages className="w-3.5 h-3.5 text-orange-600" />
+            <span>
+              {isScanningTranslations
+                ? lang === 'th'
+                  ? 'กำลังสแกน...'
+                  : 'Scanning...'
+                : lang === 'th'
+                ? 'ตรวจสอบและดูตัวอย่าง'
+                : 'Scan & Preview'}
+            </span>
+          </button>
+        </div>
+
+        {retranslateFeedback && (
+          <div className="p-3 rounded-2xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-800 flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{retranslateFeedback}</span>
+          </div>
+        )}
+      </div>
+
       {/* USALI Accounting & Costing Formula Guide */}
       <div className="p-5 bg-white rounded-3xl border border-neutral-200 shadow-xs space-y-3">
         <button
@@ -878,6 +1314,118 @@ export const SettingsPage: React.FC<Props> = ({
         onCancel={() => setIsRebuildConfirmOpen(false)}
         onConfirm={handleConfirmRebuildSummaries}
       />
+
+      {isRetranslateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
+          <div className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-3xl w-full border border-orange-200">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Languages className="w-5 h-5" />
+                <h3 className="font-extrabold text-base">
+                  {lang === 'th'
+                    ? 'ตัวอย่างการแปลชื่อภาษาอังกฤษใหม่'
+                    : 'Re-translate Auto-Generated Names Preview'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={isApplyingTranslations}
+                onClick={() => setIsRetranslateModalOpen(false)}
+                className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body space-y-3">
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <span className="px-2.5 py-1 rounded-lg bg-orange-50 border border-orange-200 text-orange-800 font-bold">
+                  {lang === 'th'
+                    ? `รายการที่จะอัปเดต: ${retranslateItems.length}`
+                    : `Updates ready: ${retranslateItems.length}`}
+                </span>
+                <span className="px-2.5 py-1 rounded-lg bg-neutral-100 border border-neutral-200 text-neutral-700 font-bold">
+                  {lang === 'th'
+                    ? `ข้ามชื่อที่แก้เอง: ${retranslateStats.skippedManualCount}`
+                    : `Manual kept: ${retranslateStats.skippedManualCount}`}
+                </span>
+                {retranslateStats.unresolvedCount > 0 && (
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {lang === 'th'
+                        ? `รอตรวจสอบ EN: ${retranslateStats.unresolvedCount}`
+                        : `Needs EN review: ${retranslateStats.unresolvedCount}`}
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              {retranslateItems.length === 0 ? (
+                <div className="p-8 bg-neutral-50 border border-dashed border-neutral-300 rounded-2xl text-center text-xs text-neutral-600">
+                  {lang === 'th'
+                    ? 'ชื่อภาษาอังกฤษที่สร้างอัตโนมัติทั้งหมดเป็นเวอร์ชันล่าสุดแล้ว'
+                    : 'All auto-generated English names are already up to date.'}
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-neutral-200">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-neutral-100 border-b border-neutral-200 text-[11px] font-extrabold text-neutral-700">
+                        <th className="py-2 px-3">{lang === 'th' ? 'ประเภท' : 'Type'}</th>
+                        <th className="py-2 px-3">{lang === 'th' ? 'ชื่อไทย' : 'Thai Name'}</th>
+                        <th className="py-2 px-3">{lang === 'th' ? 'อังกฤษเดิม' : 'Old EN'}</th>
+                        <th className="py-2 px-3">{lang === 'th' ? 'อังกฤษใหม่' : 'New EN'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-100">
+                      {retranslateItems.map((item) => (
+                        <tr key={item.key} className="hover:bg-orange-50/40">
+                          <td className="py-2 px-3 font-bold text-neutral-600 whitespace-nowrap">
+                            {getEntityTypeLabel(item.entityType)}
+                          </td>
+                          <td className="py-2 px-3 font-bold text-neutral-900">{item.thaiName}</td>
+                          <td className="py-2 px-3 text-neutral-500">
+                            {item.oldEnglish || '—'}
+                          </td>
+                          <td className="py-2 px-3 font-extrabold text-emerald-700">
+                            {item.newEnglish}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={isApplyingTranslations}
+                onClick={() => setIsRetranslateModalOpen(false)}
+                className="px-4 py-1.5 bg-white text-neutral-700 border border-neutral-300 rounded-xl text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={isApplyingTranslations || retranslateItems.length === 0}
+                onClick={handleApplyRetranslations}
+                className="px-5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer disabled:opacity-50"
+              >
+                {isApplyingTranslations
+                  ? lang === 'th'
+                    ? 'กำลังอัปเดต...'
+                    : 'Applying...'
+                  : lang === 'th'
+                  ? `ยืนยันอัปเดต (${retranslateItems.length})`
+                  : `Apply (${retranslateItems.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -42,7 +42,17 @@ import {
   roundUpToStep,
 } from '../services/calculationEngine';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
-import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import {
+  translateThaiToEnglish,
+  computeAutoEnglishName,
+  containsThaiCharacters,
+  getLocalizedText,
+  localizeUnit,
+} from '../../utils/thaiToEnglish';
+import {
+  useDebouncedTranslationScheduler,
+  needsEnglishReview,
+} from '../../hooks/useDebouncedThaiTranslation';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { convertUnit, isPieceLikeUnit } from '../engine/units';
 import { NumericInput } from './common/NumericInput';
@@ -233,6 +243,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const [draggedMenuId, setDraggedMenuId] = useState<string | null>(null);
   const [dragOverMenuId, setDragOverMenuId] = useState<string | null>(null);
   const menuNameClickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevMenuThaiRef = React.useRef<string>('');
+  const prevVariantThaiRef = React.useRef<string>('');
+  const prevAddCatThaiRef = React.useRef<string>('');
+  const prevEditCatThaiRef = React.useRef<string>('');
+  const translationScheduler = useDebouncedTranslationScheduler(600);
 
   React.useEffect(() => {
     return () => {
@@ -546,8 +561,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
   const handleOpenEditCategory = (categoryName: string) => {
     if (!categoryName || categoryName === 'ALL') return;
+    translationScheduler.cancelAll();
     setEditingCategoryOldName(categoryName);
     setEditingCategoryNewName(categoryName);
+    prevEditCatThaiRef.current = categoryName;
     setEditCategoryEnglishInput(translateThaiToEnglish(categoryName));
     setEditCategoryError(null);
     setIsEditCategoryModalOpen(true);
@@ -789,6 +806,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   };
 
   const handleOpenAddMenu = () => {
+    translationScheduler.cancelAll();
+    prevMenuThaiRef.current = '';
     const currentCat =
       selectedCategory !== 'ALL'
         ? selectedCategory
@@ -802,6 +821,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       name: '',
       thaiName: '',
       englishName: '',
+      englishNameManual: false,
       category: currentCat,
       variants: [
         {
@@ -831,10 +851,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   };
 
   const handleOpenEditMenu = (menu: MenuItem) => {
+    translationScheduler.cancelAll();
     const cloned = JSON.parse(JSON.stringify(menu));
     const thName = cloned.thaiName || cloned.name || '';
+    prevMenuThaiRef.current = thName;
+    const storedEn = (cloned.englishName || '').trim();
     cloned.thaiName = thName;
-    cloned.englishName = cloned.englishName || translateThaiToEnglish(thName);
+    cloned.englishNameManual = Boolean(cloned.englishNameManual);
+    cloned.englishName =
+      cloned.englishNameManual && storedEn && !containsThaiCharacters(storedEn)
+        ? storedEn
+        : storedEn && !containsThaiCharacters(storedEn)
+        ? storedEn
+        : translateThaiToEnglish(thName);
     setEditingMenu(cloned);
     setIsMenuModalOpen(true);
   };
@@ -842,18 +871,25 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const handleSaveMenuModal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMenu || !editingMenu.name) return;
+    translationScheduler.cancelAll();
 
     const trimmedTh = editingMenu.name.trim();
-    const trimmedEn =
-      (editingMenu.englishName || '').trim() ||
-      translateThaiToEnglish(trimmedTh) ||
-      trimmedTh;
+    const isManual = Boolean(editingMenu.englishNameManual);
+    const trimmedEn = isManual
+      ? (editingMenu.englishName || '').trim()
+      : computeAutoEnglishName({
+          previousThai: prevMenuThaiRef.current || trimmedTh,
+          nextThai: trimmedTh,
+          currentEnglish: editingMenu.englishName || '',
+          isManuallyEdited: false,
+        }).trim() || translateThaiToEnglish(trimmedTh);
 
     const finalMenu: MenuItem = {
       id: editingMenu.id || `menu_${Date.now()}`,
       name: trimmedTh,
       thaiName: trimmedTh,
       englishName: trimmedEn,
+      englishNameManual: isManual,
       code: editingMenu.code,
       sku: editingMenu.sku,
       barcode: editingMenu.barcode,
@@ -878,6 +914,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const initialUnit = (defaultIng?.usageUnit || defaultIng?.baseUnit || 'g') as string;
     const initialQty = isPieceLikeUnit(initialUnit) ? (initialUnit === 'ตัว' ? 4 : 1) : 80;
     const variantTh = `${menu.name} ${defaultProtein}`;
+    translationScheduler.cancelAll();
+    prevVariantThaiRef.current = variantTh;
     const defaultBaseItems = extractBaseRecipeItemsForMenu(menu);
 
     if (initialUnit && !portionUnits.includes(initialUnit)) {
@@ -909,6 +947,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       name: variantTh,
       thaiName: variantTh,
       englishName: translateThaiToEnglish(variantTh),
+      englishNameManual: false,
       proteinType: defaultProtein,
       sellingPrice: basePrice,
       takeawayPrice: baseTakeaway,
@@ -995,10 +1034,20 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       clonedVariant.robinhoodPrice = computeChannelPriceFromMultiplier(resolvedTakeaway, robinhoodMultiplier);
     }
     clonedVariant.deliveryPrice = clonedVariant.grabPrice;
+    translationScheduler.cancelAll();
     const existingTh = clonedVariant.thaiName || clonedVariant.name || '';
+    prevVariantThaiRef.current = existingTh;
     clonedVariant.name = existingTh;
     clonedVariant.thaiName = existingTh;
-    clonedVariant.englishName = clonedVariant.englishName || translateThaiToEnglish(existingTh);
+    const storedVariantEn = (clonedVariant.englishName || '').trim();
+    const isManualVar = Boolean(clonedVariant.englishNameManual);
+    clonedVariant.englishNameManual = isManualVar;
+    clonedVariant.englishName =
+      isManualVar && storedVariantEn && !containsThaiCharacters(storedVariantEn)
+        ? storedVariantEn
+        : storedVariantEn && !containsThaiCharacters(storedVariantEn)
+        ? storedVariantEn
+        : translateThaiToEnglish(existingTh);
 
     const existingNonProteins = (clonedVariant.recipeItems || []).filter(
       (it) => !isProteinRecipeItem(it, clonedVariant.proteinType)
@@ -1026,7 +1075,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       meatUnit: initialUnit,
       seafoodShrimpQty: existingShrimp?.quantity || 4,
       seafoodSquidQty: existingSquid?.quantity || 40,
-      isEnglishManuallyEdited: false,
+      isEnglishManuallyEdited: isManualVar,
       selectedBaseRecipeMenuId: initialBaseRecipeId,
     });
   };
@@ -1132,8 +1181,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       finalRecipeItems = [proteinRecipeItem, ...existingOtherItems];
     }
 
+    translationScheduler.cancelAll();
     const derivedNameTh = v.name?.trim() || `${targetMenu.name} ${pType}`;
-    const derivedNameEn = (v.englishName || '').trim() || translateThaiToEnglish(derivedNameTh) || derivedNameTh;
+    const isVariantManual = Boolean(variantModalState.isEnglishManuallyEdited || v.englishNameManual);
+    const derivedNameEn = isVariantManual
+      ? (v.englishName || '').trim()
+      : computeAutoEnglishName({
+          previousThai: prevVariantThaiRef.current || derivedNameTh,
+          nextThai: derivedNameTh,
+          currentEnglish: v.englishName || '',
+          isManuallyEdited: false,
+        }).trim() || translateThaiToEnglish(derivedNameTh);
     const baseSellingPrice = Number(v.sellingPrice) || 60;
 
     const finalVariant: MenuVariant = {
@@ -1145,6 +1203,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       name: derivedNameTh,
       thaiName: derivedNameTh,
       englishName: derivedNameEn,
+      englishNameManual: isVariantManual,
       proteinType: pType,
       sellingPrice: baseSellingPrice,
       takeawayPrice: Number(v.takeawayPrice) || baseSellingPrice,
@@ -2500,37 +2559,55 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     value={editingMenu.name || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      const nextEn = computeAutoEnglishName({
-                        previousThai: editingMenu.thaiName ?? editingMenu.name,
-                        nextThai: nextTh,
-                        currentEnglish: editingMenu.englishName,
-                      });
-                      setEditingMenu({
-                        ...editingMenu,
-                        name: nextTh,
-                        thaiName: nextTh,
-                        englishName: nextEn,
+                      setEditingMenu((prev) =>
+                        prev ? { ...prev, name: nextTh, thaiName: nextTh } : prev
+                      );
+                      translationScheduler.schedule('costMenu', () => {
+                        setEditingMenu((prev) => {
+                          if (!prev) return prev;
+                          const currTh = prev.name || '';
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevMenuThaiRef.current,
+                            nextThai: currTh,
+                            currentEnglish: prev.englishName,
+                            isManuallyEdited: Boolean(prev.englishNameManual),
+                          });
+                          prevMenuThaiRef.current = currTh;
+                          return { ...prev, englishName: nextEn };
+                        });
                       });
                     }}
+                    onBlur={() => translationScheduler.flush('costMenu')}
                     className="w-full p-3 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-sm font-medium focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
                   />
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-stone-700 font-bold text-xs">
-                      {isEn
-                        ? 'Menu Name (English — Auto-translated)'
-                        : 'ชื่อเมนูภาษาอังกฤษ (English Name — แปลอัตโนมัติ)'}
-                    </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2">
+                      <label className="block text-stone-700 font-bold text-xs">
+                        {isEn
+                          ? 'Menu Name (English — Auto-translated)'
+                          : 'ชื่อเมนูภาษาอังกฤษ (English Name — แปลอัตโนมัติ)'}
+                      </label>
+                      {needsEnglishReview(editingMenu.name, editingMenu.englishName) && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          <span>{isEn ? 'Needs EN' : 'รอตรวจสอบ EN'}</span>
+                        </span>
+                      )}
+                    </div>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        translationScheduler.cancel('costMenu');
+                        prevMenuThaiRef.current = editingMenu.name || '';
                         setEditingMenu({
                           ...editingMenu,
                           englishName: translateThaiToEnglish(editingMenu.name || ''),
-                        })
-                      }
+                          englishNameManual: false,
+                        });
+                      }}
                       className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                     >
                       {isEn ? 'Re-translate from Thai' : 'แปลใหม่จากภาษาไทย'}
@@ -2540,7 +2617,15 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     type="text"
                     placeholder={isEn ? 'Auto-translated English name (editable)' : 'ชื่อเมนูภาษาอังกฤษที่แปลอัตโนมัติ (แก้ไขได้)'}
                     value={editingMenu.englishName || ''}
-                    onChange={(e) => setEditingMenu({ ...editingMenu, englishName: e.target.value })}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      translationScheduler.cancel('costMenu');
+                      setEditingMenu({
+                        ...editingMenu,
+                        englishName: val,
+                        englishNameManual: Boolean(val.trim()),
+                      });
+                    }}
                     className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
                   />
                 </div>
@@ -2653,16 +2738,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     value={newCategoryInput}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      setNewCategoryEnglishInput((currEn) =>
-                        computeAutoEnglishName({
-                          previousThai: newCategoryInput,
-                          nextThai: nextTh,
-                          currentEnglish: currEn,
-                        })
-                      );
                       setNewCategoryInput(nextTh);
                       if (categoryError) setCategoryError(null);
+                      translationScheduler.schedule('costAddCat', () => {
+                        setNewCategoryEnglishInput((currEn) => {
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevAddCatThaiRef.current,
+                            nextThai: nextTh,
+                            currentEnglish: currEn,
+                          });
+                          prevAddCatThaiRef.current = nextTh;
+                          return nextEn;
+                        });
+                      });
                     }}
+                    onBlur={() => translationScheduler.flush('costAddCat')}
                     className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
                   />
                   {categoryError && (
@@ -2673,14 +2763,25 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-stone-700 mb-1 font-semibold">
-                    {isEn ? 'Category Name (English — Auto-translated)' : 'ชื่อหมวดหมู่ภาษาอังกฤษ (แปลอัตโนมัติ)'}
-                  </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="block text-stone-700 font-semibold">
+                      {isEn ? 'Category Name (English — Auto-translated)' : 'ชื่อหมวดหมู่ภาษาอังกฤษ (แปลอัตโนมัติ)'}
+                    </label>
+                    {needsEnglishReview(newCategoryInput, newCategoryEnglishInput) && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>{isEn ? 'Needs EN' : 'รอตรวจสอบ EN'}</span>
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     placeholder={isEn ? 'Auto-translated category name' : 'ชื่อหมวดหมู่ภาษาอังกฤษที่แปลอัตโนมัติ'}
                     value={newCategoryEnglishInput}
-                    onChange={(e) => setNewCategoryEnglishInput(e.target.value)}
+                    onChange={(e) => {
+                      translationScheduler.cancel('costAddCat');
+                      setNewCategoryEnglishInput(e.target.value);
+                    }}
                     className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-800 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
                   />
                 </div>
@@ -2782,16 +2883,21 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     value={editingCategoryNewName}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      setEditCategoryEnglishInput((currEn) =>
-                        computeAutoEnglishName({
-                          previousThai: editingCategoryNewName,
-                          nextThai: nextTh,
-                          currentEnglish: currEn,
-                        })
-                      );
                       setEditingCategoryNewName(nextTh);
                       if (editCategoryError) setEditCategoryError(null);
+                      translationScheduler.schedule('costEditCat', () => {
+                        setEditCategoryEnglishInput((currEn) => {
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevEditCatThaiRef.current,
+                            nextThai: nextTh,
+                            currentEnglish: currEn,
+                          });
+                          prevEditCatThaiRef.current = nextTh;
+                          return nextEn;
+                        });
+                      });
                     }}
+                    onBlur={() => translationScheduler.flush('costEditCat')}
                     className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
                   />
                   {editCategoryError && (
@@ -2802,14 +2908,25 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-stone-700 mb-1 font-semibold">
-                    {isEn ? 'English Name (Auto-translated)' : 'ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)'}
-                  </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="block text-stone-700 font-semibold">
+                      {isEn ? 'English Name (Auto-translated)' : 'ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)'}
+                    </label>
+                    {needsEnglishReview(editingCategoryNewName, editCategoryEnglishInput) && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>{isEn ? 'Needs EN' : 'รอตรวจสอบ EN'}</span>
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     placeholder={isEn ? 'Auto-translated English name' : 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ'}
                     value={editCategoryEnglishInput}
-                    onChange={(e) => setEditCategoryEnglishInput(e.target.value)}
+                    onChange={(e) => {
+                      translationScheduler.cancel('costEditCat');
+                      setEditCategoryEnglishInput(e.target.value);
+                    }}
                     className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-800 focus:outline-none focus:border-[#F27D26] font-medium text-xs"
                   />
                 </div>
@@ -3375,47 +3492,72 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       value={variantModalState.variant?.name || ''}
                       onChange={(e) => {
                         const nextTh = e.target.value;
-                        setVariantModalState((prev) => {
-                          const prevTh = prev.variant?.thaiName ?? prev.variant?.name ?? '';
-                          const autoEn = prev.isEnglishManuallyEdited
-                            ? prev.variant?.englishName || ''
-                            : computeAutoEnglishName({
-                                previousThai: prevTh,
-                                nextThai: nextTh,
-                                currentEnglish: prev.variant?.englishName,
-                              });
-                          return {
-                            ...prev,
-                            variant: {
-                              ...prev.variant,
-                              name: nextTh,
-                              thaiName: nextTh,
-                              englishName: autoEn,
-                            },
-                          };
+                        setVariantModalState((prev) => ({
+                          ...prev,
+                          variant: {
+                            ...prev.variant,
+                            name: nextTh,
+                            thaiName: nextTh,
+                          },
+                        }));
+                        translationScheduler.schedule('costVariant', () => {
+                          setVariantModalState((prev) => {
+                            const currTh = prev.variant?.name || '';
+                            const autoEn = prev.isEnglishManuallyEdited
+                              ? prev.variant?.englishName || ''
+                              : computeAutoEnglishName({
+                                  previousThai: prevVariantThaiRef.current,
+                                  nextThai: currTh,
+                                  currentEnglish: prev.variant?.englishName,
+                                  isManuallyEdited: Boolean(prev.isEnglishManuallyEdited),
+                                });
+                            prevVariantThaiRef.current = currTh;
+                            return {
+                              ...prev,
+                              variant: {
+                                ...prev.variant,
+                                englishName: autoEn,
+                              },
+                            };
+                          });
                         });
                       }}
+                      onBlur={() => translationScheduler.flush('costVariant')}
                       placeholder={isEn ? 'e.g. Stir-Fried Holy Basil with Pork' : 'เช่น กะเพราหมูสับ'}
                       className="w-full p-2 bg-white border border-amber-300 rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
                     />
                   </div>
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-[11px] font-bold text-stone-700">
-                        {isEn ? 'Option Name (EN)' : 'ชื่อตัวเลือก (English)'}
-                      </label>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-1.5">
+                        <label className="block text-[11px] font-bold text-stone-700">
+                          {isEn ? 'Option Name (EN)' : 'ชื่อตัวเลือก (English)'}
+                        </label>
+                        {needsEnglishReview(
+                          variantModalState.variant?.name,
+                          variantModalState.variant?.englishName
+                        ) && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span>{isEn ? 'Needs EN' : 'รอตรวจสอบ EN'}</span>
+                          </span>
+                        )}
+                      </div>
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          translationScheduler.cancel('costVariant');
+                          prevVariantThaiRef.current = variantModalState.variant?.name || '';
                           setVariantModalState((prev) => ({
                             ...prev,
                             isEnglishManuallyEdited: false,
                             variant: {
                               ...prev.variant,
                               englishName: translateThaiToEnglish(prev.variant?.name || ''),
+                              englishNameManual: false,
                             },
-                          }))
-                        }
+                          }));
+                        }}
                         className="text-[10px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                       >
                         {isEn ? 'Re-translate' : 'แปลใหม่'}
@@ -3424,16 +3566,20 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <input
                       type="text"
                       value={variantModalState.variant?.englishName || ''}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        translationScheduler.cancel('costVariant');
+                        const hasManual = Boolean(val.trim());
                         setVariantModalState((prev) => ({
                           ...prev,
-                          isEnglishManuallyEdited: true,
+                          isEnglishManuallyEdited: hasManual,
                           variant: {
                             ...prev.variant,
-                            englishName: e.target.value,
+                            englishName: val,
+                            englishNameManual: hasManual,
                           },
-                        }))
-                      }
+                        }));
+                      }}
                       placeholder={isEn ? 'Auto-translated culinary English name' : 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ'}
                       className="w-full p-2 bg-white border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
                     />

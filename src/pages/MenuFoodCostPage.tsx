@@ -26,7 +26,17 @@ import {
   getImageDoc,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
-import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText } from '../utils/thaiToEnglish';
+import {
+  translateThaiToEnglish,
+  computeAutoEnglishName,
+  getLocalizedText,
+  containsThaiCharacters,
+  resolveEntityEnglishName,
+} from '../utils/thaiToEnglish';
+import {
+  useDebouncedTranslationScheduler,
+  needsEnglishReview,
+} from '../hooks/useDebouncedThaiTranslation';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import {
   MenuItem as CostMenuItem,
@@ -62,6 +72,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Link2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface Props {
@@ -144,6 +155,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
   // Tracks which English inputs were manually customized in the current modal session
   const manualEnKeysRef = useRef<Set<string>>(new Set());
+  const prevDishThaiRef = useRef<string>('');
+  const prevVarThaiMapRef = useRef<Map<string, string>>(new Map());
+  const prevCatThaiRef = useRef<string>('');
+  const prevChThaiRef = useRef<string>('');
+  const translationScheduler = useDebouncedTranslationScheduler(600);
   const loadedDishImageIdsRef = useRef<Map<string, string>>(new Map());
 
   // No-ops kept for existing handler call sites since real-time listeners handle updates
@@ -423,7 +439,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       );
     });
 
-    const labelEn = cv.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
+    const labelEn = resolveEntityEnglishName(labelTh, cv.englishName) || labelTh;
     let updatedVariants: DishVariant[];
     if (existingMatched) {
       updatedVariants = strippedPlaceholder.map((pv) =>
@@ -432,6 +448,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               ...pv,
               nameTh: labelTh,
               name: labelEn,
+              nameEnManual: Boolean(cv.englishNameManual || pv.nameEnManual),
               price: newPrice,
               costMenuId: costMenu.id,
               costVariantId: cv.id,
@@ -445,6 +462,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           id: cv.id || `var_${Date.now()}`,
           nameTh: labelTh,
           name: labelEn,
+          nameEnManual: Boolean(cv.englishNameManual),
           price: newPrice,
           costMenuId: costMenu.id,
           costVariantId: cv.id,
@@ -637,7 +655,20 @@ export const MenuFoodCostPage: React.FC<Props> = ({
   };
 
   const openEditDish = (dish: DishDoc) => {
+    translationScheduler.cancelAll();
     manualEnKeysRef.current.clear();
+    if (dish.nameEnManual && (dish.name || '').trim()) {
+      manualEnKeysRef.current.add('dish');
+    }
+    prevDishThaiRef.current = dish.nameTh || '';
+    prevVarThaiMapRef.current = new Map(
+      (dish.variants || []).map((v) => [v.id, v.nameTh || ''])
+    );
+    (dish.variants || []).forEach((v) => {
+      if (v.nameEnManual && (v.name || '').trim()) {
+        manualEnKeysRef.current.add(`var_${v.id}`);
+      }
+    });
     setModalPriceOverrides({});
     setImageUploadError(null);
     setEditingDishImageSizeKb(null);
@@ -728,10 +759,19 @@ export const MenuFoodCostPage: React.FC<Props> = ({
     e.preventDefault();
     if (!editingDish) return;
 
+    translationScheduler.cancelAll();
     const finalDishTh = (editingDish.nameTh || '').trim();
-    const finalDishEn =
-      (editingDish.name || '').trim() ||
-      (finalDishTh ? translateThaiToEnglish(finalDishTh) : '');
+    const isDishManual =
+      manualEnKeysRef.current.has('dish') && Boolean((editingDish.name || '').trim());
+    const computedDishEn = isDishManual
+      ? (editingDish.name || '').trim()
+      : computeAutoEnglishName({
+          previousThai: prevDishThaiRef.current,
+          nextThai: finalDishTh,
+          currentEnglish: editingDish.name || '',
+          isManuallyEdited: false,
+        }) || (finalDishTh ? translateThaiToEnglish(finalDishTh) : '');
+    const finalDishEn = computedDishEn.trim();
     if (!finalDishEn && !finalDishTh) return;
 
     const matchedCostMenu = findMatchingCostMenu(editingDish);
@@ -744,11 +784,12 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           );
           const vTh = getCostVariantLabel(cv);
           const vEn =
-            cv.englishName?.trim() ||
-            (existingMatched?.name && existingMatched.name !== 'Standard'
+            resolveEntityEnglishName(vTh, cv.englishName) ||
+            (existingMatched?.name &&
+            existingMatched.name !== 'Standard' &&
+            !containsThaiCharacters(existingMatched.name)
               ? existingMatched.name.trim()
               : '') ||
-            translateThaiToEnglish(vTh) ||
             vTh;
           const resolvedPrice = resolveCostVariantSellingPrice(
             matchedCostMenu,
@@ -760,6 +801,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             id: existingMatched?.id || cv.id || `var_${Date.now()}`,
             name: vEn,
             nameTh: vTh,
+            nameEnManual: Boolean(cv.englishNameManual || existingMatched?.nameEnManual),
             price: resolvedPrice,
             costMenuId: matchedCostMenu.id,
             costVariantId: cv.id,
@@ -770,13 +812,22 @@ export const MenuFoodCostPage: React.FC<Props> = ({
         })
       : (editingDish.variants || []).map((v) => {
           const vTh = (v.nameTh || '').trim();
-          const vEn =
-            (v.name || '').trim() ||
-            (vTh ? translateThaiToEnglish(vTh) : '') ||
-            'Standard';
+          const isVarManual =
+            manualEnKeysRef.current.has(`var_${v.id}`) && Boolean((v.name || '').trim());
+          const vEn = isVarManual
+            ? (v.name || '').trim()
+            : computeAutoEnglishName({
+                previousThai: prevVarThaiMapRef.current.get(v.id) ?? vTh,
+                nextThai: vTh,
+                currentEnglish: v.name || '',
+                isManuallyEdited: false,
+              }) ||
+              (vTh ? translateThaiToEnglish(vTh) : '') ||
+              'Standard';
           return {
             ...v,
             name: vEn,
+            nameEnManual: isVarManual,
             ...(vTh ? { nameTh: vTh } : {}),
             price: Number(v.price) || 0,
             ingredients: v.ingredients || [],
@@ -790,6 +841,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
     const dishToSave: DishDoc = {
       id: editingDish.id || `dish_${Date.now()}`,
       name: finalDishEn || finalDishTh,
+      nameEnManual: isDishManual,
       ...(finalDishTh ? { nameTh: finalDishTh } : {}),
       categoryId: editingDish.categoryId || categories[0]?.id || 'cat_main',
       ...(editingDish.imageId ? { imageId: editingDish.imageId } : {}),
@@ -910,7 +962,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             </span>
             <button
               onClick={() => {
+                translationScheduler.cancelAll();
                 manualEnKeysRef.current.clear();
+                prevDishThaiRef.current = '';
+                prevVarThaiMapRef.current = new Map();
                 setModalPriceOverrides({});
                 setEditingDishPreviewUrl(null);
                 setEditingDishImageSizeKb(null);
@@ -1141,7 +1196,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             </span>
             <button
               onClick={() => {
-                manualEnKeysRef.current.clear();
+                translationScheduler.cancel('cat');
+                manualEnKeysRef.current.delete('cat');
+                prevCatThaiRef.current = '';
                 setEditingCategory({ name: '', nameTh: '', order: categories.length + 1 });
                 setIsCategoryModalOpen(true);
               }}
@@ -1168,7 +1225,12 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => {
-                      manualEnKeysRef.current.clear();
+                      translationScheduler.cancel('cat');
+                      manualEnKeysRef.current.delete('cat');
+                      if (cat.nameEnManual && (cat.name || '').trim()) {
+                        manualEnKeysRef.current.add('cat');
+                      }
+                      prevCatThaiRef.current = cat.nameTh || '';
                       setEditingCategory(cat);
                       setIsCategoryModalOpen(true);
                     }}
@@ -1207,7 +1269,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             </span>
             <button
               onClick={() => {
-                manualEnKeysRef.current.clear();
+                translationScheduler.cancel('ch');
+                manualEnKeysRef.current.delete('ch');
+                prevChThaiRef.current = '';
                 setEditingChannel({ name: '', nameTh: '', type: 'delivery', commissionPercent: 30, packagingCost: 10 });
                 setIsChannelModalOpen(true);
               }}
@@ -1255,7 +1319,12 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 <div className="flex justify-end gap-1.5 mt-3 pt-2 border-t border-neutral-100">
                   <button
                     onClick={() => {
-                      manualEnKeysRef.current.clear();
+                      translationScheduler.cancel('ch');
+                      manualEnKeysRef.current.delete('ch');
+                      if (ch.nameEnManual && (ch.name || '').trim()) {
+                        manualEnKeysRef.current.add('ch');
+                      }
+                      prevChThaiRef.current = ch.nameTh || '';
                       setEditingChannel(ch);
                       setIsChannelModalOpen(true);
                     }}
@@ -1378,14 +1447,23 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     value={editingDish.nameTh || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      const nextEn = computeAutoEnglishName({
-                        previousThai: editingDish.nameTh || '',
-                        nextThai: nextTh,
-                        currentEnglish: editingDish.name || '',
-                        isManuallyEdited: manualEnKeysRef.current.has('dish'),
+                      setEditingDish({ ...editingDish, nameTh: nextTh });
+                      translationScheduler.schedule('dish', () => {
+                        setEditingDish((prev) => {
+                          if (!prev) return prev;
+                          const prevTh = prevDishThaiRef.current;
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevTh,
+                            nextThai: nextTh,
+                            currentEnglish: prev.name || '',
+                            isManuallyEdited: manualEnKeysRef.current.has('dish'),
+                          });
+                          prevDishThaiRef.current = nextTh;
+                          return { ...prev, name: nextEn };
+                        });
                       });
-                      setEditingDish({ ...editingDish, nameTh: nextTh, name: nextEn });
                     }}
+                    onBlur={() => translationScheduler.flush('dish')}
                     className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                     placeholder={
                       lang === 'th'
@@ -1395,21 +1473,33 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   />
                 </div>
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-neutral-700">
-                      {t.menuCost.dishName} (EN)
-                    </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <label className="block text-xs font-bold text-neutral-700">
+                        {t.menuCost.dishName} (EN)
+                      </label>
+                      {!translationScheduler.hasPending('dish') &&
+                        needsEnglishReview(editingDish.nameTh, editingDish.name) && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                          </span>
+                        )}
+                    </div>
                     {editingDish.nameTh && (
                       <button
                         type="button"
                         onClick={() => {
+                          translationScheduler.cancel('dish');
                           manualEnKeysRef.current.delete('dish');
+                          prevDishThaiRef.current = editingDish.nameTh || '';
                           setEditingDish({
                             ...editingDish,
                             name: translateThaiToEnglish(editingDish.nameTh || ''),
+                            nameEnManual: false,
                           });
                         }}
-                        className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                        className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer shrink-0"
                       >
                         {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                       </button>
@@ -1419,10 +1509,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     type="text"
                     value={editingDish.name || ''}
                     onChange={(e) => {
+                      translationScheduler.cancel('dish');
                       const val = e.target.value;
                       if (val.trim()) manualEnKeysRef.current.add('dish');
                       else manualEnKeysRef.current.delete('dish');
-                      setEditingDish({ ...editingDish, name: val });
+                      setEditingDish({
+                        ...editingDish,
+                        name: val,
+                        nameEnManual: Boolean(val.trim()),
+                      });
                     }}
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                     placeholder="e.g. Stir-Fried Holy Basil"
@@ -1764,44 +1859,70 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                 value={currVar.nameTh || ''}
                                 onChange={(e) => {
                                   const nextTh = e.target.value;
+                                  const varId = currVar.id;
+                                  const varKey = `var_${varId}`;
                                   const updated = [...(editingDish.variants || [])];
-                                  const prev = updated[activeDishVariantIndex];
-                                  const nextEn = computeAutoEnglishName({
-                                    previousThai: prev.nameTh || '',
-                                    nextThai: nextTh,
-                                    currentEnglish: prev.name || '',
-                                    isManuallyEdited: manualEnKeysRef.current.has(`var_${currVar.id}`),
-                                  });
                                   updated[activeDishVariantIndex] = {
-                                    ...prev,
+                                    ...updated[activeDishVariantIndex],
                                     nameTh: nextTh,
-                                    name: nextEn,
                                   };
                                   setEditingDish({ ...editingDish, variants: updated });
+                                  translationScheduler.schedule(varKey, () => {
+                                    setEditingDish((prev) => {
+                                      if (!prev?.variants) return prev;
+                                      const prevTh = prevVarThaiMapRef.current.get(varId) || '';
+                                      const nextVars = prev.variants.map((v) => {
+                                        if (v.id !== varId) return v;
+                                        const nextEn = computeAutoEnglishName({
+                                          previousThai: prevTh,
+                                          nextThai: nextTh,
+                                          currentEnglish: v.name || '',
+                                          isManuallyEdited: manualEnKeysRef.current.has(varKey),
+                                        });
+                                        return { ...v, name: nextEn };
+                                      });
+                                      prevVarThaiMapRef.current.set(varId, nextTh);
+                                      return { ...prev, variants: nextVars };
+                                    });
+                                  });
                                 }}
+                                onBlur={() => translationScheduler.flush(`var_${currVar.id}`)}
                                 className="w-full px-2.5 py-1 text-xs bg-white border border-orange-300 rounded-lg"
                                 placeholder={lang === 'th' ? 'เช่น ธรรมดา, พิเศษ' : 'e.g. ธรรมดา, พิเศษ'}
                               />
                             </div>
 
                             <div>
-                              <div className="flex items-center justify-between mb-1">
-                                <label className="block text-[11px] font-bold text-neutral-600">
-                                  {lang === 'th' ? 'ชื่อ EN' : 'Name (EN)'}
-                                </label>
+                              <div className="flex items-center justify-between gap-1.5 mb-1">
+                                <div className="flex items-center gap-1 min-w-0">
+                                  <label className="block text-[11px] font-bold text-neutral-600">
+                                    {lang === 'th' ? 'ชื่อ EN' : 'Name (EN)'}
+                                  </label>
+                                  {!translationScheduler.hasPending(`var_${currVar.id}`) &&
+                                    needsEnglishReview(currVar.nameTh, currVar.name) && (
+                                      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700">
+                                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                                        <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                                      </span>
+                                    )}
+                                </div>
                                 {currVar.nameTh && (
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      manualEnKeysRef.current.delete(`var_${currVar.id}`);
+                                      const varKey = `var_${currVar.id}`;
+                                      translationScheduler.cancel(varKey);
+                                      manualEnKeysRef.current.delete(varKey);
+                                      prevVarThaiMapRef.current.set(currVar.id, currVar.nameTh || '');
                                       const updated = [...(editingDish.variants || [])];
                                       updated[activeDishVariantIndex] = {
                                         ...updated[activeDishVariantIndex],
                                         name: translateThaiToEnglish(currVar.nameTh || ''),
+                                        nameEnManual: false,
                                       };
                                       setEditingDish({ ...editingDish, variants: updated });
                                     }}
-                                    className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                                    className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer shrink-0"
                                   >
                                     {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                                   </button>
@@ -1813,12 +1934,14 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   const key = `var_${currVar.id}`;
+                                  translationScheduler.cancel(key);
                                   if (val.trim()) manualEnKeysRef.current.add(key);
                                   else manualEnKeysRef.current.delete(key);
                                   const updated = [...(editingDish.variants || [])];
                                   updated[activeDishVariantIndex] = {
                                     ...updated[activeDishVariantIndex],
                                     name: val,
+                                    nameEnManual: Boolean(val.trim()),
                                   };
                                   setEditingDish({ ...editingDish, variants: updated });
                                 }}
@@ -2054,15 +2177,26 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           <form
             onSubmit={async (e) => {
               e.preventDefault();
+              translationScheduler.cancel('cat');
               const finalTh = (editingCategory.nameTh || '').trim();
-              const finalEn =
-                (editingCategory.name || '').trim() ||
-                (finalTh ? translateThaiToEnglish(finalTh) : '');
+              const isCatManual =
+                manualEnKeysRef.current.has('cat') && Boolean((editingCategory.name || '').trim());
+              const finalEn = isCatManual
+                ? (editingCategory.name || '').trim()
+                : (
+                    computeAutoEnglishName({
+                      previousThai: prevCatThaiRef.current,
+                      nextThai: finalTh,
+                      currentEnglish: editingCategory.name || '',
+                      isManuallyEdited: false,
+                    }) || (finalTh ? translateThaiToEnglish(finalTh) : '')
+                  ).trim();
               if (!finalEn && !finalTh) return;
               const isNew = !editingCategory.id;
               const catToSave: CategoryDoc = {
                 id: editingCategory.id || `cat_${Date.now()}`,
                 name: finalEn || finalTh,
+                nameEnManual: isCatManual,
                 ...(finalTh ? { nameTh: finalTh } : {}),
                 order: editingCategory.order || categories.length + 1,
                 createdAt: editingCategory.createdAt || new Date().toISOString(),
@@ -2098,34 +2232,54 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   value={editingCategory.nameTh || ''}
                   onChange={(e) => {
                     const nextTh = e.target.value;
-                    const nextEn = computeAutoEnglishName({
-                      previousThai: editingCategory.nameTh || '',
-                      nextThai: nextTh,
-                      currentEnglish: editingCategory.name || '',
-                      isManuallyEdited: manualEnKeysRef.current.has('cat'),
+                    setEditingCategory({ ...editingCategory, nameTh: nextTh });
+                    translationScheduler.schedule('cat', () => {
+                      setEditingCategory((prev) => {
+                        if (!prev) return prev;
+                        const nextEn = computeAutoEnglishName({
+                          previousThai: prevCatThaiRef.current,
+                          nextThai: nextTh,
+                          currentEnglish: prev.name || '',
+                          isManuallyEdited: manualEnKeysRef.current.has('cat'),
+                        });
+                        prevCatThaiRef.current = nextTh;
+                        return { ...prev, name: nextEn };
+                      });
                     });
-                    setEditingCategory({ ...editingCategory, nameTh: nextTh, name: nextEn });
                   }}
+                  onBlur={() => translationScheduler.flush('cat')}
                   className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
                   placeholder={lang === 'th' ? 'เช่น อาหารจานหลัก, เครื่องดื่ม' : 'e.g. Main Dishes, Drinks'}
                 />
               </div>
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-neutral-700">
-                    {t.menuCost.categoryName} (EN)
-                  </label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <label className="block text-xs font-bold text-neutral-700">
+                      {t.menuCost.categoryName} (EN)
+                    </label>
+                    {!translationScheduler.hasPending('cat') &&
+                      needsEnglishReview(editingCategory.nameTh, editingCategory.name) && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                        </span>
+                      )}
+                  </div>
                   {editingCategory.nameTh && (
                     <button
                       type="button"
                       onClick={() => {
+                        translationScheduler.cancel('cat');
                         manualEnKeysRef.current.delete('cat');
+                        prevCatThaiRef.current = editingCategory.nameTh || '';
                         setEditingCategory({
                           ...editingCategory,
                           name: translateThaiToEnglish(editingCategory.nameTh || ''),
+                          nameEnManual: false,
                         });
                       }}
-                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer shrink-0"
                     >
                       {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                     </button>
@@ -2135,10 +2289,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   type="text"
                   value={editingCategory.name || ''}
                   onChange={(e) => {
+                    translationScheduler.cancel('cat');
                     const val = e.target.value;
                     if (val.trim()) manualEnKeysRef.current.add('cat');
                     else manualEnKeysRef.current.delete('cat');
-                    setEditingCategory({ ...editingCategory, name: val });
+                    setEditingCategory({
+                      ...editingCategory,
+                      name: val,
+                      nameEnManual: Boolean(val.trim()),
+                    });
                   }}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                   placeholder="e.g. Main Dishes"
@@ -2171,15 +2330,26 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           <form
             onSubmit={async (e) => {
               e.preventDefault();
+              translationScheduler.cancel('ch');
               const finalTh = (editingChannel.nameTh || '').trim();
-              const finalEn =
-                (editingChannel.name || '').trim() ||
-                (finalTh ? translateThaiToEnglish(finalTh) : '');
+              const isChManual =
+                manualEnKeysRef.current.has('ch') && Boolean((editingChannel.name || '').trim());
+              const finalEn = isChManual
+                ? (editingChannel.name || '').trim()
+                : (
+                    computeAutoEnglishName({
+                      previousThai: prevChThaiRef.current,
+                      nextThai: finalTh,
+                      currentEnglish: editingChannel.name || '',
+                      isManuallyEdited: false,
+                    }) || (finalTh ? translateThaiToEnglish(finalTh) : '')
+                  ).trim();
               if (!finalEn && !finalTh) return;
               const isNew = !editingChannel.id;
               const chToSave: ChannelDoc = {
                 id: editingChannel.id || `ch_${Date.now()}`,
                 name: finalEn || finalTh,
+                nameEnManual: isChManual,
                 ...(finalTh ? { nameTh: finalTh } : {}),
                 type: editingChannel.type || 'delivery',
                 commissionPercent: editingChannel.commissionPercent || 0,
@@ -2218,35 +2388,55 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   value={editingChannel.nameTh || ''}
                   onChange={(e) => {
                     const nextTh = e.target.value;
-                    const nextEn = computeAutoEnglishName({
-                      previousThai: editingChannel.nameTh || '',
-                      nextThai: nextTh,
-                      currentEnglish: editingChannel.name || '',
-                      isManuallyEdited: manualEnKeysRef.current.has('ch'),
+                    setEditingChannel({ ...editingChannel, nameTh: nextTh });
+                    translationScheduler.schedule('ch', () => {
+                      setEditingChannel((prev) => {
+                        if (!prev) return prev;
+                        const nextEn = computeAutoEnglishName({
+                          previousThai: prevChThaiRef.current,
+                          nextThai: nextTh,
+                          currentEnglish: prev.name || '',
+                          isManuallyEdited: manualEnKeysRef.current.has('ch'),
+                        });
+                        prevChThaiRef.current = nextTh;
+                        return { ...prev, name: nextEn };
+                      });
                     });
-                    setEditingChannel({ ...editingChannel, nameTh: nextTh, name: nextEn });
                   }}
+                  onBlur={() => translationScheduler.flush('ch')}
                   className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl"
                   placeholder={lang === 'th' ? 'เช่น หน้าร้าน, กลับบ้าน, GrabFood' : 'e.g. Dine-In, Takeaway, GrabFood'}
                 />
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-neutral-700">
-                    {t.menuCost.channelName} (EN)
-                  </label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <label className="block text-xs font-bold text-neutral-700">
+                      {t.menuCost.channelName} (EN)
+                    </label>
+                    {!translationScheduler.hasPending('ch') &&
+                      needsEnglishReview(editingChannel.nameTh, editingChannel.name) && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                        </span>
+                      )}
+                  </div>
                   {editingChannel.nameTh && (
                     <button
                       type="button"
                       onClick={() => {
+                        translationScheduler.cancel('ch');
                         manualEnKeysRef.current.delete('ch');
+                        prevChThaiRef.current = editingChannel.nameTh || '';
                         setEditingChannel({
                           ...editingChannel,
                           name: translateThaiToEnglish(editingChannel.nameTh || ''),
+                          nameEnManual: false,
                         });
                       }}
-                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                      className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer shrink-0"
                     >
                       {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                     </button>
@@ -2256,10 +2446,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                   type="text"
                   value={editingChannel.name || ''}
                   onChange={(e) => {
+                    translationScheduler.cancel('ch');
                     const val = e.target.value;
                     if (val.trim()) manualEnKeysRef.current.add('ch');
                     else manualEnKeysRef.current.delete('ch');
-                    setEditingChannel({ ...editingChannel, name: val });
+                    setEditingChannel({
+                      ...editingChannel,
+                      name: val,
+                      nameEnManual: Boolean(val.trim()),
+                    });
                   }}
                   className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                   placeholder="e.g. LINE MAN, GrabFood"

@@ -41,6 +41,7 @@ export interface Ingredient {
   name: string;
   thaiName?: string;
   englishName?: string;
+  englishNameManual?: boolean;
   category: IngredientCategory;
   purchaseQuantity: number;
   purchaseUnit: UnitType;
@@ -101,6 +102,7 @@ export interface Sauce {
   name: string;
   thaiName?: string;
   englishName?: string;
+  englishNameManual?: boolean;
   category?: string;
   description?: string;
   productionQuantity: number;
@@ -152,6 +154,7 @@ export interface MenuVariant {
   name: string; // e.g. "กะเพราหมูหมัก", "กะเพราทะเล"
   thaiName?: string;
   englishName?: string;
+  englishNameManual?: boolean;
   proteinType: string; // "หมูหมัก" | "หมูบด" | "ไก่" | "เนื้อ" | "กุ้ง" | "ปลาหมึก" | "ทะเล"
   sellingPrice: number; // Dine-in price
   takeawayPrice: number; // Takeaway price
@@ -187,6 +190,7 @@ export interface MenuItem {
   variants: MenuVariant[];
   thaiName?: string;
   englishName?: string;
+  englishNameManual?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -573,6 +577,7 @@ export interface PackagingItem {
   code?: string;
   thaiName: string;
   englishName?: string;
+  englishNameManual?: boolean;
   category?: 'Box' | 'Bag' | 'Cup & Lid' | 'Cutlery & Napkin' | 'Sauce Container' | 'Other' | string;
   unitCost: number;
   stockQuantity?: number;

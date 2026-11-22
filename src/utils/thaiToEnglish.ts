@@ -1,9 +1,151 @@
 /**
  * Deterministic offline Thai -> English culinary translator.
  * Produces authentic food-industry English terminology without phonetic karaoke romanization.
- * Used to auto-populate editable English name fields and localize menus, ingredients, and sauces.
+ * Resolution order (Phase 1):
+ *   1. Manual edit / shop glossary override
+ *   2. Exact dictionary match after normalization
+ *   3. Safe culinary pattern rules / 100%-coverage segmentation
+ *   4. Unresolved -> empty string with needsReview: true (never emits partial or romanized Thai)
  */
 
+export type TranslationSource =
+  | 'manual'
+  | 'glossary'
+  | 'dictionary'
+  | 'pattern'
+  | 'ai'
+  | 'none';
+
+export type TranslationConfidence = 'high' | 'medium' | 'low';
+
+export interface TranslateMenuNameResult {
+  en: string;
+  source: TranslationSource;
+  confidence: TranslationConfidence;
+  needsReview: boolean;
+}
+
+export interface TranslateMenuNameOptions {
+  glossary?: Record<string, string>;
+  manualEnglish?: string;
+  isManuallyEdited?: boolean;
+}
+
+export const HAS_THAI_RE = /[\u0E00-\u0E7F]/;
+
+export function containsThaiCharacters(value: string | null | undefined): boolean {
+  return Boolean(value && HAS_THAI_RE.test(value));
+}
+
+const ZERO_WIDTH_AND_SOFT_HYPHEN_RE = /[\u200B-\u200D\uFEFF\u00AD]/g;
+
+/**
+ * R3: Normalize Thai text consistently before glossary, dictionary, pattern, or AI lookup.
+ * - Strips zero-width characters & soft hyphens
+ * - Applies Unicode NFC
+ * - Reconstructs decomposed Sara Am (\u0E4D\u0E32 -> \u0E33, preserving any tone mark before it)
+ * - Trims & collapses repeated whitespace
+ * - Unifies common culinary spelling variants (ปอเปี๊ยะ, กะเพรา, ก๋วยเตี๋ยว, ไส้กรอก)
+ * - Handles ๆ cleanly (preserves อื่นๆ/อื่น ๆ as อื่นๆ; strips trailing emphasis ๆ)
+ */
+export function normalizeThaiForTranslation(input: string): string {
+  if (!input) return '';
+
+  let text = input
+    .replace(ZERO_WIDTH_AND_SOFT_HYPHEN_RE, '')
+    .normalize('NFC')
+    // Decomposed Sara Am forms (e.g. น + ้ + ํ + า -> น้ำ)
+    .replace(/([\u0E48-\u0E4B]?)\u0E4D\u0E32/g, '$1\u0E33')
+    .replace(/\u0E4D([\u0E48-\u0E4B])\u0E32/g, '$1\u0E33')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Unify common Thai menu spelling variants
+  text = text
+    .replace(/(?:เปาะเปี๊ยะ|ปอเปี๊ยะ|เปาะเปียะ|ปอเปียะ|ปอเปี๊ย|เปาะเปี๊ย|ปอเปี้ย|เปาะเปี้ย)/g, 'ปอเปี๊ยะ')
+    .replace(/(?:กระเพรา|กระเพราะ|กะเพราะ)/g, 'กะเพรา')
+    .replace(/(?:ก๊วยเตี๋ยว|ก๋วยเตียว)/g, 'ก๋วยเตี๋ยว')
+    .replace(/ใส้กรอก/g, 'ไส้กรอก')
+    .replace(/(?:บร็อคโคลี่|บรอคโคลี่)/g, 'บล็อกโคลี่');
+
+  // Preserve "อื่นๆ" / "อื่น ๆ" cleanly, while stripping emphasis "ๆ" (e.g. "สดๆ" / "ร้อน ๆ")
+  const OTHER_SENTINEL = '__TONYS_OTHER_TH__';
+  text = text.replace(/อื่น\s*ๆ/g, OTHER_SENTINEL);
+  text = text.replace(/\s*ๆ+/g, '');
+  text = text.replace(new RegExp(OTHER_SENTINEL, 'g'), 'อื่นๆ');
+
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+// ============================================================================
+// Shop Glossary Store (Safe in both Browser and Node/Vitest environments)
+// ============================================================================
+const GLOSSARY_STORAGE_KEY = 'tonys_shop_translation_glossary_v1';
+let inMemoryGlossary: Record<string, string> = {};
+
+function readBrowserGlossary(): Record<string, string> | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(GLOSSARY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, string>;
+    }
+  } catch {
+    // Ignore storage read failures in private/test environments
+  }
+  return null;
+}
+
+function writeBrowserGlossary(next: Record<string, string>): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(GLOSSARY_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore storage write failures
+  }
+}
+
+export function getShopTranslationGlossary(): Record<string, string> {
+  const fromStorage = readBrowserGlossary();
+  if (fromStorage) {
+    inMemoryGlossary = { ...fromStorage, ...inMemoryGlossary };
+  }
+  return { ...inMemoryGlossary };
+}
+
+export function setShopTranslationGlossary(entries: Record<string, string>): void {
+  const cleaned: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entries || {})) {
+    const normKey = normalizeThaiForTranslation(k);
+    const val = (v || '').trim();
+    if (normKey && val && !HAS_THAI_RE.test(val)) {
+      cleaned[normKey] = val;
+    }
+  }
+  inMemoryGlossary = cleaned;
+  writeBrowserGlossary(cleaned);
+}
+
+export function upsertShopTranslationEntry(thaiTerm: string, englishTerm: string): void {
+  const normKey = normalizeThaiForTranslation(thaiTerm);
+  const val = (englishTerm || '').trim();
+  if (!normKey || !val || HAS_THAI_RE.test(val)) return;
+  const current = getShopTranslationGlossary();
+  current[normKey] = val;
+  inMemoryGlossary = current;
+  writeBrowserGlossary(current);
+}
+
+export function clearShopTranslationGlossary(): void {
+  inMemoryGlossary = {};
+  writeBrowserGlossary({});
+}
+
+// ============================================================================
+// Culinary Dictionaries
+// ============================================================================
 const PHRASE_DICTIONARY: Array<[string, string]> = [
   // Multi-word dishes & preparations (longest first)
   ['ผัดกะเพราหมูกรอบ', 'Stir-Fried Holy Basil with Crispy Pork'],
@@ -132,13 +274,19 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['ไก่ผัดเม็ดมะม่วงหิมพานต์', 'Stir-Fried Chicken with Cashew Nuts'],
   ['ผัดเม็ดมะม่วงหิมพานต์', 'Stir-Fried with Cashew Nuts'],
   ['ผัดหน่อไม้', 'Stir-Fried with Bamboo Shoots'],
-  ['ผัดพริกขี้หนู', 'Stir-Fried with Bird\'s Eye Chili'],
+  ['ผัดพริกขี้หนู', "Stir-Fried with Bird's Eye Chili"],
   ['ทอดกระเทียมพริกไทย', 'Fried Garlic & Pepper'],
   ['ทอดกระเทียม', 'Fried Garlic'],
   ['ผัดกระเทียม', 'Stir-Fried Garlic'],
   ['ผัดน้ำมันหอย', 'Stir-Fried Oyster Sauce'],
   ['ผัดผักรวมมิตร', 'Stir-Fried Mixed Vegetables'],
   ['ผัดผักรวม', 'Stir-Fried Mixed Vegetables'],
+  ['ผัดผัก', 'Stir-Fried Vegetables'],
+  ['ผักรวม', 'Mixed Vegetables'],
+  ['ผักลวก', 'Blanched Vegetables'],
+  ['ผักทอด', 'Fried Vegetables'],
+  ['ผักสด', 'Fresh Vegetables'],
+  ['เห็ดทอด', 'Fried Mushrooms'],
   ['กะหล่ำปลีทอดน้ำปลา', 'Stir-Fried Cabbage with Fish Sauce'],
   ['ผัดยอดมะระหวาน', 'Stir-Fried Chayote Shoots'],
   ['ผัดต้นหอม', 'Stir-Fried with Spring Onions'],
@@ -213,8 +361,16 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['หมูแดดเดียว', 'Sun-Dried Fried Pork'],
   ['หมูทอด', 'Fried Pork'],
   ['หมูย่าง', 'Grilled Pork'],
+  ['หมูปิ้ง', 'Grilled Pork Skewers (Moo Ping)'],
   ['เป็ดย่าง', 'Roasted Duck'],
   ['ปลาดุกฟู', 'Crispy Flaked Catfish Salad'],
+  ['ทอดมันปลา', 'Thai Fish Cakes (Tod Mun Pla)'],
+  ['ทอดมันกุ้ง', 'Thai Shrimp Cakes (Tod Mun Kung)'],
+  ['กุ้งทอด', 'Fried Shrimp'],
+  ['ปลาทอด', 'Fried Fish'],
+  ['เต้าหู้ทอด', 'Fried Tofu'],
+  ['ไส้กรอกทอด', 'Fried Sausage'],
+  ['ลูกชิ้นทอด', 'Fried Meatballs'],
   ['ไข่เจียวหมูสับ', 'Minced Pork Omelette'],
   ['ไข่เจียวปู', 'Crab Omelette'],
   ['ไข่เจียวกุ้งสับ', 'Minced Shrimp Omelette'],
@@ -234,14 +390,26 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['เฟรนช์ฟรายส์ชีส', 'Cheesy French Fries'],
   ['เฟรนช์ฟรายส์', 'French Fries'],
   ['นักเก็ตไก่', 'Chicken Nuggets'],
+  ['เกี๊ยวทอด', 'Fried Wontons'],
   ['เกี๊ยวกรอบ', 'Crispy Wontons'],
   ['เกี๊ยวหมู', 'Pork Wontons'],
+  ['เกี๊ยว', 'Wontons'],
+  ['ขนมจีบ', 'Steamed Dumplings (Kanom Jeeb)'],
+  ['ซาลาเปา', 'Steamed Buns'],
+  ['ปอเปี๊ยะผักทอด', 'Fried Vegetable Spring Rolls'],
+  ['ปอเปี๊ยะกุ้งสด', 'Fresh Shrimp Spring Rolls'],
+  ['ปอเปี๊ยะไส้ผัก', 'Vegetable Spring Rolls'],
+  ['ปอเปี๊ยะผัก', 'Vegetable Spring Rolls'],
+  ['ปอเปี๊ยะกุ้ง', 'Shrimp Spring Rolls'],
+  ['ปอเปี๊ยะหมู', 'Pork Spring Rolls'],
   ['ปอเปี๊ยะทอด', 'Fried Spring Rolls'],
+  ['ปอเปี๊ยะสด', 'Fresh Spring Rolls'],
+  ['ปอเปี๊ยะ', 'Spring Rolls'],
 
   // Beverages & Desserts
-  ['ชาไทยเย็น', 'Iced Thai Tea'],
+  ['ชาไทยเย็น', 'Thai Iced Tea'],
   ['ชาไทย', 'Thai Tea'],
-  ['ชาเย็น', 'Iced Thai Milk Tea'],
+  ['ชาเย็น', 'Thai Iced Tea'],
   ['ชาเขียวเย็น', 'Iced Green Tea'],
   ['ชาเขียว', 'Green Tea'],
   ['ชานมไข่มุก', 'Bubble Milk Tea'],
@@ -479,6 +647,7 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['น้ำจิ้มซีฟู้ด', 'Seafood Spicy Dipping Sauce'],
   ['น้ำจิ้มไก่', 'Sweet Chili Dipping Sauce'],
   ['น้ำจิ้มหมูกระทะ', 'Thai BBQ Dipping Sauce'],
+  ['น้ำจิ้ม', 'Dipping Sauce'],
   ['น้ำซอสมะขามผัดไทย', 'Pad Thai Tamarind Sauce'],
   ['น้ำซอสมะขาม', 'Tamarind Sauce'],
   ['มะขามเปียกแกะเมล็ด', 'Seedless Tamarind Paste'],
@@ -563,9 +732,9 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['กระชาย', 'Fingerroot'],
   ['ขิงซอย', 'Julienne Ginger'],
   ['ขิง', 'Ginger'],
-  ['พริกขี้หนูแดงจินดา', 'Red Bird\'s Eye Chili'],
-  ['พริกขี้หนูสวน', 'Thai Bird\'s Eye Chili'],
-  ['พริกขี้หนู', 'Bird\'s Eye Chili'],
+  ['พริกขี้หนูแดงจินดา', "Red Bird's Eye Chili"],
+  ['พริกขี้หนูสวน', "Thai Bird's Eye Chili"],
+  ['พริกขี้หนู', "Bird's Eye Chili"],
   ['พริกชี้ฟ้าแดง', 'Red Spur Chili'],
   ['พริกชี้ฟ้า', 'Spur Chili'],
   ['พริกแห้ง', 'Dried Chili'],
@@ -792,7 +961,6 @@ const SINGLE_WORD_DICTIONARY: Record<string, string> = {
   'เค็ม': 'Salty',
   'เปรี้ยว': 'Sour',
   'จืด': 'Mild',
-  'มัน': 'Rich',
   'ร้อน': 'Hot',
   'เย็น': 'Iced',
   'ปั่น': 'Smoothie',
@@ -840,40 +1008,34 @@ const SINGLE_WORD_DICTIONARY: Record<string, string> = {
   'ไทย': 'Thai',
 };
 
-// Non-semantic Thai grammatical particles to omit cleanly instead of transliterating
-const THAI_STOPWORDS = [
-  'สำหรับ',
-  'พร้อม',
-  'อย่าง',
-  'สูตร',
-  'ตรา',
-  'และ',
-  'กับ',
-  'หรือ',
-  'ของ',
-  'ใน',
-  'ที่',
-  'จาก',
-  'โดย',
-  'เพื่อ',
-  'แบบ',
-  'ด้วย',
-  'เป็น',
-  'มี',
-  'ให้',
-  'ได้',
-  'ต่อ',
-  'ละ',
-  'ฯ',
-  'ๆ',
-].sort((a, b) => b.length - a.length);
+// Build exact lookup map (phrase wins over single word when identical keys exist)
+const EXACT_DICTIONARY = new Map<string, string>();
+for (const [k, v] of Object.entries(SINGLE_WORD_DICTIONARY)) {
+  EXACT_DICTIONARY.set(normalizeThaiForTranslation(k), v);
+}
+for (const [k, v] of PHRASE_DICTIONARY) {
+  const norm = normalizeThaiForTranslation(k);
+  if (!EXACT_DICTIONARY.has(norm)) {
+    EXACT_DICTIONARY.set(norm, v);
+  }
+}
 
-const COMBINED_MAP: Array<[string, string]> = [
-  ...PHRASE_DICTIONARY,
-  ...Object.entries(SINGLE_WORD_DICTIONARY),
-].sort((a, b) => b[0].length - a[0].length);
+// Hazardous single-word fragments that must NEVER be used to split inside unknown compound words in DP
+const DP_HAZARDOUS_TOKENS = new Set(['น้ำ', 'ตัก', 'ผง', 'ใบ', 'มัน', 'ซอย', 'สุก', 'อ่อน', 'แก่']);
 
-const HAS_THAI_RE = /[\u0E00-\u0E7F]/;
+// Safe connector stopwords allowed inside DP ONLY at word boundaries or clear conjunctions
+const DP_CONJUNCTION_TOKENS: Record<string, string> = {
+  'และ': '&',
+  'กับ': 'with',
+  'พร้อม': 'with',
+  'หรือ': 'or',
+  'สำหรับ': 'for',
+};
+const DP_BOUNDARY_OMIT_STOPWORDS = new Set(['สูตร', 'ตรา', 'แบบ', 'อย่าง', 'ใน', 'ที่', 'จาก', 'โดย', 'เพื่อ', 'ของ', 'ด้วย', 'เป็น', 'มี', 'ให้', 'ได้', 'ต่อ', 'ละ']);
+
+const DP_DICTIONARY_ENTRIES: Array<[string, string]> = Array.from(EXACT_DICTIONARY.entries())
+  .filter(([th]) => !DP_HAZARDOUS_TOKENS.has(th))
+  .sort((a, b) => b[0].length - a[0].length);
 
 function toTitleCase(text: string): string {
   const lowercaseWords = new Set(['with', 'and', 'on', 'in', 'the', 'of', 'for', 'or', 'by', 'to', 'a']);
@@ -885,111 +1047,328 @@ function toTitleCase(text: string): string {
       if (idx > 0 && lowercaseWords.has(lower)) {
         return lower;
       }
-      if (/^[A-Z0-9()-]+$/.test(word) && word.length <= 4) {
+      if (/^[A-Z0-9()-]+$/.test(word) && word.length <= 5) {
+        return word;
+      }
+      if (/^\d+[a-zA-Z]+$/.test(word)) {
         return word;
       }
       if (word.startsWith('(') && word.length > 1) {
-        return '(' + word.charAt(1).toUpperCase() + word.slice(2);
+        const inner = word.slice(1);
+        if (/^[A-Z0-9)-]+$/.test(inner)) {
+          return '(' + inner;
+        }
+        return '(' + inner.charAt(0).toUpperCase() + inner.slice(1);
       }
       return word.charAt(0).toUpperCase() + word.slice(1);
     })
     .join(' ');
 }
 
-function translateTokensGreedy(thaiInput: string): string {
-  const trimmed = thaiInput.trim();
-  if (!trimmed) return '';
-  if (!HAS_THAI_RE.test(trimmed)) return trimmed;
+function toModifierForm(en: string): string {
+  const t = en.trim();
+  if (t === 'Vegetables') return 'Vegetable';
+  if (t === 'Mixed Vegetables') return 'Mixed Vegetable';
+  if (t === 'Mushrooms') return 'Mushroom';
+  if (t === 'Wontons') return 'Wonton';
+  if (t === 'Meatballs') return 'Meatball';
+  if (t === 'Noodles') return 'Noodle';
+  return t;
+}
 
-  const outputParts: string[] = [];
-  let cursor = 0;
+function toDishCountableForm(en: string): string {
+  const t = en.trim();
+  if (t === 'Mushroom') return 'Mushrooms';
+  return t;
+}
 
-  while (cursor < trimmed.length) {
-    const remaining = trimmed.slice(cursor);
+const COOKING_MODIFIER_PREFIX_MAP: Record<string, string> = {
+  'ทอด': 'Fried',
+  'ปิ้ง': 'Grilled',
+  'ย่าง': 'Grilled',
+  'เผา': 'Char-Grilled',
+  'นึ่ง': 'Steamed',
+  'ต้ม': 'Boiled',
+  'ลวก': 'Blanched',
+  'อบ': 'Baked',
+  'ตุ๋น': 'Braised',
+  'สับ': 'Minced',
+  'บด': 'Ground',
+  'สไลซ์': 'Sliced',
+  'กรอบ': 'Crispy',
+  'สด': 'Fresh',
+  'รวม': 'Mixed',
+};
 
+/**
+ * 100%-coverage DP segmentation over known safe dictionary tokens + ASCII segments.
+ * Returns null immediately if ANY Thai character cannot be covered completely (Rule A).
+ */
+function segmentThai100Percent(thaiInput: string): string | null {
+  const n = thaiInput.length;
+  if (n === 0) return null;
+  if (!HAS_THAI_RE.test(thaiInput)) return thaiInput;
+
+  type Step = { nextIndex: number; tokens: string[]; score: number } | null;
+  const memo = new Array<Step | undefined>(n + 1);
+
+  const solve = (pos: number): Step => {
+    if (pos === n) return { nextIndex: n, tokens: [], score: 0 };
+    if (memo[pos] !== undefined) return memo[pos]!;
+
+    const remaining = thaiInput.slice(pos);
+
+    // 1. Whitespace
     const wsMatch = remaining.match(/^\s+/);
     if (wsMatch) {
-      cursor += wsMatch[0].length;
-      continue;
+      const rest = solve(pos + wsMatch[0].length);
+      const res = rest ? { nextIndex: n, tokens: rest.tokens, score: rest.score } : null;
+      memo[pos] = res;
+      return res;
     }
 
-    const asciiMatch = remaining.match(/^[^\u0E00-\u0E7F]+/);
+    // 2. Non-Thai ASCII run (e.g., "(L)", "100g", "+")
+    const asciiMatch = remaining.match(/^[^\u0E00-\u0E7F\s]+/);
     if (asciiMatch) {
       const seg = asciiMatch[0].trim();
-      if (seg) outputParts.push(seg);
-      cursor += asciiMatch[0].length;
-      continue;
+      const rest = solve(pos + asciiMatch[0].length);
+      const res = rest
+        ? {
+            nextIndex: n,
+            tokens: seg ? [seg, ...rest.tokens] : rest.tokens,
+            score: rest.score + 1,
+          }
+        : null;
+      memo[pos] = res;
+      return res;
     }
 
-    // Try exact longest culinary dictionary phrase / word match
-    let matched = false;
-    for (const [thPhrase, enTranslation] of COMBINED_MAP) {
+    let best: Step = null;
+
+    // 3. Dictionary phrases & safe words (must achieve 100% coverage of remainder)
+    for (const [thPhrase, enTranslation] of DP_DICTIONARY_ENTRIES) {
       if (remaining.startsWith(thPhrase)) {
-        outputParts.push(enTranslation);
-        cursor += thPhrase.length;
-        matched = true;
-        break;
+        const rest = solve(pos + thPhrase.length);
+        if (rest) {
+          // Prefer fewer, longer phrase matches
+          const candidateScore = rest.score + 100 - thPhrase.length;
+          if (!best || candidateScore < best.score) {
+            best = {
+              nextIndex: n,
+              tokens: [enTranslation, ...rest.tokens],
+              score: candidateScore,
+            };
+          }
+        }
       }
     }
-    if (matched) continue;
 
-    // Skip Thai filler grammatical particles cleanly
-    let stopMatched = false;
-    for (const sw of THAI_STOPWORDS) {
-      if (remaining.startsWith(sw)) {
-        cursor += sw.length;
-        stopMatched = true;
-        break;
+    // 4. Explicit Thai conjunction words
+    for (const [conj, enConj] of Object.entries(DP_CONJUNCTION_TOKENS)) {
+      if (remaining.startsWith(conj)) {
+        const rest = solve(pos + conj.length);
+        if (rest) {
+          const candidateScore = rest.score + 95;
+          if (!best || candidateScore < best.score) {
+            best = {
+              nextIndex: n,
+              tokens: [enConj, ...rest.tokens],
+              score: candidateScore,
+            };
+          }
+        }
       }
     }
-    if (stopMatched) continue;
 
-    // Advance 1 character cleanly until next recognized culinary term (never emit karaoke syllables)
-    cursor += 1;
+    // 5. Boundary-only grammar filler words (never matched mid-word inside unknown Thai words)
+    const prevChar = pos > 0 ? thaiInput[pos - 1] : '';
+    const isAtWordStart = pos === 0 || /\s/.test(prevChar);
+    if (isAtWordStart) {
+      for (const sw of DP_BOUNDARY_OMIT_STOPWORDS) {
+        if (remaining.startsWith(sw)) {
+          const afterPos = pos + sw.length;
+          const nextChar = afterPos < n ? thaiInput[afterPos] : '';
+          const isAtWordEnd = afterPos === n || /\s/.test(nextChar);
+          if (isAtWordEnd) {
+            const rest = solve(afterPos);
+            if (rest) {
+              const candidateScore = rest.score + 98;
+              if (!best || candidateScore < best.score) {
+                best = {
+                  nextIndex: n,
+                  tokens: rest.tokens,
+                  score: candidateScore,
+                };
+              }
+            }
+          }
+        }
+      }
+    }
+
+    memo[pos] = best;
+    return best;
+  };
+
+  const solved = solve(0);
+  if (!solved || solved.tokens.length === 0) {
+    return null;
   }
 
-  return outputParts
+  const joined = solved.tokens
     .join(' ')
     .replace(/\s+/g, ' ')
     .replace(/\b(Sauce)\s+\1\b/gi, '$1')
     .replace(/\b(Broth)\s+\1\b/gi, '$1')
     .replace(/\b(Curry)\s+\1\b/gi, '$1')
     .trim();
+
+  if (!joined || HAS_THAI_RE.test(joined)) {
+    return null;
+  }
+  return joined;
 }
 
-function translateCompoundClause(input: string, depth = 0): string {
-  const trimmed = (input || '').trim();
-  if (!trimmed) return '';
-  if (!HAS_THAI_RE.test(trimmed)) return trimmed;
-  if (depth > 4) return translateTokensGreedy(trimmed);
+interface InternalClauseResolution {
+  en: string;
+  source: 'glossary' | 'dictionary' | 'pattern';
+  confidence: 'high' | 'medium';
+}
 
-  // Direct exact dictionary match first
-  for (const [thPhrase, enTranslation] of PHRASE_DICTIONARY) {
-    if (trimmed === thPhrase) {
-      return enTranslation;
+function resolveCompoundClauseInternal(
+  normalizedInput: string,
+  glossary: Record<string, string>,
+  depth = 0
+): InternalClauseResolution | null {
+  const trimmed = normalizedInput.trim();
+  if (!trimmed) return null;
+
+  if (!HAS_THAI_RE.test(trimmed)) {
+    return { en: trimmed, source: 'dictionary', confidence: 'high' };
+  }
+
+  if (depth > 5) return null;
+
+  // Step 1: Glossary lookup
+  const glossaryHit = glossary[trimmed];
+  if (glossaryHit && !HAS_THAI_RE.test(glossaryHit)) {
+    return { en: glossaryHit.trim(), source: 'glossary', confidence: 'high' };
+  }
+
+  // Step 2: Exact dictionary match
+  const exactHit = EXACT_DICTIONARY.get(trimmed);
+  if (exactHit) {
+    return { en: exactHit, source: 'dictionary', confidence: 'high' };
+  }
+
+  // Step 2b: Slash-separated multi-item phrases (both/all parts MUST translate)
+  if (trimmed.includes('/')) {
+    const slashParts = trimmed.split(/\s*\/\s*/).map((p) => p.trim());
+    if (slashParts.length > 1 && slashParts.every(Boolean)) {
+      const resolvedParts: InternalClauseResolution[] = [];
+      let allOk = true;
+      for (const part of slashParts) {
+        const res = resolveCompoundClauseInternal(part, glossary, depth + 1);
+        if (!res) {
+          allOk = false;
+          break;
+        }
+        resolvedParts.push(res);
+      }
+      if (allOk) {
+        const hasGlossary = resolvedParts.some((r) => r.source === 'glossary');
+        const hasPattern = resolvedParts.some((r) => r.source === 'pattern');
+        return {
+          en: resolvedParts.map((r) => r.en).join(' / '),
+          source: hasGlossary ? 'glossary' : hasPattern ? 'pattern' : 'dictionary',
+          confidence: hasPattern ? 'medium' : 'high',
+        };
+      }
     }
   }
 
-  // Handle slash-separated pairs like "ก / ข"
-  if (trimmed.includes(' / ')) {
-    const parts = trimmed
-      .split(/\s*\/\s*/)
-      .map((p) => translateCompoundClause(p, depth + 1))
-      .filter(Boolean);
-    if (parts.length > 0) return parts.join(' / ');
-  }
-
-  // Handle parenthetical suffixes like "หมูบด (มันน้อย)"
+  // Step 3a: Parenthetical suffix like "ปอเปี๊ยะผัก (L)" or "หมูบด (มันน้อย)"
   const parenMatch = trimmed.match(/^(.+?)\s*\(([^()]+)\)$/);
   if (parenMatch) {
-    const mainPart = translateCompoundClause(parenMatch[1], depth + 1);
-    const subPart = translateCompoundClause(parenMatch[2], depth + 1);
-    if (mainPart && subPart) return `${mainPart} (${subPart})`;
-    if (mainPart) return mainPart;
-    if (subPart) return subPart;
+    const mainRes = resolveCompoundClauseInternal(parenMatch[1].trim(), glossary, depth + 1);
+    const subRes = resolveCompoundClauseInternal(parenMatch[2].trim(), glossary, depth + 1);
+    if (mainRes && subRes) {
+      return {
+        en: `${mainRes.en} (${subRes.en})`,
+        source: mainRes.source === 'glossary' ? 'glossary' : 'pattern',
+        confidence: mainRes.confidence === 'high' && subRes.confidence === 'high' ? 'high' : 'medium',
+      };
+    }
+    return null;
   }
 
-  // Structured Thai culinary compound grammar (natural English menu syntax)
+  // Step 3b: Whitespace-separated leading or trailing pure-ASCII tokens (e.g. "100g กุ้งสด", "ปอเปี๊ยะผัก XL")
+  const trailingAscii = trimmed.match(/^(.+?)\s+([^\u0E00-\u0E7F\s]+)$/);
+  if (trailingAscii && HAS_THAI_RE.test(trailingAscii[1])) {
+    const coreRes = resolveCompoundClauseInternal(trailingAscii[1].trim(), glossary, depth + 1);
+    if (coreRes) {
+      return {
+        en: `${coreRes.en} ${trailingAscii[2].trim()}`,
+        source: coreRes.source === 'glossary' ? 'glossary' : 'pattern',
+        confidence: coreRes.confidence,
+      };
+    }
+    return null;
+  }
+
+  const leadingAscii = trimmed.match(/^([^\u0E00-\u0E7F\s]+)\s+(.+)$/);
+  if (leadingAscii && HAS_THAI_RE.test(leadingAscii[2])) {
+    const coreRes = resolveCompoundClauseInternal(leadingAscii[2].trim(), glossary, depth + 1);
+    if (coreRes) {
+      return {
+        en: `${leadingAscii[1].trim()} ${coreRes.en}`,
+        source: coreRes.source === 'glossary' ? 'glossary' : 'pattern',
+        confidence: coreRes.confidence,
+      };
+    }
+    return null;
+  }
+
+  // Step 3c: Dish Base + optional ไส้ + Ingredient + optional Cooking/State
+  const wrappedDishBases: Array<[string, string]> = [
+    ['ปอเปี๊ยะ', 'Spring Rolls'],
+    ['เกี๊ยว', 'Wontons'],
+    ['ซาลาเปา', 'Steamed Buns'],
+    ['ขนมจีบ', 'Steamed Dumplings'],
+  ];
+  for (const [baseTh, baseEn] of wrappedDishBases) {
+    if (trimmed.startsWith(baseTh) && trimmed.length > baseTh.length) {
+      const afterBase = trimmed.slice(baseTh.length).replace(/^ไส้/, '').trim();
+      if (!afterBase) continue;
+
+      // Try exact match of remainder with cooking suffix peeled off first
+      const prepMatch = afterBase.match(/^(.+?)(ทอด|ปิ้ง|ย่าง|นึ่ง|ต้ม|ลวก|อบ|สด|กรอบ)$/);
+      if (prepMatch && prepMatch[1].trim()) {
+        const fillRes = resolveCompoundClauseInternal(prepMatch[1].trim(), glossary, depth + 1);
+        const prepWord = COOKING_MODIFIER_PREFIX_MAP[prepMatch[2]];
+        if (fillRes && prepWord) {
+          return {
+            en: `${prepWord} ${toModifierForm(fillRes.en)} ${baseEn}`,
+            source: 'pattern',
+            confidence: 'high',
+          };
+        }
+      }
+
+      // Otherwise treat remainder directly as filling ingredient (or prep-only if matched by dict)
+      const fillRes = resolveCompoundClauseInternal(afterBase, glossary, depth + 1);
+      if (fillRes) {
+        return {
+          en: `${toModifierForm(fillRes.en)} ${baseEn}`,
+          source: 'pattern',
+          confidence: 'high',
+        };
+      }
+      return null;
+    }
+  }
+
+  // Step 3d: Multi-word culinary suffix rules
   const suffixRules: Array<[RegExp, (innerEn: string) => string]> = [
     [/^(.+?)ราดข้าว$/, (x) => `${x} on Rice`],
     [/^(.+?)กับข้าว$/, (x) => `${x} (A La Carte)`],
@@ -1001,16 +1380,37 @@ function translateCompoundClause(input: string, depth = 0): string {
     [/^(.+?)ผัดน้ำมันหอย$/, (x) => `Stir-Fried ${x} in Oyster Sauce`],
     [/^(.+?)ผัดกะเพรา$/, (x) => `Stir-Fried Holy Basil with ${x}`],
     [/^(.+?)นึ่งมะนาว$/, (x) => `Steamed ${x} in Spicy Lime Sauce`],
+    [/^(.+?)ทอด$/, (x) => `Fried ${toDishCountableForm(x)}`],
+    [/^(.+?)ย่าง$/, (x) => `Grilled ${toDishCountableForm(x)}`],
+    [/^(.+?)ปิ้ง$/, (x) => `Grilled ${toDishCountableForm(x)}`],
+    [/^(.+?)เผา$/, (x) => `Char-Grilled ${toDishCountableForm(x)}`],
+    [/^(.+?)นึ่ง$/, (x) => `Steamed ${toDishCountableForm(x)}`],
+    [/^(.+?)ต้ม$/, (x) => `Boiled ${toDishCountableForm(x)}`],
+    [/^(.+?)ลวก$/, (x) => `Blanched ${toDishCountableForm(x)}`],
+    [/^(.+?)อบ$/, (x) => `Baked ${toDishCountableForm(x)}`],
+    [/^(.+?)ตุ๋น$/, (x) => `Braised ${toDishCountableForm(x)}`],
+    [/^(.+?)สไลซ์$/, (x) => `Sliced ${x}`],
+    [/^(.+?)สับ$/, (x) => `Minced ${x}`],
+    [/^(.+?)บด$/, (x) => `Ground ${x}`],
+    [/^(.+?)รวม$/, (x) => `Mixed ${toDishCountableForm(x)}`],
+    [/^(.+?)สด$/, (x) => `Fresh ${toDishCountableForm(x)}`],
   ];
 
   for (const [regex, formatter] of suffixRules) {
     const m = trimmed.match(regex);
     if (m && m[1].trim()) {
-      const inner = translateCompoundClause(m[1].trim(), depth + 1);
-      if (inner) return formatter(inner);
+      const innerRes = resolveCompoundClauseInternal(m[1].trim(), glossary, depth + 1);
+      if (innerRes) {
+        return {
+          en: formatter(innerRes.en),
+          source: 'pattern',
+          confidence: 'medium',
+        };
+      }
     }
   }
 
+  // Step 3e: Culinary prefix rules (specific patterns BEFORE generic ผัด)
   const prefixRules: Array<[RegExp, (innerEn: string) => string]> = [
     [/^ข้าวผัดกะเพรา(.+)$/, (x) => `Holy Basil & ${x} Fried Rice`],
     [/^ข้าวผัด(.+)$/, (x) => `${x} Fried Rice`],
@@ -1018,6 +1418,15 @@ function translateCompoundClause(input: string, depth = 0): string {
     [/^ข้าวกะเพรา(.+)$/, (x) => `Stir-Fried Holy Basil with ${x} on Rice`],
     [/^ผัดกะเพรา(.+)$/, (x) => `Stir-Fried Holy Basil with ${x}`],
     [/^กะเพรา(.+)$/, (x) => `Holy Basil ${x}`],
+    [/^ผัดซีอิ๊ว(.+)$/, (x) => `Pad See Ew with ${x}`],
+    [/^ผัดไทย(.+)$/, (x) => `Pad Thai with ${x}`],
+    [/^ผัดพริกแกง(.+)$/, (x) => `Stir-Fried Red Curry Paste with ${x}`],
+    [/^ผัดพริกเผา(.+)$/, (x) => `Stir-Fried Roasted Chili Paste with ${x}`],
+    [/^ผัดผงกะหรี่(.+)$/, (x) => `Stir-Fried Curry Powder with ${x}`],
+    [/^ผัดน้ำมันหอย(.+)$/, (x) => `Stir-Fried ${x} in Oyster Sauce`],
+    [/^ผัดขี้เมา(.+)$/, (x) => `Spicy Drunken Stir-Fried ${x}`],
+    [/^ผัดเปรี้ยวหวาน(.+)$/, (x) => `Sweet & Sour Stir-Fried ${x}`],
+    [/^ผัด(.+)$/, (x) => `Stir-Fried ${toDishCountableForm(x)}`],
     [/^ต้มยำ(.+)$/, (x) => `Tom Yum ${x}`],
     [/^ต้มข่า(.+)$/, (x) => `Coconut Galangal Soup with ${x}`],
     [/^ต้มแซ่บ(.+)$/, (x) => `Spicy ${x} Soup`],
@@ -1034,9 +1443,7 @@ function translateCompoundClause(input: string, depth = 0): string {
     [/^ยำ(.+)$/, (x) => `Spicy ${x} Salad`],
     [/^ส้มตำ(.+)$/, (x) => `Papaya Salad with ${x}`],
     [/^ก๋วยเตี๋ยว(.+)$/, (x) => `${x} Noodles`],
-    [/^ผัดซีอิ๊ว(.+)$/, (x) => `Pad See Ew with ${x}`],
     [/^ราดหน้า(.+)$/, (x) => `Stir-Fried Noodles in Gravy with ${x}`],
-    [/^ผัดไทย(.+)$/, (x) => `Pad Thai with ${x}`],
     [/^สุกี้แห้ง(.+)$/, (x) => `Dry Sukiyaki with ${x}`],
     [/^สุกี้น้ำ(.+)$/, (x) => `Sukiyaki Soup with ${x}`],
     [/^ซอส(.+)$/, (x) => (x.toLowerCase().includes('sauce') ? x : `${x} Sauce`)],
@@ -1051,24 +1458,133 @@ function translateCompoundClause(input: string, depth = 0): string {
   for (const [regex, formatter] of prefixRules) {
     const m = trimmed.match(regex);
     if (m && m[1].trim()) {
-      const inner = translateCompoundClause(m[1].trim(), depth + 1);
-      if (inner) return formatter(inner);
+      const innerRes = resolveCompoundClauseInternal(m[1].trim(), glossary, depth + 1);
+      if (innerRes) {
+        return {
+          en: formatter(innerRes.en),
+          source: 'pattern',
+          confidence: 'medium',
+        };
+      }
     }
   }
 
-  return translateTokensGreedy(trimmed);
-}
-
-export function translateThaiToEnglish(input: string): string {
-  const trimmed = (input || '').trim();
-  if (!trimmed) return '';
-  if (!HAS_THAI_RE.test(trimmed)) {
-    return trimmed;
+  // Step 3f: Strict 100%-coverage DP word/phrase segmentation (fails cleanly on any partial match)
+  const dpEn = segmentThai100Percent(trimmed);
+  if (dpEn) {
+    return {
+      en: dpEn,
+      source: 'pattern',
+      confidence: 'medium',
+    };
   }
 
-  const translated = translateCompoundClause(trimmed);
-  if (!translated) return '';
-  return toTitleCase(translated.replace(/\s+/g, ' ').trim());
+  return null;
+}
+
+/**
+ * Synchronous deterministic resolution returning metadata (en, source, confidence, needsReview).
+ * Returns { en: '', source: 'none', confidence: 'low', needsReview: true } when unresolved.
+ */
+export function resolveMenuNameSync(
+  input: string,
+  options: TranslateMenuNameOptions = {}
+): TranslateMenuNameResult {
+  const { manualEnglish, isManuallyEdited, glossary: optionGlossary } = options;
+
+  if (isManuallyEdited && manualEnglish && manualEnglish.trim()) {
+    const cleanManual = manualEnglish.trim();
+    if (!HAS_THAI_RE.test(cleanManual)) {
+      return {
+        en: cleanManual,
+        source: 'manual',
+        confidence: 'high',
+        needsReview: false,
+      };
+    }
+  }
+
+  const rawTrimmed = (input || '').trim();
+  if (!rawTrimmed) {
+    return { en: '', source: 'none', confidence: 'high', needsReview: false };
+  }
+
+  if (!HAS_THAI_RE.test(rawTrimmed)) {
+    return { en: rawTrimmed, source: 'dictionary', confidence: 'high', needsReview: false };
+  }
+
+  const mergedGlossary: Record<string, string> = {};
+  for (const [k, v] of Object.entries({ ...getShopTranslationGlossary(), ...(optionGlossary || {}) })) {
+    const normK = normalizeThaiForTranslation(k);
+    const val = (v || '').trim();
+    if (normK && val && !HAS_THAI_RE.test(val)) {
+      mergedGlossary[normK] = val;
+    }
+  }
+
+  const normalized = normalizeThaiForTranslation(rawTrimmed);
+  if (!normalized) {
+    return { en: '', source: 'none', confidence: 'low', needsReview: true };
+  }
+
+  const resolved = resolveCompoundClauseInternal(normalized, mergedGlossary, 0);
+  if (!resolved) {
+    return { en: '', source: 'none', confidence: 'low', needsReview: true };
+  }
+
+  const formatted =
+    resolved.source === 'glossary'
+      ? resolved.en.trim()
+      : toTitleCase(resolved.en.replace(/\s+/g, ' ').trim());
+
+  if (!formatted || HAS_THAI_RE.test(formatted)) {
+    return { en: '', source: 'none', confidence: 'low', needsReview: true };
+  }
+
+  return {
+    en: formatted,
+    source: resolved.source,
+    confidence: resolved.confidence,
+    needsReview: false,
+  };
+}
+
+/**
+ * Primary async translation API for forms and batch actions.
+ * In Phase 1, executes steps (1) manual/glossary -> (2) exact dictionary -> (3) pattern/DP -> unresolved (needsReview: true).
+ */
+export async function translateMenuName(
+  input: string,
+  options: TranslateMenuNameOptions = {}
+): Promise<TranslateMenuNameResult> {
+  return resolveMenuNameSync(input, options);
+}
+
+/**
+ * Synchronous deterministic Thai -> English translator preserving the existing export contract.
+ * Returns '' when a Thai phrase cannot be 100% translated cleanly (never romanizes or emits partial results).
+ */
+export function translateThaiToEnglish(input: string): string {
+  return resolveMenuNameSync(input).en;
+}
+
+/**
+ * Shared R7 resolver across forms, posBridge, and costing views:
+ * Reads valid stored non-Thai English name first; falls back to translation ONLY when missing/blank/Thai.
+ * Returns '' if unresolved (never leaks Thai text into English storage fields).
+ */
+export function resolveEntityEnglishName(
+  thaiName?: string | null,
+  storedEnglish?: string | null
+): string {
+  const stored = (storedEnglish || '').trim();
+  if (stored && !HAS_THAI_RE.test(stored)) {
+    return stored;
+  }
+  const source = (thaiName || stored || '').trim();
+  if (!source) return '';
+  if (!HAS_THAI_RE.test(source)) return source;
+  return translateThaiToEnglish(source);
 }
 
 const DEFAULT_PLACEHOLDER_EN_VALUES = new Set([
@@ -1103,6 +1619,7 @@ export function computeAutoEnglishName(params: {
     !currEnTrimmed ||
     DEFAULT_PLACEHOLDER_EN_VALUES.has(currEnTrimmed.toLowerCase()) ||
     currEnTrimmed === previousThai.trim() ||
+    HAS_THAI_RE.test(currEnTrimmed) ||
     (prevAuto && currEnTrimmed.toLowerCase() === prevAuto.toLowerCase());
 
   if (!shouldAutoUpdate) {

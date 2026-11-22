@@ -1,6 +1,6 @@
 import { Ingredient, MenuItem, MenuVariant } from '../types';
 import { DishDoc, DishVariant } from '../../types';
-import { translateThaiToEnglish } from '../../utils/thaiToEnglish';
+import { resolveEntityEnglishName } from '../../utils/thaiToEnglish';
 
 export type SpreadsheetServingMode = 'ON_RICE' | 'A_LA_CARTE';
 
@@ -88,7 +88,7 @@ export function resolveCostVariantDisplayNames(
   if (matchedVariant) {
     const labelTh = resolveCostVariantLabel(matchedVariant);
     const labelEn =
-      matchedVariant.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
+      resolveEntityEnglishName(labelTh, matchedVariant.englishName) || labelTh;
     return {
       name: labelEn,
       nameTh: labelTh,

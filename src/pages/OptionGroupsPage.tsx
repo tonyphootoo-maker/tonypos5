@@ -10,6 +10,10 @@ import { translations } from '../i18n/translations';
 import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
 import { subscribeCollection, saveDocument, deleteDocument } from '../data/db';
 import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
+import {
+  useDebouncedTranslationScheduler,
+  needsEnglishReview,
+} from '../hooks/useDebouncedThaiTranslation';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ConfirmModal } from '../components/ConfirmModal';
 import {
@@ -40,6 +44,9 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
   const [pendingDeleteGroup, setPendingDeleteGroup] = useState<OptionGroupDoc | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const manualEnKeysRef = useRef<Set<string>>(new Set());
+  const prevGroupThaiRef = useRef<string>('');
+  const prevChoiceThaiRef = useRef<Map<string, string>>(new Map());
+  const translationScheduler = useDebouncedTranslationScheduler(600);
 
   const loadData = async () => {
     // Handled continuously in real time by Firestore onSnapshot subscriptions below
@@ -63,23 +70,39 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
   const handleSaveGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingGroup) return;
+    translationScheduler.cancelAll();
 
     const finalNameTh = (editingGroup.nameTh || '').trim();
-    const finalNameEn =
-      (editingGroup.name || '').trim() ||
-      (finalNameTh ? translateThaiToEnglish(finalNameTh) : '');
+    const isGroupManual = manualEnKeysRef.current.has('group');
+    const resolvedGroupEn = isGroupManual
+      ? (editingGroup.name || '').trim()
+      : computeAutoEnglishName({
+          previousThai: prevGroupThaiRef.current || finalNameTh,
+          nextThai: finalNameTh,
+          currentEnglish: editingGroup.name || '',
+          isManuallyEdited: false,
+        }).trim() || (finalNameTh ? translateThaiToEnglish(finalNameTh) : '');
 
-    if (!finalNameEn && !finalNameTh) return;
+    if (!resolvedGroupEn && !finalNameTh) return;
 
     const normalizedChoices: OptionChoice[] = (editingGroup.choices || [])
       .map((c) => {
         const cTh = (c.nameTh || '').trim();
-        const cEn = (c.name || '').trim() || (cTh ? translateThaiToEnglish(cTh) : '');
+        const isChoiceManual = manualEnKeysRef.current.has(`choice_${c.id}`);
+        const cEn = isChoiceManual
+          ? (c.name || '').trim()
+          : computeAutoEnglishName({
+              previousThai: prevChoiceThaiRef.current.get(c.id) ?? cTh,
+              nextThai: cTh,
+              currentEnglish: c.name || '',
+              isManuallyEdited: false,
+            }).trim() || (cTh ? translateThaiToEnglish(cTh) : '');
         if (!cTh && !cEn) return null;
         return {
           id: c.id,
           name: cEn || cTh,
           ...(cTh ? { nameTh: cTh } : {}),
+          nameEnManual: isChoiceManual,
           price: Number(c.price) || 0,
           ...(c.ingredients ? { ingredients: c.ingredients } : {}),
         } as OptionChoice;
@@ -89,8 +112,9 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
     const isNew = !editingGroup.id;
     const groupToSave: OptionGroupDoc = {
       id: editingGroup.id || `og_${Date.now()}`,
-      name: finalNameEn || finalNameTh,
+      name: resolvedGroupEn || finalNameTh,
       ...(finalNameTh ? { nameTh: finalNameTh } : {}),
+      nameEnManual: isGroupManual,
       minSelect: editingGroup.minSelect || 0,
       maxSelect: editingGroup.maxSelect || 1,
       order: editingGroup.order || optionGroups.length + 1,
@@ -129,7 +153,10 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
         <button
           onClick={() => {
+            translationScheduler.cancelAll();
             manualEnKeysRef.current.clear();
+            prevGroupThaiRef.current = '';
+            prevChoiceThaiRef.current.clear();
             setEditingGroup({
               name: '',
               nameTh: '',
@@ -202,7 +229,19 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
             <div className="flex justify-end gap-1.5 mt-4 pt-2 border-t border-neutral-100">
               <button
                 onClick={() => {
+                  translationScheduler.cancelAll();
                   manualEnKeysRef.current.clear();
+                  if (group.nameEnManual) {
+                    manualEnKeysRef.current.add('group');
+                  }
+                  prevGroupThaiRef.current = group.nameTh || '';
+                  prevChoiceThaiRef.current.clear();
+                  (group.choices || []).forEach((c) => {
+                    prevChoiceThaiRef.current.set(c.id, c.nameTh || '');
+                    if (c.nameEnManual) {
+                      manualEnKeysRef.current.add(`choice_${c.id}`);
+                    }
+                  });
                   setEditingGroup({
                     ...group,
                     choices: (group.choices || []).map((c) => ({ ...c })),
@@ -262,31 +301,51 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                     value={editingGroup.nameTh || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      const nextEn = computeAutoEnglishName({
-                        previousThai: editingGroup.nameTh || '',
-                        nextThai: nextTh,
-                        currentEnglish: editingGroup.name || '',
-                        isManuallyEdited: manualEnKeysRef.current.has('group'),
+                      setEditingGroup((prev) => (prev ? { ...prev, nameTh: nextTh } : prev));
+                      translationScheduler.schedule('group', () => {
+                        setEditingGroup((prev) => {
+                          if (!prev) return prev;
+                          const currTh = prev.nameTh || '';
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevGroupThaiRef.current,
+                            nextThai: currTh,
+                            currentEnglish: prev.name || '',
+                            isManuallyEdited: manualEnKeysRef.current.has('group'),
+                          });
+                          prevGroupThaiRef.current = currTh;
+                          return { ...prev, name: nextEn };
+                        });
                       });
-                      setEditingGroup({ ...editingGroup, nameTh: nextTh, name: nextEn });
                     }}
+                    onBlur={() => translationScheduler.flush('group')}
                     className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500"
                     placeholder={lang === 'th' ? 'เช่น ระดับความเผ็ด, ท็อปปิ้ง' : 'e.g. ระดับความเผ็ด, ท็อปปิ้ง'}
                   />
                 </div>
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-neutral-700">
-                      {lang === 'th' ? 'ชื่อกลุ่ม (อังกฤษ)' : 'Group Name (EN)'}
-                    </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5">
+                      <label className="block text-xs font-bold text-neutral-700">
+                        {lang === 'th' ? 'ชื่อกลุ่ม (อังกฤษ)' : 'Group Name (EN)'}
+                      </label>
+                      {needsEnglishReview(editingGroup.nameTh, editingGroup.name) && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                        </span>
+                      )}
+                    </div>
                     {editingGroup.nameTh && (
                       <button
                         type="button"
                         onClick={() => {
+                          translationScheduler.cancel('group');
                           manualEnKeysRef.current.delete('group');
+                          prevGroupThaiRef.current = editingGroup.nameTh || '';
                           setEditingGroup({
                             ...editingGroup,
                             name: translateThaiToEnglish(editingGroup.nameTh || ''),
+                            nameEnManual: false,
                           });
                         }}
                         className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
@@ -300,12 +359,17 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                     value={editingGroup.name || ''}
                     onChange={(e) => {
                       const val = e.target.value;
+                      translationScheduler.cancel('group');
                       if (val.trim()) {
                         manualEnKeysRef.current.add('group');
                       } else {
                         manualEnKeysRef.current.delete('group');
                       }
-                      setEditingGroup({ ...editingGroup, name: val });
+                      setEditingGroup({
+                        ...editingGroup,
+                        name: val,
+                        nameEnManual: Boolean(val.trim()),
+                      });
                     }}
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
                     placeholder="e.g. Spice Level"
@@ -397,38 +461,73 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                           value={choice.nameTh || ''}
                           onChange={(e) => {
                             const nextTh = e.target.value;
-                            const updated = [...(editingGroup.choices || [])];
-                            const prev = updated[idx];
-                            const nextEn = computeAutoEnglishName({
-                              previousThai: prev.nameTh || '',
-                              nextThai: nextTh,
-                              currentEnglish: prev.name || '',
-                              isManuallyEdited: manualEnKeysRef.current.has(`choice_${choice.id}`),
+                            const choiceKey = `choice_${choice.id}`;
+                            setEditingGroup((prev) => {
+                              if (!prev) return prev;
+                              const updated = [...(prev.choices || [])];
+                              if (!updated[idx]) return prev;
+                              updated[idx] = { ...updated[idx], nameTh: nextTh };
+                              return { ...prev, choices: updated };
                             });
-                            updated[idx] = { ...prev, nameTh: nextTh, name: nextEn };
-                            setEditingGroup({ ...editingGroup, choices: updated });
+                            translationScheduler.schedule(choiceKey, () => {
+                              setEditingGroup((prev) => {
+                                if (!prev) return prev;
+                                const updated = [...(prev.choices || [])];
+                                const target = updated[idx];
+                                if (!target) return prev;
+                                const currTh = target.nameTh || '';
+                                const prevTh = prevChoiceThaiRef.current.get(choice.id) ?? '';
+                                const nextEn = computeAutoEnglishName({
+                                  previousThai: prevTh,
+                                  nextThai: currTh,
+                                  currentEnglish: target.name || '',
+                                  isManuallyEdited: manualEnKeysRef.current.has(choiceKey),
+                                });
+                                prevChoiceThaiRef.current.set(choice.id, currTh);
+                                updated[idx] = { ...target, name: nextEn };
+                                return { ...prev, choices: updated };
+                              });
+                            });
                           }}
+                          onBlur={() => translationScheduler.flush(`choice_${choice.id}`)}
                           className="w-full px-2 py-1 bg-white border border-orange-300 rounded-lg text-xs"
                           placeholder={lang === 'th' ? 'ชื่อไทย (เช่น เผ็ดน้อย)' : 'Thai name (e.g. เผ็ดน้อย)'}
                         />
-                        <input
-                          type="text"
-                          value={choice.name || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            const key = `choice_${choice.id}`;
-                            if (val.trim()) {
-                              manualEnKeysRef.current.add(key);
-                            } else {
-                              manualEnKeysRef.current.delete(key);
-                            }
-                            const updated = [...(editingGroup.choices || [])];
-                            updated[idx] = { ...updated[idx], name: val };
-                            setEditingGroup({ ...editingGroup, choices: updated });
-                          }}
-                          className="w-full px-2 py-1 bg-neutral-100/70 border border-neutral-300 rounded-lg text-xs"
-                          placeholder={lang === 'th' ? 'ภาษาอังกฤษ (แปลอัตโนมัติ)' : 'English (auto)'}
-                        />
+                        <div className="relative flex items-center">
+                          <input
+                            type="text"
+                            value={choice.name || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const key = `choice_${choice.id}`;
+                              translationScheduler.cancel(key);
+                              if (val.trim()) {
+                                manualEnKeysRef.current.add(key);
+                              } else {
+                                manualEnKeysRef.current.delete(key);
+                              }
+                              const updated = [...(editingGroup.choices || [])];
+                              updated[idx] = {
+                                ...updated[idx],
+                                name: val,
+                                nameEnManual: Boolean(val.trim()),
+                              };
+                              setEditingGroup({ ...editingGroup, choices: updated });
+                            }}
+                            className={`w-full px-2 py-1 bg-neutral-100/70 border border-neutral-300 rounded-lg text-xs ${
+                              needsEnglishReview(choice.nameTh, choice.name) ? 'pr-6' : ''
+                            }`}
+                            placeholder={lang === 'th' ? 'ภาษาอังกฤษ (แปลอัตโนมัติ)' : 'English (auto)'}
+                          />
+                          {needsEnglishReview(choice.nameTh, choice.name) && (
+                            <span
+                              title={lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}
+                              className="absolute right-1.5 text-amber-600 pointer-events-none"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">

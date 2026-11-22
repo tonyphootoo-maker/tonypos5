@@ -17,7 +17,7 @@ import {
 } from '../types';
 import { fetchCollection, saveDocument } from '../../data/db';
 import { calculateIngredientCostPerBaseUnit } from '../../engine/calculations';
-import { translateThaiToEnglish } from '../../utils/thaiToEnglish';
+import { resolveEntityEnglishName } from '../../utils/thaiToEnglish';
 import { convertUnit } from '../engine/units';
 import {
   resolveCostVariantLabel,
@@ -116,7 +116,7 @@ async function syncSingleMenuWithContext(
   if (!matchedCat) {
     matchedCat = {
       id: `cat_cost_${normalizePosId(catName).slice(0, 24)}`,
-      name: translateThaiToEnglish(catName) || catName,
+      name: resolveEntityEnglishName(catName) || catName,
       nameTh: catName,
       order: existingCategories.length + 1,
       createdAt: now,
@@ -148,11 +148,12 @@ async function syncSingleMenuWithContext(
     );
     const nextCostPerBase = costIng.costPerBaseUnit || calc.costPerBaseUnit;
 
-    const nextIngEn = costIng.englishName?.trim() || translateThaiToEnglish(costIng.name) || costIng.name;
+    const nextIngEn = resolveEntityEnglishName(costIng.thaiName || costIng.name, costIng.englishName) || costIng.name;
 
     if (byName) {
+      const effectiveIngEn = byName.nameEnManual ? byName.name : nextIngEn;
       const changed =
-        byName.name !== nextIngEn ||
+        byName.name !== effectiveIngEn ||
         byName.purchasePrice !== (costIng.purchasePrice || 0) ||
         byName.purchaseQuantity !== (costIng.purchaseQuantity || 1) ||
         byName.yieldPercent !== (costIng.yieldPercent || 100) ||
@@ -162,8 +163,9 @@ async function syncSingleMenuWithContext(
       if (changed) {
         const updatedIng: IngredientDoc = {
           ...byName,
-          name: nextIngEn,
+          name: effectiveIngEn,
           nameTh: costIng.thaiName || costIng.name,
+          ...(byName.nameEnManual || costIng.englishNameManual ? { nameEnManual: true } : {}),
           purchaseUnit,
           purchasePrice: costIng.purchasePrice || 0,
           purchaseQuantity: costIng.purchaseQuantity || 1,
@@ -260,8 +262,9 @@ async function syncSingleMenuWithContext(
     const thName = sauce.thaiName || sauce.name;
     const newSub: SubRecipeDoc = {
       id: posSubId,
-      name: sauce.englishName || translateThaiToEnglish(thName) || thName,
+      name: resolveEntityEnglishName(thName, sauce.englishName) || thName,
       nameTh: thName,
+      ...(sauce.englishNameManual ? { nameEnManual: true } : {}),
       outputUnit: normalizedOutUnit,
       outputQuantity: outQty,
       ingredients: subIngs,
@@ -301,7 +304,7 @@ async function syncSingleMenuWithContext(
         if (!existingPkg) {
           const newPkg: PackagingDoc = {
             id: pkgId,
-            name: translateThaiToEnglish(r.name) || r.name,
+            name: resolveEntityEnglishName(r.name) || r.name,
             nameTh: r.name,
             cost: pkgCost,
             unit: r.unit || 'piece',
@@ -338,7 +341,7 @@ async function syncSingleMenuWithContext(
         if (!existingPkg) {
           const newPkg: PackagingDoc = {
             id: pkgId,
-            name: translateThaiToEnglish(p.name) || p.name,
+            name: resolveEntityEnglishName(p.name) || p.name,
             nameTh: p.name,
             cost: p.cost || 0,
             unit: 'piece',
@@ -359,11 +362,12 @@ async function syncSingleMenuWithContext(
     }
 
     const labelTh = resolveCostVariantLabel(v);
-    const labelEn = v.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
+    const labelEn = resolveEntityEnglishName(labelTh, v.englishName) || labelTh;
     builtVariants.push({
       id: v.id || `var_${Date.now()}`,
       name: labelEn,
       nameTh: labelTh,
+      ...(v.englishNameManual ? { nameEnManual: true } : {}),
       price: Number(v.sellingPrice) || 0,
       costMenuId: costMenu.id,
       costVariantId: v.id,
@@ -399,8 +403,9 @@ async function syncSingleMenuWithContext(
         preserved.push({
           ...match,
           id: oldVar.id,
-          name: match.name || oldVar.name,
+          name: oldVar.nameEnManual ? oldVar.name : match.name || oldVar.name,
           nameTh: match.nameTh || oldVar.nameTh,
+          ...(oldVar.nameEnManual || match.nameEnManual ? { nameEnManual: true } : {}),
         });
       }
     }
@@ -430,8 +435,13 @@ async function syncSingleMenuWithContext(
 
   const dishDoc: DishDoc = {
     id: existingDish ? existingDish.id : targetDishId,
-    name: costMenu.englishName?.trim() || existingDish?.name || translateThaiToEnglish(costMenu.name) || costMenu.name,
+    name: existingDish?.nameEnManual
+      ? existingDish.name
+      : resolveEntityEnglishName(costMenu.thaiName || costMenu.name, costMenu.englishName) ||
+        existingDish?.name ||
+        costMenu.name,
     nameTh: costMenu.thaiName?.trim() || existingDish?.nameTh || costMenu.name,
+    ...(existingDish?.nameEnManual || costMenu.englishNameManual ? { nameEnManual: true } : {}),
     categoryId: existingDish?.categoryId || matchedCat.id,
     ...(existingDish?.imageId ? { imageId: existingDish.imageId } : {}),
     costMenuId: costMenu.id,
@@ -623,11 +633,19 @@ export async function syncAllCostingToPOS(
       const cv = activeCostVariantMap.get(dv.costVariantId);
       if (!cv) return dv;
       const labelTh = resolveCostVariantLabel(cv);
-      const labelEn = cv.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
+      const labelEn = dv.nameEnManual
+        ? dv.name
+        : resolveEntityEnglishName(labelTh, cv.englishName) || labelTh;
       const nextPrice = Number(cv.sellingPrice) || dv.price;
       if (nextPrice !== dv.price || dv.nameTh !== labelTh || dv.name !== labelEn) {
         dishChanged = true;
-        return { ...dv, price: nextPrice, nameTh: labelTh, name: labelEn };
+        return {
+          ...dv,
+          price: nextPrice,
+          nameTh: labelTh,
+          name: labelEn,
+          ...(dv.nameEnManual || cv.englishNameManual ? { nameEnManual: true } : {}),
+        };
       }
       return dv;
     });
@@ -694,8 +712,9 @@ export async function importCostingVariantToDishVariant(params: {
 
     const newIng: IngredientDoc = {
       id: posId,
-      name: translateThaiToEnglish(costIng.name) || costIng.name,
-      nameTh: costIng.name,
+      name: resolveEntityEnglishName(costIng.thaiName || costIng.name, costIng.englishName) || costIng.name,
+      nameTh: costIng.thaiName || costIng.name,
+      ...(costIng.englishNameManual ? { nameEnManual: true } : {}),
       purchaseUnit,
       purchasePrice: costIng.purchasePrice || 0,
       purchaseQuantity: costIng.purchaseQuantity || 1,
@@ -748,8 +767,9 @@ export async function importCostingVariantToDishVariant(params: {
     const thName = sauce.thaiName || sauce.name;
     const newSub: SubRecipeDoc = {
       id: posSubId,
-      name: sauce.englishName || translateThaiToEnglish(thName) || thName,
+      name: resolveEntityEnglishName(thName, sauce.englishName) || thName,
       nameTh: thName,
+      ...(sauce.englishNameManual ? { nameEnManual: true } : {}),
       outputUnit: outUnit === 'ml' ? 'ml' : 'g',
       outputQuantity: outQty,
       ingredients: subIngs,
@@ -784,7 +804,7 @@ export async function importCostingVariantToDishVariant(params: {
         const pkgCost = r.calculatedUnitCost || 0;
         const newPkg: PackagingDoc = {
           id: pkgId,
-          name: translateThaiToEnglish(r.name) || r.name,
+          name: resolveEntityEnglishName(r.name) || r.name,
           nameTh: r.name,
           cost: pkgCost,
           unit: r.unit || 'piece',
@@ -814,7 +834,7 @@ export async function importCostingVariantToDishVariant(params: {
     if (!posPkgById.has(pkgId)) {
       const newPkg: PackagingDoc = {
         id: pkgId,
-        name: translateThaiToEnglish(p.name) || p.name,
+        name: resolveEntityEnglishName(p.name) || p.name,
         nameTh: p.name,
         cost: p.cost || 0,
         unit: 'piece',
@@ -830,15 +850,16 @@ export async function importCostingVariantToDishVariant(params: {
 
   const itemLabelTh = (v.thaiName || v.name || '').trim();
   const labelTh = preferredNameTh?.trim() || itemLabelTh || v.proteinType?.trim() || 'มาตรฐาน';
+  const sameAsVariantLabel = !preferredNameTh?.trim() || preferredNameTh.trim() === itemLabelTh;
   const labelEn =
-    (!preferredNameTh?.trim() || preferredNameTh.trim() === itemLabelTh) && v.englishName?.trim()
-      ? v.englishName.trim()
-      : translateThaiToEnglish(labelTh) || labelTh;
+    (sameAsVariantLabel ? resolveEntityEnglishName(labelTh, v.englishName) : resolveEntityEnglishName(labelTh)) ||
+    labelTh;
 
   return {
     id: `var_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     name: labelEn,
     nameTh: labelTh,
+    ...(sameAsVariantLabel && v.englishNameManual ? { nameEnManual: true } : {}),
     price: Number(v.sellingPrice) || 0,
     ...(costMenuId ? { costMenuId } : v.menuId ? { costMenuId: v.menuId } : {}),
     costVariantId: v.id,
@@ -874,8 +895,9 @@ export async function importCostingIngredientAsDishVariant(
     );
     matched = {
       id: posId,
-      name: translateThaiToEnglish(costIng.name) || costIng.name,
-      nameTh: costIng.name,
+      name: resolveEntityEnglishName(costIng.thaiName || costIng.name, costIng.englishName) || costIng.name,
+      nameTh: costIng.thaiName || costIng.name,
+      ...(costIng.englishNameManual ? { nameEnManual: true } : {}),
       purchaseUnit,
       purchasePrice: costIng.purchasePrice || 0,
       purchaseQuantity: costIng.purchaseQuantity || 1,
@@ -891,8 +913,8 @@ export async function importCostingIngredientAsDishVariant(
 
   const usageQty = matched.baseUnit === 'piece' ? 1 : quantityInRecipeUnit;
 
-  const labelTh = costIng.name;
-  const labelEn = translateThaiToEnglish(labelTh) || labelTh;
+  const labelTh = costIng.thaiName || costIng.name;
+  const labelEn = resolveEntityEnglishName(labelTh, costIng.englishName) || labelTh;
 
   return {
     id: `var_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,

@@ -44,7 +44,17 @@ import {
   getImageDoc,
 } from '../data/db';
 import { compressImage } from '../utils/imageCompressor';
-import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText } from '../utils/thaiToEnglish';
+import {
+  translateThaiToEnglish,
+  computeAutoEnglishName,
+  getLocalizedText,
+  containsThaiCharacters,
+  resolveEntityEnglishName,
+} from '../utils/thaiToEnglish';
+import {
+  useDebouncedTranslationScheduler,
+  needsEnglishReview,
+} from '../hooks/useDebouncedThaiTranslation';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import {
   MenuItem as CostMenuItem,
@@ -96,6 +106,7 @@ import {
   ArrowLeft,
   ChevronRight,
   Sliders,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface Props {
@@ -152,6 +163,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const [pendingDeleteDish, setPendingDeleteDish] = useState<DishDoc | null>(null);
   const [isDeletingPosDish, setIsDeletingPosDish] = useState(false);
   const posManualEnKeysRef = useRef<Set<string>>(new Set());
+  const posPrevDishThaiRef = useRef<string>('');
+  const posPrevVarThaiMapRef = useRef<Map<string, string>>(new Map());
+  const posTranslationScheduler = useDebouncedTranslationScheduler(600);
   const lastDishNameTapRef = useRef<{ dishId: string; ts: number } | null>(null);
 
   // Costing Food-Cost Primary Option Picker & Sub-Option Picker states for POS Menu Management
@@ -1024,7 +1038,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       );
     });
 
-    const labelEn = cv.englishName?.trim() || translateThaiToEnglish(labelTh) || labelTh;
+    const labelEn = resolveEntityEnglishName(labelTh, cv.englishName) || labelTh;
     let updatedVariants: DishVariant[];
     if (existingMatched) {
       updatedVariants = strippedPlaceholder.map((pv) =>
@@ -1033,6 +1047,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               ...pv,
               nameTh: labelTh,
               name: labelEn,
+              nameEnManual: Boolean(cv.englishNameManual || pv.nameEnManual),
               price: newPrice,
               costMenuId: costMenu.id,
               costVariantId: cv.id,
@@ -1046,6 +1061,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           id: cv.id || `var_${Date.now()}`,
           nameTh: labelTh,
           name: labelEn,
+          nameEnManual: Boolean(cv.englishNameManual),
           price: newPrice,
           costMenuId: costMenu.id,
           costVariantId: cv.id,
@@ -1198,7 +1214,10 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       dishNameClickTimerRef.current = null;
     }
     setSelectedDishForOptions(null);
+    posTranslationScheduler.cancelAll();
     posManualEnKeysRef.current.clear();
+    posPrevDishThaiRef.current = '';
+    posPrevVarThaiMapRef.current = new Map();
     setPosModalPriceOverrides({});
     setPosImageError(null);
     setPosEditImageSizeKb(null);
@@ -1243,7 +1262,20 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
     setSelectedDishForOptions(null);
     setIsCreatingDishInPos(false);
+    posTranslationScheduler.cancelAll();
     posManualEnKeysRef.current.clear();
+    if (dish.nameEnManual && (dish.name || '').trim()) {
+      posManualEnKeysRef.current.add('dish');
+    }
+    posPrevDishThaiRef.current = dish.nameTh || '';
+    posPrevVarThaiMapRef.current = new Map(
+      (dish.variants || []).map((v) => [v.id, v.nameTh || ''])
+    );
+    (dish.variants || []).forEach((v) => {
+      if (v.nameEnManual && (v.name || '').trim()) {
+        posManualEnKeysRef.current.add(`var_${v.id}`);
+      }
+    });
     setPosModalPriceOverrides({});
     setPosImageError(null);
     setPosEditImageSizeKb(null);
@@ -1307,10 +1339,20 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     e.preventDefault();
     if (!editingDishInPos || isSavingPosDish) return;
 
+    posTranslationScheduler.cancelAll();
     const finalDishTh = (editingDishInPos.nameTh || '').trim();
-    const finalDishEn =
-      (editingDishInPos.name || '').trim() ||
-      (finalDishTh ? translateThaiToEnglish(finalDishTh) : '');
+    const isDishManual =
+      posManualEnKeysRef.current.has('dish') && Boolean((editingDishInPos.name || '').trim());
+    const finalDishEn = (
+      isDishManual
+        ? (editingDishInPos.name || '').trim()
+        : computeAutoEnglishName({
+            previousThai: posPrevDishThaiRef.current,
+            nextThai: finalDishTh,
+            currentEnglish: editingDishInPos.name || '',
+            isManuallyEdited: false,
+          }) || (finalDishTh ? translateThaiToEnglish(finalDishTh) : '')
+    ).trim();
     if (!finalDishEn && !finalDishTh) return;
 
     setIsSavingPosDish(true);
@@ -1324,11 +1366,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             );
             const vTh = getCostVariantLabel(cv);
             const vEn =
-              cv.englishName?.trim() ||
-              (existingMatched?.name && existingMatched.name !== 'Standard'
+              resolveEntityEnglishName(vTh, cv.englishName) ||
+              (existingMatched?.name &&
+              existingMatched.name !== 'Standard' &&
+              !containsThaiCharacters(existingMatched.name)
                 ? existingMatched.name.trim()
                 : '') ||
-              translateThaiToEnglish(vTh) ||
               vTh;
             const resolvedPrice = resolveCostVariantSellingPrice(
               matchedCostMenu,
@@ -1340,6 +1383,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               id: existingMatched?.id || cv.id || `var_${Date.now()}`,
               name: vEn,
               nameTh: vTh,
+              nameEnManual: Boolean(cv.englishNameManual || existingMatched?.nameEnManual),
               price: resolvedPrice,
               costMenuId: matchedCostMenu.id,
               costVariantId: cv.id,
@@ -1350,13 +1394,22 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           })
         : (editingDishInPos.variants || []).map((v) => {
             const vTh = (v.nameTh || '').trim();
-            const vEn =
-              (v.name || '').trim() ||
-              (vTh ? translateThaiToEnglish(vTh) : '') ||
-              'Standard';
+            const isVarManual =
+              posManualEnKeysRef.current.has(`var_${v.id}`) && Boolean((v.name || '').trim());
+            const vEn = isVarManual
+              ? (v.name || '').trim()
+              : computeAutoEnglishName({
+                  previousThai: posPrevVarThaiMapRef.current.get(v.id) ?? vTh,
+                  nextThai: vTh,
+                  currentEnglish: v.name || '',
+                  isManuallyEdited: false,
+                }) ||
+                (vTh ? translateThaiToEnglish(vTh) : '') ||
+                'Standard';
             return {
               ...v,
               name: vEn,
+              nameEnManual: isVarManual,
               ...(vTh ? { nameTh: vTh } : {}),
               price: Number(v.price) || 0,
               ingredients: v.ingredients || [],
@@ -1372,6 +1425,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         ...editingDishInPos,
         id: editingDishInPos.id || `dish_${Date.now()}`,
         name: finalDishEn || finalDishTh,
+        nameEnManual: isDishManual,
         ...(finalDishTh ? { nameTh: finalDishTh } : {}),
         categoryId: editingDishInPos.categoryId || categories[0]?.id || 'cat_main',
         ...(resolvedCostMenuId ? { costMenuId: resolvedCostMenuId } : {}),
@@ -2823,14 +2877,22 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                     value={editingDishInPos.nameTh || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      const nextEn = computeAutoEnglishName({
-                        previousThai: editingDishInPos.nameTh || '',
-                        nextThai: nextTh,
-                        currentEnglish: editingDishInPos.name || '',
-                        isManuallyEdited: posManualEnKeysRef.current.has('dish'),
+                      setEditingDishInPos({ ...editingDishInPos, nameTh: nextTh });
+                      posTranslationScheduler.schedule('dish', () => {
+                        setEditingDishInPos((prev) => {
+                          if (!prev) return prev;
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: posPrevDishThaiRef.current,
+                            nextThai: nextTh,
+                            currentEnglish: prev.name || '',
+                            isManuallyEdited: posManualEnKeysRef.current.has('dish'),
+                          });
+                          posPrevDishThaiRef.current = nextTh;
+                          return { ...prev, name: nextEn };
+                        });
                       });
-                      setEditingDishInPos({ ...editingDishInPos, nameTh: nextTh, name: nextEn });
                     }}
+                    onBlur={() => posTranslationScheduler.flush('dish')}
                     placeholder={
                       lang === 'th'
                         ? 'เช่น กะเพรา, ผัดกะเพรา, ข้าวผัด'
@@ -2840,21 +2902,33 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                   />
                 </div>
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-bold text-neutral-700">
-                      {t.menuCost.dishName} (EN)
-                    </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <label className="block text-xs font-bold text-neutral-700">
+                        {t.menuCost.dishName} (EN)
+                      </label>
+                      {!posTranslationScheduler.hasPending('dish') &&
+                        needsEnglishReview(editingDishInPos.nameTh, editingDishInPos.name) && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                          </span>
+                        )}
+                    </div>
                     {editingDishInPos.nameTh && (
                       <button
                         type="button"
                         onClick={() => {
+                          posTranslationScheduler.cancel('dish');
                           posManualEnKeysRef.current.delete('dish');
+                          posPrevDishThaiRef.current = editingDishInPos.nameTh || '';
                           setEditingDishInPos({
                             ...editingDishInPos,
                             name: translateThaiToEnglish(editingDishInPos.nameTh || ''),
+                            nameEnManual: false,
                           });
                         }}
-                        className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer"
+                        className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer shrink-0"
                       >
                         {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
                       </button>
@@ -2864,10 +2938,15 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                     type="text"
                     value={editingDishInPos.name || ''}
                     onChange={(e) => {
+                      posTranslationScheduler.cancel('dish');
                       const val = e.target.value;
                       if (val.trim()) posManualEnKeysRef.current.add('dish');
                       else posManualEnKeysRef.current.delete('dish');
-                      setEditingDishInPos({ ...editingDishInPos, name: val });
+                      setEditingDishInPos({
+                        ...editingDishInPos,
+                        name: val,
+                        nameEnManual: Boolean(val.trim()),
+                      });
                     }}
                     placeholder="e.g. Stir-Fried Holy Basil"
                     className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
@@ -3158,17 +3237,31 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                                 value={v.nameTh || ''}
                                 onChange={(e) => {
                                   const nextTh = e.target.value;
+                                  const varId = v.id;
+                                  const varKey = `var_${varId}`;
                                   const updated = [...editingDishInPos.variants];
-                                  const prev = updated[vIdx];
-                                  const nextEn = computeAutoEnglishName({
-                                    previousThai: prev.nameTh || '',
-                                    nextThai: nextTh,
-                                    currentEnglish: prev.name || '',
-                                    isManuallyEdited: posManualEnKeysRef.current.has(`var_${v.id}`),
-                                  });
-                                  updated[vIdx] = { ...prev, nameTh: nextTh, name: nextEn };
+                                  updated[vIdx] = { ...updated[vIdx], nameTh: nextTh };
                                   setEditingDishInPos({ ...editingDishInPos, variants: updated });
+                                  posTranslationScheduler.schedule(varKey, () => {
+                                    setEditingDishInPos((prev) => {
+                                      if (!prev) return prev;
+                                      const prevTh = posPrevVarThaiMapRef.current.get(varId) || '';
+                                      const nextVars = prev.variants.map((item) => {
+                                        if (item.id !== varId) return item;
+                                        const nextEn = computeAutoEnglishName({
+                                          previousThai: prevTh,
+                                          nextThai: nextTh,
+                                          currentEnglish: item.name || '',
+                                          isManuallyEdited: posManualEnKeysRef.current.has(varKey),
+                                        });
+                                        return { ...item, name: nextEn };
+                                      });
+                                      posPrevVarThaiMapRef.current.set(varId, nextTh);
+                                      return { ...prev, variants: nextVars };
+                                    });
+                                  });
                                 }}
+                                onBlur={() => posTranslationScheduler.flush(`var_${v.id}`)}
                                 placeholder={lang === 'th' ? 'ชื่อตัวเลือก (TH)' : 'Option Name (TH)'}
                                 className="w-full px-2 py-1 text-xs border border-neutral-300 rounded-lg"
                               />
@@ -3180,15 +3273,27 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   const key = `var_${v.id}`;
+                                  posTranslationScheduler.cancel(key);
                                   if (val.trim()) posManualEnKeysRef.current.add(key);
                                   else posManualEnKeysRef.current.delete(key);
                                   const updated = [...editingDishInPos.variants];
-                                  updated[vIdx] = { ...updated[vIdx], name: val };
+                                  updated[vIdx] = {
+                                    ...updated[vIdx],
+                                    name: val,
+                                    nameEnManual: Boolean(val.trim()),
+                                  };
                                   setEditingDishInPos({ ...editingDishInPos, variants: updated });
                                 }}
                                 placeholder="EN"
                                 className="w-full px-2 py-1 text-xs bg-neutral-50 border border-neutral-300 rounded-lg"
                               />
+                              {!posTranslationScheduler.hasPending(`var_${v.id}`) &&
+                                needsEnglishReview(v.nameTh, v.name) && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold text-amber-700 mt-0.5">
+                                    <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                    <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                                  </span>
+                                )}
                             </div>
                             <div className="col-span-3">
                               <NumericInput

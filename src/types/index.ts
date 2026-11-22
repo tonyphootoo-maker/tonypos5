@@ -58,6 +58,7 @@ export interface SettingsDoc extends BaseDoc {
 export interface IngredientDoc extends BaseDoc {
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   purchaseUnit: string; // 'kg', 'g', 'l', 'ml', 'piece', 'pack'
   purchasePrice: number; // Price per purchase pack/unit
   purchaseQuantity: number; // Quantity in purchase pack (e.g. 5 for 5kg)
@@ -88,6 +89,7 @@ export interface RecipePackagingItem {
 export interface SubRecipeDoc extends BaseDoc {
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   outputUnit: string; // 'portion', 'g', 'ml', 'cup'
   outputQuantity: number; // Total output yield from this batch
   ingredients: RecipeIngredientItem[];
@@ -97,6 +99,7 @@ export interface SubRecipeDoc extends BaseDoc {
 export interface PackagingDoc extends BaseDoc {
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   cost: number;
   unit: string;
 }
@@ -105,6 +108,7 @@ export interface OptionChoice {
   id: string;
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   price: number; // Additional price
   ingredients?: RecipeIngredientItem[]; // Cost lines for choice
 }
@@ -112,6 +116,7 @@ export interface OptionChoice {
 export interface OptionGroupDoc extends BaseDoc {
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   minSelect: number;
   maxSelect: number;
   order: number;
@@ -122,6 +127,7 @@ export interface DishVariant {
   id: string;
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   price: number;
   costMenuId?: string;
   costVariantId?: string;
@@ -133,6 +139,7 @@ export interface DishVariant {
 export interface DishDoc extends BaseDoc {
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   categoryId: string;
   imageId?: string;
   description?: string;
@@ -145,12 +152,14 @@ export interface DishDoc extends BaseDoc {
 export interface CategoryDoc extends BaseDoc {
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   order: number;
 }
 
 export interface ChannelDoc extends BaseDoc {
   name: string;
   nameTh?: string;
+  nameEnManual?: boolean;
   type: OrderType;
   commissionPercent: number; // e.g. 30% for delivery platforms
   packagingCost: number; // default packaging cost for channel

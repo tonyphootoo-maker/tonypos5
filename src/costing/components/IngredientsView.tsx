@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Plus,
   Search,
@@ -35,7 +35,17 @@ import {
   calculateIngredientCost,
   analyzePriceChangeImpact,
 } from '../services/calculationEngine';
-import { translateThaiToEnglish, computeAutoEnglishName, getLocalizedText, localizeUnit } from '../../utils/thaiToEnglish';
+import {
+  translateThaiToEnglish,
+  computeAutoEnglishName,
+  containsThaiCharacters,
+  getLocalizedText,
+  localizeUnit,
+} from '../../utils/thaiToEnglish';
+import {
+  useDebouncedTranslationScheduler,
+  needsEnglishReview,
+} from '../../hooks/useDebouncedThaiTranslation';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NumericInput } from './common/NumericInput';
 import { convertUnit } from '../engine/units';
@@ -440,12 +450,17 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     onReorderIngredients?.(updated);
   };
 
+  const prevIngThaiRef = useRef<string>('');
+  const translationScheduler = useDebouncedTranslationScheduler(600);
+
   const handleDragEnd = () => {
     setDraggedIngredientId(null);
     setDragOverIngredientId(null);
   };
 
   const handleOpenAdd = () => {
+    translationScheduler.cancelAll();
+    prevIngThaiRef.current = '';
     const defaultCat = (selectedCategory || allCategories[0] || 'เนื้อสัตว์และอาหารทะเล') as IngredientCategory;
 
     const newIng: Partial<Ingredient> = {
@@ -453,6 +468,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       name: '',
       thaiName: '',
       englishName: '',
+      englishNameManual: false,
       category: defaultCat,
       purchaseQuantity: 1000,
       purchaseUnit: 'g',
@@ -474,18 +490,29 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   };
 
   const handleOpenEdit = (ing: Ingredient) => {
+    translationScheduler.cancelAll();
     const pQty = Number(ing.purchaseQuantity) || 1000;
     const yPct = Number(ing.yieldPercent) || 100;
     const computedActual = ing.actualQuantity !== undefined && ing.actualQuantity !== null
       ? ing.actualQuantity
       : Number(((pQty * yPct) / 100).toFixed(1));
     const thName = ing.thaiName || ing.name || '';
+    prevIngThaiRef.current = thName;
+    const storedEn = (ing.englishName || '').trim();
+    const resolvedInitialEn =
+      ing.englishNameManual && storedEn && !containsThaiCharacters(storedEn)
+        ? storedEn
+        : storedEn && !containsThaiCharacters(storedEn)
+        ? storedEn
+        : translateThaiToEnglish(thName);
+
     setIsAddingPurchaseUnit(false);
     setNewPurchaseUnitInput('');
     setEditingIngredient({
       ...ing,
       thaiName: thName,
-      englishName: ing.englishName || translateThaiToEnglish(thName),
+      englishName: resolvedInitialEn,
+      englishNameManual: Boolean(ing.englishNameManual),
       actualQuantity: computedActual,
       actualUnit: ing.actualUnit || ing.purchaseUnit || 'g',
     });
@@ -495,12 +522,18 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   const handleSaveModal = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingIngredient || !editingIngredient.name) return;
+    translationScheduler.cancelAll();
 
     const trimmedTh = editingIngredient.name.trim();
-    const trimmedEn =
-      (editingIngredient.englishName || '').trim() ||
-      translateThaiToEnglish(trimmedTh) ||
-      trimmedTh;
+    const isManual = Boolean(editingIngredient.englishNameManual);
+    const trimmedEn = isManual
+      ? (editingIngredient.englishName || '').trim()
+      : computeAutoEnglishName({
+          previousThai: prevIngThaiRef.current || trimmedTh,
+          nextThai: trimmedTh,
+          currentEnglish: editingIngredient.englishName || '',
+          isManuallyEdited: false,
+        }).trim() || translateThaiToEnglish(trimmedTh);
 
     const calc = calculateIngredientCost(editingIngredient);
     const completeIngredient: Ingredient = {
@@ -508,6 +541,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       name: trimmedTh,
       thaiName: trimmedTh,
       englishName: trimmedEn,
+      englishNameManual: isManual,
       category: editingIngredient.category || 'เนื้อสัตว์และอาหารทะเล',
       purchaseQuantity: Number(editingIngredient.purchaseQuantity) || 1,
       purchaseUnit: editingIngredient.purchaseUnit || 'g',
@@ -1057,18 +1091,25 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     value={editingIngredient.name || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      const nextEn = computeAutoEnglishName({
-                        previousThai: editingIngredient.thaiName ?? editingIngredient.name,
-                        nextThai: nextTh,
-                        currentEnglish: editingIngredient.englishName,
-                      });
-                      setEditingIngredient({
-                        ...editingIngredient,
-                        name: nextTh,
-                        thaiName: nextTh,
-                        englishName: nextEn,
+                      setEditingIngredient((prev) =>
+                        prev ? { ...prev, name: nextTh, thaiName: nextTh } : prev
+                      );
+                      translationScheduler.schedule('ingredient', () => {
+                        setEditingIngredient((prev) => {
+                          if (!prev) return prev;
+                          const currTh = prev.name || '';
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevIngThaiRef.current,
+                            nextThai: currTh,
+                            currentEnglish: prev.englishName,
+                            isManuallyEdited: Boolean(prev.englishNameManual),
+                          });
+                          prevIngThaiRef.current = currTh;
+                          return { ...prev, englishName: nextEn };
+                        });
                       });
                     }}
+                    onBlur={() => translationScheduler.flush('ingredient')}
                     className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none"
                     placeholder={lang === 'th' ? 'เช่น หมูหมัก, กุ้งสด XL' : 'e.g. Marinated Pork, Fresh Shrimp XL'}
                   />
@@ -1100,20 +1141,31 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-white/80">
-                    {lang === 'th'
-                      ? 'ชื่อวัตถุดิบภาษาอังกฤษ (English Name — แปลอัตโนมัติ)'
-                      : 'English Name (Auto-translated)'}
-                  </label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="flex items-center gap-2">
+                    <label className="block font-bold text-white/80">
+                      {lang === 'th'
+                        ? 'ชื่อวัตถุดิบภาษาอังกฤษ (English Name — แปลอัตโนมัติ)'
+                        : 'English Name (Auto-translated)'}
+                    </label>
+                    {needsEnglishReview(editingIngredient.name, editingIngredient.englishName) && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-400">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>{lang === 'th' ? 'รอตรวจสอบ EN' : 'Needs EN'}</span>
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      translationScheduler.cancel('ingredient');
+                      prevIngThaiRef.current = editingIngredient.name || '';
                       setEditingIngredient({
                         ...editingIngredient,
                         englishName: translateThaiToEnglish(editingIngredient.name || ''),
-                      })
-                    }
+                        englishNameManual: false,
+                      });
+                    }}
                     className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                   >
                     {lang === 'th' ? 'แปลใหม่จากภาษาไทย' : 'Re-translate from Thai'}
@@ -1122,9 +1174,15 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 <input
                   type="text"
                   value={editingIngredient.englishName || ''}
-                  onChange={(e) =>
-                    setEditingIngredient({ ...editingIngredient, englishName: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    translationScheduler.cancel('ingredient');
+                    setEditingIngredient({
+                      ...editingIngredient,
+                      englishName: val,
+                      englishNameManual: Boolean(val.trim()),
+                    });
+                  }}
                   className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 font-medium focus:border-[#F27D26] focus:outline-none placeholder-white/30"
                   placeholder={lang === 'th' ? 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ (แก้ไขได้)' : 'Auto-translated English name (editable)'}
                 />

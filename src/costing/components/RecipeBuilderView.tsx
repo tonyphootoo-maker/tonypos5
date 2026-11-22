@@ -16,6 +16,7 @@ import {
   X,
   Package,
   Soup,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   MenuItem,
@@ -36,9 +37,14 @@ import { convertUnit } from '../engine/units';
 import {
   translateThaiToEnglish,
   computeAutoEnglishName,
+  containsThaiCharacters,
   getLocalizedText,
   localizeUnit,
 } from '../../utils/thaiToEnglish';
+import {
+  useDebouncedTranslationScheduler,
+  needsEnglishReview,
+} from '../../hooks/useDebouncedThaiTranslation';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NumericInput } from './common/NumericInput';
 
@@ -812,13 +818,18 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   const [isSauceModalOpen, setIsSauceModalOpen] = useState(false);
   const [editingSauce, setEditingSauce] = useState<Partial<Sauce> | null>(null);
   const [sauceFormError, setSauceFormError] = useState<string | null>(null);
+  const prevSauceThaiRef = useRef<string>('');
+  const sauceTranslationScheduler = useDebouncedTranslationScheduler(600);
 
   const handleOpenAddSauce = () => {
+    sauceTranslationScheduler.cancelAll();
+    prevSauceThaiRef.current = '';
     const newSauce: Partial<Sauce> = {
       id: `sauce_${Date.now()}`,
       name: '',
       thaiName: '',
       englishName: '',
+      englishNameManual: false,
       category: 'ซอสปรุงรส',
       productionQuantity: 1000,
       productionUnit: 'g',
@@ -839,11 +850,20 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   };
 
   const handleOpenEditSauce = (sauce: Sauce) => {
+    sauceTranslationScheduler.cancelAll();
     setSauceFormError(null);
     const cloned = JSON.parse(JSON.stringify(sauce));
     const thName = cloned.thaiName || cloned.name || '';
+    prevSauceThaiRef.current = thName;
+    const storedEn = (cloned.englishName || '').trim();
     cloned.thaiName = thName;
-    cloned.englishName = cloned.englishName || translateThaiToEnglish(thName);
+    cloned.englishNameManual = Boolean(cloned.englishNameManual);
+    cloned.englishName =
+      cloned.englishNameManual && storedEn && !containsThaiCharacters(storedEn)
+        ? storedEn
+        : storedEn && !containsThaiCharacters(storedEn)
+        ? storedEn
+        : translateThaiToEnglish(thName);
     setEditingSauce(cloned);
     setIsSauceModalOpen(true);
   };
@@ -854,6 +874,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       setSauceFormError(lang === 'en' ? 'Please enter a sauce recipe name' : 'กรุณาระบุชื่อสูตรซอส');
       return;
     }
+    sauceTranslationScheduler.cancelAll();
 
     const rawActual = Number(editingSauce.actualQuantity);
     if (!Number.isFinite(rawActual) || rawActual <= 0) {
@@ -871,16 +892,22 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     }
 
     const trimmedTh = editingSauce.name.trim();
-    const trimmedEn =
-      (editingSauce.englishName || '').trim() ||
-      translateThaiToEnglish(trimmedTh) ||
-      trimmedTh;
+    const isManual = Boolean(editingSauce.englishNameManual);
+    const trimmedEn = isManual
+      ? (editingSauce.englishName || '').trim()
+      : computeAutoEnglishName({
+          previousThai: prevSauceThaiRef.current || trimmedTh,
+          nextThai: trimmedTh,
+          currentEnglish: editingSauce.englishName || '',
+          isManuallyEdited: false,
+        }).trim() || translateThaiToEnglish(trimmedTh);
 
     const finalSauce: Sauce = {
       id: editingSauce.id || `sauce_${Date.now()}`,
       name: trimmedTh,
       thaiName: trimmedTh,
       englishName: trimmedEn,
+      englishNameManual: isManual,
       category: editingSauce.category || 'ซอสปรุงรส',
       productionQuantity: Number(editingSauce.productionQuantity) || rawActual,
       productionUnit: editingSauce.productionUnit || 'g',
@@ -1762,36 +1789,54 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     value={editingSauce.name || ''}
                     onChange={(e) => {
                       const nextTh = e.target.value;
-                      const nextEn = computeAutoEnglishName({
-                        previousThai: editingSauce.thaiName ?? editingSauce.name,
-                        nextThai: nextTh,
-                        currentEnglish: editingSauce.englishName,
-                      });
                       setSauceFormError(null);
-                      setEditingSauce({
-                        ...editingSauce,
-                        name: nextTh,
-                        thaiName: nextTh,
-                        englishName: nextEn,
+                      setEditingSauce((prev) =>
+                        prev ? { ...prev, name: nextTh, thaiName: nextTh } : prev
+                      );
+                      sauceTranslationScheduler.schedule('sauce', () => {
+                        setEditingSauce((prev) => {
+                          if (!prev) return prev;
+                          const currTh = prev.name || '';
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevSauceThaiRef.current,
+                            nextThai: currTh,
+                            currentEnglish: prev.englishName,
+                            isManuallyEdited: Boolean(prev.englishNameManual),
+                          });
+                          prevSauceThaiRef.current = currTh;
+                          return { ...prev, englishName: nextEn };
+                        });
                       });
                     }}
+                    onBlur={() => sauceTranslationScheduler.flush('sauce')}
                     className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
                   />
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-white/70 font-semibold">
-                      {lang === 'en' ? 'Sauce Name (English — Auto-translated)' : 'ชื่อสูตรซอส (English Name — แปลอัตโนมัติ)'}
-                    </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2">
+                      <label className="block text-white/70 font-semibold">
+                        {lang === 'en' ? 'Sauce Name (English — Auto-translated)' : 'ชื่อสูตรซอส (English Name — แปลอัตโนมัติ)'}
+                      </label>
+                      {needsEnglishReview(editingSauce.name, editingSauce.englishName) && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-400">
+                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                          <span>{lang === 'en' ? 'Needs EN' : 'รอตรวจสอบ EN'}</span>
+                        </span>
+                      )}
+                    </div>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        sauceTranslationScheduler.cancel('sauce');
+                        prevSauceThaiRef.current = editingSauce.name || '';
                         setEditingSauce({
                           ...editingSauce,
                           englishName: translateThaiToEnglish(editingSauce.name || ''),
-                        })
-                      }
+                          englishNameManual: false,
+                        });
+                      }}
                       className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
                     >
                       {lang === 'en' ? 'Re-translate from Thai' : 'แปลใหม่จากภาษาไทย'}
@@ -1802,8 +1847,14 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     placeholder={lang === 'en' ? 'Auto-translated English sauce name' : 'ชื่อซอสภาษาอังกฤษที่แปลอัตโนมัติ'}
                     value={editingSauce.englishName || ''}
                     onChange={(e) => {
+                      const val = e.target.value;
+                      sauceTranslationScheduler.cancel('sauce');
                       setSauceFormError(null);
-                      setEditingSauce({ ...editingSauce, englishName: e.target.value });
+                      setEditingSauce({
+                        ...editingSauce,
+                        englishName: val,
+                        englishNameManual: Boolean(val.trim()),
+                      });
                     }}
                     className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 focus:outline-none focus:border-[#F27D26]"
                   />
