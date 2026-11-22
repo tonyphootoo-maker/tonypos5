@@ -107,16 +107,25 @@ import {
   ChevronRight,
   Sliders,
   AlertTriangle,
+  BookOpen,
 } from 'lucide-react';
+import { CENTRAL_RECIPE_BUTTON_LABELS } from '../costing/utils/centralRecipeNav';
 
 interface Props {
   settings: SettingsDoc;
   lang: Language;
   onOpenFloorPlan?: () => void;
   onEditDish?: (dish: DishDoc, categoryId?: string | null) => void;
+  onOpenCentralRecipe?: (target: { variantId?: string; menuId?: string }) => void;
 }
 
-export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan, onEditDish }) => {
+export const TablesPosPage: React.FC<Props> = ({
+  settings,
+  lang,
+  onOpenFloorPlan,
+  onEditDish,
+  onOpenCentralRecipe,
+}) => {
   const t = translations[lang];
 
   // Firestore real-time state
@@ -167,6 +176,14 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const posPrevVarThaiMapRef = useRef<Map<string, string>>(new Map());
   const posTranslationScheduler = useDebouncedTranslationScheduler(600);
   const lastDishNameTapRef = useRef<{ dishId: string; ts: number } | null>(null);
+  const posDishFormRef = useRef<HTMLFormElement | null>(null);
+  const posDishSnapshotRef = useRef<string>('');
+  const [posDishModalError, setPosDishModalError] = useState<string | null>(null);
+  const [posPendingRecipeNavTarget, setPosPendingRecipeNavTarget] = useState<{
+    variantId?: string;
+    menuId?: string;
+  } | null>(null);
+  const [isPosNavigatingToRecipe, setIsPosNavigatingToRecipe] = useState<boolean>(false);
 
   // Costing Food-Cost Primary Option Picker & Sub-Option Picker states for POS Menu Management
   const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
@@ -185,6 +202,55 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
   const [posModalPriceOverrides, setPosModalPriceOverrides] = useState<Record<string, number>>({});
   const [isPosOptionGroupPickerOpen, setIsPosOptionGroupPickerOpen] = useState(false);
   const [posOptionGroupSearch, setPosOptionGroupSearch] = useState('');
+
+  const serializePosDishDraft = (
+    dish: DishDoc | null,
+    overrides: Record<string, number>
+  ) => {
+    if (!dish) return '';
+    return JSON.stringify({
+      id: dish.id || '',
+      name: dish.name || '',
+      nameTh: dish.nameTh || '',
+      categoryId: dish.categoryId || '',
+      imageId: dish.imageId || '',
+      description: dish.description || '',
+      costMenuId: dish.costMenuId || '',
+      optionGroupIds: dish.optionGroupIds || [],
+      variants: (dish.variants || []).map((v) => ({
+        id: v.id,
+        name: v.name || '',
+        nameTh: v.nameTh || '',
+        price: Number(v.price) || 0,
+        costMenuId: v.costMenuId || '',
+        costVariantId: v.costVariantId || '',
+      })),
+      overrides,
+    });
+  };
+
+  const isPosDishModalDirty = useMemo(() => {
+    if (!editingDishInPos) return false;
+    return (
+      serializePosDishDraft(editingDishInPos, posModalPriceOverrides) !==
+      posDishSnapshotRef.current
+    );
+  }, [editingDishInPos, posModalPriceOverrides]);
+
+  const closePosDishModalCleanly = () => {
+    posTranslationScheduler.cancelAll();
+    setEditingDishInPos(null);
+    setIsCreatingDishInPos(false);
+    setIsPosPrimaryOptionPickerOpen(false);
+    setIsPosOptionGroupPickerOpen(false);
+    setPosEditPreviewUrl(null);
+    setPosEditImageSizeKb(null);
+    setPosImageError(null);
+    setPosModalPriceOverrides({});
+    setPosDishModalError(null);
+    setPosPendingRecipeNavTarget(null);
+    setIsPosNavigatingToRecipe(false);
+  };
 
   // Modals state
   const [isSaveOrderModalOpen, setIsSaveOrderModalOpen] = useState(false);
@@ -1090,18 +1156,24 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           const targetMenu = activeCostMenus.find(
             (m) => m.id === (variant.costMenuId || dish.costMenuId)
           );
-          const targetVar = targetMenu?.variants?.find((cv) => cv.id === variant.costVariantId);
+          const targetVar = targetMenu?.variants?.find(
+            (cv) => cv.id === variant.costVariantId && cv.active !== false
+          );
           if (targetMenu && targetVar) return { menu: targetMenu, variant: targetVar };
         }
         for (const cm of activeCostMenus) {
-          const cv = (cm.variants || []).find((x) => x.id === variant.costVariantId);
+          const cv = (cm.variants || []).find(
+            (x) => x.id === variant.costVariantId && x.active !== false
+          );
           if (cv) return { menu: cm, variant: cv };
         }
       }
 
       if (variant?.id) {
         for (const cm of activeCostMenus) {
-          const cv = (cm.variants || []).find((x) => x.id === variant.id);
+          const cv = (cm.variants || []).find(
+            (x) => x.id === variant.id && x.active !== false
+          );
           if (cv) return { menu: cm, variant: cv };
         }
       }
@@ -1148,6 +1220,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       return {
         hasData: true,
         source: 'food_cost' as const,
+        matchedMenuId: match.menu.id,
+        matchedVariantId: match.variant.id,
         matchedMenuName: match.menu.name,
         matchedVariantName: getCostVariantLabel(match.variant),
         cost: breakdown.totalCost,
@@ -1185,6 +1259,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         return {
           hasData: true,
           source: 'pos_recipe' as const,
+          matchedMenuId: '',
+          matchedVariantId: '',
           matchedMenuName: dish.nameTh || dish.name || '',
           matchedVariantName: variant.nameTh || variant.name,
           cost: posCalc.totalCost,
@@ -1198,6 +1274,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     return {
       hasData: false,
       source: 'none' as const,
+      matchedMenuId: '',
+      matchedVariantId: '',
       matchedMenuName: '',
       matchedVariantName: '',
       cost: 0,
@@ -1230,7 +1308,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         : categories[0]?.id || 'cat_main';
     const nowIso = new Date().toISOString();
 
-    setEditingDishInPos({
+    const initialDraftDish: DishDoc = {
       id: `dish_${Date.now()}`,
       name: '',
       nameTh: '',
@@ -1251,7 +1329,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       createdAt: nowIso,
       updatedAt: nowIso,
       version: 1,
-    });
+    };
+    posDishSnapshotRef.current = serializePosDishDraft(initialDraftDish, {});
+    setPosDishModalError(null);
+    setPosPendingRecipeNavTarget(null);
+    setIsPosNavigatingToRecipe(false);
+    setEditingDishInPos(initialDraftDish);
   };
 
   const handleOpenPosEditDish = (dish: DishDoc) => {
@@ -1293,7 +1376,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         })
         .catch(() => {});
     }
-    setEditingDishInPos({
+    const draftDish: DishDoc = {
       ...dish,
       variants: (dish.variants || []).map((v) => ({
         ...v,
@@ -1302,7 +1385,12 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         packaging: [...(v.packaging || [])],
       })),
       optionGroupIds: [...(dish.optionGroupIds || [])],
-    });
+    };
+    posDishSnapshotRef.current = serializePosDishDraft(draftDish, {});
+    setPosDishModalError(null);
+    setPosPendingRecipeNavTarget(null);
+    setIsPosNavigatingToRecipe(false);
+    setEditingDishInPos(draftDish);
   };
 
   const handlePosDishPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1335,9 +1423,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
     }
   };
 
-  const handleSavePosDish = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingDishInPos || isSavingPosDish) return;
+  const savePosDishFromModal = async (): Promise<{ ok: boolean; savedDish?: DishDoc }> => {
+    if (!editingDishInPos || isSavingPosDish) return { ok: false };
 
     posTranslationScheduler.cancelAll();
     const finalDishTh = (editingDishInPos.nameTh || '').trim();
@@ -1353,7 +1440,14 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             isManuallyEdited: false,
           }) || (finalDishTh ? translateThaiToEnglish(finalDishTh) : '')
     ).trim();
-    if (!finalDishEn && !finalDishTh) return;
+    if (!finalDishEn && !finalDishTh) {
+      setPosDishModalError(
+        lang === 'th' ? 'กรุณาระบุชื่อเมนูอาหารก่อนบันทึก' : 'Please enter a dish name before saving.'
+      );
+      posDishFormRef.current?.reportValidity();
+      return { ok: false };
+    }
+    setPosDishModalError(null);
 
     setIsSavingPosDish(true);
     try {
@@ -1469,16 +1563,26 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
           return next;
         });
       }
-      setEditingDishInPos(null);
-      setIsCreatingDishInPos(false);
-      setPosEditPreviewUrl(null);
-      setPosEditImageSizeKb(null);
-      setPosModalPriceOverrides({});
+      closePosDishModalCleanly();
+      return { ok: true, savedDish: dishToSave };
     } catch (err) {
       console.error('POS save dish error:', err);
+      setPosDishModalError(
+        err instanceof Error
+          ? err.message
+          : lang === 'th'
+          ? 'บันทึกเมนูไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
+          : 'Failed to save dish. Please try again.'
+      );
+      return { ok: false };
     } finally {
       setIsSavingPosDish(false);
     }
+  };
+
+  const handleSavePosDish = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await savePosDishFromModal();
   };
 
   // Drag-and-drop reorder dish cards inside POS category (Desktop mouse & Touch long-press)
@@ -2842,6 +2946,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       {editingDishInPos && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
+            ref={posDishFormRef}
             onSubmit={handleSavePosDish}
             className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-3xl w-full border border-orange-200"
           >
@@ -2854,10 +2959,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               </div>
               <button
                 type="button"
-                onClick={() => {
-                  setEditingDishInPos(null);
-                  setIsCreatingDishInPos(false);
-                }}
+                onClick={closePosDishModalCleanly}
                 className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -3324,19 +3426,96 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                               )}
                             </div>
                           </div>
-                          {varMetrics.hasData && (
-                            <div className="px-2.5 py-1.5 rounded-lg bg-emerald-50/80 border border-emerald-200 text-[10.5px] flex flex-wrap items-center justify-between gap-2 text-emerald-900">
-                              <span className="font-bold flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                                <span>
-                                  {lang === 'th' ? 'ต้นทุน' : 'Cost'}: ฿{formatMoney(varMetrics.cost)} ({varMetrics.foodCostPercent.toFixed(1)}%)
-                                </span>
-                              </span>
-                              <span className="font-black">
-                                {lang === 'th' ? 'ที่ร้าน' : 'Dine-in'}: {varMetrics.dineInProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.dineInProfit)} • {lang === 'th' ? 'กล่อง' : 'Box'}: {varMetrics.takeawayProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.takeawayProfit)}
-                              </span>
-                            </div>
-                          )}
+                          {(varMetrics.hasData || Boolean(v.costVariantId || v.costMenuId || editingDishInPos.costMenuId)) && (() => {
+                            const isAddMode =
+                              isCreatingDishInPos ||
+                              !dishes.some((d) => d.id === editingDishInPos.id);
+                            const canOpenCentralRecipe =
+                              varMetrics.source === 'food_cost' &&
+                              Boolean(varMetrics.matchedVariantId || varMetrics.matchedMenuId);
+                            const buttonLabel = isAddMode
+                              ? lang === 'en'
+                                ? CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenEn
+                                : CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenTh
+                              : lang === 'en'
+                              ? CENTRAL_RECIPE_BUTTON_LABELS.openEn
+                              : CENTRAL_RECIPE_BUTTON_LABELS.openTh;
+                            return (
+                              <div className="px-2.5 py-1.5 rounded-lg bg-emerald-50/80 border border-emerald-200 text-[10.5px] space-y-1.5 text-emerald-900">
+                                {varMetrics.hasData && (
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className="font-bold flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                      <span>
+                                        {lang === 'th' ? 'ต้นทุน' : 'Cost'}: ฿{formatMoney(varMetrics.cost)} ({varMetrics.foodCostPercent.toFixed(1)}%)
+                                      </span>
+                                    </span>
+                                    <span className="font-black">
+                                      {lang === 'th' ? 'ที่ร้าน' : 'Dine-in'}: {varMetrics.dineInProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.dineInProfit)} • {lang === 'th' ? 'กล่อง' : 'Box'}: {varMetrics.takeawayProfit > 0 ? '+' : ''}฿{formatMoney(varMetrics.takeawayProfit)}
+                                    </span>
+                                  </div>
+                                )}
+                                <div
+                                  className={`${
+                                    varMetrics.hasData
+                                      ? 'pt-1.5 border-t border-emerald-200/70'
+                                      : ''
+                                  } flex flex-wrap items-center justify-between gap-2`}
+                                >
+                                  {!canOpenCentralRecipe && (
+                                    <span className="text-[10px] font-semibold text-amber-800">
+                                      {lang === 'en'
+                                        ? CENTRAL_RECIPE_BUTTON_LABELS.unresolvedHintEn
+                                        : CENTRAL_RECIPE_BUTTON_LABELS.unresolvedHintTh}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      !canOpenCentralRecipe ||
+                                      !onOpenCentralRecipe ||
+                                      isPosNavigatingToRecipe
+                                    }
+                                    onClick={async () => {
+                                      if (
+                                        isPosNavigatingToRecipe ||
+                                        !canOpenCentralRecipe ||
+                                        !onOpenCentralRecipe
+                                      ) {
+                                        return;
+                                      }
+                                      const target = {
+                                        variantId: varMetrics.matchedVariantId || undefined,
+                                        menuId: varMetrics.matchedMenuId || undefined,
+                                      };
+                                      if (isAddMode) {
+                                        setIsPosNavigatingToRecipe(true);
+                                        const res = await savePosDishFromModal();
+                                        if (res.ok) {
+                                          onOpenCentralRecipe(target);
+                                        }
+                                        setIsPosNavigatingToRecipe(false);
+                                        return;
+                                      }
+                                      if (isPosDishModalDirty) {
+                                        setPosPendingRecipeNavTarget(target);
+                                        return;
+                                      }
+                                      setIsPosNavigatingToRecipe(true);
+                                      closePosDishModalCleanly();
+                                      onOpenCentralRecipe(target);
+                                    }}
+                                    title={buttonLabel}
+                                    aria-label={buttonLabel}
+                                    className="min-h-[36px] px-2.5 py-1 rounded-xl border border-emerald-400/90 bg-white/90 hover:bg-emerald-100/80 text-emerald-900 font-bold text-[11px] inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-auto w-full sm:w-auto"
+                                  >
+                                    <BookOpen className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                                    <span>{buttonLabel}</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
@@ -3401,6 +3580,74 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               </div>
             </div>
 
+            {posDishModalError && (
+              <div className="shrink-0 px-4 sm:px-6 py-2 bg-rose-50 border-t border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{posDishModalError}</span>
+              </div>
+            )}
+
+            {posPendingRecipeNavTarget && (
+              <div className="shrink-0 px-4 sm:px-6 py-3 bg-amber-50 border-t border-amber-200 text-xs space-y-2">
+                <div className="font-bold text-amber-950 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    {lang === 'en'
+                      ? 'You have unsaved changes in this menu. What would you like to do?'
+                      : 'คุณมีการแก้ไขเมนูนี้ที่ยังไม่ได้บันทึก ต้องการดำเนินการอย่างไร?'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isPosNavigatingToRecipe}
+                    onClick={async () => {
+                      if (isPosNavigatingToRecipe || !onOpenCentralRecipe) return;
+                      const target = posPendingRecipeNavTarget;
+                      setIsPosNavigatingToRecipe(true);
+                      const res = await savePosDishFromModal();
+                      if (res.ok) {
+                        onOpenCentralRecipe(target);
+                      } else {
+                        setPosPendingRecipeNavTarget(null);
+                      }
+                      setIsPosNavigatingToRecipe(false);
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {lang === 'en'
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenTh}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isPosNavigatingToRecipe}
+                    onClick={() => {
+                      if (isPosNavigatingToRecipe || !onOpenCentralRecipe) return;
+                      const target = posPendingRecipeNavTarget;
+                      setIsPosNavigatingToRecipe(true);
+                      closePosDishModalCleanly();
+                      onOpenCentralRecipe(target);
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-neutral-100 text-neutral-800 border border-neutral-300 font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {lang === 'en'
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.goWithoutSavingEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.goWithoutSavingTh}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPosPendingRecipeNavTarget(null)}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-neutral-800 font-bold cursor-pointer"
+                  >
+                    {lang === 'en'
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.stayEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.stayTh}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 {!isCreatingDishInPos && (
@@ -3418,7 +3665,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                     type="button"
                     onClick={() => {
                       const target = editingDishInPos;
-                      setEditingDishInPos(null);
+                      closePosDishModalCleanly();
                       onEditDish(target, selectedCategoryId);
                     }}
                     className="px-3 py-2 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
@@ -3430,10 +3677,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               <div className="flex items-center gap-2 ml-auto">
                 <button
                   type="button"
-                  onClick={() => {
-                    setEditingDishInPos(null);
-                    setIsCreatingDishInPos(false);
-                  }}
+                  onClick={closePosDishModalCleanly}
                   className="px-4 py-2 bg-white hover:bg-neutral-50 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 cursor-pointer"
                 >
                   {t.common.cancel}
@@ -3887,8 +4131,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             await deleteDocument('dishes', delId);
             setDishes((prev) => prev.filter((d) => d.id !== delId));
             if (editingDishInPos?.id === delId) {
-              setEditingDishInPos(null);
-              setIsCreatingDishInPos(false);
+              closePosDishModalCleanly();
             }
             setPendingDeleteDish(null);
           } finally {

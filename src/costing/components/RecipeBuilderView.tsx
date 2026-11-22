@@ -17,7 +17,9 @@ import {
   Package,
   Soup,
   AlertTriangle,
+  ArrowLeft,
 } from 'lucide-react';
+import { resolveCentralRecipeMenuTarget } from '../utils/centralRecipeNav';
 import {
   MenuItem,
   MenuVariant,
@@ -162,6 +164,11 @@ interface RecipeBuilderViewProps {
   settings: RestaurantSettings;
   lang?: 'th' | 'en';
   initialVariantId?: string;
+  initialMenuId?: string;
+  targetNonce?: number;
+  onTargetApplied?: () => void;
+  returnOriginLabel?: string;
+  onReturnToOrigin?: () => void;
   initialTab?: 'FOOD' | 'SAUCE' | 'RICE_NOODLES';
   onSaveVariantRecipe: (menuId: string, variantId: string, recipeItems: RecipeItem[]) => void;
   onSaveSauce?: (sauce: Sauce) => void;
@@ -175,6 +182,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   settings,
   lang: propLang,
   initialVariantId,
+  initialMenuId,
+  targetNonce,
+  onTargetApplied,
+  returnOriginLabel,
+  onReturnToOrigin,
   initialTab,
   onSaveVariantRecipe,
   onSaveSauce,
@@ -203,10 +215,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
   // --- TAB 1: CENTRAL BASE RECIPES (คลังสูตรอาหารกลาง) ---
   const [selectedMenuId, setSelectedMenuId] = useState<string>(() => {
-    if (initialVariantId) {
-      const found = menus.find((m) => m.variants.some((v) => v.id === initialVariantId));
-      if (found) return found.id;
-    }
+    const resolved = resolveCentralRecipeMenuTarget(menus, {
+      variantId: initialVariantId,
+      menuId: initialMenuId,
+    });
+    if (resolved) return resolved.menu.id;
     return menus[0]?.id || '';
   });
 
@@ -217,17 +230,39 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   const [localBaseItems, setLocalBaseItems] = useState<RecipeItem[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
+  const [showReturnUnsavedConfirm, setShowReturnUnsavedConfirm] = useState(false);
   const lastLoadedMenuIdRef = useRef<string>('');
+  const appliedTargetKeyRef = useRef<string | null>(null);
+  const onTargetAppliedRef = useRef(onTargetApplied);
+  onTargetAppliedRef.current = onTargetApplied;
 
   useEffect(() => {
-    if (initialVariantId) {
-      const found = menus.find((m) => m.variants.some((v) => v.id === initialVariantId));
-      if (found) {
-        setSelectedMenuId(found.id);
-        setActiveTab('FOOD');
-      }
+    const navKey =
+      initialVariantId || initialMenuId
+        ? `${targetNonce ?? 0}:${initialVariantId ?? ''}:${initialMenuId ?? ''}`
+        : null;
+    if (!navKey) {
+      appliedTargetKeyRef.current = null;
+      return;
     }
-  }, [initialVariantId, menus]);
+    if (appliedTargetKeyRef.current === navKey) {
+      return;
+    }
+    if (menus.length === 0) {
+      return;
+    }
+    const resolved = resolveCentralRecipeMenuTarget(menus, {
+      variantId: initialVariantId,
+      menuId: initialMenuId,
+    });
+    if (resolved) {
+      appliedTargetKeyRef.current = navKey;
+      setSelectedMenuId(resolved.menu.id);
+      setActiveTab('FOOD');
+      setShowReturnUnsavedConfirm(false);
+      onTargetAppliedRef.current?.();
+    }
+  }, [initialVariantId, initialMenuId, targetNonce, menus]);
 
   // Load base items whenever selectedMenuId changes
   useEffect(() => {
@@ -1035,15 +1070,48 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   return (
     <div className="space-y-5 pb-8">
       {/* Header with 3 Tabs */}
-      <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <BookOpen className="w-5 h-5 text-[#F27D26]" />
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            {lang === 'en' ? 'Recipe Management' : 'สูตรอาหาร (Recipe Management)'}
-          </h1>
-        </div>
+      <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl flex flex-col gap-3">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {returnOriginLabel && onReturnToOrigin && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (hasUnsavedChanges) {
+                    setShowReturnUnsavedConfirm(true);
+                  } else {
+                    onReturnToOrigin();
+                  }
+                }}
+                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-orange-50 text-stone-800 border border-[#D6CEBE] text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                title={
+                  lang === 'en'
+                    ? `Back to ${returnOriginLabel}`
+                    : `กลับไปที่${returnOriginLabel}`
+                }
+                aria-label={
+                  lang === 'en'
+                    ? `Back to ${returnOriginLabel}`
+                    : `กลับไปที่${returnOriginLabel}`
+                }
+              >
+                <ArrowLeft className="w-3.5 h-3.5 text-[#F27D26] shrink-0" />
+                <span>
+                  {lang === 'en'
+                    ? `Back to ${returnOriginLabel}`
+                    : `กลับไปที่${returnOriginLabel}`}
+                </span>
+              </button>
+            )}
+            <div className="flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-[#F27D26]" />
+              <h1 className="text-2xl font-bold text-white tracking-tight">
+                {lang === 'en' ? 'Recipe Management' : 'สูตรอาหาร (Recipe Management)'}
+              </h1>
+            </div>
+          </div>
 
-        {/* 3 Primary Tabs Navigation */}
+          {/* 3 Primary Tabs Navigation */}
         <div className="flex bg-black/40 border border-white/15 p-1 rounded-2xl">
           <button
             type="button"
@@ -1092,6 +1160,51 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
             <span>{lang === 'en' ? 'Rice & Noodles (Yield & Portions)' : 'ข้าวและเส้น (Yield & Portions)'}</span>
           </button>
         </div>
+        </div>
+
+        {showReturnUnsavedConfirm && returnOriginLabel && onReturnToOrigin && (
+          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-2 text-amber-950 font-bold">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                {lang === 'en'
+                  ? `You have unsaved recipe edits. Save before returning to ${returnOriginLabel}?`
+                  : `คุณมีการแก้ไขสูตรกลางที่ยังไม่ได้บันทึก ต้องการบันทึกก่อนกลับไปที่${returnOriginLabel}หรือไม่?`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  handleSaveBaseRecipe();
+                  setShowReturnUnsavedConfirm(false);
+                  onReturnToOrigin();
+                }}
+                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#F27D26] hover:bg-[#d96817] text-white font-bold cursor-pointer"
+              >
+                {lang === 'en' ? 'Save & Return' : 'บันทึกแล้วกลับ'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHasUnsavedChanges(false);
+                  setShowReturnUnsavedConfirm(false);
+                  onReturnToOrigin();
+                }}
+                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 font-bold cursor-pointer"
+              >
+                {lang === 'en' ? 'Leave Without Saving' : 'กลับโดยไม่บันทึก'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowReturnUnsavedConfirm(false)}
+                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold cursor-pointer"
+              >
+                {lang === 'en' ? 'Stay Here' : 'อยู่ต่อ'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
 

@@ -64,6 +64,11 @@ import { LaborView } from './components/Financials/LaborView';
 import { ExecutiveDashboard } from './components/Dashboard/ExecutiveDashboard';
 import { AppIconModal } from './components/common/AppIconModal';
 import { useLanguage } from '../contexts/LanguageContext';
+import {
+  CentralRecipeOriginPage,
+  CentralRecipeTarget,
+  getCentralRecipeOriginLabel,
+} from './utils/centralRecipeNav';
 
 export type CostingTabId =
   | 'executive_dashboard'
@@ -89,6 +94,10 @@ interface CostingWorkspaceProps {
   onNavigateToPos: () => void;
   user: FirebaseUser;
   lang?: 'th' | 'en';
+  externalRecipeTarget?: CentralRecipeTarget | null;
+  onClearExternalRecipeTarget?: () => void;
+  onReturnFromRecipe?: (originPage: CentralRecipeOriginPage) => void;
+  navResetNonce?: number;
 }
 
 const DEFAULT_SALES_CHANNELS: SalesChannel[] = [
@@ -104,6 +113,10 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   onNavigateToPos,
   user,
   lang: propLang,
+  externalRecipeTarget,
+  onClearExternalRecipeTarget,
+  onReturnFromRecipe,
+  navResetNonce,
 }) => {
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
@@ -126,12 +139,49 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const [stockCounts, setStockCounts] = useState<StockCountSnapshot[]>(() => StorageService.getStockCounts());
   const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(DEFAULT_SALES_CHANNELS);
 
-  const [targetRecipeVariantId, setTargetRecipeVariantId] = useState<string>('');
+  const [recipeNavTarget, setRecipeNavTarget] = useState<{
+    variantId?: string;
+    menuId?: string;
+    nonce: number;
+  } | null>(null);
+  const [recipeReturnOrigin, setRecipeReturnOrigin] = useState<CentralRecipeOriginPage | null>(null);
+  const lastExternalNonceRef = React.useRef<number | null>(null);
+  const prevActiveTabRef = React.useRef<CostingTabId>(activeTab);
+  const lastNavResetNonceRef = React.useRef<number | undefined>(navResetNonce);
   const [isIconModalOpen, setIsIconModalOpen] = useState<boolean>(false);
   const [isCloudLoading, setIsCloudLoading] = useState<boolean>(false);
   const [cloudError, setCloudError] = useState<string | null>(null);
   const [isPushingToPos, setIsPushingToPos] = useState<boolean>(false);
   const [bridgeFeedback, setBridgeFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!externalRecipeTarget) return;
+    if (lastExternalNonceRef.current === externalRecipeTarget.nonce) return;
+    lastExternalNonceRef.current = externalRecipeTarget.nonce;
+    setRecipeNavTarget({
+      variantId: externalRecipeTarget.variantId,
+      menuId: externalRecipeTarget.menuId,
+      nonce: externalRecipeTarget.nonce,
+    });
+    setRecipeReturnOrigin(externalRecipeTarget.origin);
+    onClearExternalRecipeTarget?.();
+  }, [externalRecipeTarget, onClearExternalRecipeTarget]);
+
+  useEffect(() => {
+    if (prevActiveTabRef.current === 'recipes' && activeTab !== 'recipes') {
+      setRecipeNavTarget(null);
+      setRecipeReturnOrigin(null);
+    }
+    prevActiveTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (navResetNonce !== lastNavResetNonceRef.current) {
+      lastNavResetNonceRef.current = navResetNonce;
+      setRecipeNavTarget(null);
+      setRecipeReturnOrigin(null);
+    }
+  }, [navResetNonce]);
 
   // Sync user-scoped costing collections cleanly in Firestore (users/{uid}/cost*)
   useEffect(() => {
@@ -734,9 +784,33 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     setStockCounts(StorageService.getStockCounts());
   };
 
-  const handleNavigateToRecipeBuilder = (variantId: string) => {
-    setTargetRecipeVariantId(variantId);
+  const handleNavigateToRecipeBuilder = (
+    target: string | { variantId?: string; menuId?: string }
+  ) => {
+    const normalized = typeof target === 'string' ? { variantId: target } : target;
+    const origin: CentralRecipeOriginPage =
+      activeTab === 'food_cost_alacarte' ? 'cost_food_cost_alacarte' : 'cost_food_cost';
+    setRecipeNavTarget({
+      variantId: normalized.variantId,
+      menuId: normalized.menuId,
+      nonce: Date.now(),
+    });
+    setRecipeReturnOrigin(origin);
     onSelectCostTab('recipes');
+  };
+
+  const handleReturnFromRecipe = () => {
+    const origin = recipeReturnOrigin;
+    setRecipeNavTarget(null);
+    setRecipeReturnOrigin(null);
+    if (!origin) return;
+    if (origin === 'cost_food_cost') {
+      onSelectCostTab('food_cost');
+    } else if (origin === 'cost_food_cost_alacarte') {
+      onSelectCostTab('food_cost_alacarte');
+    } else if (onReturnFromRecipe) {
+      onReturnFromRecipe(origin);
+    }
   };
 
   // Live bridge: push all edited Food Cost menus, ingredients & sauces into KinPOS active POS
@@ -902,7 +976,18 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             sauces={sauces}
             settings={settings}
             lang={lang}
-            initialVariantId={targetRecipeVariantId}
+            initialVariantId={recipeNavTarget?.variantId}
+            initialMenuId={recipeNavTarget?.menuId}
+            targetNonce={recipeNavTarget?.nonce}
+            onTargetApplied={() => setRecipeNavTarget(null)}
+            returnOriginLabel={
+              activeTab === 'recipes' && recipeReturnOrigin
+                ? getCentralRecipeOriginLabel(recipeReturnOrigin, lang)
+                : undefined
+            }
+            onReturnToOrigin={
+              activeTab === 'recipes' && recipeReturnOrigin ? handleReturnFromRecipe : undefined
+            }
             initialTab={activeTab === 'sauces' ? 'SAUCE' : 'FOOD'}
             onSaveVariantRecipe={handleSaveVariantRecipe}
             onSaveSauce={handleSaveSauce}

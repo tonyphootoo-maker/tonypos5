@@ -29,6 +29,7 @@ import { UnifiedFinanceHubPage, FinanceHubTab } from './pages/UnifiedFinanceHubP
 import { BackupPage } from './pages/BackupPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { CostingWorkspace, CostingTabId } from './costing/CostingWorkspace';
+import { CentralRecipeTarget } from './costing/utils/centralRecipeNav';
 import { MenuItem as CostMenuItem } from './costing/types';
 import { COST_COLLECTIONS } from './costing/services/firebaseSyncService';
 import { StorageService } from './costing/services/storageService';
@@ -208,6 +209,8 @@ export default function App() {
     categoryId?: string | null;
     nonce: number;
   } | null>(null);
+  const [centralRecipeTarget, setCentralRecipeTarget] = useState<CentralRecipeTarget | null>(null);
+  const [navResetNonce, setNavResetNonce] = useState<number>(0);
   const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
 
   useEffect(() => {
@@ -530,7 +533,11 @@ export default function App() {
       {/* Universal Top Navigation & Hamburger Menu */}
       <Navigation
         currentPage={currentPage}
-        onSelectPage={(p) => setCurrentPage(p)}
+        onSelectPage={(p) => {
+          setCentralRecipeTarget(null);
+          setNavResetNonce((n) => n + 1);
+          setCurrentPage(p);
+        }}
         lang={lang}
         onToggleLang={handleToggleLanguage}
         userEmail={user.email}
@@ -559,6 +566,15 @@ export default function App() {
               });
               setCurrentPage('menu_cost');
             }}
+            onOpenCentralRecipe={(target) => {
+              setCentralRecipeTarget({
+                variantId: target.variantId,
+                menuId: target.menuId,
+                origin: 'pos',
+                nonce: Date.now(),
+              });
+              setCurrentPage('cost_recipes');
+            }}
           />
         )}
         {currentPage === 'floor_plan' && (
@@ -573,6 +589,15 @@ export default function App() {
             lang={lang}
             initialEditDishRequest={pendingEditDish}
             onClearEditDishRequest={() => setPendingEditDish(null)}
+            onOpenCentralRecipe={(target) => {
+              setCentralRecipeTarget({
+                variantId: target.variantId,
+                menuId: target.menuId,
+                origin: 'menu_cost',
+                nonce: Date.now(),
+              });
+              setCurrentPage('cost_recipes');
+            }}
           />
         )}
         {currentPage === 'option_groups' && (
@@ -624,6 +649,13 @@ export default function App() {
             onNavigateToPos={() => setCurrentPage('pos')}
             user={user}
             lang={lang}
+            externalRecipeTarget={centralRecipeTarget}
+            onClearExternalRecipeTarget={() => setCentralRecipeTarget(null)}
+            onReturnFromRecipe={(originPage) => {
+              setCentralRecipeTarget(null);
+              setCurrentPage(originPage);
+            }}
+            navResetNonce={navResetNonce}
           />
         )}
       </main>

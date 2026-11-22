@@ -73,7 +73,9 @@ import {
   ChevronRight,
   Link2,
   AlertTriangle,
+  BookOpen,
 } from 'lucide-react';
+import { CENTRAL_RECIPE_BUTTON_LABELS } from '../costing/utils/centralRecipeNav';
 
 interface Props {
   settings: SettingsDoc;
@@ -84,6 +86,7 @@ interface Props {
     nonce: number;
   } | null;
   onClearEditDishRequest?: () => void;
+  onOpenCentralRecipe?: (target: { variantId?: string; menuId?: string }) => void;
 }
 
 type TabType = 'dishes' | 'categories' | 'channels';
@@ -93,6 +96,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
   lang,
   initialEditDishRequest,
   onClearEditDishRequest,
+  onOpenCentralRecipe,
 }) => {
   const t = translations[lang];
   const [activeTab, setActiveTab] = useState<TabType>('dishes');
@@ -161,6 +165,60 @@ export const MenuFoodCostPage: React.FC<Props> = ({
   const prevChThaiRef = useRef<string>('');
   const translationScheduler = useDebouncedTranslationScheduler(600);
   const loadedDishImageIdsRef = useRef<Map<string, string>>(new Map());
+  const dishFormRef = useRef<HTMLFormElement | null>(null);
+  const dishModalSnapshotRef = useRef<string>('');
+  const [dishModalError, setDishModalError] = useState<string | null>(null);
+  const [pendingRecipeNavTarget, setPendingRecipeNavTarget] = useState<{
+    variantId?: string;
+    menuId?: string;
+  } | null>(null);
+  const [isNavigatingToRecipe, setIsNavigatingToRecipe] = useState<boolean>(false);
+
+  const serializeDishModalDraft = (
+    dish: Partial<DishDoc> | null,
+    overrides: Record<string, number>
+  ) => {
+    if (!dish) return '';
+    return JSON.stringify({
+      id: dish.id || '',
+      name: dish.name || '',
+      nameTh: dish.nameTh || '',
+      categoryId: dish.categoryId || '',
+      imageId: dish.imageId || '',
+      description: dish.description || '',
+      costMenuId: dish.costMenuId || '',
+      optionGroupIds: dish.optionGroupIds || [],
+      variants: (dish.variants || []).map((v) => ({
+        id: v.id,
+        name: v.name || '',
+        nameTh: v.nameTh || '',
+        price: Number(v.price) || 0,
+        costMenuId: v.costMenuId || '',
+        costVariantId: v.costVariantId || '',
+      })),
+      overrides,
+    });
+  };
+
+  const isDishModalDirty = useMemo(() => {
+    if (!isDishModalOpen || !editingDish) return false;
+    return (
+      serializeDishModalDraft(editingDish, modalPriceOverrides) !==
+      dishModalSnapshotRef.current
+    );
+  }, [isDishModalOpen, editingDish, modalPriceOverrides]);
+
+  const closeDishModalCleanly = () => {
+    translationScheduler.cancelAll();
+    setIsDishModalOpen(false);
+    setEditingDish(null);
+    setEditingDishPreviewUrl(null);
+    setEditingDishImageSizeKb(null);
+    setImageUploadError(null);
+    setDishModalError(null);
+    setPendingRecipeNavTarget(null);
+    setIsNavigatingToRecipe(false);
+  };
 
   // No-ops kept for existing handler call sites since real-time listeners handle updates
   const loadCostingCatalog = async () => {};
@@ -493,11 +551,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           const targetMenu = activeCostMenus.find(
             (m) => m.id === (variant.costMenuId || dish.costMenuId)
           );
-          const targetVar = targetMenu?.variants?.find((cv) => cv.id === variant.costVariantId);
+          const targetVar = targetMenu?.variants?.find(
+            (cv) => cv.id === variant.costVariantId && cv.active !== false
+          );
           if (targetMenu && targetVar) return { menu: targetMenu, variant: targetVar };
         }
         for (const cm of activeCostMenus) {
-          const cv = (cm.variants || []).find((x) => x.id === variant.costVariantId);
+          const cv = (cm.variants || []).find(
+            (x) => x.id === variant.costVariantId && x.active !== false
+          );
           if (cv) return { menu: cm, variant: cv };
         }
       }
@@ -505,7 +567,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       // 2. Shared variant ID (from syncCostingMenuToPOS)
       if (variant?.id) {
         for (const cm of activeCostMenus) {
-          const cv = (cm.variants || []).find((x) => x.id === variant.id);
+          const cv = (cm.variants || []).find(
+            (x) => x.id === variant.id && x.active !== false
+          );
           if (cv) return { menu: cm, variant: cv };
         }
       }
@@ -585,6 +649,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       return {
         hasData: true,
         source: 'food_cost' as const,
+        matchedMenuId: match.menu.id,
+        matchedVariantId: match.variant.id,
         matchedMenuName: match.menu.name,
         matchedVariantName: getCostVariantLabel(match.variant),
         cost: breakdown.totalCost,
@@ -630,6 +696,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
         return {
           hasData: true,
           source: 'pos_recipe' as const,
+          matchedMenuId: '',
+          matchedVariantId: '',
           matchedMenuName: dish.nameTh || dish.name || '',
           matchedVariantName: variant.nameTh || variant.name,
           cost: posCalc.totalCost,
@@ -644,6 +712,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
     return {
       hasData: false,
       source: 'none' as const,
+      matchedMenuId: '',
+      matchedVariantId: '',
       matchedMenuName: '',
       matchedVariantName: '',
       cost: 0,
@@ -687,7 +757,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
         })
         .catch(() => {});
     }
-    setEditingDish({
+    const draftDish: Partial<DishDoc> = {
       ...dish,
       variants: (dish.variants || []).map((v) => ({
         ...v,
@@ -696,7 +766,12 @@ export const MenuFoodCostPage: React.FC<Props> = ({
         packaging: [...(v.packaging || [])],
       })),
       optionGroupIds: [...(dish.optionGroupIds || [])],
-    });
+    };
+    dishModalSnapshotRef.current = serializeDishModalDraft(draftDish, {});
+    setDishModalError(null);
+    setPendingRecipeNavTarget(null);
+    setIsNavigatingToRecipe(false);
+    setEditingDish(draftDish);
     setActiveDishVariantIndex(0);
     loadCostingCatalog();
     setIsDishModalOpen(true);
@@ -755,9 +830,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
     }
   };
 
-  const handleSaveDish = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingDish) return;
+  const saveDishFromModal = async (): Promise<{ ok: boolean; savedDish?: DishDoc }> => {
+    if (!editingDish) return { ok: false };
 
     translationScheduler.cancelAll();
     const finalDishTh = (editingDish.nameTh || '').trim();
@@ -772,7 +846,14 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           isManuallyEdited: false,
         }) || (finalDishTh ? translateThaiToEnglish(finalDishTh) : '');
     const finalDishEn = computedDishEn.trim();
-    if (!finalDishEn && !finalDishTh) return;
+    if (!finalDishEn && !finalDishTh) {
+      setDishModalError(
+        lang === 'th' ? 'กรุณาระบุชื่อเมนูอาหารก่อนบันทึก' : 'Please enter a dish name before saving.'
+      );
+      dishFormRef.current?.reportValidity();
+      return { ok: false };
+    }
+    setDishModalError(null);
 
     const matchedCostMenu = findMatchingCostMenu(editingDish);
 
@@ -865,26 +946,39 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       version: editingDish.version || 1,
     };
 
-    await saveDocument('dishes', dishToSave, isNew);
-    if (editingDishPreviewUrl) {
-      if (dishToSave.imageId) {
-        loadedDishImageIdsRef.current.set(dishToSave.id, dishToSave.imageId);
+    try {
+      await saveDocument('dishes', dishToSave, isNew);
+      if (editingDishPreviewUrl) {
+        if (dishToSave.imageId) {
+          loadedDishImageIdsRef.current.set(dishToSave.id, dishToSave.imageId);
+        }
+        setDishImages((prev) => new Map(prev).set(dishToSave.id, editingDishPreviewUrl));
+      } else if (!dishToSave.imageId) {
+        loadedDishImageIdsRef.current.delete(dishToSave.id);
+        setDishImages((prev) => {
+          const next = new Map(prev);
+          next.delete(dishToSave.id);
+          return next;
+        });
       }
-      setDishImages((prev) => new Map(prev).set(dishToSave.id, editingDishPreviewUrl));
-    } else if (!dishToSave.imageId) {
-      loadedDishImageIdsRef.current.delete(dishToSave.id);
-      setDishImages((prev) => {
-        const next = new Map(prev);
-        next.delete(dishToSave.id);
-        return next;
-      });
+      closeDishModalCleanly();
+      loadData();
+      return { ok: true, savedDish: dishToSave };
+    } catch (err) {
+      setDishModalError(
+        err instanceof Error
+          ? err.message
+          : lang === 'th'
+          ? 'บันทึกเมนูไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
+          : 'Failed to save dish. Please try again.'
+      );
+      return { ok: false };
     }
-    setIsDishModalOpen(false);
-    setEditingDish(null);
-    setEditingDishPreviewUrl(null);
-    setEditingDishImageSizeKb(null);
-    setImageUploadError(null);
-    loadData();
+  };
+
+  const handleSaveDish = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveDishFromModal();
   };
 
   const filteredDishes = dishes.filter((d) => {
@@ -970,7 +1064,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 setEditingDishPreviewUrl(null);
                 setEditingDishImageSizeKb(null);
                 setImageUploadError(null);
-                setEditingDish({
+                const draftNewDish: Partial<DishDoc> = {
                   name: '',
                   nameTh: '',
                   categoryId: selectedCategoryId || categories[0]?.id || 'cat_main',
@@ -986,7 +1080,12 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     },
                   ],
                   optionGroupIds: [],
-                });
+                };
+                dishModalSnapshotRef.current = serializeDishModalDraft(draftNewDish, {});
+                setDishModalError(null);
+                setPendingRecipeNavTarget(null);
+                setIsNavigatingToRecipe(false);
+                setEditingDish(draftNewDish);
                 setActiveDishVariantIndex(0);
                 loadCostingCatalog();
                 setIsDishModalOpen(true);
@@ -1418,6 +1517,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       {isDishModalOpen && editingDish && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
+            ref={dishFormRef}
             onSubmit={handleSaveDish}
             className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-3xl w-full border border-orange-200"
           >
@@ -1427,7 +1527,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </h3>
               <button
                 type="button"
-                onClick={() => setIsDishModalOpen(false)}
+                onClick={closeDishModalCleanly}
                 className="p-1 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -1996,7 +2096,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                 : 'bg-white border-neutral-200 text-neutral-600'
                             }`}
                           >
-                            <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
                               <span className="font-bold flex items-center gap-1.5">
                                 {varMetrics.hasData ? (
                                   <>
@@ -2067,6 +2167,74 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                                 </div>
                               </div>
                             )}
+
+                            {(() => {
+                              const isAddMode = !editingDish.id;
+                              const canOpenCentralRecipe =
+                                varMetrics.source === 'food_cost' &&
+                                Boolean(varMetrics.matchedVariantId || varMetrics.matchedMenuId);
+                              const buttonLabel = isAddMode
+                                ? lang === 'en'
+                                  ? CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenEn
+                                  : CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenTh
+                                : lang === 'en'
+                                ? CENTRAL_RECIPE_BUTTON_LABELS.openEn
+                                : CENTRAL_RECIPE_BUTTON_LABELS.openTh;
+                              return (
+                                <div className="pt-1.5 border-t border-emerald-200/70 flex flex-wrap items-center justify-between gap-2">
+                                  {!canOpenCentralRecipe && (
+                                    <span className="text-[10.5px] font-semibold text-amber-800">
+                                      {lang === 'en'
+                                        ? CENTRAL_RECIPE_BUTTON_LABELS.unresolvedHintEn
+                                        : CENTRAL_RECIPE_BUTTON_LABELS.unresolvedHintTh}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      !canOpenCentralRecipe ||
+                                      !onOpenCentralRecipe ||
+                                      isNavigatingToRecipe
+                                    }
+                                    onClick={async () => {
+                                      if (
+                                        isNavigatingToRecipe ||
+                                        !canOpenCentralRecipe ||
+                                        !onOpenCentralRecipe
+                                      ) {
+                                        return;
+                                      }
+                                      const target = {
+                                        variantId: varMetrics.matchedVariantId || undefined,
+                                        menuId: varMetrics.matchedMenuId || undefined,
+                                      };
+                                      if (isAddMode) {
+                                        setIsNavigatingToRecipe(true);
+                                        const res = await saveDishFromModal();
+                                        if (res.ok) {
+                                          onOpenCentralRecipe(target);
+                                        }
+                                        setIsNavigatingToRecipe(false);
+                                        return;
+                                      }
+                                      if (isDishModalDirty) {
+                                        setPendingRecipeNavTarget(target);
+                                        return;
+                                      }
+                                      setIsNavigatingToRecipe(true);
+                                      closeDishModalCleanly();
+                                      onOpenCentralRecipe(target);
+                                    }}
+                                    title={buttonLabel}
+                                    aria-label={buttonLabel}
+                                    className="min-h-[36px] px-3 py-1.5 rounded-xl border border-emerald-400/90 bg-white/90 hover:bg-emerald-100/80 text-emerald-900 font-bold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-auto w-full sm:w-auto"
+                                  >
+                                    <BookOpen className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                                    <span>{buttonLabel}</span>
+                                  </button>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       );
@@ -2152,10 +2320,78 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </div>
             </div>
 
+            {dishModalError && (
+              <div className="shrink-0 px-4 sm:px-6 py-2 bg-rose-50 border-t border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{dishModalError}</span>
+              </div>
+            )}
+
+            {pendingRecipeNavTarget && (
+              <div className="shrink-0 px-4 sm:px-6 py-3 bg-amber-50 border-t border-amber-200 text-xs space-y-2">
+                <div className="font-bold text-amber-950 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    {lang === 'en'
+                      ? 'You have unsaved changes in this menu. What would you like to do?'
+                      : 'คุณมีการแก้ไขเมนูนี้ที่ยังไม่ได้บันทึก ต้องการดำเนินการอย่างไร?'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isNavigatingToRecipe}
+                    onClick={async () => {
+                      if (isNavigatingToRecipe || !onOpenCentralRecipe) return;
+                      const target = pendingRecipeNavTarget;
+                      setIsNavigatingToRecipe(true);
+                      const res = await saveDishFromModal();
+                      if (res.ok) {
+                        onOpenCentralRecipe(target);
+                      } else {
+                        setPendingRecipeNavTarget(null);
+                      }
+                      setIsNavigatingToRecipe(false);
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {lang === 'en'
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenTh}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isNavigatingToRecipe}
+                    onClick={() => {
+                      if (isNavigatingToRecipe || !onOpenCentralRecipe) return;
+                      const target = pendingRecipeNavTarget;
+                      setIsNavigatingToRecipe(true);
+                      closeDishModalCleanly();
+                      onOpenCentralRecipe(target);
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-neutral-100 text-neutral-800 border border-neutral-300 font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {lang === 'en'
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.goWithoutSavingEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.goWithoutSavingTh}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingRecipeNavTarget(null)}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-neutral-800 font-bold cursor-pointer"
+                  >
+                    {lang === 'en'
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.stayEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.stayTh}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setIsDishModalOpen(false)}
+                onClick={closeDishModalCleanly}
                 className="px-3 py-1.5 bg-white text-neutral-700 border border-neutral-300 rounded-xl text-xs font-bold cursor-pointer"
               >
                 {t.common.cancel}

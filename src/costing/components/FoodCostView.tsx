@@ -21,7 +21,9 @@ import {
   Package,
   Trash2,
   GripVertical,
+  BookOpen,
 } from 'lucide-react';
+import { CENTRAL_RECIPE_BUTTON_LABELS } from '../utils/centralRecipeNav';
 import {
   MenuItem,
   MenuVariant,
@@ -197,7 +199,9 @@ interface FoodCostViewProps {
     variantId: string,
     prices: { sellingPrice: number; takeawayPrice: number; deliveryPrice: number }
   ) => void;
-  onNavigateToRecipeBuilder: (variantId: string) => void;
+  onNavigateToRecipeBuilder: (
+    target: string | { variantId?: string; menuId?: string }
+  ) => void;
 }
 
 export const FoodCostView: React.FC<FoodCostViewProps> = ({
@@ -355,6 +359,51 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const [isAddingCustomUnit, setIsAddingCustomUnit] = useState(false);
   const [customUnitInput, setCustomUnitInput] = useState('');
 
+  const variantFormRef = React.useRef<HTMLFormElement | null>(null);
+  const variantModalSnapshotRef = React.useRef<string>('');
+  const [variantModalError, setVariantModalError] = useState<string | null>(null);
+  const [variantRecipeConfirmOpen, setVariantRecipeConfirmOpen] = useState<boolean>(false);
+  const [isNavigatingToRecipe, setIsNavigatingToRecipe] = useState<boolean>(false);
+
+  const serializeVariantModalDraft = (state: {
+    mode: 'ADD' | 'EDIT';
+    menuId: string;
+    variant: Partial<MenuVariant> | null;
+    selectedCategory?: string;
+    selectedIngredientId: string;
+    meatQuantity: number;
+    meatUnit: string;
+    seafoodShrimpQty?: number;
+    seafoodSquidQty?: number;
+    selectedBaseRecipeMenuId?: string;
+  }) =>
+    JSON.stringify({
+      mode: state.mode,
+      menuId: state.menuId,
+      variantId: state.variant?.id || '',
+      name: state.variant?.name || '',
+      englishName: state.variant?.englishName || '',
+      proteinType: state.variant?.proteinType || '',
+      sellingPrice: Number(state.variant?.sellingPrice) || 0,
+      takeawayPrice: Number(state.variant?.takeawayPrice) || 0,
+      grabPrice: Number(state.variant?.grabPrice) || 0,
+      linemanPrice: Number(state.variant?.linemanPrice) || 0,
+      robinhoodPrice: Number(state.variant?.robinhoodPrice) || 0,
+      packagingCost: Number(state.variant?.packagingCost) || 0,
+      code: state.variant?.code || state.variant?.sku || '',
+      barcode: state.variant?.barcode || '',
+      isOutOfStock: Boolean(state.variant?.isOutOfStock),
+      active: state.variant?.active !== false,
+      recipeItems: state.variant?.recipeItems || [],
+      selectedCategory: state.selectedCategory || '',
+      selectedIngredientId: state.selectedIngredientId || '',
+      meatQuantity: Number(state.meatQuantity) || 0,
+      meatUnit: state.meatUnit || 'g',
+      seafoodShrimpQty: Number(state.seafoodShrimpQty) || 0,
+      seafoodSquidQty: Number(state.seafoodSquidQty) || 0,
+      selectedBaseRecipeMenuId: state.selectedBaseRecipeMenuId || '',
+    });
+
   // Variant Modal state (Add or Edit)
   const [variantModalState, setVariantModalState] = useState<{
     isOpen: boolean;
@@ -383,6 +432,44 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     isEnglishManuallyEdited: false,
     selectedBaseRecipeMenuId: '',
   });
+
+  const isVariantModalDirty = useMemo(() => {
+    if (!variantModalState.isOpen || !variantModalState.menu || !variantModalState.variant) {
+      return false;
+    }
+    return (
+      serializeVariantModalDraft({
+        mode: variantModalState.mode,
+        menuId: variantModalState.menu.id,
+        variant: variantModalState.variant,
+        selectedCategory: variantModalState.selectedCategory,
+        selectedIngredientId: variantModalState.selectedIngredientId,
+        meatQuantity: variantModalState.meatQuantity,
+        meatUnit: variantModalState.meatUnit,
+        seafoodShrimpQty: variantModalState.seafoodShrimpQty,
+        seafoodSquidQty: variantModalState.seafoodSquidQty,
+        selectedBaseRecipeMenuId: variantModalState.selectedBaseRecipeMenuId,
+      }) !== variantModalSnapshotRef.current
+    );
+  }, [variantModalState]);
+
+  const closeVariantModalCleanly = () => {
+    translationScheduler.cancelAll();
+    setVariantModalError(null);
+    setVariantRecipeConfirmOpen(false);
+    setIsNavigatingToRecipe(false);
+    setVariantModalState({
+      isOpen: false,
+      mode: 'ADD',
+      menu: null,
+      variant: null,
+      selectedIngredientId: '',
+      meatQuantity: 80,
+      meatUnit: 'g',
+      isEnglishManuallyEdited: false,
+      selectedBaseRecipeMenuId: '',
+    });
+  };
 
   const handleAddCustomUnit = () => {
     const trimmed = customUnitInput.trim();
@@ -963,9 +1050,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
     setIsAddingCustomUnit(false);
     setCustomUnitInput('');
-    setVariantModalState({
+    const nextAddState = {
       isOpen: true,
-      mode: 'ADD',
+      mode: 'ADD' as const,
       menu,
       variant: newVariant,
       selectedCategory: defaultIng?.category || 'เนื้อสัตว์และอาหารทะเล',
@@ -976,7 +1063,23 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       seafoodSquidQty: 40,
       isEnglishManuallyEdited: false,
       selectedBaseRecipeMenuId: defaultBaseItems.length > 0 ? menu.id : '',
+    };
+    variantModalSnapshotRef.current = serializeVariantModalDraft({
+      mode: 'ADD',
+      menuId: menu.id,
+      variant: nextAddState.variant,
+      selectedCategory: nextAddState.selectedCategory,
+      selectedIngredientId: nextAddState.selectedIngredientId,
+      meatQuantity: nextAddState.meatQuantity,
+      meatUnit: nextAddState.meatUnit,
+      seafoodShrimpQty: nextAddState.seafoodShrimpQty,
+      seafoodSquidQty: nextAddState.seafoodSquidQty,
+      selectedBaseRecipeMenuId: nextAddState.selectedBaseRecipeMenuId,
     });
+    setVariantModalError(null);
+    setVariantRecipeConfirmOpen(false);
+    setIsNavigatingToRecipe(false);
+    setVariantModalState(nextAddState);
   };
 
   const handleOpenEditVariant = (menu: MenuItem, variant: MenuVariant) => {
@@ -1064,9 +1167,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
     setIsAddingCustomUnit(false);
     setCustomUnitInput('');
-    setVariantModalState({
+    const nextEditState = {
       isOpen: true,
-      mode: 'EDIT',
+      mode: 'EDIT' as const,
       menu,
       variant: clonedVariant,
       selectedCategory: isSeafoodItem ? 'เนื้อสัตว์และอาหารทะเล' : (matchedIng?.category || 'เนื้อสัตว์และอาหารทะเล'),
@@ -1077,7 +1180,23 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       seafoodSquidQty: existingSquid?.quantity || 40,
       isEnglishManuallyEdited: isManualVar,
       selectedBaseRecipeMenuId: initialBaseRecipeId,
+    };
+    variantModalSnapshotRef.current = serializeVariantModalDraft({
+      mode: 'EDIT',
+      menuId: menu.id,
+      variant: nextEditState.variant,
+      selectedCategory: nextEditState.selectedCategory,
+      selectedIngredientId: nextEditState.selectedIngredientId,
+      meatQuantity: nextEditState.meatQuantity,
+      meatUnit: nextEditState.meatUnit,
+      seafoodShrimpQty: nextEditState.seafoodShrimpQty,
+      seafoodSquidQty: nextEditState.seafoodSquidQty,
+      selectedBaseRecipeMenuId: nextEditState.selectedBaseRecipeMenuId,
     });
+    setVariantModalError(null);
+    setVariantRecipeConfirmOpen(false);
+    setIsNavigatingToRecipe(false);
+    setVariantModalState(nextEditState);
   };
 
   const handleOpenDeleteVariant = (menu: MenuItem, variantId: string) => {
@@ -1102,9 +1221,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     setVariantToDelete(null);
   };
 
-  const handleSaveVariantModal = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!variantModalState.menu || !variantModalState.variant) return;
+  const saveVariantFromModal = (): { ok: boolean; menuId?: string; variantId?: string } => {
+    if (!variantModalState.menu || !variantModalState.variant) {
+      return { ok: false };
+    }
     const targetMenu = variantModalState.menu;
     const v = variantModalState.variant;
     const linkedIng = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
@@ -1112,6 +1232,39 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       variantModalState.selectedIngredientId === 'seafood_combo' ||
       (v.proteinType || '').includes('ทะเล') ||
       (v.proteinType || '').includes('ซีฟู้ด');
+
+    if (!isSeafoodSelected && !variantModalState.selectedIngredientId) {
+      setVariantModalError(
+        isEn
+          ? 'Please select an ingredient from database before saving.'
+          : 'กรุณาเลือกวัตถุดิบจากฐานข้อมูลก่อนบันทึก'
+      );
+      variantFormRef.current?.reportValidity();
+      return { ok: false };
+    }
+
+    if (!(v.name || '').trim()) {
+      setVariantModalError(
+        isEn ? 'Please enter the option name (TH).' : 'กรุณาระบุชื่อตัวเลือก (ไทย)'
+      );
+      variantFormRef.current?.reportValidity();
+      return { ok: false };
+    }
+
+    if (
+      v.sellingPrice === undefined ||
+      v.sellingPrice === null ||
+      isNaN(Number(v.sellingPrice)) ||
+      Number(v.sellingPrice) < 0
+    ) {
+      setVariantModalError(
+        isEn ? 'Please enter a valid selling price.' : 'กรุณาระบุราคาขายที่ถูกต้อง'
+      );
+      variantFormRef.current?.reportValidity();
+      return { ok: false };
+    }
+
+    setVariantModalError(null);
 
     const derivedProtein = isSeafoodSelected
       ? 'ทะเล'
@@ -1234,18 +1387,25 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
-    onSaveMenu(updatedMenu);
-    setVariantModalState({
-      isOpen: false,
-      mode: 'ADD',
-      menu: null,
-      variant: null,
-      selectedIngredientId: '',
-      meatQuantity: 80,
-      meatUnit: 'g',
-      isEnglishManuallyEdited: false,
-      selectedBaseRecipeMenuId: '',
-    });
+    try {
+      onSaveMenu(updatedMenu);
+      closeVariantModalCleanly();
+      return { ok: true, menuId: updatedMenu.id, variantId: finalVariant.id };
+    } catch (err) {
+      setVariantModalError(
+        err instanceof Error
+          ? err.message
+          : isEn
+          ? 'Failed to save option. Please try again.'
+          : 'บันทึกตัวเลือกไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
+      );
+      return { ok: false };
+    }
+  };
+
+  const handleSaveVariantModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    saveVariantFromModal();
   };
 
   // Packaging Line Items Management for Sub-Items
@@ -3283,19 +3443,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  setVariantModalState({
-                    isOpen: false,
-                    mode: 'ADD',
-                    menu: null,
-                    variant: null,
-                    selectedIngredientId: '',
-                    meatQuantity: 80,
-                    meatUnit: 'g',
-                    isEnglishManuallyEdited: false,
-                    selectedBaseRecipeMenuId: '',
-                  })
-                }
+                onClick={closeVariantModalCleanly}
                 className="p-1.5 rounded-xl text-stone-400 hover:text-stone-700 hover:bg-stone-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -3303,6 +3451,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             <form
+              ref={variantFormRef}
               id="variant-modal-form"
               onSubmit={handleSaveVariantModal}
               className="modal-body space-y-4 text-xs"
@@ -4162,81 +4311,218 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 const estProfit = netSellPrice - estTotalCost;
                 const estFc = netSellPrice > 0 ? (totalFoodCost / netSellPrice) * 100 : 0;
 
+                const activeTargetMenu = variantModalState.menu
+                  ? menus.find((m) => m.id === variantModalState.menu?.id && m.active !== false)
+                  : undefined;
+                const activeTargetVariant =
+                  variantModalState.mode === 'EDIT' &&
+                  activeTargetMenu &&
+                  variantModalState.variant?.id
+                    ? activeTargetMenu.variants.find(
+                        (item) => item.id === variantModalState.variant?.id && item.active !== false
+                      )
+                    : undefined;
+                const canOpenCentralRecipe = Boolean(
+                  activeTargetMenu &&
+                    (variantModalState.mode === 'ADD' ||
+                      (activeTargetVariant && variantModalState.variant?.active !== false))
+                );
+                const recipeButtonLabel =
+                  variantModalState.mode === 'ADD'
+                    ? isEn
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenTh
+                    : isEn
+                    ? CENTRAL_RECIPE_BUTTON_LABELS.openEn
+                    : CENTRAL_RECIPE_BUTTON_LABELS.openTh;
+
+                const handleOpenCentralRecipeClick = () => {
+                  if (isNavigatingToRecipe || !canOpenCentralRecipe) return;
+                  if (variantModalState.mode === 'ADD') {
+                    setIsNavigatingToRecipe(true);
+                    const result = saveVariantFromModal();
+                    if (result.ok && (result.variantId || result.menuId)) {
+                      onNavigateToRecipeBuilder({
+                        variantId: result.variantId,
+                        menuId: result.menuId,
+                      });
+                    }
+                    setIsNavigatingToRecipe(false);
+                    return;
+                  }
+                  if (isVariantModalDirty) {
+                    setVariantRecipeConfirmOpen(true);
+                    return;
+                  }
+                  setIsNavigatingToRecipe(true);
+                  const targetVariantId = variantModalState.variant?.id;
+                  const targetMenuId = variantModalState.menu?.id;
+                  closeVariantModalCleanly();
+                  onNavigateToRecipeBuilder({
+                    variantId: targetVariantId,
+                    menuId: targetMenuId,
+                  });
+                };
+
                 return (
-                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs font-mono flex-wrap gap-2">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      <div>
-                        <span className="text-emerald-900 font-bold">
-                          {isEn ? 'Protein Cost: ' : 'ต้นทุนเนื้อสัตว์: '}
-                        </span>
-                        <strong className="text-emerald-950 font-black">฿{meatCost.toFixed(2)}</strong>
-                        {costDetail && (
-                          <span className="text-[10px] text-emerald-700 ml-1">
-                            ({costDetail})
-                          </span>
-                        )}
-                      </div>
-                      {baseRecipeCost > 0 && (
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-2 text-xs font-mono">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         <div>
                           <span className="text-emerald-900 font-bold">
-                            {isEn ? 'Base Recipe: ' : 'สูตรกลาง: '}
+                            {isEn ? 'Protein Cost: ' : 'ต้นทุนเนื้อสัตว์: '}
                           </span>
-                          <strong className="text-emerald-950 font-black">฿{baseRecipeCost.toFixed(2)}</strong>
+                          <strong className="text-emerald-950 font-black">฿{meatCost.toFixed(2)}</strong>
+                          {costDetail && (
+                            <span className="text-[10px] text-emerald-700 ml-1">
+                              ({costDetail})
+                            </span>
+                          )}
                         </div>
-                      )}
-                      <div>
-                        <span className="text-stone-800 font-bold">
-                          {isEn ? 'Total Actual Cost: ' : 'ต้นทุนรวมจริงทั้งหมด: '}
-                        </span>
-                        <strong className="text-[#B45309] font-black">฿{estTotalCost.toFixed(2)}</strong>
-                        <span className="text-[10px] text-stone-600 ml-1 font-sans">
-                          {isEn
-                            ? `(Raw ฿${totalFoodCost.toFixed(2)} + OH ฿${estOverhead.toFixed(2)}${estPackagingCost > 0 ? ` • w/ Box ฿${estTotalWithPackaging.toFixed(2)}` : ''})`
-                            : `(วัตถุดิบรวม ฿${totalFoodCost.toFixed(2)} + โสหุ้ย ฿${estOverhead.toFixed(2)}${estPackagingCost > 0 ? ` • รวมกล่อง ฿${estTotalWithPackaging.toFixed(2)}` : ''})`}
-                        </span>
+                        {baseRecipeCost > 0 && (
+                          <div>
+                            <span className="text-emerald-900 font-bold">
+                              {isEn ? 'Base Recipe: ' : 'สูตรกลาง: '}
+                            </span>
+                            <strong className="text-emerald-950 font-black">฿{baseRecipeCost.toFixed(2)}</strong>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-stone-800 font-bold">
+                            {isEn ? 'Total Actual Cost: ' : 'ต้นทุนรวมจริงทั้งหมด: '}
+                          </span>
+                          <strong className="text-[#B45309] font-black">฿{estTotalCost.toFixed(2)}</strong>
+                          <span className="text-[10px] text-stone-600 ml-1 font-sans">
+                            {isEn
+                              ? `(Raw ฿${totalFoodCost.toFixed(2)} + OH ฿${estOverhead.toFixed(2)}${estPackagingCost > 0 ? ` • w/ Box ฿${estTotalWithPackaging.toFixed(2)}` : ''})`
+                              : `(วัตถุดิบรวม ฿${totalFoodCost.toFixed(2)} + โสหุ้ย ฿${estOverhead.toFixed(2)}${estPackagingCost > 0 ? ` • รวมกล่อง ฿${estTotalWithPackaging.toFixed(2)}` : ''})`}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center flex-wrap gap-2 ml-auto">
+                        <div>
+                          <span className="text-stone-700 font-bold">
+                            {isEn ? 'Est. Dine-in Profit: ' : 'กำไรหน้าร้านเบื้องต้น: '}
+                          </span>
+                          {sellPrice > 0 ? (
+                            <>
+                              <strong className={`font-black ${estProfit < 0 ? 'text-rose-600' : 'text-emerald-800'}`}>
+                                ฿{estProfit.toFixed(2)}
+                              </strong>
+                              <span className="text-[10px] text-stone-600 ml-1.5 font-sans">
+                                (FC ~{estFc.toFixed(1)}%)
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-amber-700 font-sans font-bold">
+                              {isEn ? 'Enter selling price' : 'กรุณาระบุราคาขาย'}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!canOpenCentralRecipe || isNavigatingToRecipe}
+                          onClick={handleOpenCentralRecipeClick}
+                          title={recipeButtonLabel}
+                          aria-label={recipeButtonLabel}
+                          className="min-h-[36px] px-3 py-1.5 rounded-xl border border-emerald-400/90 bg-white/90 hover:bg-emerald-100/80 text-emerald-900 font-sans font-bold text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors w-full sm:w-auto"
+                        >
+                          <BookOpen className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                          <span>{recipeButtonLabel}</span>
+                        </button>
                       </div>
                     </div>
-                    <div>
-                      <span className="text-stone-700 font-bold">
-                        {isEn ? 'Est. Dine-in Profit: ' : 'กำไรหน้าร้านเบื้องต้น: '}
-                      </span>
-                      {sellPrice > 0 ? (
-                        <>
-                          <strong className={`font-black ${estProfit < 0 ? 'text-rose-600' : 'text-emerald-800'}`}>
-                            ฿{estProfit.toFixed(2)}
-                          </strong>
-                          <span className="text-[10px] text-stone-600 ml-1.5 font-sans">
-                            (FC ~{estFc.toFixed(1)}%)
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-[10px] text-amber-700 font-sans font-bold">
-                          {isEn ? 'Enter selling price' : 'กรุณาระบุราคาขาย'}
-                        </span>
-                      )}
-                    </div>
+                    {!canOpenCentralRecipe && (
+                      <p className="font-sans text-[11px] font-semibold text-amber-800 bg-amber-50/90 border border-amber-200 rounded-xl px-2.5 py-1.5">
+                        {isEn
+                          ? CENTRAL_RECIPE_BUTTON_LABELS.unresolvedHintEn
+                          : CENTRAL_RECIPE_BUTTON_LABELS.unresolvedHintTh}
+                      </p>
+                    )}
                   </div>
                 );
               })()}
             </form>
 
+            {variantModalError && (
+              <div className="shrink-0 px-4 sm:px-6 py-2 bg-rose-50 border-t border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{variantModalError}</span>
+              </div>
+            )}
+
+            {variantRecipeConfirmOpen && (
+              <div className="shrink-0 px-4 sm:px-6 py-3 bg-amber-50 border-t border-amber-200 text-xs space-y-2">
+                <div className="font-bold text-amber-950 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    {isEn
+                      ? 'You have unsaved changes in this option. What would you like to do?'
+                      : 'คุณมีการแก้ไขตัวเลือกนี้ที่ยังไม่ได้บันทึก ต้องการดำเนินการอย่างไร?'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isNavigatingToRecipe}
+                    onClick={() => {
+                      if (isNavigatingToRecipe) return;
+                      setIsNavigatingToRecipe(true);
+                      const result = saveVariantFromModal();
+                      if (result.ok && (result.variantId || result.menuId)) {
+                        onNavigateToRecipeBuilder({
+                          variantId: result.variantId,
+                          menuId: result.menuId,
+                        });
+                      } else {
+                        setVariantRecipeConfirmOpen(false);
+                      }
+                      setIsNavigatingToRecipe(false);
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#F27D26] hover:bg-[#d96817] text-white font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {isEn
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.saveAndOpenTh}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isNavigatingToRecipe}
+                    onClick={() => {
+                      if (isNavigatingToRecipe) return;
+                      setIsNavigatingToRecipe(true);
+                      const targetVariantId = variantModalState.variant?.id;
+                      const targetMenuId = variantModalState.menu?.id;
+                      closeVariantModalCleanly();
+                      onNavigateToRecipeBuilder({
+                        variantId: targetVariantId,
+                        menuId: targetMenuId,
+                      });
+                    }}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 font-bold cursor-pointer disabled:opacity-50"
+                  >
+                    {isEn
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.goWithoutSavingEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.goWithoutSavingTh}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setVariantRecipeConfirmOpen(false)}
+                    className="min-h-[36px] px-3 py-1.5 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold cursor-pointer"
+                  >
+                    {isEn
+                      ? CENTRAL_RECIPE_BUTTON_LABELS.stayEn
+                      : CENTRAL_RECIPE_BUTTON_LABELS.stayTh}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Locked Modal Footer */}
             <div className="modal-footer flex justify-end gap-3 border-t border-[#EAE4D9] bg-[#FFFDF9]">
               <button
                 type="button"
-                onClick={() =>
-                  setVariantModalState({
-                    isOpen: false,
-                    mode: 'ADD',
-                    menu: null,
-                    variant: null,
-                    selectedIngredientId: '',
-                    meatQuantity: 80,
-                    meatUnit: 'g',
-                    isEnglishManuallyEdited: false,
-                    selectedBaseRecipeMenuId: '',
-                  })
-                }
+                onClick={closeVariantModalCleanly}
                 className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
               >
                 {isEn ? 'Cancel' : 'ยกเลิก'}
