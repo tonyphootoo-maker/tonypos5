@@ -46,10 +46,10 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       }}
     >
       <div
-        className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl border border-neutral-200 text-neutral-900 space-y-4"
+        className="modal-panel bg-white rounded-3xl max-w-sm w-full shadow-2xl border border-neutral-200 text-neutral-900"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-neutral-100">
+        <div className="modal-header flex items-center justify-between gap-2 border-b border-neutral-100">
           <div className="flex items-center gap-2.5 min-w-0">
             <span
               className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
@@ -74,9 +74,11 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
           </button>
         </div>
 
-        <p className="text-xs text-neutral-600 leading-relaxed">{message}</p>
+        <div className="modal-body">
+          <p className="text-xs text-neutral-600 leading-relaxed">{message}</p>
+        </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-neutral-100">
+        <div className="modal-footer bg-white flex justify-end gap-2 border-t border-neutral-100">
           <button
             type="button"
             disabled={isLoading}

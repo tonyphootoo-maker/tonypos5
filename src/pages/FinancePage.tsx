@@ -637,9 +637,9 @@ export const FinancePage: React.FC<Props> = ({ settings, lang: propLang }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
             onSubmit={handleSaveExpense}
-            className="bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200 overflow-hidden"
+            className="modal-panel bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200"
           >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">{t.finance.addExpense}</h3>
               <button
                 type="button"
@@ -650,7 +650,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang: propLang }) => {
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="modal-body space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
                   {t.finance.expenseTitle}
@@ -725,7 +725,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang: propLang }) => {
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsExpenseModalOpen(false)}
@@ -749,9 +749,9 @@ export const FinancePage: React.FC<Props> = ({ settings, lang: propLang }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
             onSubmit={handleSaveEmployee}
-            className="bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200 overflow-hidden"
+            className="modal-panel bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200"
           >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">{t.finance.addEmployee}</h3>
               <button
                 type="button"
@@ -762,7 +762,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang: propLang }) => {
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="modal-body space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
                   {t.finance.employeeName}
@@ -850,7 +850,7 @@ export const FinancePage: React.FC<Props> = ({ settings, lang: propLang }) => {
               )}
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsEmployeeModalOpen(false)}

@@ -346,8 +346,8 @@ export const LaborView: React.FC<LaborViewProps> = ({
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+          <div className="modal-panel-fixed w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200">
+            <div className="modal-header flex items-center justify-between border-b border-slate-100">
               <h2 className="text-base font-bold text-slate-900">
                 {isTh ? 'เพิ่มพนักงาน' : 'Add Staff Member'}
               </h2>
@@ -360,7 +360,8 @@ export const LaborView: React.FC<LaborViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="space-y-3.5">
+            <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0">
+              <div className="modal-body space-y-3.5">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {isTh ? 'ชื่อ-นามสกุล *' : 'Full Name *'}
@@ -509,7 +510,9 @@ export const LaborView: React.FC<LaborViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+              </div>
+
+              <div className="modal-footer bg-white flex justify-end gap-2.5 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

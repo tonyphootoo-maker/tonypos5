@@ -64,9 +64,9 @@ export const SaveOrderModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90dvh] flex flex-col border border-orange-200 overflow-hidden">
+      <div className="modal-panel bg-white rounded-3xl shadow-2xl max-w-2xl w-full border border-orange-200">
         {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between shadow-xs">
+        <div className="modal-header bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between shadow-xs">
           <h3 className="font-extrabold text-base">{t.pos.saveOrderToTable}</h3>
           <button
             onClick={onClose}
@@ -77,7 +77,7 @@ export const SaveOrderModal: React.FC<Props> = ({
         </div>
 
         {/* Zone Chip Bar at top */}
-        <div className="p-3 bg-neutral-100 border-b border-neutral-200 flex items-center gap-2 overflow-x-auto">
+        <div className="p-3 bg-neutral-100 border-b border-neutral-200 flex items-center gap-2 overflow-x-auto shrink-0">
           {zones.map((z) => (
             <button
               key={z.id}
@@ -95,7 +95,7 @@ export const SaveOrderModal: React.FC<Props> = ({
         </div>
 
         {/* Tables Floor Plan View */}
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 bg-neutral-50/50">
+        <div className="modal-body bg-neutral-50/50">
           <div
             ref={floorBoxRef}
             className="relative w-full h-[360px] bg-white rounded-2xl border border-neutral-300 shadow-inner overflow-auto flex items-start"
@@ -142,7 +142,7 @@ export const SaveOrderModal: React.FC<Props> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-3.5 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-3">
+        <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={onClose}

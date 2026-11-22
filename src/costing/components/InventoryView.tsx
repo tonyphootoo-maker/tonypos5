@@ -690,8 +690,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       {/* PERIOD STOCK COUNT MODAL */}
       {isStockCountModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-white/20 text-white max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3 shrink-0">
+          <div className="modal-panel-fixed bg-[#1a1a1a] rounded-3xl max-w-3xl w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <div className="flex items-center gap-2">
                 <ClipboardCheck className="w-5 h-5 text-emerald-400" />
                 <h3 className="font-bold text-white text-base">
@@ -709,7 +709,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleConfirmStockCount} className="mt-4 flex flex-col gap-4 min-h-0 flex-1">
+            <form onSubmit={handleConfirmStockCount} className="flex flex-col flex-1 min-h-0">
+              <div className="modal-body flex flex-col gap-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs shrink-0">
                 <div>
                   <label className="block font-bold text-white/80 mb-1">
@@ -737,7 +738,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
               </div>
 
-              <div className="overflow-y-auto border border-white/10 rounded-2xl flex-1 min-h-0">
+              <div className="border border-white/10 rounded-2xl overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="sticky top-0 bg-[#222226] z-10">
                     <tr className="border-b border-white/10 text-white/50 font-bold uppercase text-[10px]">
@@ -791,7 +792,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </table>
               </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-white/10 shrink-0">
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-white/10">
                 <div className="text-xs">
                   <span className="text-white/60">
                     {lang === 'th' ? 'มูลค่าสต็อกปิดงวดรวม: ' : 'Total Closing Stock Value: '}
@@ -824,8 +827,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       {/* ADJUST / WASTE MODAL */}
       {isAdjustModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-md w-full p-6 shadow-2xl border border-white/20 text-white">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="modal-panel bg-[#1a1a1a] rounded-3xl max-w-md w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <h3 className="font-bold text-white text-base">
                 {lang === 'th' ? 'ปรับปรุงยอดสต็อก / บันทึกของเสีย' : 'Adjust Stock / Log Waste'}
               </h3>
@@ -838,7 +841,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveAdjust} className="space-y-3.5 mt-4 text-xs">
+            <form onSubmit={handleSaveAdjust} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-3.5">
               <CategoryIngredientSelect
                 ingredients={inventoryWithCategories}
                 selectedIngredientId={selectedItemId}
@@ -905,7 +909,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-white/10">
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex justify-end gap-2 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setIsAdjustModalOpen(false)}

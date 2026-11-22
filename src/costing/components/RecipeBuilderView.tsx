@@ -1732,8 +1732,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       {/* SAUCE EDIT MODAL */}
       {isSauceModalOpen && editingSauce && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-white/20 text-white max-h-[90vh] overflow-y-auto scrollbar-thin">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="modal-panel-fixed bg-[#1a1a1a] rounded-3xl max-w-lg w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <h3 className="font-bold text-white text-base">
                 {editingSauce.id?.startsWith('sauce_') && !sauces.find((s) => s.id === editingSauce.id)
                   ? lang === 'en' ? 'Create New Sauce Recipe' : 'สร้างสูตรซอสใหม่'
@@ -1748,7 +1748,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveSauceModal} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleSaveSauceModal} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4 scrollbar-thin">
               <div className="space-y-3">
                 <div>
                   <label className="block text-white/70 mb-1 font-semibold">
@@ -1975,7 +1976,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex justify-end gap-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setIsSauceModalOpen(false)}
@@ -1998,8 +2001,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       {/* ADD BASE INGREDIENT MODAL (2-step Category & Sub-ingredient) */}
       {isAddBaseIngModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-md w-full p-6 shadow-2xl border border-white/20 text-white">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="modal-panel bg-[#1a1a1a] rounded-3xl max-w-md w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <h3 className="font-bold text-white text-base">
                 {lang === 'en'
                   ? '+ Add Ingredient to Base Recipe'
@@ -2014,7 +2017,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleConfirmAddBaseIngredient} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleConfirmAddBaseIngredient} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
               {/* Step 1: Select Category first */}
               <div>
                 <label className="block text-white/80 font-bold mb-1">
@@ -2110,7 +2114,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-white/10">
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex justify-end gap-2 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setIsAddBaseIngModalOpen(false)}

@@ -610,8 +610,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+          <div className="modal-panel-fixed w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-slate-200">
+            <div className="modal-header flex items-center justify-between border-b border-slate-100">
               <h2 className="text-base font-bold text-slate-900">
                 {isTh ? 'เพิ่มค่าใช้จ่ายดำเนินงาน' : 'Add Operating Expense'}
               </h2>
@@ -624,7 +624,8 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="space-y-3.5">
+            <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0">
+              <div className="modal-body space-y-3.5">
               {validationError && (
                 <div className="p-2.5 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 font-medium">
                   {validationError}
@@ -892,7 +893,9 @@ export const ExpensesView: React.FC<ExpensesViewProps> = ({
                 </div>
               )}
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100">
+              </div>
+
+              <div className="modal-footer bg-white flex justify-end gap-2.5 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

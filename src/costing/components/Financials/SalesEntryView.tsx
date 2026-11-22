@@ -294,8 +294,8 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
       {/* Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+          <div className="modal-panel-fixed w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200">
+            <div className="modal-header flex items-center justify-between border-b border-slate-100">
               <h2 className="text-base font-bold text-slate-900">
                 {isTh ? 'บันทึกยอดขายรายวัน' : 'Log Daily Sales'}
               </h2>
@@ -308,7 +308,8 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="space-y-3">
+            <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0">
+              <div className="modal-body space-y-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   {isTh ? 'วันที่ขาย' : 'Sales Date'}
@@ -529,7 +530,9 @@ export const SalesEntryView: React.FC<SalesEntryViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-slate-100">
+              </div>
+
+              <div className="modal-footer bg-white flex flex-wrap justify-end gap-2 border-t border-slate-100">
                 {existingPosDuplicate ? (
                   <>
                     <button

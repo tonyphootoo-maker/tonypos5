@@ -336,8 +336,8 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
       {/* Bill Details Slide-over Dialog */}
       {selectedBillForDetails && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-orange-200 overflow-hidden">
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+          <div className="modal-panel bg-white rounded-3xl shadow-2xl max-w-lg w-full border border-orange-200">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <div>
                 <h3 className="font-extrabold text-base">
                   {t.bills.billDetails} - {selectedBillForDetails.billNumber}
@@ -354,7 +354,7 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="modal-body space-y-3">
               {selectedBillForDetails.status === 'voided' && (
                 <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-rose-900 text-xs font-bold space-y-1">
                   <div>{t.bills.voidedBanner}</div>
@@ -425,7 +425,7 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 onClick={() => {
                   setReceiptBillToView(selectedBillForDetails);
@@ -449,8 +449,8 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
       {/* Void Confirmation Modal with Reason */}
       {isVoidModalOpen && billToVoid && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-rose-300 overflow-hidden">
-            <div className="p-4 bg-rose-600 text-white flex items-center justify-between">
+          <div className="modal-panel bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-rose-300">
+            <div className="modal-header bg-rose-600 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base flex items-center gap-1.5">
                 <Ban className="w-5 h-5 text-rose-200" />
                 <span>{t.bills.voidBill}</span>
@@ -463,7 +463,7 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="modal-body space-y-3">
               <div className="text-xs text-neutral-600">
                 {lang === 'th' ? (
                   <>
@@ -501,7 +501,7 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsVoidModalOpen(false)}

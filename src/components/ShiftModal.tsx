@@ -89,9 +89,9 @@ export const ShiftModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full border border-orange-200 overflow-hidden">
+      <div className="modal-panel bg-white rounded-3xl shadow-2xl max-w-md w-full border border-orange-200">
         {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between">
+        <div className="modal-header bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Clock className="w-5 h-5 text-amber-200" />
             <h3 className="font-extrabold text-base">
@@ -107,7 +107,7 @@ export const ShiftModal: React.FC<Props> = ({
         </div>
 
         {/* Body */}
-        <div className="p-4 space-y-4">
+        <div className="modal-body space-y-4">
           {!activeShift ? (
             // Open Shift View
             <div className="space-y-3">
@@ -196,7 +196,7 @@ export const ShiftModal: React.FC<Props> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+        <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}

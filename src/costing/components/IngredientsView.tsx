@@ -1026,8 +1026,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       {/* EDIT / ADD INGREDIENT MODAL */}
       {isEditingModalOpen && editingIngredient && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-white/20 text-white">
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="modal-panel-fixed bg-[#1a1a1a] rounded-3xl max-w-xl w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <h2 className="text-lg font-bold text-white">
                 {editingIngredient.id
                   ? lang === 'th' ? 'แก้ไขข้อมูลวัตถุดิบ' : 'Edit Ingredient'
@@ -1042,7 +1042,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveModal} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleSaveModal} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
               {/* Name & Category */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1478,8 +1479,10 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 );
               })()}
 
+              </div>
+
               {/* Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-white/10">
+              <div className="modal-footer bg-[#1a1a1a] flex items-center justify-end gap-2 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setIsEditingModalOpen(false)}
@@ -1502,8 +1505,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       {/* PRICE CHANGE IMPACT SIMULATION MODAL */}
       {isImpactModalOpen && simulatingIngredient && impactAnalysis && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-white/20 text-white">
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="modal-panel bg-[#1a1a1a] rounded-3xl max-w-2xl w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <div>
                 <div className="flex items-center gap-1.5 text-xs font-bold text-[#F27D26] uppercase">
                   <Sparkles className="w-4 h-4" />
@@ -1526,7 +1529,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               </button>
             </div>
 
-            <div className="mt-5 space-y-4 text-xs">
+            <div className="modal-body space-y-4 text-xs">
               {/* Price inputs */}
               <div className="grid grid-cols-2 gap-3 p-4 bg-white/5 rounded-2xl border border-white/10">
                 <div>
@@ -1661,26 +1664,27 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-4 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setIsImpactModalOpen(false)}
-                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-colors cursor-pointer"
-                >
-                  {lang === 'th' ? 'ปิดหน้าต่าง' : 'Close'}
-                </button>
+            </div>
 
-                <button
-                  type="button"
-                  onClick={handleApplySimulatedPrice}
-                  className="px-5 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black rounded-xl font-bold shadow-md shadow-[#F27D26]/20 transition-colors cursor-pointer"
-                >
-                  {lang === 'th'
-                    ? `อนุมัติและปรับใช้ราคาใหม่นี้ (฿${simulatedNewPrice})`
-                    : `Approve & Apply New Price (฿${simulatedNewPrice})`}
-                </button>
-              </div>
+            {/* Action Buttons */}
+            <div className="modal-footer bg-[#1a1a1a] flex items-center justify-between border-t border-white/10 text-xs">
+              <button
+                type="button"
+                onClick={() => setIsImpactModalOpen(false)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-colors cursor-pointer"
+              >
+                {lang === 'th' ? 'ปิดหน้าต่าง' : 'Close'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleApplySimulatedPrice}
+                className="px-5 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black rounded-xl font-bold shadow-md shadow-[#F27D26]/20 transition-colors cursor-pointer"
+              >
+                {lang === 'th'
+                  ? `อนุมัติและปรับใช้ราคาใหม่นี้ (฿${simulatedNewPrice})`
+                  : `Approve & Apply New Price (฿${simulatedNewPrice})`}
+              </button>
             </div>
           </div>
         </div>
@@ -1689,8 +1693,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       {/* ADD CATEGORY MODAL */}
       {isAddCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-2xl max-w-md w-full p-6 shadow-2xl border border-white/20 text-white animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="modal-panel bg-[#1a1a1a] rounded-2xl max-w-md w-full shadow-2xl border border-white/20 text-white animate-in fade-in zoom-in-95 duration-150">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <Plus className="w-4 h-4 text-[#F27D26]" />
                 <span>{lang === 'th' ? 'เพิ่มหมวดหมู่วัตถุดิบใหม่' : 'Add New Ingredient Category'}</span>
@@ -1707,7 +1711,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleAddCategory} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleAddCategory} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
               <div>
                 <label className="block font-bold text-white/80 mb-1.5">
                   {lang === 'th' ? 'ชื่อหมวดหมู่ใหม่ (ไทย)' : 'New Category Name (Thai)'}{' '}
@@ -1747,7 +1752,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex items-center justify-end gap-2 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => {

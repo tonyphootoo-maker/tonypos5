@@ -1350,9 +1350,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
             onSubmit={handleSaveDish}
-            className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
+            className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-3xl w-full border border-orange-200"
           >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">
                 {editingDish.id ? t.menuCost.editDish : t.menuCost.addDish}
               </h3>
@@ -1365,7 +1365,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="modal-body space-y-4">
               {/* Dish Name Thai-first + Auto-EN */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -2029,7 +2029,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsDishModalOpen(false)}
@@ -2074,9 +2074,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               setEditingCategory(null);
               loadData();
             }}
-            className="bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200 overflow-hidden"
+            className="modal-panel bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200"
           >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">{t.menuCost.addCategory}</h3>
               <button
                 type="button"
@@ -2087,7 +2087,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="modal-body space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
                   {lang === 'th' ? 'ชื่อหมวดหมู่ (ภาษาไทย) *' : 'Category Name (Thai) *'}
@@ -2146,7 +2146,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsCategoryModalOpen(false)}
@@ -2194,9 +2194,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               setEditingChannel(null);
               loadData();
             }}
-            className="bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200 overflow-hidden"
+            className="modal-panel bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200"
           >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">{t.menuCost.addChannel}</h3>
               <button
                 type="button"
@@ -2207,7 +2207,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </button>
             </div>
 
-            <div className="p-4 space-y-3">
+            <div className="modal-body space-y-3">
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1">
                   {lang === 'th' ? 'ชื่อช่องทางขาย (ภาษาไทย) *' : 'Channel Name (Thai) *'}
@@ -2314,7 +2314,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsChannelModalOpen(false)}
@@ -2425,8 +2425,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
         return (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[88vh] flex flex-col border border-orange-200 overflow-hidden">
-              <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-2xl w-full border border-orange-200">
+              <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ChefHat className="w-5 h-5" />
                   <h3 className="font-extrabold text-base">
@@ -2449,7 +2449,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </div>
 
               {/* Search & Step/Tab Bar */}
-              <div className="p-3 border-b border-neutral-200 bg-neutral-50 space-y-2">
+              <div className="shrink-0 p-3 border-b border-neutral-200 bg-neutral-50 space-y-2">
                 {selectedCostMenu ? (
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <button
@@ -2550,7 +2550,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="modal-body space-y-3">
                 {isImportingCostOption && (
                   <div className="p-2 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-700 font-bold text-center">
                     {lang === 'th' ? 'กำลังนำเข้าข้อมูลต้นทุน...' : 'Importing Food Cost data...'}
@@ -2769,7 +2769,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 )}
               </div>
 
-              <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2">
+              <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2">
                 <button
                   type="button"
                   onClick={() => {
@@ -2809,8 +2809,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       {/* ========================================================= */}
       {isOptionGroupPickerOpen && editingDish && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[84vh] flex flex-col border border-orange-200 overflow-hidden">
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+          <div className="modal-panel bg-white rounded-3xl shadow-2xl max-w-lg w-full border border-orange-200">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sliders className="w-5 h-5" />
                 <h3 className="font-extrabold text-base">
@@ -2826,7 +2826,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </button>
             </div>
 
-            <div className="p-3 border-b border-neutral-200 bg-neutral-50">
+            <div className="shrink-0 p-3 border-b border-neutral-200 bg-neutral-50">
               <div className="relative">
                 <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
                 <input
@@ -2840,7 +2840,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            <div className="modal-body space-y-2">
               {optionGroups.length === 0 ? (
                 <div className="p-4 text-center text-xs text-neutral-500">
                   {lang === 'th'
@@ -2906,7 +2906,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
               )}
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end">
               <button
                 type="button"
                 onClick={() => setIsOptionGroupPickerOpen(false)}

@@ -511,7 +511,7 @@ export const PaymentModal: React.FC<Props> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-neutral-950/60 backdrop-blur-xs">
-      <div className="bg-[#f3f4f6] w-full max-w-4xl max-h-[94vh] rounded-xl sm:rounded-2xl shadow-2xl border border-neutral-300/90 flex flex-col overflow-hidden">
+      <div className="bg-[#f3f4f6] w-full max-w-4xl max-h-[94vh] max-h-[94dvh] rounded-xl sm:rounded-2xl shadow-2xl border border-neutral-300/90 flex flex-col overflow-hidden">
         {/* Top Bar matching reference */}
         <div className="bg-[#f1f3f5] border-b border-neutral-200 px-2 sm:px-4 h-13 sm:h-14 flex items-center justify-between shrink-0">
           <button
@@ -560,7 +560,7 @@ export const PaymentModal: React.FC<Props> = ({
         {/* Main 2-Column Body */}
         <div className="relative flex-1 min-h-0 flex flex-col md:flex-row bg-[#f3f4f6] overflow-hidden">
           {/* Left Sidebar: Payment Method List */}
-          <div className="md:w-48 lg:w-52 shrink-0 p-2 md:py-3 md:pl-3 md:pr-1.5 grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-col gap-1.5 border-b md:border-b-0 border-neutral-200 overflow-y-auto">
+          <div className="md:w-48 lg:w-52 shrink-0 p-2 md:py-3 md:pl-3 md:pr-1.5 grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-col gap-1.5 border-b md:border-b-0 border-neutral-200 overflow-y-auto overscroll-contain">
             {PAYMENT_TABS.map((tab) => {
               const isActive = activeTabId === tab.id;
               return (
@@ -582,7 +582,8 @@ export const PaymentModal: React.FC<Props> = ({
           </div>
 
           {/* Right Main Workspace */}
-          <div className="flex-1 min-h-0 p-3 sm:p-4 md:pl-2.5 flex flex-col gap-2.5 sm:gap-3 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 p-3 sm:p-4 md:pl-2.5 flex flex-col gap-2.5 sm:gap-3 overflow-y-auto overscroll-contain">
             {errorMsg && (
               <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-md text-rose-800 text-xs font-semibold flex items-center gap-2 shrink-0">
                 <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
@@ -831,26 +832,30 @@ export const PaymentModal: React.FC<Props> = ({
               </div>
             )}
 
-            {/* Full-Width Green Confirm CTA matching reference */}
-            <button
-              type="button"
-              disabled={!canConfirm}
-              onClick={handleProcessPayment}
-              className="w-full min-h-[48px] py-3 sm:py-3.5 px-6 bg-[#31b237] hover:bg-[#2aa02f] active:scale-[0.99] text-white rounded-sm font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-            >
-              {isSubmitting ? (
-                <span>{t.common.loading}</span>
-              ) : (
-                <span>{lang === 'th' ? 'ยืนยันการชำระเงิน' : 'Confirm Payment'}</span>
-              )}
-            </button>
+            </div>
+
+            {/* Pinned Full-Width Green Confirm CTA */}
+            <div className="shrink-0 px-3 sm:px-4 md:pl-2.5 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#f3f4f6] border-t border-neutral-200/80">
+              <button
+                type="button"
+                disabled={!canConfirm}
+                onClick={handleProcessPayment}
+                className="w-full min-h-[48px] py-3 sm:py-3.5 px-6 bg-[#31b237] hover:bg-[#2aa02f] active:scale-[0.99] text-white rounded-sm font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? (
+                  <span>{t.common.loading}</span>
+                ) : (
+                  <span>{lang === 'th' ? 'ยืนยันการชำระเงิน' : 'Confirm Payment'}</span>
+                )}
+              </button>
+            </div>
           </div>
 
           {/* Inline Slide-Over Panel for Bill Breakdown, Member Points & Split Payment */}
           {showDetailsDrawer && (
             <div className="absolute inset-0 z-20 bg-neutral-950/35 flex justify-end">
               <div className="w-full max-w-md bg-white h-full shadow-2xl border-l border-neutral-200 flex flex-col overflow-hidden">
-                <div className="px-4 py-3 bg-[#f1f3f5] border-b border-neutral-200 flex items-center justify-between">
+                <div className="px-4 py-3 bg-[#f1f3f5] border-b border-neutral-200 flex items-center justify-between shrink-0">
                   <div className="font-bold text-sm text-neutral-900">
                     {lang === 'th'
                       ? 'รายละเอียดบิล / สมาชิก / แยกจ่าย'
@@ -865,7 +870,7 @@ export const PaymentModal: React.FC<Props> = ({
                   </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
                   {/* Bill Summary Grid */}
                   <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg space-y-1.5 text-xs">
                     <div className="flex justify-between text-neutral-600">
@@ -996,7 +1001,7 @@ export const PaymentModal: React.FC<Props> = ({
                   </div>
                 </div>
 
-                <div className="p-3 border-t border-neutral-200 bg-neutral-50">
+                <div className="shrink-0 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-neutral-200 bg-neutral-50">
                   <button
                     type="button"
                     onClick={() => setShowDetailsDrawer(false)}

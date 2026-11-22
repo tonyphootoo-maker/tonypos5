@@ -1833,9 +1833,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* DETAIL COST BREAKDOWN MODAL (Includes Seafood Rule Breakdown) */}
       {selectedBreakdown && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917] max-h-[90vh] overflow-y-auto scrollbar-thin">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-2xl w-full shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-stone-200 pb-3">
+            <div className="modal-header flex items-center justify-between border-b border-stone-200">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-black text-stone-900 text-lg">
                   {getLocalizedText(lang, selectedBreakdown.menu.thaiName || selectedBreakdown.menu.name, selectedBreakdown.menu.englishName)}{' '}
@@ -1854,7 +1854,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-4 mt-3 text-xs">
+            <div className="modal-body space-y-4 text-xs scrollbar-thin">
               {/* SEAFOOD RULE HIGHLIGHT CARD */}
               {isSeafoodVariant(selectedBreakdown.breakdown) && (
                 <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5">
@@ -2437,29 +2437,30 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 );
               })()}
 
-              {/* Action Buttons */}
-              <div className="flex justify-between items-center pt-3 border-t border-stone-200">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const variantId = selectedBreakdown.variant.id;
-                    setSelectedBreakdown(null);
-                    onNavigateToRecipeBuilder(variantId);
-                  }}
-                  className="px-3.5 py-2 bg-stone-200 hover:bg-stone-300 text-stone-900 font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
-                >
-                  <SlidersHorizontal className="w-4 h-4 text-stone-700" />
-                  <span>{isEn ? 'Customize Recipe' : 'ไปที่หน้าปรับแต่งสูตรอาหาร'}</span>
-                </button>
+            </div>
 
-                <button
-                  type="button"
-                  onClick={() => setSelectedBreakdown(null)}
-                  className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] !text-white font-black rounded-xl cursor-pointer shadow-xs"
-                >
-                  {isEn ? 'Close' : 'ปิดหน้าต่าง'}
-                </button>
-              </div>
+            {/* Action Buttons */}
+            <div className="modal-footer bg-[#FFFDF9] flex justify-between items-center border-t border-stone-200 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  const variantId = selectedBreakdown.variant.id;
+                  setSelectedBreakdown(null);
+                  onNavigateToRecipeBuilder(variantId);
+                }}
+                className="px-3.5 py-2 bg-stone-200 hover:bg-stone-300 text-stone-900 font-bold rounded-xl flex items-center gap-1.5 cursor-pointer"
+              >
+                <SlidersHorizontal className="w-4 h-4 text-stone-700" />
+                <span>{isEn ? 'Customize Recipe' : 'ไปที่หน้าปรับแต่งสูตรอาหาร'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedBreakdown(null)}
+                className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] !text-white font-black rounded-xl cursor-pointer shadow-xs"
+              >
+                {isEn ? 'Close' : 'ปิดหน้าต่าง'}
+              </button>
             </div>
           </div>
         </div>
@@ -2468,8 +2469,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* EDIT MENU MODAL */}
       {isMenuModalOpen && editingMenu && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
-            <div className="flex items-center justify-between border-b border-[#EAE4D9] pb-3">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-lg w-full shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
+            <div className="modal-header flex items-center justify-between border-b border-[#EAE4D9]">
               <h3 className="font-bold text-[#1C1917] text-base">
                 {editingMenu.id?.startsWith('menu_') && !menus.find((m) => m.id === editingMenu.id)
                   ? (isEn ? 'Add New Menu' : 'เพิ่มเมนูใหม่')
@@ -2484,7 +2485,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveMenuModal} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleSaveMenuModal} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
               <div className="space-y-3">
                 <div>
                   <label className="block text-stone-700 mb-1.5 font-bold text-sm">
@@ -2588,7 +2590,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </label>
               </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-[#EAE4D9]">
+              </div>
+
+              <div className="modal-footer bg-[#FFFDF9] flex justify-end gap-3 border-t border-[#EAE4D9]">
                 <button
                   type="button"
                   onClick={() => setIsMenuModalOpen(false)}
@@ -2610,8 +2614,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* ADD CATEGORY MODAL */}
       {isAddCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
-            <div className="flex items-center justify-between border-b border-[#EAE4D9] pb-3">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-md w-full shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
+            <div className="modal-header flex items-center justify-between border-b border-[#EAE4D9]">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-[#F27D26]/10 text-[#F27D26] flex items-center justify-center font-bold">
                   <FolderPlus className="w-4 h-4" />
@@ -2634,7 +2638,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleCreateCategory} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleCreateCategory} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
               <div className="space-y-3">
                 <div>
                   <label className="block text-stone-700 mb-1.5 font-semibold">
@@ -2711,7 +2716,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[#EAE4D9]">
+              </div>
+
+              <div className="modal-footer bg-[#FFFDF9] flex justify-end gap-2.5 border-t border-[#EAE4D9]">
                 <button
                   type="button"
                   onClick={() => {
@@ -2739,8 +2746,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* EDIT CATEGORY MODAL */}
       {isEditCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
-            <div className="flex items-center justify-between border-b border-[#EAE4D9] pb-3">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-md w-full shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
+            <div className="modal-header flex items-center justify-between border-b border-[#EAE4D9]">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-[#F27D26]/10 text-[#F27D26] flex items-center justify-center font-bold">
                   <Edit2 className="w-4 h-4" />
@@ -2761,7 +2768,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditCategory} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleSaveEditCategory} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
               <div className="space-y-3">
                 <div>
                   <label className="block text-stone-700 mb-1.5 font-semibold">
@@ -2820,7 +2828,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 )}
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[#EAE4D9]">
+              </div>
+
+              <div className="modal-footer bg-[#FFFDF9] flex justify-end gap-2.5 border-t border-[#EAE4D9]">
                 <button
                   type="button"
                   onClick={() => {
@@ -2846,8 +2856,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* DELETE CATEGORY MODAL */}
       {isDeleteCategoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
-            <div className="flex items-center justify-between border-b border-[#EAE4D9] pb-3">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-md w-full shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
+            <div className="modal-header flex items-center justify-between border-b border-[#EAE4D9]">
               <div className="flex items-center gap-2">
                 <span className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
                   <Trash2 className="w-4 h-4" />
@@ -2865,7 +2875,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-4 mt-4 text-xs">
+            <div className="modal-body space-y-4 text-xs">
               <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-800">
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
@@ -2896,23 +2906,24 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[#EAE4D9]">
-                <button
-                  type="button"
-                  onClick={() => setIsDeleteCategoryModalOpen(false)}
-                  className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
-                >
-                  {isEn ? 'Cancel' : 'ยกเลิก'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmDeleteCategory}
-                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{isEn ? 'Confirm Delete Category' : 'ยืนยันการลบหมวดหมู่'}</span>
-                </button>
-              </div>
+            </div>
+
+            <div className="modal-footer bg-[#FFFDF9] flex justify-end gap-2.5 border-t border-[#EAE4D9] text-xs">
+              <button
+                type="button"
+                onClick={() => setIsDeleteCategoryModalOpen(false)}
+                className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
+              >
+                {isEn ? 'Cancel' : 'ยกเลิก'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCategory}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isEn ? 'Confirm Delete Category' : 'ยืนยันการลบหมวดหมู่'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -2921,9 +2932,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* WARNING REVIEW MODAL (Requirement 3: Displays all alerted items immediately) */}
       {isWarningModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-stone-900/60 backdrop-blur-xs">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl border border-stone-300 text-stone-900 flex flex-col max-h-[90vh]">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-2xl w-full shadow-2xl border border-stone-300 text-stone-900">
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-stone-200 pb-3 shrink-0">
+            <div className="modal-header flex items-center justify-between border-b border-stone-200">
               <div className="flex items-center gap-2.5">
                 <span className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shadow-xs shrink-0">
                   <AlertTriangle className="w-5 h-5" />
@@ -2945,7 +2956,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             {/* List */}
-            <div className="space-y-3 mt-4 overflow-y-auto flex-1 pr-1">
+            <div className="modal-body space-y-3">
               {warningRows.length === 0 ? (
                 <div className="text-center py-10 text-stone-500">
                   <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500 mb-2" />
@@ -3036,7 +3047,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             {/* Footer */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 mt-3 border-t border-stone-200 shrink-0 text-xs">
+            <div className="modal-footer bg-[#FFFDF9] flex flex-wrap items-center justify-between gap-2 border-t border-stone-200 text-xs">
               <span className="font-mono font-bold text-stone-600">
                 {isEn ? `Found ${warningRows.length} flagged items` : `พบทั้งหมด ${warningRows.length} รายการที่เข้าเกณฑ์`}
               </span>
@@ -3067,8 +3078,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* DELETE MENU CONFIRMATION MODAL */}
       {menuToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
-            <div className="flex items-center justify-between border-b border-[#EAE4D9] pb-3">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-md w-full shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
+            <div className="modal-header flex items-center justify-between border-b border-[#EAE4D9]">
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
                   <Trash2 className="w-4 h-4" />
@@ -3085,7 +3096,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="space-y-4 mt-4 text-xs">
+            <div className="modal-body space-y-4 text-xs">
               <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-800">
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
@@ -3101,31 +3112,31 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   </p>
                 </div>
               </div>
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[#EAE4D9]">
-                <button
-                  type="button"
-                  onClick={() => setMenuToDelete(null)}
-                  className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
-                >
-                  {isEn ? 'Cancel' : 'ยกเลิก'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onDeleteMenu) {
-                      onDeleteMenu(menuToDelete.id);
-                    }
-                    if (selectedMenuId === menuToDelete.id) {
-                      setSelectedMenuId(null);
-                    }
-                    setMenuToDelete(null);
-                  }}
-                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{isEn ? 'Confirm Delete Menu' : 'ยืนยันการลบเมนู'}</span>
-                </button>
-              </div>
+            </div>
+            <div className="modal-footer bg-[#FFFDF9] flex justify-end gap-2.5 border-t border-[#EAE4D9] text-xs">
+              <button
+                type="button"
+                onClick={() => setMenuToDelete(null)}
+                className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
+              >
+                {isEn ? 'Cancel' : 'ยกเลิก'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDeleteMenu) {
+                    onDeleteMenu(menuToDelete.id);
+                  }
+                  if (selectedMenuId === menuToDelete.id) {
+                    setSelectedMenuId(null);
+                  }
+                  setMenuToDelete(null);
+                }}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isEn ? 'Confirm Delete Menu' : 'ยืนยันการลบเมนู'}</span>
+              </button>
             </div>
           </div>
         </div>
@@ -3134,9 +3145,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* ADD / EDIT VARIANT MODAL (เชื่อมโยงกับข้อมูลวัตถุดิบจริง) */}
       {variantModalState.isOpen && variantModalState.menu && variantModalState.variant && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-stone-900/60 backdrop-blur-xs">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-xl w-full shadow-2xl border border-stone-300 text-stone-900 max-h-[92vh] flex flex-col overflow-hidden">
+          <div className="modal-panel-fixed bg-[#FFFDF9] rounded-3xl max-w-xl w-full shadow-2xl border border-stone-300 text-stone-900">
             {/* Locked Modal Header */}
-            <div className="shrink-0 flex items-center justify-between border-b border-stone-200 px-5 sm:px-6 pt-5 pb-3 bg-[#FFFDF9]">
+            <div className="modal-header flex items-center justify-between border-b border-stone-200 bg-[#FFFDF9]">
               <div className="flex items-center gap-2.5">
                 <span className="w-9 h-9 rounded-xl bg-[#F27D26]/15 border border-[#F27D26]/30 text-[#F27D26] flex items-center justify-center font-bold">
                   <UtensilsCrossed className="w-4 h-4" />
@@ -3177,7 +3188,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             <form
               id="variant-modal-form"
               onSubmit={handleSaveVariantModal}
-              className="flex-1 overflow-y-auto px-5 sm:px-6 py-4 space-y-4 text-xs"
+              className="modal-body space-y-4 text-xs"
             >
               {/* 1. เลือกวัตถุดิบจากฐานข้อมูล (เหลือเฉพาะข้อ 1. เชื่อมข้อมูลจากฐานข้อมูลโดยตรง) */}
               <div className="p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-2xl space-y-2.5">
@@ -4064,7 +4075,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </form>
 
             {/* Locked Modal Footer */}
-            <div className="shrink-0 flex justify-end gap-3 px-5 sm:px-6 py-3.5 border-t border-[#EAE4D9] bg-[#FFFDF9]">
+            <div className="modal-footer flex justify-end gap-3 border-t border-[#EAE4D9] bg-[#FFFDF9]">
               <button
                 type="button"
                 onClick={() =>
@@ -4101,8 +4112,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       {/* DELETE VARIANT CONFIRMATION MODAL */}
       {variantToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/50 backdrop-blur-sm">
-          <div className="bg-[#FFFDF9] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
-            <div className="flex items-center justify-between border-b border-[#EAE4D9] pb-3">
+          <div className="modal-panel bg-[#FFFDF9] rounded-3xl max-w-md w-full shadow-2xl border border-[#EAE4D9] text-[#1C1917]">
+            <div className="modal-header flex items-center justify-between border-b border-[#EAE4D9]">
               <div className="flex items-center gap-2.5">
                 <span className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-bold">
                   <Trash2 className="w-4 h-4" />
@@ -4125,7 +4136,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="space-y-4 mt-4 text-xs">
+            <div className="modal-body space-y-4 text-xs">
               <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-800">
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
@@ -4141,23 +4152,23 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   </p>
                 </div>
               </div>
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-[#EAE4D9]">
-                <button
-                  type="button"
-                  onClick={() => setVariantToDelete(null)}
-                  className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
-                >
-                  {isEn ? 'Cancel' : 'ยกเลิก'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmDeleteVariant}
-                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{isEn ? 'Confirm Delete Option' : 'ยืนยันการลบตัวเลือก'}</span>
-                </button>
-              </div>
+            </div>
+            <div className="modal-footer bg-[#FFFDF9] flex justify-end gap-2.5 border-t border-[#EAE4D9] text-xs">
+              <button
+                type="button"
+                onClick={() => setVariantToDelete(null)}
+                className="px-4 py-2 bg-stone-100 hover:bg-stone-200 rounded-xl text-stone-700 font-semibold cursor-pointer"
+              >
+                {isEn ? 'Cancel' : 'ยกเลิก'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteVariant}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isEn ? 'Confirm Delete Option' : 'ยืนยันการลบตัวเลือก'}</span>
+              </button>
             </div>
           </div>
         </div>

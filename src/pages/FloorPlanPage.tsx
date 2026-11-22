@@ -1418,10 +1418,10 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
           <form
             onSubmit={handleSaveEditModal}
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-3xl shadow-2xl max-w-xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
+            className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-xl w-full border border-orange-200"
           >
             {/* Modal Header */}
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between shrink-0">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">
                 {isCreatingNewItem
                   ? isTh
@@ -1448,7 +1448,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             </div>
 
             {/* Scrollable Modal Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="modal-body space-y-4">
               {/* Live Visual Preview */}
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center min-h-[140px] relative">
                 <span className="absolute top-2 left-3 text-[10px] font-bold uppercase tracking-wider text-slate-400">
@@ -1854,7 +1854,7 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
             </div>
 
             {/* Footer */}
-            <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
+            <div className="modal-footer bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2">
               {!isCreatingNewItem ? (
                 <button
                   type="button"

@@ -326,8 +326,8 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
       {/* RECORD PURCHASE MODAL */}
       {isPurchaseModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
-          <div className="bg-[#1a1a1a]/95 backdrop-blur-2xl rounded-3xl max-w-md w-full p-6 shadow-2xl border border-white/20 text-white">
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+          <div className="modal-panel-fixed bg-[#1a1a1a] rounded-3xl max-w-md w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
               <h3 className="font-bold text-white text-base">
                 {lang === 'en' ? 'Record Ingredient Purchase' : 'บันทึกการซื้อวัตถุดิบเข้าร้าน'}
               </h3>
@@ -340,7 +340,8 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSavePurchaseForm} className="space-y-3.5 mt-4 text-xs">
+            <form onSubmit={handleSavePurchaseForm} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-3.5">
               <CategoryIngredientSelect
                 ingredients={ingredients}
                 selectedIngredientId={selectedIngredientId}
@@ -452,7 +453,9 @@ export const PurchasesView: React.FC<PurchasesViewProps> = ({
                 </label>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-white/10">
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex justify-end gap-2 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setIsPurchaseModalOpen(false)}

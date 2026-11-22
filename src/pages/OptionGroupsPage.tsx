@@ -231,9 +231,9 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
             onSubmit={handleSaveGroup}
-            className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-orange-200 overflow-hidden"
+            className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-lg w-full border border-orange-200"
           >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">
                 {editingGroup.id
                   ? lang === 'th'
@@ -250,7 +250,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="modal-body space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
@@ -463,7 +463,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setIsEditorOpen(false)}

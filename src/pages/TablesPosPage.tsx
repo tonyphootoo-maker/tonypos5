@@ -2454,9 +2454,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       {/* Dish Options & Variants Customizer Dialog */}
       {selectedDishForOptions && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-orange-200 overflow-hidden">
+          <div className="modal-panel bg-white rounded-3xl shadow-2xl max-w-lg w-full border border-orange-200">
             {/* Header */}
-            <div className="p-4 bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between">
+            <div className="modal-header bg-gradient-to-r from-orange-500 via-red-500 to-amber-500 text-white flex items-center justify-between">
               <h3 className="font-extrabold text-base">
                 {lang === 'th' && selectedDishForOptions.nameTh ? selectedDishForOptions.nameTh : selectedDishForOptions.name}
               </h3>
@@ -2469,7 +2469,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             </div>
 
             {/* Scrollable Body */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="modal-body space-y-4">
               {/* Variants Selector (Drag-and-drop to reorder positions) */}
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1.5">
@@ -2677,7 +2677,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
             </div>
 
             {/* Pinned Footer: Quantity + Cancel + Add to Bill on one compact row */}
-            <div className="p-2.5 sm:p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 shrink-0">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 bg-white border border-neutral-300 rounded-xl px-1.5 py-1 shadow-2xs shrink-0">
                 <button
                   type="button"
@@ -2789,9 +2789,9 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
         <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-neutral-950/60 backdrop-blur-xs">
           <form
             onSubmit={handleSavePosDish}
-            className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[92vh] flex flex-col border border-orange-200 overflow-hidden"
+            className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-3xl w-full border border-orange-200"
           >
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between shrink-0">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {isCreatingDishInPos ? <Plus className="w-4 h-4" /> : <Edit2 className="w-4 h-4" />}
                 <h3 className="font-extrabold text-base">
@@ -2810,7 +2810,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="modal-body space-y-4">
               {/* Names TH / EN */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -3296,7 +3296,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               </div>
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 shrink-0 flex-wrap">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 {!isCreatingDishInPos && (
                   <button
@@ -3426,8 +3426,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
 
         return (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[88vh] flex flex-col border border-orange-200 overflow-hidden">
-              <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+            <div className="modal-panel-fixed bg-white rounded-3xl shadow-2xl max-w-2xl w-full border border-orange-200">
+              <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <ChefHat className="w-5 h-5" />
                   <h3 className="font-extrabold text-base">
@@ -3449,7 +3449,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 </button>
               </div>
 
-              <div className="p-3 border-b border-neutral-200 bg-neutral-50 space-y-2">
+              <div className="p-3 border-b border-neutral-200 bg-neutral-50 space-y-2 shrink-0">
                 {selectedCostMenu ? (
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <button
@@ -3533,7 +3533,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+              <div className="modal-body space-y-2.5">
                 {posPickerSourceTab === 'menus' && !selectedCostMenu && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {filteredMenus.map((menu) => (
@@ -3643,7 +3643,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 )}
               </div>
 
-              <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end">
+              <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end">
                 <button
                   type="button"
                   onClick={() => setIsPosPrimaryOptionPickerOpen(false)}
@@ -3660,8 +3660,8 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
       {/* POS Sub-Option Group Picker Modal */}
       {isPosOptionGroupPickerOpen && editingDishInPos && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 bg-neutral-950/70 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[84vh] flex flex-col border border-orange-200 overflow-hidden">
-            <div className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
+          <div className="modal-panel bg-white rounded-3xl shadow-2xl max-w-lg w-full border border-orange-200">
+            <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Sliders className="w-5 h-5" />
                 <h3 className="font-extrabold text-base">
@@ -3677,7 +3677,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               </button>
             </div>
 
-            <div className="p-3 border-b border-neutral-200 bg-neutral-50">
+            <div className="p-3 border-b border-neutral-200 bg-neutral-50 shrink-0">
               <div className="relative">
                 <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-2.5" />
                 <input
@@ -3691,7 +3691,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            <div className="modal-body space-y-2">
               {optionGroups
                 .filter((grp) => {
                   const q = posOptionGroupSearch.trim().toLowerCase();
@@ -3744,7 +3744,7 @@ export const TablesPosPage: React.FC<Props> = ({ settings, lang, onOpenFloorPlan
                 })}
             </div>
 
-            <div className="p-3 bg-neutral-100 border-t border-neutral-200 flex justify-end">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end">
               <button
                 type="button"
                 onClick={() => setIsPosOptionGroupPickerOpen(false)}

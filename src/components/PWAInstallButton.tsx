@@ -117,11 +117,11 @@ export const PWAInstallButton: React.FC<Props> = ({
       ? createPortal(
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-neutral-950/75 backdrop-blur-xs">
             <div
-              className={`bg-white rounded-3xl shadow-2xl max-w-md w-full border overflow-hidden text-neutral-900 ${
+              className={`modal-panel bg-white rounded-3xl shadow-2xl max-w-md w-full border text-neutral-900 ${
                 isRiderTheme ? 'border-emerald-200' : 'border-orange-200'
               }`}
             >
-              <div className={`p-4 bg-gradient-to-r ${headerGrad} text-white flex items-center justify-between`}>
+              <div className={`modal-header bg-gradient-to-r ${headerGrad} text-white flex items-center justify-between`}>
                 <div className="flex items-center gap-2.5 min-w-0">
                   <Smartphone className="w-5 h-5 shrink-0" />
                   <h3 className="font-extrabold text-base truncate">
@@ -139,7 +139,7 @@ export const PWAInstallButton: React.FC<Props> = ({
                 </button>
               </div>
 
-              <div className="p-5 space-y-4 text-xs">
+              <div className="modal-body space-y-4 text-xs">
                 {/* Switch between Android & iOS guides */}
                 <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-xl">
                   <button
@@ -318,6 +318,9 @@ export const PWAInstallButton: React.FC<Props> = ({
                   </div>
                 )}
 
+              </div>
+
+              <div className="modal-footer bg-white border-t border-neutral-200">
                 <button
                   type="button"
                   onClick={() => setShowGuideModal(false)}

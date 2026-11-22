@@ -97,9 +97,9 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4 backdrop-blur-xs animate-in fade-in">
-      <div className="w-full max-w-2xl rounded-3xl bg-[#FAF8F5] p-5 sm:p-6 shadow-2xl border border-stone-200 max-h-[92vh] overflow-y-auto">
+      <div className="modal-panel w-full max-w-2xl rounded-3xl bg-[#FAF8F5] shadow-2xl border border-stone-200">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-stone-200/80">
+        <div className="modal-header flex items-center justify-between border-b border-stone-200/80">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#EA580C] to-[#F27D26] text-white flex items-center justify-center font-bold shadow-sm shadow-[#F27D26]/30">
               <Sparkles className="w-5 h-5" />
@@ -117,15 +117,16 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
           </button>
         </div>
 
+        <div className="modal-body space-y-4">
         {/* Success toast */}
         {saveSuccessMessage && (
-          <div className="mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-semibold flex items-center gap-2">
+          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs sm:text-sm font-semibold flex items-center gap-2">
             <Check className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{saveSuccessMessage}</span>
           </div>
         )}
 
-        <div className="mt-5 grid grid-cols-1 md:grid-cols-12 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Left Column: Preset options & Upload */}
           <div className="md:col-span-7 space-y-4">
             <div>
@@ -325,9 +326,10 @@ export const AppIconModal: React.FC<AppIconModalProps> = ({
             </div>
           </div>
         </div>
+        </div>
 
         {/* Footer Actions */}
-        <div className="mt-6 pt-4 border-t border-stone-200/80 flex items-center justify-end gap-3">
+        <div className="modal-footer bg-[#FAF8F5] border-t border-stone-200/80 flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={onClose}
