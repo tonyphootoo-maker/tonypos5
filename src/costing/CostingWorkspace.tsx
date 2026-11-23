@@ -25,6 +25,8 @@ import {
   RecipeItem,
   Employee as CostEmployee,
   StockCountSnapshot,
+  CentralBaseRecipe,
+  RiceNoodlePortion,
 } from './types';
 import { convertUnitQuantity } from './services/transactionService';
 import {
@@ -33,6 +35,7 @@ import {
 } from './types/domain';
 import { StorageService, migrateSettings } from './services/storageService';
 import { FirebaseSyncService, COST_COLLECTIONS } from './services/firebaseSyncService';
+import { INITIAL_RICE_NOODLE_PORTIONS } from './data/initialData';
 import { subscribeCollection } from '../data/db';
 import { DailySummaryDoc } from '../types';
 import {
@@ -69,6 +72,8 @@ import {
   CentralRecipeOriginPage,
   CentralRecipeTarget,
   getCentralRecipeOriginLabel,
+  syncBaseRecipeToLinkedMenus,
+  detachBaseRecipeFromMenus,
 } from './utils/centralRecipeNav';
 
 export type CostingTabId =
@@ -138,6 +143,10 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const [employees, setEmployees] = useState<CostEmployee[]>(() => StorageService.getEmployees());
   const [dailySales, setDailySales] = useState<DailySalesRecord[]>(() => StorageService.getDailySales());
   const [stockCounts, setStockCounts] = useState<StockCountSnapshot[]>(() => StorageService.getStockCounts());
+  const [baseRecipes, setBaseRecipes] = useState<CentralBaseRecipe[]>(() => StorageService.getBaseRecipes());
+  const [riceNoodlePortions, setRiceNoodlePortions] = useState<RiceNoodlePortion[]>(() =>
+    StorageService.getRiceNoodlePortions()
+  );
   const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(DEFAULT_SALES_CHANNELS);
 
   const [recipeNavTarget, setRecipeNavTarget] = useState<{
@@ -380,6 +389,56 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             StorageService.saveStockCounts(items);
           },
           (err) => setCloudError(err.message)
+        ),
+        FirebaseSyncService.subscribeUserCollection<CentralBaseRecipe>(
+          user.uid,
+          COST_COLLECTIONS.BASE_RECIPES,
+          (items) => {
+            const sorted = [...items].sort(
+              (a, b) =>
+                (a.displayOrder ?? Number.MAX_SAFE_INTEGER) -
+                  (b.displayOrder ?? Number.MAX_SAFE_INTEGER) ||
+                String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+            );
+            setBaseRecipes(sorted);
+            StorageService.saveBaseRecipes(sorted);
+          },
+          (err) => setCloudError(err.message)
+        ),
+        FirebaseSyncService.subscribeUserCollection<RiceNoodlePortion>(
+          user.uid,
+          COST_COLLECTIONS.RICE_NOODLE_PORTIONS,
+          (items) => {
+            if (items.length === 0) {
+              try {
+                const seededKey = `tonys_rn_cloud_seeded_${user.uid}`;
+                if (typeof localStorage !== 'undefined' && !localStorage.getItem(seededKey)) {
+                  localStorage.setItem(seededKey, '1');
+                  const seedList = StorageService.getRiceNoodlePortions();
+                  const initial = seedList.length > 0 ? seedList : INITIAL_RICE_NOODLE_PORTIONS;
+                  if (initial.length > 0) {
+                    setRiceNoodlePortions(initial);
+                    StorageService.saveRiceNoodlePortions(initial);
+                    FirebaseSyncService.batchSaveUser(
+                      user.uid,
+                      COST_COLLECTIONS.RICE_NOODLE_PORTIONS,
+                      initial
+                    );
+                    return;
+                  }
+                }
+              } catch {}
+            } else {
+              try {
+                if (typeof localStorage !== 'undefined') {
+                  localStorage.setItem(`tonys_rn_cloud_seeded_${user.uid}`, '1');
+                }
+              } catch {}
+            }
+            setRiceNoodlePortions(items);
+            StorageService.saveRiceNoodlePortions(items);
+          },
+          (err) => setCloudError(err.message)
         )
       );
 
@@ -416,6 +475,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   useEffect(() => { StorageService.saveEmployees(employees); }, [employees]);
   useEffect(() => { StorageService.saveDailySales(dailySales); }, [dailySales]);
   useEffect(() => { StorageService.saveStockCounts(stockCounts); }, [stockCounts]);
+  useEffect(() => { StorageService.saveBaseRecipes(baseRecipes); }, [baseRecipes]);
+  useEffect(() => { StorageService.saveRiceNoodlePortions(riceNoodlePortions); }, [riceNoodlePortions]);
 
   const menuNamesMap = new Map<string, string>();
   menus.forEach((m) => {
@@ -639,6 +700,74 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     }
   };
 
+  const handleSaveBaseRecipe = (recipe: CentralBaseRecipe) => {
+    setBaseRecipes((prev) => {
+      const exists = prev.some((r) => r.id === recipe.id);
+      const next = exists
+        ? prev.map((r) => (r.id === recipe.id ? recipe : r))
+        : [...prev, recipe];
+      StorageService.saveBaseRecipes(next);
+      return next;
+    });
+    FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.BASE_RECIPES, recipe.id, recipe);
+
+    // Automatically sync any menu variants explicitly linked to this central base recipe
+    const { updatedMenus, changedMenus } = syncBaseRecipeToLinkedMenus(menus, recipe);
+    if (changedMenus.length > 0) {
+      handleBatchUpdateMenus(updatedMenus);
+    }
+  };
+
+  const handleDeleteBaseRecipe = (recipeId: string) => {
+    setBaseRecipes((prev) => {
+      const next = prev.filter((r) => r.id !== recipeId);
+      StorageService.saveBaseRecipes(next);
+      return next;
+    });
+    FirebaseSyncService.deleteUserDoc(user.uid, COST_COLLECTIONS.BASE_RECIPES, recipeId);
+
+    const { updatedMenus, changedMenus } = detachBaseRecipeFromMenus(menus, recipeId);
+    if (changedMenus.length > 0) {
+      handleBatchUpdateMenus(updatedMenus);
+    }
+  };
+
+  const handleSaveRiceNoodlePortion = (portion: RiceNoodlePortion) => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(`tonys_rn_cloud_seeded_${user.uid}`, '1');
+      }
+    } catch {}
+    setRiceNoodlePortions((prev) => {
+      const exists = prev.some((p) => p.id === portion.id);
+      const next = exists
+        ? prev.map((p) => (p.id === portion.id ? portion : p))
+        : [...prev, portion];
+      StorageService.saveRiceNoodlePortions(next);
+      return next;
+    });
+    FirebaseSyncService.saveUserDoc(
+      user.uid,
+      COST_COLLECTIONS.RICE_NOODLE_PORTIONS,
+      portion.id,
+      portion
+    );
+  };
+
+  const handleDeleteRiceNoodlePortion = (portionId: string) => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(`tonys_rn_cloud_seeded_${user.uid}`, '1');
+      }
+    } catch {}
+    setRiceNoodlePortions((prev) => {
+      const next = prev.filter((p) => p.id !== portionId);
+      StorageService.saveRiceNoodlePortions(next);
+      return next;
+    });
+    FirebaseSyncService.deleteUserDoc(user.uid, COST_COLLECTIONS.RICE_NOODLE_PORTIONS, portionId);
+  };
+
   const handleSavePurchase = (purchase: PurchaseRecord) => {
     const ing = ingredients.find((i) => i.id === purchase.ingredientId);
     const enrichedPurchase: PurchaseRecord = {
@@ -783,6 +912,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
     setEmployees(StorageService.getEmployees());
     setDailySales(StorageService.getDailySales());
     setStockCounts(StorageService.getStockCounts());
+    setBaseRecipes(StorageService.getBaseRecipes());
+    setRiceNoodlePortions(StorageService.getRiceNoodlePortions());
   };
 
   const handleNavigateToRecipeBuilder = (
@@ -928,6 +1059,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             menus={menus}
             ingredients={ingredients}
             sauces={sauces}
+            baseRecipes={baseRecipes}
             settings={settings}
             lang={lang}
             initialServingMode="ON_RICE"
@@ -946,6 +1078,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             menus={menus}
             ingredients={ingredients}
             sauces={sauces}
+            baseRecipes={baseRecipes}
             settings={settings}
             lang={lang}
             initialServingMode="A_LA_CARTE"
@@ -978,6 +1111,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             menus={menus}
             ingredients={ingredients}
             sauces={sauces}
+            baseRecipes={baseRecipes}
+            riceNoodlePortions={riceNoodlePortions}
             settings={settings}
             lang={lang}
             initialVariantId={recipeNavTarget?.variantId}
@@ -996,6 +1131,10 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             onSaveVariantRecipe={handleSaveVariantRecipe}
             onSaveSauce={handleSaveSauce}
             onSaveMenu={handleSaveMenu}
+            onSaveBaseRecipe={handleSaveBaseRecipe}
+            onDeleteBaseRecipe={handleDeleteBaseRecipe}
+            onSaveRiceNoodlePortion={handleSaveRiceNoodlePortion}
+            onDeleteRiceNoodlePortion={handleDeleteRiceNoodlePortion}
           />
         )}
 

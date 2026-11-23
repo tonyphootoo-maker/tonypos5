@@ -172,7 +172,47 @@ export interface MenuVariant {
   active: boolean;
   isOutOfStock?: boolean; // POS availability flag: out of stock in kitchen
   availableChannels?: string[]; // e.g. ['DINE_IN', 'TAKEAWAY', 'GRAB', 'LINEMAN']
+  baseRecipeId?: string; // Linked user-created standalone CentralBaseRecipe ID
   isReviewRequired?: boolean;
+}
+
+export interface CentralBaseRecipe {
+  id: string;
+  name: string;
+  thaiName?: string;
+  englishName?: string;
+  englishNameManual?: boolean;
+  description?: string;
+  items: RecipeItem[];
+  packagingCost?: number;
+  packagingItems?: PackagingLineItem[];
+  active: boolean;
+  displayOrder?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface RiceNoodlePortion {
+  id: string;
+  name: string;
+  nameEn: string;
+  type: string;
+  typeEn: string;
+  linkedIngredientId?: string;
+  rawIngredientName: string;
+  rawIngredientNameEn: string;
+  rawPurchaseCost: string;
+  rawPurchaseCostEn: string;
+  cookingYield: string;
+  cookingYieldEn: string;
+  yieldPercent?: number;
+  portionGram: number;
+  costPerPortion: number;
+  dishesUsing: string[];
+  dishesUsingEn: string[];
+  active?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface MenuItem {
@@ -628,6 +668,8 @@ export interface AppBackupPackage {
     employees?: Employee[];
     packagingItems?: PackagingItem[];
     stockCounts?: StockCountSnapshot[];
+    baseRecipes?: CentralBaseRecipe[];
+    riceNoodlePortions?: RiceNoodlePortion[];
   };
 }
 

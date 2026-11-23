@@ -22,7 +22,6 @@ import {
 import { resolveCentralRecipeMenuTarget } from '../utils/centralRecipeNav';
 import {
   MenuItem,
-  MenuVariant,
   Ingredient,
   Sauce,
   RecipeItem,
@@ -30,7 +29,10 @@ import {
   RestaurantSettings,
   PackagingLineItem,
   UnitType,
+  CentralBaseRecipe,
+  RiceNoodlePortion,
 } from '../types';
+import { INITIAL_RICE_NOODLE_PORTIONS } from '../data/initialData';
 import {
   calculateVariantCostBreakdown,
   calculateSauceCost,
@@ -50,85 +52,6 @@ import {
 } from '../../hooks/useDebouncedThaiTranslation';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { NumericInput } from './common/NumericInput';
-
-// Helper to determine if a recipe line item is a variant's protein/meat
-const isProteinItem = (it: RecipeItem, proteinType?: string): boolean => {
-  if (
-    it.proteinCategory === 'SHRIMP' ||
-    it.proteinCategory === 'SQUID' ||
-    it.proteinCategory === 'PORK' ||
-    it.proteinCategory === 'CHICKEN' ||
-    it.proteinCategory === 'BEEF' ||
-    it.proteinCategory === 'OTHER'
-  ) {
-    return true;
-  }
-
-  if (
-    it.type === 'SAUCE' ||
-    it.ingredientType === 'SAUCE' ||
-    it.type === 'PACKAGING' ||
-    it.ingredientType === 'PACKAGING' ||
-    it.type === 'PREPARED_ITEM' ||
-    it.ingredientType === 'PREPARED_ITEM'
-  ) {
-    return false;
-  }
-
-  const name = (it.name || '').trim().toLowerCase();
-
-  // Exclude seasonings and base ingredients even if their name contains words like ปลา, ไก่, หมู
-  if (
-    name.includes('น้ำปลา') ||
-    name.includes('น้ำมัน') ||
-    name.includes('ซอส') ||
-    name.includes('ผง') ||
-    name.includes('ซีอิ๊ว') ||
-    name.includes('กะปิ') ||
-    name.includes('กุ้งแห้ง') ||
-    name.includes('ใบ') ||
-    name.includes('พริก') ||
-    name.includes('กระเทียม') ||
-    name.includes('หอม') ||
-    name.includes('ไข่') ||
-    name.includes('ผัก') ||
-    name.includes('น้ำตาล') ||
-    name.includes('เกลือ') ||
-    name.includes('ข้าว')
-  ) {
-    return false;
-  }
-
-  // Specific raw protein identifiers
-  if (
-    name.includes('หมูหมัก') ||
-    name.includes('หมูบด') ||
-    name.includes('หมูสับ') ||
-    name.includes('หมูกรอบ') ||
-    name.includes('เนื้อไก่') ||
-    name.includes('อกไก่') ||
-    name.includes('สะโพกไก่') ||
-    name.includes('ไก่ชิ้น') ||
-    name.includes('เนื้อวัว') ||
-    name.includes('เนื้อสับ') ||
-    name.includes('เนื้อสไลซ์') ||
-    name.includes('กุ้งสด') ||
-    name.includes('ปลาหมึก') ||
-    name.includes('ไส้กรอก') ||
-    name.includes('เนื้อปลา')
-  ) {
-    return true;
-  }
-
-  if (proteinType && proteinType.trim()) {
-    const pType = proteinType.trim().toLowerCase();
-    if (name === pType || name.startsWith(pType)) {
-      return true;
-    }
-  }
-
-  return false;
-};
 
 // Presets for Packaging & Side Dishes in Central Recipe Repository
 interface PresetItem {
@@ -162,6 +85,8 @@ interface RecipeBuilderViewProps {
   menus: MenuItem[];
   ingredients: Ingredient[];
   sauces: Sauce[];
+  baseRecipes?: CentralBaseRecipe[];
+  riceNoodlePortions?: RiceNoodlePortion[];
   settings: RestaurantSettings;
   lang?: 'th' | 'en';
   initialVariantId?: string;
@@ -174,12 +99,18 @@ interface RecipeBuilderViewProps {
   onSaveVariantRecipe: (menuId: string, variantId: string, recipeItems: RecipeItem[]) => void;
   onSaveSauce?: (sauce: Sauce) => void;
   onSaveMenu?: (menu: MenuItem) => void;
+  onSaveBaseRecipe?: (recipe: CentralBaseRecipe) => void;
+  onDeleteBaseRecipe?: (recipeId: string) => void;
+  onSaveRiceNoodlePortion?: (portion: RiceNoodlePortion) => void;
+  onDeleteRiceNoodlePortion?: (portionId: string) => void;
 }
 
 export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   menus,
   ingredients,
   sauces,
+  baseRecipes: propBaseRecipes,
+  riceNoodlePortions: propRiceNoodlePortions,
   settings,
   lang: propLang,
   initialVariantId,
@@ -192,7 +123,14 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   onSaveVariantRecipe,
   onSaveSauce,
   onSaveMenu,
+  onSaveBaseRecipe,
+  onDeleteBaseRecipe,
+  onSaveRiceNoodlePortion,
+  onDeleteRiceNoodlePortion,
 }) => {
+  void calculateVariantCostBreakdown;
+  void onSaveVariantRecipe;
+  void onSaveMenu;
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
   // 3 Primary Tabs
@@ -214,28 +152,43 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     [sauces]
   );
 
-  // --- TAB 1: CENTRAL BASE RECIPES (คลังสูตรอาหารกลาง) ---
-  const [selectedMenuId, setSelectedMenuId] = useState<string>(() => {
+  // --- TAB 1: STANDALONE CENTRAL BASE RECIPES (คลังสูตรอาหารกลางที่สร้างโดยผู้ใช้) ---
+  const [localFallbackBaseRecipes, setLocalFallbackBaseRecipes] = useState<CentralBaseRecipe[]>([]);
+  const baseRecipes = propBaseRecipes ?? localFallbackBaseRecipes;
+
+  const [selectedBaseRecipeId, setSelectedBaseRecipeId] = useState<string>(() => {
     const resolved = resolveCentralRecipeMenuTarget(menus, {
       variantId: initialVariantId,
       menuId: initialMenuId,
     });
-    if (resolved) return resolved.menu.id;
-    return menus[0]?.id || '';
+    const linkedBaseId = resolved?.variant?.baseRecipeId;
+    if (linkedBaseId && (propBaseRecipes || []).some((r) => r.id === linkedBaseId)) {
+      return linkedBaseId;
+    }
+    return (propBaseRecipes || [])[0]?.id || '';
   });
 
-  const currentMenu = useMemo(() => {
-    return menus.find((m) => m.id === selectedMenuId) || menus[0];
-  }, [menus, selectedMenuId]);
+  const currentBaseRecipe = useMemo(() => {
+    if (baseRecipes.length === 0) return null;
+    return baseRecipes.find((r) => r.id === selectedBaseRecipeId) || baseRecipes[0];
+  }, [baseRecipes, selectedBaseRecipeId]);
 
   const [localBaseItems, setLocalBaseItems] = useState<RecipeItem[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
   const [showReturnUnsavedConfirm, setShowReturnUnsavedConfirm] = useState(false);
-  const lastLoadedMenuIdRef = useRef<string>('');
+  const lastLoadedBaseRecipeIdRef = useRef<string>('');
   const appliedTargetKeyRef = useRef<string | null>(null);
   const onTargetAppliedRef = useRef(onTargetApplied);
   onTargetAppliedRef.current = onTargetApplied;
+
+  // Create / Rename modal for standalone Central Base Recipe
+  const [isBaseRecipeMetaModalOpen, setIsBaseRecipeMetaModalOpen] = useState(false);
+  const [editingBaseRecipeMeta, setEditingBaseRecipeMeta] = useState<Partial<CentralBaseRecipe> | null>(null);
+  const [baseRecipeMetaError, setBaseRecipeMetaError] = useState<string | null>(null);
+  const prevBaseRecipeThaiRef = useRef<string>('');
+  const baseRecipeTranslationScheduler = useDebouncedTranslationScheduler(600);
+  const [baseRecipeToDelete, setBaseRecipeToDelete] = useState<CentralBaseRecipe | null>(null);
 
   useEffect(() => {
     const navKey =
@@ -258,84 +211,49 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     });
     if (resolved) {
       appliedTargetKeyRef.current = navKey;
-      setSelectedMenuId(resolved.menu.id);
+      const linkedId = resolved.variant?.baseRecipeId;
+      if (linkedId && baseRecipes.some((r) => r.id === linkedId)) {
+        setSelectedBaseRecipeId(linkedId);
+      }
       setActiveTab('FOOD');
       setShowReturnUnsavedConfirm(false);
       onTargetAppliedRef.current?.();
     }
-  }, [initialVariantId, initialMenuId, targetNonce, menus]);
+  }, [initialVariantId, initialMenuId, targetNonce, menus, baseRecipes]);
 
-  // Load base items whenever selectedMenuId changes
+  // Keep selectedBaseRecipeId pointing to a valid card if cards are added/deleted
   useEffect(() => {
-    if (currentMenu) {
-      const isSwitchingMenu = lastLoadedMenuIdRef.current !== currentMenu.id;
-      // Do not overwrite user's unsaved edits if staying on the same menu
-      if (!isSwitchingMenu && hasUnsavedChanges) {
-        return;
-      }
-
-      if (isSwitchingMenu) {
-        lastLoadedMenuIdRef.current = currentMenu.id;
-      }
-
-      const firstVariant = currentMenu.variants[0];
-      const seenItemIds = new Set<string>();
-      const items: RecipeItem[] = [];
-
-      if (firstVariant && firstVariant.recipeItems && firstVariant.recipeItems.length > 0) {
-        firstVariant.recipeItems.forEach((it, idx) => {
-          if (!isProteinItem(it, firstVariant.proteinType)) {
-            const safeId = it.id || `item_${idx}_${it.ingredientId}`;
-            const isDuplicate = seenItemIds.has(safeId);
-            if (!isDuplicate) {
-              seenItemIds.add(safeId);
-              items.push({ ...it, id: safeId });
-            }
-          }
-        });
-      }
-
-      // If packaging items exist on variant and not yet in items as PACKAGING:
-      if (firstVariant?.packagingItems && firstVariant.packagingItems.length > 0) {
-        firstVariant.packagingItems.forEach((pkg) => {
-          if (!items.some((it) => it.name === pkg.name)) {
-            items.push({
-              id: `pkg_${pkg.id}`,
-              type: 'PACKAGING',
-              ingredientType: 'PACKAGING',
-              ingredientId: pkg.id,
-              name: pkg.name,
-              quantity: 1,
-              unit: 'ชิ้น',
-              calculatedUnitCost: pkg.cost,
-              calculatedLineCost: pkg.cost,
-            });
-          }
-        });
-      } else if (
-        (!firstVariant?.recipeItems || firstVariant.recipeItems.length === 0) &&
-        !items.some((it) => it.type === 'PACKAGING' || it.ingredientType === 'PACKAGING')
-      ) {
-        items.push({
-          id: `pkg_default_box`,
-          type: 'PACKAGING',
-          ingredientType: 'PACKAGING',
-          ingredientId: 'pkg_kraft_box',
-          name: 'กล่องกระดาษคราฟท์อาหารรักษ์โลก',
-          quantity: 1,
-          unit: 'ชิ้น',
-          calculatedUnitCost: 2.50,
-          calculatedLineCost: 2.50,
-        });
-      }
-
-      // Only set localBaseItems if switching to a new menu or initially empty
-      if (isSwitchingMenu || localBaseItems.length === 0) {
-        setLocalBaseItems(items);
+    if (baseRecipes.length === 0) {
+      if (selectedBaseRecipeId !== '') setSelectedBaseRecipeId('');
+      if (lastLoadedBaseRecipeIdRef.current !== '') {
+        lastLoadedBaseRecipeIdRef.current = '';
+        setLocalBaseItems([]);
         setHasUnsavedChanges(false);
       }
+      return;
     }
-  }, [selectedMenuId, currentMenu, hasUnsavedChanges, localBaseItems.length]);
+    if (!baseRecipes.some((r) => r.id === selectedBaseRecipeId)) {
+      setSelectedBaseRecipeId(baseRecipes[0].id);
+    }
+  }, [baseRecipes, selectedBaseRecipeId]);
+
+  // Load items whenever selected standalone CentralBaseRecipe changes
+  useEffect(() => {
+    if (!currentBaseRecipe) return;
+    const isSwitchingRecipe = lastLoadedBaseRecipeIdRef.current !== currentBaseRecipe.id;
+    if (!isSwitchingRecipe && hasUnsavedChanges) {
+      return;
+    }
+    if (isSwitchingRecipe) {
+      lastLoadedBaseRecipeIdRef.current = currentBaseRecipe.id;
+    }
+    const items = (currentBaseRecipe.items || []).map((it, idx) => ({
+      ...it,
+      id: it.id || `base_item_${idx}_${it.ingredientId || Date.now()}`,
+    }));
+    setLocalBaseItems(items);
+    setHasUnsavedChanges(false);
+  }, [currentBaseRecipe, hasUnsavedChanges]);
 
   // Calculate unit cost and line cost for each item with unit conversion
   const getItemCost = (item: RecipeItem) => {
@@ -391,18 +309,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     };
   };
 
-  const totalBaseIngredientsCost = useMemo(() => {
-    return localBaseItems
-      .filter((it) => it.type === 'INGREDIENT' || (!it.type && it.ingredientType !== 'SAUCE' && it.ingredientType !== 'PACKAGING' && it.ingredientType !== 'PREPARED_ITEM'))
-      .reduce((sum, it) => sum + getItemCost(it).lineCost, 0);
-  }, [localBaseItems, ingredientsMap, saucesMap]);
-
-  const totalSauceCost = useMemo(() => {
-    return localBaseItems
-      .filter((it) => it.type === 'SAUCE' || it.ingredientType === 'SAUCE')
-      .reduce((sum, it) => sum + getItemCost(it).lineCost, 0);
-  }, [localBaseItems, ingredientsMap, saucesMap]);
-
   const totalSideDishCost = useMemo(() => {
     return localBaseItems
       .filter((it) => it.type === 'PREPARED_ITEM' || it.ingredientType === 'PREPARED_ITEM')
@@ -434,9 +340,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
         it.ingredientType === 'PREPARED_ITEM'
     );
   }, [localBaseItems]);
-
-  const totalBaseRecipeCost =
-    totalBaseIngredientsCost + totalSauceCost + totalSideDishCost + totalPackagingCost;
 
   const handleRemoveBaseItemById = (itemId: string) => {
     const updated = localBaseItems.filter((it) => it.id !== itemId);
@@ -767,8 +670,140 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     setHasUnsavedChanges(true);
   };
 
+  const handleOpenCreateBaseRecipe = () => {
+    baseRecipeTranslationScheduler.cancelAll();
+    prevBaseRecipeThaiRef.current = '';
+    setBaseRecipeMetaError(null);
+    setEditingBaseRecipeMeta({
+      id: `base_recipe_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: '',
+      thaiName: '',
+      englishName: '',
+      englishNameManual: false,
+      description: '',
+      items: [],
+      active: true,
+      displayOrder: baseRecipes.length + 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    setIsBaseRecipeMetaModalOpen(true);
+  };
+
+  const handleOpenEditBaseRecipeMeta = (recipe: CentralBaseRecipe) => {
+    baseRecipeTranslationScheduler.cancelAll();
+    setBaseRecipeMetaError(null);
+    const thName = recipe.thaiName || recipe.name || '';
+    prevBaseRecipeThaiRef.current = thName;
+    const storedEn = (recipe.englishName || '').trim();
+    const isManual = Boolean(recipe.englishNameManual);
+    setEditingBaseRecipeMeta({
+      ...recipe,
+      name: thName,
+      thaiName: thName,
+      englishName:
+        isManual && storedEn && !containsThaiCharacters(storedEn)
+          ? storedEn
+          : storedEn && !containsThaiCharacters(storedEn)
+          ? storedEn
+          : translateThaiToEnglish(thName),
+      englishNameManual: isManual,
+    });
+    setIsBaseRecipeMetaModalOpen(true);
+  };
+
+  const handleSaveBaseRecipeMetaModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBaseRecipeMeta) return;
+    const trimmedTh = (editingBaseRecipeMeta.name || '').trim();
+    if (!trimmedTh) {
+      setBaseRecipeMetaError(
+        lang === 'en' ? 'Please enter a base recipe name.' : 'กรุณาระบุชื่อสูตรอาหารกลาง'
+      );
+      return;
+    }
+    baseRecipeTranslationScheduler.cancelAll();
+    const isManual = Boolean(editingBaseRecipeMeta.englishNameManual);
+    const trimmedEn = isManual
+      ? (editingBaseRecipeMeta.englishName || '').trim()
+      : computeAutoEnglishName({
+          previousThai: prevBaseRecipeThaiRef.current || trimmedTh,
+          nextThai: trimmedTh,
+          currentEnglish: editingBaseRecipeMeta.englishName || '',
+          isManuallyEdited: false,
+        }).trim() || translateThaiToEnglish(trimmedTh);
+
+    const existing = baseRecipes.find((r) => r.id === editingBaseRecipeMeta.id);
+    const currentItems =
+      existing && currentBaseRecipe?.id === existing.id && hasUnsavedChanges
+        ? localBaseItems
+        : existing?.items || editingBaseRecipeMeta.items || [];
+
+    const recipeId =
+      editingBaseRecipeMeta.id ||
+      `base_recipe_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const finalRecipe: CentralBaseRecipe = {
+      id: recipeId,
+      name: trimmedTh,
+      thaiName: trimmedTh,
+      englishName: trimmedEn,
+      englishNameManual: isManual,
+      description: editingBaseRecipeMeta.description?.trim() || undefined,
+      items: currentItems,
+      packagingCost: existing?.packagingCost ?? editingBaseRecipeMeta.packagingCost ?? 0,
+      packagingItems: existing?.packagingItems ?? editingBaseRecipeMeta.packagingItems ?? [],
+      active: editingBaseRecipeMeta.active !== false,
+      displayOrder: editingBaseRecipeMeta.displayOrder ?? baseRecipes.length + 1,
+      createdAt: existing?.createdAt || editingBaseRecipeMeta.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (onSaveBaseRecipe) {
+      onSaveBaseRecipe(finalRecipe);
+    } else {
+      setLocalFallbackBaseRecipes((prev) =>
+        prev.some((r) => r.id === finalRecipe.id)
+          ? prev.map((r) => (r.id === finalRecipe.id ? finalRecipe : r))
+          : [...prev, finalRecipe]
+      );
+    }
+    if (trimmedTh && trimmedEn) {
+      learnShopTranslation(trimmedTh, trimmedEn, { isManual });
+    }
+    setSelectedBaseRecipeId(finalRecipe.id);
+    lastLoadedBaseRecipeIdRef.current = finalRecipe.id;
+    setLocalBaseItems(finalRecipe.items || []);
+    setHasUnsavedChanges(false);
+    setBaseRecipeMetaError(null);
+    setIsBaseRecipeMetaModalOpen(false);
+  };
+
+  const handleConfirmDeleteBaseRecipe = () => {
+    if (!baseRecipeToDelete) return;
+    const targetId = baseRecipeToDelete.id;
+    if (onDeleteBaseRecipe) {
+      onDeleteBaseRecipe(targetId);
+    } else {
+      setLocalFallbackBaseRecipes((prev) => prev.filter((r) => r.id !== targetId));
+    }
+    setBaseRecipeToDelete(null);
+  };
+
+  const handleSelectBaseRecipeCard = (recipe: CentralBaseRecipe) => {
+    setSelectedBaseRecipeId(recipe.id);
+    lastLoadedBaseRecipeIdRef.current = recipe.id;
+    setLocalBaseItems(
+      (recipe.items || []).map((it, idx) => ({
+        ...it,
+        id: it.id || `base_item_${idx}_${it.ingredientId || Date.now()}`,
+      }))
+    );
+    setHasUnsavedChanges(false);
+  };
+
   const handleSaveBaseRecipe = () => {
-    if (!currentMenu) return;
+    if (!currentBaseRecipe) return;
 
     const packagingCost = totalPackagingCost;
     const packagingItems: PackagingLineItem[] = localBaseItems
@@ -788,62 +823,23 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       };
     });
 
-    const updatedVariants = currentMenu.variants.map((v) => {
-      // Keep protein item(s) from existing variant
-      const proteinItems = (v.recipeItems || []).filter((it) =>
-        isProteinItem(it, v.proteinType)
-      );
-
-      // If no protein items matched, fallback to keeping the first item only if not already in enrichedBaseItems
-      let finalProteins = proteinItems;
-      if (finalProteins.length === 0 && v.recipeItems && v.recipeItems.length > 0) {
-        const candidate = v.recipeItems[0];
-        const alreadyInBase = enrichedBaseItems.some(
-          (b) => b.id === candidate.id || b.name === candidate.name
-        );
-        if (!alreadyInBase && isProteinItem(candidate, v.proteinType)) {
-          finalProteins = [candidate];
-        }
-      }
-
-      // Ensure every item in combinedRecipeItems has a unique ID
-      const seenVariantItemIds = new Set<string>();
-      const combinedRecipeItems: RecipeItem[] = [];
-
-      for (const item of [...finalProteins, ...enrichedBaseItems]) {
-        let itemId = item.id;
-        if (!itemId || seenVariantItemIds.has(itemId)) {
-          itemId = `${itemId || 'item'}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        }
-        seenVariantItemIds.add(itemId);
-        combinedRecipeItems.push({
-          ...item,
-          id: itemId,
-        });
-      }
-
-      return {
-        ...v,
-        recipeItems: combinedRecipeItems,
-        packagingCost: packagingCost,
-        packagingItems: packagingItems,
-      };
-    });
-
-    const updatedMenu: MenuItem = {
-      ...currentMenu,
-      variants: updatedVariants,
+    const updatedRecipe: CentralBaseRecipe = {
+      ...currentBaseRecipe,
+      items: enrichedBaseItems,
+      packagingCost,
+      packagingItems,
       updatedAt: new Date().toISOString(),
     };
 
-    if (onSaveMenu) {
-      onSaveMenu(updatedMenu);
-    } else if (onSaveVariantRecipe) {
-      updatedVariants.forEach((v) => {
-        onSaveVariantRecipe(currentMenu.id, v.id, v.recipeItems);
-      });
+    if (onSaveBaseRecipe) {
+      onSaveBaseRecipe(updatedRecipe);
+    } else {
+      setLocalFallbackBaseRecipes((prev) =>
+        prev.map((r) => (r.id === updatedRecipe.id ? updatedRecipe : r))
+      );
     }
 
+    setLocalBaseItems(enrichedBaseItems);
     setHasUnsavedChanges(false);
     setSaveSuccessNotice(true);
     setTimeout(() => setSaveSuccessNotice(false), 3500);
@@ -982,94 +978,219 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     );
   }, [ingredients]);
 
-  // Standard portion mapping for Tony's Kitchen
-  const standardPortions = [
-    {
-      id: 'portion_rice',
-      name: 'ข้าวสวยหอมมะลิ (จานหลัก 200g)',
-      nameEn: 'Steamed Jasmine Rice (Main Dish 200g)',
+  const [localFallbackPortions, setLocalFallbackPortions] = useState<RiceNoodlePortion[]>(
+    () => INITIAL_RICE_NOODLE_PORTIONS
+  );
+  const portionRecipes = propRiceNoodlePortions ?? localFallbackPortions;
+
+  const [isPortionModalOpen, setIsPortionModalOpen] = useState(false);
+  const [editingPortion, setEditingPortion] = useState<Partial<RiceNoodlePortion> | null>(null);
+  const [portionFormError, setPortionFormError] = useState<string | null>(null);
+  const [portionToDelete, setPortionToDelete] = useState<RiceNoodlePortion | null>(null);
+  const prevPortionThaiRef = useRef<string>('');
+  const portionTranslationScheduler = useDebouncedTranslationScheduler(600);
+
+  const handleOpenAddPortion = () => {
+    portionTranslationScheduler.cancelAll();
+    prevPortionThaiRef.current = '';
+    setPortionFormError(null);
+    setEditingPortion({
+      id: `portion_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: '',
+      nameEn: '',
       type: 'ข้าว',
       typeEn: 'Rice',
-      rawIngredientName: 'ข้าวสารหอมมะลิ',
-      rawIngredientNameEn: 'Jasmine Rice (Uncooked)',
-      rawPurchaseCost: '฿42 / กก.',
-      rawPurchaseCostEn: '฿42 / kg',
-      cookingYield: '220% (ขยาย 2.2 เท่า)',
-      cookingYieldEn: '220% (2.2x expansion)',
-      portionGram: 200,
-      costPerPortion: 8.67,
-      dishesUsing: ['กะเพราทุกเมนู', 'หมูกระเทียม', 'ไก่ผัดพริกเผา'],
-      dishesUsingEn: ['All Holy Basil Dishes', 'Garlic Pork', 'Roasted Chili Paste Chicken'],
-    },
-    {
-      id: 'portion_padthai',
-      name: 'เส้นจันท์แช่น้ำ (ผัดไทย 150g)',
-      nameEn: 'Soaked Chantaburi Rice Noodles (Pad Thai 150g)',
-      type: 'เส้น',
-      typeEn: 'Noodles',
-      rawIngredientName: 'เส้นจันท์แห้ง',
-      rawIngredientNameEn: 'Dried Rice Noodles',
-      rawPurchaseCost: '฿55 / กก.',
-      rawPurchaseCostEn: '฿55 / kg',
-      cookingYield: '100% (แช่น้ำพร้อมผัด)',
-      cookingYieldEn: '100% (Soaked & ready to stir-fry)',
+      linkedIngredientId: '',
+      rawIngredientName: '',
+      rawIngredientNameEn: '',
+      rawPurchaseCost: '',
+      rawPurchaseCostEn: '',
+      cookingYield: '100%',
+      cookingYieldEn: '100%',
+      yieldPercent: 100,
       portionGram: 150,
-      costPerPortion: 8.25,
-      dishesUsing: ['ผัดไทยกุ้งสด', 'ผัดไทยโบราณ', 'ผัดไทยทะเล'],
-      dishesUsingEn: ['Pad Thai Shrimp', 'Classic Pad Thai', 'Pad Thai Seafood'],
-    },
-    {
-      id: 'portion_flat',
-      name: 'เส้นใหญ่สด (ผัดซีอิ๊ว/คั่วไก่ 180g)',
-      nameEn: 'Fresh Wide Rice Noodles (Pad See Ew 180g)',
-      type: 'เส้น',
-      typeEn: 'Noodles',
-      rawIngredientName: 'เส้นใหญ่ตลาด',
-      rawIngredientNameEn: 'Fresh Flat Noodles',
-      rawPurchaseCost: '฿35 / กก.',
-      rawPurchaseCostEn: '฿35 / kg',
-      cookingYield: '100% (คลี่เส้นพร้อมผัด)',
-      cookingYieldEn: '100% (Separated & ready)',
-      portionGram: 180,
-      costPerPortion: 6.30,
-      dishesUsing: ['ผัดซีอิ๊วหมู', 'ก๋วยเตี๋ยวคั่วไก่', 'ราดหน้า'],
-      dishesUsingEn: ['Pad See Ew Pork', 'Kuay Teow Kua Gai', 'Rad Na'],
-    },
-    {
-      id: 'portion_mama',
-      name: 'บะหมี่กึ่งสำเร็จรูป (มาม่า 1 ซอง 60g)',
-      nameEn: 'Instant Noodles (1 Pack 60g)',
-      type: 'เส้น',
-      typeEn: 'Noodles',
-      rawIngredientName: 'มาม่าแพ็ค',
-      rawIngredientNameEn: 'Instant Noodle Pack',
-      rawPurchaseCost: '฿6.00 / ซอง',
-      rawPurchaseCostEn: '฿6.00 / pack',
-      cookingYield: '100% (ลวกสุก)',
-      cookingYieldEn: '100% (Blanched)',
-      portionGram: 60,
-      costPerPortion: 6.00,
-      dishesUsing: ['มาม่าผัดขี้เมา', 'ต้มยำมาม่าหม้อไฟ', 'ยำมาม่ารวมมิตร'],
-      dishesUsingEn: ['Drunken Stir-Fried Mama', 'Tom Yum Mama Hot Pot', 'Spicy Mama Salad'],
-    },
-    {
-      id: 'portion_glass',
-      name: 'วุ้นเส้นสด (อบหม้อดิน/ผัด 100g)',
-      nameEn: 'Fresh Glass Noodles (100g)',
-      type: 'เส้น',
-      typeEn: 'Noodles',
-      rawIngredientName: 'วุ้นเส้นสดเกรด A',
-      rawIngredientNameEn: 'Fresh Grade-A Glass Noodles',
-      rawPurchaseCost: '฿65 / กก.',
-      rawPurchaseCostEn: '฿65 / kg',
-      cookingYield: '100% (แช่น้ำ)',
-      cookingYieldEn: '100% (Soaked)',
-      portionGram: 100,
-      costPerPortion: 6.50,
-      dishesUsing: ['กุ้งอบวุ้นเส้น', 'ยำวุ้นเส้นโบราณ', 'ต้มจืดวุ้นเส้น'],
-      dishesUsingEn: ['Baked Shrimp with Glass Noodles', 'Spicy Glass Noodle Salad', 'Clear Glass Noodle Soup'],
-    },
-  ];
+      costPerPortion: 0,
+      dishesUsing: [],
+      dishesUsingEn: [],
+      active: true,
+    });
+    setIsPortionModalOpen(true);
+  };
+
+  const handleOpenEditPortion = (portion: RiceNoodlePortion) => {
+    portionTranslationScheduler.cancelAll();
+    setPortionFormError(null);
+    const cloned: Partial<RiceNoodlePortion> = JSON.parse(JSON.stringify(portion));
+    prevPortionThaiRef.current = cloned.name || '';
+    if (!cloned.nameEn || containsThaiCharacters(cloned.nameEn)) {
+      cloned.nameEn = translateThaiToEnglish(cloned.name || '');
+    }
+    setEditingPortion(cloned);
+    setIsPortionModalOpen(true);
+  };
+
+  const handleLinkIngredientToPortion = (ingredientId: string) => {
+    setPortionFormError(null);
+    setEditingPortion((prev) => {
+      if (!prev) return prev;
+      if (!ingredientId) {
+        return { ...prev, linkedIngredientId: '' };
+      }
+      const ing = ingredientsMap.get(ingredientId);
+      if (!ing) {
+        return { ...prev, linkedIngredientId: ingredientId };
+      }
+      const gram = Number(prev.portionGram) > 0 ? Number(prev.portionGram) : 150;
+      const conv = convertUnit(gram, 'g', ing.usageUnit || ing.baseUnit || 'g');
+      const effQty = conv.success ? conv.convertedQuantity : gram;
+      const computedCost = Number(((ing.costPerBaseUnit || 0) * effQty).toFixed(2));
+      const yieldVal = Number(ing.yieldPercent) > 0 ? Number(ing.yieldPercent) : 100;
+      const priceLabel =
+        ing.purchasePrice && ing.purchaseQuantity
+          ? `฿${ing.purchasePrice} / ${ing.purchaseQuantity}${ing.purchaseUnit || 'g'}`
+          : prev.rawPurchaseCost || '';
+      const rawNameTh = ing.thaiName || ing.name;
+      const rawNameEn = ing.englishName || translateThaiToEnglish(rawNameTh);
+      const nextNameTh = prev.name?.trim() ? prev.name : `${rawNameTh} (${gram}g)`;
+      const nextNameEn =
+        prev.nameEn?.trim() && !containsThaiCharacters(prev.nameEn)
+          ? prev.nameEn
+          : `${rawNameEn} (${gram}g)`;
+      prevPortionThaiRef.current = nextNameTh;
+
+      return {
+        ...prev,
+        linkedIngredientId: ing.id,
+        name: nextNameTh,
+        nameEn: nextNameEn,
+        rawIngredientName: rawNameTh,
+        rawIngredientNameEn: rawNameEn,
+        rawPurchaseCost: priceLabel,
+        rawPurchaseCostEn: priceLabel,
+        yieldPercent: yieldVal,
+        cookingYield: `${yieldVal}%`,
+        cookingYieldEn: `${yieldVal}%`,
+        portionGram: gram,
+        costPerPortion: computedCost,
+      };
+    });
+  };
+
+  const handleSavePortionModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPortion || !editingPortion.name?.trim()) {
+      setPortionFormError(lang === 'en' ? 'Please enter a recipe name' : 'กรุณาระบุชื่อสูตรข้าว/เส้น');
+      return;
+    }
+    const portionGram = Number(editingPortion.portionGram);
+    if (!Number.isFinite(portionGram) || portionGram <= 0) {
+      setPortionFormError(
+        lang === 'en' ? 'Serving size must be greater than 0' : 'ขนาดเสิร์ฟต้องมากกว่า 0 กรัม'
+      );
+      return;
+    }
+    const costPerPortion = Number(editingPortion.costPerPortion);
+    if (!Number.isFinite(costPerPortion) || costPerPortion < 0) {
+      setPortionFormError(
+        lang === 'en' ? 'Cost per dish cannot be negative' : 'ต้นทุนต่อจานต้องไม่ติดลบ'
+      );
+      return;
+    }
+
+    portionTranslationScheduler.cancelAll();
+    const trimmedTh = editingPortion.name.trim();
+    const trimmedEn =
+      (editingPortion.nameEn || '').trim() && !containsThaiCharacters(editingPortion.nameEn || '')
+        ? (editingPortion.nameEn || '').trim()
+        : computeAutoEnglishName({
+            previousThai: prevPortionThaiRef.current || trimmedTh,
+            nextThai: trimmedTh,
+            currentEnglish: editingPortion.nameEn || '',
+            isManuallyEdited: false,
+          }).trim() || translateThaiToEnglish(trimmedTh);
+
+    const typeTh = (editingPortion.type || 'ข้าว').trim();
+    const typeEn =
+      editingPortion.typeEn?.trim() ||
+      (typeTh === 'ข้าว' ? 'Rice' : typeTh === 'เส้น' ? 'Noodles' : translateThaiToEnglish(typeTh));
+    const rawIngTh = (editingPortion.rawIngredientName || '').trim() || trimmedTh;
+    const rawIngEn =
+      (editingPortion.rawIngredientNameEn || '').trim() || translateThaiToEnglish(rawIngTh);
+    const yieldMatch = (editingPortion.cookingYield || '').match(/(\d+(?:\.\d+)?)/);
+    const parsedYield =
+      Number(editingPortion.yieldPercent) > 0
+        ? Number(editingPortion.yieldPercent)
+        : yieldMatch
+        ? parseFloat(yieldMatch[1])
+        : 100;
+
+    const dishesTh = (editingPortion.dishesUsing || []).map((d) => d.trim()).filter(Boolean);
+    const dishesEn =
+      (editingPortion.dishesUsingEn || []).length === dishesTh.length &&
+      (editingPortion.dishesUsingEn || []).every((d) => !containsThaiCharacters(d))
+        ? (editingPortion.dishesUsingEn || [])
+        : dishesTh.map((d) => translateThaiToEnglish(d));
+
+    const now = new Date().toISOString();
+    const finalPortion: RiceNoodlePortion = {
+      id:
+        editingPortion.id ||
+        `portion_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: trimmedTh,
+      nameEn: trimmedEn,
+      type: typeTh,
+      typeEn,
+      linkedIngredientId: editingPortion.linkedIngredientId || undefined,
+      rawIngredientName: rawIngTh,
+      rawIngredientNameEn: rawIngEn,
+      rawPurchaseCost: (editingPortion.rawPurchaseCost || '').trim() || '-',
+      rawPurchaseCostEn:
+        (editingPortion.rawPurchaseCostEn || '').trim() ||
+        (editingPortion.rawPurchaseCost || '').trim() ||
+        '-',
+      cookingYield: (editingPortion.cookingYield || '').trim() || `${parsedYield}%`,
+      cookingYieldEn:
+        (editingPortion.cookingYieldEn || '').trim() ||
+        (editingPortion.cookingYield || '').trim() ||
+        `${parsedYield}%`,
+      yieldPercent: parsedYield,
+      portionGram,
+      costPerPortion: Number(costPerPortion.toFixed(2)),
+      dishesUsing: dishesTh,
+      dishesUsingEn: dishesEn,
+      active: editingPortion.active !== false,
+      createdAt: editingPortion.createdAt || now,
+      updatedAt: now,
+    };
+
+    if (onSaveRiceNoodlePortion) {
+      onSaveRiceNoodlePortion(finalPortion);
+    } else {
+      setLocalFallbackPortions((prev) =>
+        prev.some((p) => p.id === finalPortion.id)
+          ? prev.map((p) => (p.id === finalPortion.id ? finalPortion : p))
+          : [...prev, finalPortion]
+      );
+    }
+    if (trimmedTh && trimmedEn) {
+      learnShopTranslation(trimmedTh, trimmedEn, { isManual: Boolean(editingPortion.nameEn?.trim()) });
+    }
+    setPortionFormError(null);
+    setIsPortionModalOpen(false);
+    setEditingPortion(null);
+  };
+
+  const handleConfirmDeletePortion = () => {
+    if (!portionToDelete) return;
+    const targetId = portionToDelete.id;
+    if (onDeleteRiceNoodlePortion) {
+      onDeleteRiceNoodlePortion(targetId);
+    } else {
+      setLocalFallbackPortions((prev) => prev.filter((p) => p.id !== targetId));
+    }
+    setPortionToDelete(null);
+  };
+
 
   return (
     <div className="space-y-5 pb-8">
@@ -1217,29 +1338,23 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       {/* ========================================================= */}
       {activeTab === 'FOOD' && (
         <div className="space-y-4">
-          {/* Base Recipe Selector Bar */}
+          {/* Toolbar & Action Header */}
           <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-3 flex-1 flex-wrap">
-              <span className="text-xs font-bold text-white/60 whitespace-nowrap">
-                {lang === 'en' ? 'Select Base Recipe:' : 'เลือกสูตรอาหารกลาง (Base Recipe):'}
-              </span>
-              <select
-                value={selectedMenuId}
-                onChange={(e) => setSelectedMenuId(e.target.value)}
-                className="bg-black/50 border border-white/15 px-3 py-2 rounded-xl text-xs font-bold text-white focus:outline-none focus:border-[#F27D26] max-w-md cursor-pointer"
-              >
-                {menus.map((m) => (
-                  <option key={m.id} value={m.id} className="bg-[#1a1a1a]">
-                    {lang === 'en'
-                      ? `Recipe: ${getLocalizedText(lang, m.thaiName || m.name, m.englishName)}`
-                      : `สูตร ${m.name}`}
-                  </option>
-                ))}
-              </select>
+            <div>
+              <h2 className="text-sm font-bold text-white">
+                {lang === 'en'
+                  ? 'User-Created Central Base Recipes'
+                  : 'คลังสูตรอาหารกลาง (สร้างและตั้งชื่อสูตรเอง)'}
+              </h2>
+              <p className="text-[11px] text-white/55 mt-0.5">
+                {lang === 'en'
+                  ? 'Click any compact recipe card below to customize ingredients, sauces, side dishes & packaging, then assign it from the Food Cost menu dropdown.'
+                  : 'กดเลือกการ์ดสูตรอาหารแบบย่อด้านล่างเพื่อปรับวัตถุดิบ ซอส เครื่องเคียง และแพ็คเกจจิ้ง แล้วนำไปเลือกใช้ในหน้าเมนูอาหารหลัก'}
+              </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              {hasUnsavedChanges && (
+            <div className="flex items-center gap-2 flex-wrap">
+              {hasUnsavedChanges && currentBaseRecipe && (
                 <span className="text-xs text-amber-400 font-semibold animate-pulse">
                   ● {lang === 'en' ? 'Unsaved changes' : 'มีการแก้ไขที่ยังไม่ได้บันทึก'}
                 </span>
@@ -1249,43 +1364,206 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   <CheckCircle2 className="w-3.5 h-3.5" />
                   <span>
                     {lang === 'en'
-                      ? 'Base recipe saved & synced to all protein options'
-                      : 'บันทึกสูตรกลางและซิงค์ตัวเลือกเนื้อสัตว์เรียบร้อยแล้ว'}
+                      ? 'Base recipe saved & synced'
+                      : 'บันทึกสูตรอาหารกลางและซิงค์เมนูที่เชื่อมไว้แล้ว'}
                   </span>
                 </span>
               )}
               <button
                 type="button"
-                onClick={handleSaveBaseRecipe}
-                disabled={!hasUnsavedChanges}
-                className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  hasUnsavedChanges
-                    ? 'bg-[#F27D26] hover:bg-[#d96817] text-black shadow-lg shadow-[#F27D26]/20'
-                    : 'bg-white/10 text-white/40 cursor-not-allowed'
-                }`}
+                onClick={handleOpenCreateBaseRecipe}
+                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
               >
-                <Save className="w-3.5 h-3.5" />
+                <Plus className="w-3.5 h-3.5 text-[#F27D26]" />
                 <span>
-                  {lang === 'en'
-                    ? 'Save Base Recipe (Sync to All Options)'
-                    : 'บันทึกสูตรอาหารกลาง (Sync ไปทุกเนื้อสัตว์)'}
+                  {lang === 'en' ? '+ Create Base Recipe' : '+ สร้างสูตรอาหารกลางใหม่'}
                 </span>
               </button>
+              {currentBaseRecipe && (
+                <button
+                  type="button"
+                  onClick={handleSaveBaseRecipe}
+                  disabled={!hasUnsavedChanges}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                    hasUnsavedChanges
+                      ? 'bg-[#F27D26] hover:bg-[#d96817] text-black shadow-lg shadow-[#F27D26]/20'
+                      : 'bg-white/10 text-white/40 cursor-not-allowed'
+                  }`}
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>
+                    {lang === 'en' ? 'Save Base Recipe' : 'บันทึกสูตรอาหารกลาง'}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Main Grid: Recipe Builder Left, Live Breakdown Right */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Left: Central Recipe Items Builder (2 cols) */}
-            <div className="lg:col-span-2 space-y-4">
+          {/* Compact Recipe Cards Grid (การ์ดสูตรอาหารแบบย่อ) */}
+          {baseRecipes.length === 0 ? (
+            <div className="bg-white/5 backdrop-blur-xl border border-dashed border-white/20 rounded-3xl p-8 text-center space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-[#F27D26]/15 border border-[#F27D26]/30 text-[#F27D26] flex items-center justify-center mx-auto">
+                <BookOpen className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-white">
+                  {lang === 'en'
+                    ? 'No central base recipes yet'
+                    : 'ยังไม่มีสูตรอาหารกลางในคลัง'}
+                </h3>
+                <p className="text-xs text-white/55 max-w-md mx-auto">
+                  {lang === 'en'
+                    ? 'Create your own standalone central base recipes here (independent of main menu names), then select them from the dropdown in Food Cost menus.'
+                    : 'สร้างสูตรอาหารกลางด้วยตัวเองได้ที่นี่ (แยกอิสระจากชื่อเมนูอาหารหลัก) แล้วนำไปเลือกใช้จากรายการในหน้าต้นทุนอาหาร'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenCreateBaseRecipe}
+                className="px-5 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl text-xs shadow-lg shadow-[#F27D26]/20 inline-flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>
+                  {lang === 'en' ? '+ Create First Base Recipe' : '+ สร้างสูตรอาหารกลางแรก'}
+                </span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {baseRecipes.map((recipe) => {
+                const isSelected = currentBaseRecipe?.id === recipe.id;
+                const displayItems = isSelected ? localBaseItems : (recipe.items || []);
+                const nonPkgCount = displayItems.filter(
+                  (it) =>
+                    it.type !== 'PACKAGING' &&
+                    it.ingredientType !== 'PACKAGING' &&
+                    it.type !== 'PREPARED_ITEM' &&
+                    it.ingredientType !== 'PREPARED_ITEM'
+                ).length;
+                const pkgSideCount = displayItems.length - nonPkgCount;
+                const cardTotalCost = displayItems.reduce(
+                  (sum, it) => sum + getItemCost(it).lineCost,
+                  0
+                );
+                const linkedVariantsCount = menus.reduce(
+                  (acc, m) =>
+                    acc + (m.variants || []).filter((v) => v.baseRecipeId === recipe.id).length,
+                  0
+                );
+
+                return (
+                  <div
+                    key={recipe.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleSelectBaseRecipeCard(recipe)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleSelectBaseRecipeCard(recipe);
+                      }
+                    }}
+                    className={`rounded-2xl p-3.5 border transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
+                      isSelected
+                        ? 'bg-[#F27D26]/15 border-[#F27D26] shadow-lg shadow-[#F27D26]/10'
+                        : 'bg-white/5 border-white/10 hover:border-white/25 hover:bg-white/[0.07]'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={`w-2 h-2 rounded-full shrink-0 ${
+                              isSelected ? 'bg-[#F27D26]' : 'bg-white/30'
+                            }`}
+                          />
+                          <h3 className="font-bold text-white text-sm truncate">
+                            {getLocalizedText(lang, recipe.thaiName || recipe.name, recipe.englishName)}
+                          </h3>
+                        </div>
+                        {recipe.description && (
+                          <p className="text-[11px] text-white/50 truncate mt-0.5 pl-3.5">
+                            {recipe.description}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditBaseRecipeMeta(recipe);
+                          }}
+                          className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 cursor-pointer"
+                          title={lang === 'en' ? 'Edit recipe name' : 'แก้ไขชื่อสูตร'}
+                          aria-label={lang === 'en' ? 'Edit recipe name' : 'แก้ไขชื่อสูตร'}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setBaseRecipeToDelete(recipe);
+                          }}
+                          className="p-1.5 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                          title={lang === 'en' ? 'Delete base recipe' : 'ลบสูตรอาหารกลาง'}
+                          aria-label={lang === 'en' ? 'Delete base recipe' : 'ลบสูตรอาหารกลาง'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10 text-[11px]">
+                      <div className="flex items-center gap-2 text-white/60">
+                        <span>
+                          {nonPkgCount} {lang === 'en' ? 'items' : 'วัตถุดิบ/ซอส'}
+                        </span>
+                        <span>•</span>
+                        <span>
+                          {pkgSideCount} {lang === 'en' ? 'pkg/sides' : 'กล่อง/เคียง'}
+                        </span>
+                        {linkedVariantsCount > 0 && (
+                          <>
+                            <span>•</span>
+                            <span className="text-emerald-400 font-semibold">
+                              {linkedVariantsCount} {lang === 'en' ? 'linked' : 'เมนูใช้'}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <span className="font-mono font-bold text-[#FFC107] shrink-0">
+                        ฿{cardTotalCost.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Full-width Central Recipe Items Builder for selected card */}
+          {currentBaseRecipe && (
+            <div className="space-y-4">
               {/* Card 1: Central Recipe Ingredients & Sauces */}
               <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
-                  <h3 className="font-bold text-white text-base">
-                    {lang === 'en'
-                      ? `Base Recipe Items (${nonPackagingItems.length} items)`
-                      : `รายการส่วนประกอบในสูตรกลาง (${nonPackagingItems.length} รายการ)`}
-                  </h3>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#F27D26] block">
+                      {getLocalizedText(
+                        lang,
+                        currentBaseRecipe.thaiName || currentBaseRecipe.name,
+                        currentBaseRecipe.englishName
+                      )}
+                    </span>
+                    <h3 className="font-bold text-white text-base">
+                      {lang === 'en'
+                        ? `Base Recipe Items (${nonPackagingItems.length} items)`
+                        : `รายการส่วนประกอบในสูตรกลาง (${nonPackagingItems.length} รายการ)`}
+                    </h3>
+                  </div>
 
                   {/* 2 Add buttons: วัตถุดิบ, ซอสปรุง */}
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -1311,140 +1589,148 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 </div>
 
                 {/* Items Table */}
-                <div className="mt-4 overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                        <th className="py-2.5 px-3">{lang === 'en' ? 'Recipe Item' : 'ชื่อรายการในสูตร'}</th>
-                        <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
-                        <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
-                        <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
-                        <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
-                        <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5 font-mono">
-                      {nonPackagingItems.map((item, index) => {
-                        const costInfo = getItemCost(item);
+                {nonPackagingItems.length === 0 ? (
+                  <div className="mt-4 p-5 text-center text-white/45 text-xs border border-dashed border-white/10 rounded-2xl">
+                    {lang === 'en'
+                      ? 'No ingredients or sauces in this base recipe yet (click "+ Base Ingredient" or "+ Sauce" above)'
+                      : 'ยังไม่มีวัตถุดิบหรือซอสในสูตรกลางนี้ (กดปุ่ม "+ วัตถุดิบกลาง" หรือ "+ ซอสปรุง" ด้านบนเพื่อเพิ่ม)'}
+                  </div>
+                ) : (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
+                          <th className="py-2.5 px-3">{lang === 'en' ? 'Recipe Item' : 'ชื่อรายการในสูตร'}</th>
+                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
+                          <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
+                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
+                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
+                          <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 font-mono">
+                        {nonPackagingItems.map((item, index) => {
+                          const costInfo = getItemCost(item);
 
-                        return (
-                          <tr key={`${item.id || 'item'}-${index}`} className="hover:bg-white/5 transition-colors">
-                            <td className="py-2.5 px-3 font-sans font-medium text-white">
-                              {item.type === 'SAUCE' ? (
-                                <select
-                                  value={item.ingredientId || item.sauceId}
-                                  onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                  className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white cursor-pointer"
-                                >
-                                  {sauces.map((s) => (
-                                    <option key={s.id} value={s.id} className="bg-[#1a1a1a]">
-                                      {getLocalizedText(lang, s.thaiName || s.name, s.englishName)}
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
-                                  {/* Step 1: Select Category first */}
+                          return (
+                            <tr key={`${item.id || 'item'}-${index}`} className="hover:bg-white/5 transition-colors">
+                              <td className="py-2.5 px-3 font-sans font-medium text-white">
+                                {item.type === 'SAUCE' ? (
                                   <select
-                                    value={(item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL'}
-                                    onChange={(e) => {
-                                      const newCat = e.target.value;
-                                      const safeId = item.id || '';
-                                      if (safeId) {
-                                        setBaseItemCategoryOverrides((prev) => ({ ...prev, [safeId]: newCat }));
-                                      }
-                                      const matching = newCat === 'ALL' ? ingredients : ingredients.filter((i) => i.category === newCat);
-                                      if (matching.length > 0 && !matching.some((i) => i.id === item.ingredientId)) {
-                                        handleUpdateBaseItemSourceById(safeId, matching[0].id);
-                                      }
-                                    }}
-                                    className="bg-black/60 border border-white/20 rounded-lg px-2 py-1 text-[11px] text-[#F27D26] font-bold cursor-pointer shrink-0 max-w-[130px]"
-                                    title={lang === 'en' ? '1. Select ingredient category first' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}
+                                    value={item.ingredientId || item.sauceId}
+                                    onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                    className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white cursor-pointer"
                                   >
-                                    <option value="ALL">{lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวด'}</option>
-                                    {uniqueCategories.map((cat) => (
-                                      <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
-                                        {getCategoryIcon(cat)} {getLocalizedText(lang, cat)}
+                                    {sauces.map((s) => (
+                                      <option key={s.id} value={s.id} className="bg-[#1a1a1a]">
+                                        {getLocalizedText(lang, s.thaiName || s.name, s.englishName)}
                                       </option>
                                     ))}
                                   </select>
+                                ) : (
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
+                                    {/* Step 1: Select Category first */}
+                                    <select
+                                      value={(item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL'}
+                                      onChange={(e) => {
+                                        const newCat = e.target.value;
+                                        const safeId = item.id || '';
+                                        if (safeId) {
+                                          setBaseItemCategoryOverrides((prev) => ({ ...prev, [safeId]: newCat }));
+                                        }
+                                        const matching = newCat === 'ALL' ? ingredients : ingredients.filter((i) => i.category === newCat);
+                                        if (matching.length > 0 && !matching.some((i) => i.id === item.ingredientId)) {
+                                          handleUpdateBaseItemSourceById(safeId, matching[0].id);
+                                        }
+                                      }}
+                                      className="bg-black/60 border border-white/20 rounded-lg px-2 py-1 text-[11px] text-[#F27D26] font-bold cursor-pointer shrink-0 max-w-[130px]"
+                                      title={lang === 'en' ? '1. Select ingredient category first' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}
+                                    >
+                                      <option value="ALL">{lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวด'}</option>
+                                      {uniqueCategories.map((cat) => (
+                                        <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
+                                          {getCategoryIcon(cat)} {getLocalizedText(lang, cat)}
+                                        </option>
+                                      ))}
+                                    </select>
 
-                                  {/* Step 2: Select Sub-ingredient */}
-                                  {(() => {
-                                    const selectedCat = (item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL';
-                                    const categoryIngs = selectedCat === 'ALL'
-                                      ? ingredients
-                                      : ingredients.filter((i) => i.category === selectedCat);
+                                    {/* Step 2: Select Sub-ingredient */}
+                                    {(() => {
+                                      const selectedCat = (item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL';
+                                      const categoryIngs = selectedCat === 'ALL'
+                                        ? ingredients
+                                        : ingredients.filter((i) => i.category === selectedCat);
 
-                                    return (
-                                      <select
-                                        value={item.ingredientId}
-                                        onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                        className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[190px] cursor-pointer"
-                                        title={lang === 'en' ? '2. Select sub-ingredient' : '2. เลือกวัตถุดิบย่อย'}
-                                      >
-                                        {categoryIngs.map((ing) => (
-                                          <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
-                                            {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    );
-                                  })()}
-                                </div>
-                              )}
-                            </td>
-
-                            <td className="py-2.5 px-3 text-right">
-                              <NumericInput
-                                type="number"
-                                step="any"
-                                min="0"
-                                value={item.quantity ?? 0}
-                                onChange={(e) =>
-                                  handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
-                                }
-                                className="w-20 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#F27D26]"
-                              />
-                            </td>
-
-                            <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
-                              {localizeUnit(item.unit, lang)}
-                            </td>
-
-                            <td className="py-2.5 px-3 text-right text-white/60">
-                              <div className="flex flex-col items-end">
-                                <span>฿{costInfo.unitCost.toFixed(costInfo.unitCost < 1 ? 4 : 2)}</span>
-                                {costInfo.missingPrice && (
-                                  <span className="mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
-                                    {lang === 'en'
-                                      ? 'Missing ingredient price — cost may be understated'
-                                      : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'}
-                                  </span>
+                                      return (
+                                        <select
+                                          value={item.ingredientId}
+                                          onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                          className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[190px] cursor-pointer"
+                                          title={lang === 'en' ? '2. Select sub-ingredient' : '2. เลือกวัตถุดิบย่อย'}
+                                        >
+                                          {categoryIngs.map((ing) => (
+                                            <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
+                                              {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      );
+                                    })()}
+                                  </div>
                                 )}
-                              </div>
-                            </td>
+                              </td>
 
-                            <td className="py-2.5 px-3 text-right font-bold text-white">
-                              ฿{costInfo.lineCost.toFixed(2)}
-                            </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <NumericInput
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  value={item.quantity ?? 0}
+                                  onChange={(e) =>
+                                    handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
+                                  }
+                                  className="w-20 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#F27D26]"
+                                />
+                              </td>
 
-                            <td className="py-2.5 px-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveBaseItemById(item.id || '')}
-                                className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
-                                title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
+                                {localizeUnit(item.unit, lang)}
+                              </td>
+
+                              <td className="py-2.5 px-3 text-right text-white/60">
+                                <div className="flex flex-col items-end">
+                                  <span>฿{costInfo.unitCost.toFixed(costInfo.unitCost < 1 ? 4 : 2)}</span>
+                                  {costInfo.missingPrice && (
+                                    <span className="mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                                      {lang === 'en'
+                                        ? 'Missing ingredient price — cost may be understated'
+                                        : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              <td className="py-2.5 px-3 text-right font-bold text-white">
+                                ฿{costInfo.lineCost.toFixed(2)}
+                              </td>
+
+                              <td className="py-2.5 px-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveBaseItemById(item.id || '')}
+                                  className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
+                                  title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {/* Card 2: Dedicated Packaging & Side Dish Items Card (ต้นทุนกล่อง & บรรจุภัณฑ์) */}
@@ -1486,8 +1772,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 {packagingAndSideItems.length === 0 ? (
                   <div className="p-4 text-center text-white/40 text-xs border border-dashed border-white/10 rounded-2xl">
                     {lang === 'en'
-                      ? 'No packaging or side dish items for this menu yet (click "+ Side Dish" or "+ Packaging" above to add)'
-                      : 'ยังไม่มีรายการกล่องหรือเครื่องเคียงสำหรับเมนูนี้ (กดปุ่ม "+ เครื่องเคียง" หรือ "+ แพ็คเกจจิ้ง" ด้านบนเพื่อเพิ่ม)'}
+                      ? 'No packaging or side dish items for this base recipe yet (click "+ Side Dish" or "+ Packaging" above to add)'
+                      : 'ยังไม่มีรายการกล่องหรือเครื่องเคียงสำหรับสูตรกลางนี้ (กดปุ่ม "+ เครื่องเคียง" หรือ "+ แพ็คเกจจิ้ง" ด้านบนเพื่อเพิ่ม)'}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1614,112 +1900,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 )}
               </div>
             </div>
-
-            {/* Right: Central Recipe Costing Breakdown Card */}
-            <div className="space-y-4">
-              <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5 space-y-4">
-                <div>
-                  <span className="text-[10px] font-bold text-white/40 uppercase tracking-wider block">
-                    {lang === 'en' ? 'Base Recipe Cost Breakdown' : 'คลังสูตรอาหารกลาง (Base Recipe Cost)'}
-                  </span>
-                  <h3 className="font-bold text-white text-base mt-0.5">
-                    {lang === 'en'
-                      ? `Recipe: ${getLocalizedText(lang, currentMenu?.thaiName || currentMenu?.name || '', currentMenu?.englishName)}`
-                      : `สูตร ${currentMenu?.name}`}
-                  </h3>
-                </div>
-
-                {/* Breakdown per category */}
-                <div className="space-y-2 text-xs font-mono bg-black/30 p-3 rounded-2xl border border-white/10">
-                  <div className="flex justify-between text-white/70">
-                    <span className="font-sans flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                      <span>{lang === 'en' ? 'Base Ingredients:' : 'วัตถุดิบกลาง:'}</span>
-                    </span>
-                    <span className="text-white font-bold">฿{totalBaseIngredientsCost.toFixed(2)}</span>
-                  </div>
-
-                  <div className="flex justify-between text-white/70">
-                    <span className="font-sans flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-[#F27D26]" />
-                      <span>{lang === 'en' ? 'Seasoning Sauces:' : 'ซอสปรุงรส:'}</span>
-                    </span>
-                    <span className="text-white font-bold">฿{totalSauceCost.toFixed(2)}</span>
-                  </div>
-
-                  <div className="flex justify-between text-white/70">
-                    <span className="font-sans flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-amber-400" />
-                      <span>{lang === 'en' ? 'Side Dishes:' : 'เครื่องเคียง:'}</span>
-                    </span>
-                    <span className="text-white font-bold">฿{totalSideDishCost.toFixed(2)}</span>
-                  </div>
-
-                  <div className="flex justify-between text-white/70">
-                    <span className="font-sans flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-purple-400" />
-                      <span>{lang === 'en' ? 'Packaging:' : 'บรรจุภัณฑ์ (แพ็คเกจจิ้ง):'}</span>
-                    </span>
-                    <span className="text-white font-bold">฿{totalPackagingCost.toFixed(2)}</span>
-                  </div>
-
-                  <div className="flex justify-between pt-2 border-t border-white/10 font-bold text-sm">
-                    <span className="font-sans text-white">
-                      {lang === 'en' ? 'Total Base Recipe Cost:' : 'รวมต้นทุนสูตรกลาง:'}
-                    </span>
-                    <span className="text-[#FFC107]">
-                      ฿{totalBaseRecipeCost.toFixed(2)} / {lang === 'en' ? 'dish' : 'จาน'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Synced Variants List */}
-                <div className="pt-2 border-t border-white/10 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white">
-                      {lang === 'en'
-                        ? `Protein Options in Recipe (${currentMenu?.variants.length || 0} options)`
-                        : `ตัวเลือกเนื้อสัตว์ในสูตรนี้ (${currentMenu?.variants.length || 0} ตัวเลือก)`}
-                    </span>
-                  </div>
-
-                  <div className="space-y-1.5 max-h-[220px] overflow-y-auto scrollbar-thin pr-1">
-                    {currentMenu?.variants.map((v) => (
-                      <div
-                        key={v.id}
-                        className="p-2.5 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-white font-bold">
-                            {getLocalizedText(lang, v.thaiName || v.proteinType || v.name, v.englishName)}
-                          </span>
-                          {v.proteinType === 'ทะเล' && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold">
-                              {lang === 'en' ? 'Shrimp + Squid' : 'กุ้ง + หมึก'}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-white/60 font-mono">฿{v.sellingPrice}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="bg-white/5 p-2.5 rounded-xl text-[10px] text-white/50 leading-relaxed">
-                    💡{' '}
-                    {lang === 'en' ? (
-                      <>
-                        Clicking <strong>Save Base Recipe</strong> syncs these ingredients, sauces, side dishes, and packaging across all protein options while preserving each option's meat portioning.
-                      </>
-                    ) : (
-                      <>
-                        เมื่อกด <strong>บันทึกสูตรอาหารกลาง</strong> ระบบจะนำวัตถุดิบ ซอส เครื่องเคียง และแพ็คเกจจิ้งข้างต้นไปอัปเดตให้กับทุกตัวเลือกเนื้อสัตว์ทันที โดยยังคงพอร์ชั่นเนื้อสัตว์ของแต่ละตัวเลือกไว้
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1800,7 +1981,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       {/* ========================================================= */}
       {activeTab === 'RICE_NOODLES' && (
         <div className="space-y-4">
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl">
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Wheat className="w-5 h-5 text-[#FFC107]" />
               <h2 className="text-lg font-bold text-white">
@@ -1809,67 +1990,125 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   : 'การจัดการต้นทุน ข้าวและเส้น (Rice & Noodle Portioning)'}
               </h2>
             </div>
+            <button
+              type="button"
+              onClick={handleOpenAddPortion}
+              className="px-4 py-2.5 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl text-xs shadow-lg shadow-[#F27D26]/20 flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{lang === 'en' ? '+ Add Rice / Noodle Recipe' : '+ เพิ่มสูตรข้าวและเส้น'}</span>
+            </button>
           </div>
 
-          {/* Standard Portion Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {standardPortions.map((portion) => (
-              <div
-                key={portion.id}
-                className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5 hover:border-white/20 transition-all flex flex-col justify-between"
+          {/* Portion Cards Grid */}
+          {portionRecipes.length === 0 ? (
+            <div className="bg-white/5 backdrop-blur-xl border border-dashed border-white/20 rounded-3xl p-8 text-center space-y-3">
+              <p className="text-xs text-white/60">
+                {lang === 'en'
+                  ? 'No rice or noodle portion recipes yet.'
+                  : 'ยังไม่มีสูตรข้าวและเส้น คลิกปุ่มด้านบนเพื่อเพิ่มสูตรใหม่'}
+              </p>
+              <button
+                type="button"
+                onClick={handleOpenAddPortion}
+                className="px-4 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl text-xs inline-flex items-center gap-1.5 cursor-pointer"
               >
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FFC107]/20 text-[#FFC107]">
-                      {lang === 'en' ? portion.typeEn : portion.type}
-                    </span>
-                    <span className="text-[10px] text-white/40 font-mono">
-                      {lang === 'en' ? 'Serving:' : 'ขนาดเสิร์ฟ:'} {portion.portionGram}g
-                    </span>
-                  </div>
+                <Plus className="w-4 h-4" />
+                <span>{lang === 'en' ? '+ Add Rice / Noodle Recipe' : '+ เพิ่มสูตรข้าวและเส้น'}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {portionRecipes.map((portion) => (
+                <div
+                  key={portion.id}
+                  className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5 hover:border-white/20 transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FFC107]/20 text-[#FFC107]">
+                        {lang === 'en' ? portion.typeEn : portion.type}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-white/40 font-mono">
+                          {lang === 'en' ? 'Serving:' : 'ขนาดเสิร์ฟ:'} {portion.portionGram}g
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditPortion(portion)}
+                          className="p-1.5 rounded-xl text-white/45 hover:text-white hover:bg-white/10 cursor-pointer"
+                          title={lang === 'en' ? 'Edit Rice/Noodle Recipe' : 'แก้ไขสูตรข้าวและเส้น'}
+                          aria-label={lang === 'en' ? 'Edit Rice/Noodle Recipe' : 'แก้ไขสูตรข้าวและเส้น'}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPortionToDelete(portion)}
+                          className="p-1.5 rounded-xl text-white/40 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                          title={lang === 'en' ? 'Delete Rice/Noodle Recipe' : 'ลบสูตรข้าวและเส้น'}
+                          aria-label={lang === 'en' ? 'Delete Rice/Noodle Recipe' : 'ลบสูตรข้าวและเส้น'}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
 
-                  <h3 className="font-bold text-white text-base">
-                    {lang === 'en' ? portion.nameEn : portion.name}
-                  </h3>
+                    <h3 className="font-bold text-white text-base">
+                      {lang === 'en' ? portion.nameEn : portion.name}
+                    </h3>
 
-                  {/* Details table */}
-                  <div className="mt-3 p-3 rounded-2xl bg-black/30 border border-white/5 space-y-1.5 text-xs font-mono">
-                    <div className="flex justify-between">
-                      <span className="font-sans text-white/50">
-                        {lang === 'en' ? 'Base Ingredient:' : 'วัตถุดิบหลัก:'}
-                      </span>
-                      <span className="text-white">
-                        {lang === 'en' ? portion.rawIngredientNameEn : portion.rawIngredientName}
-                      </span>
+                    {/* Details table */}
+                    <div className="mt-3 p-3 rounded-2xl bg-black/30 border border-white/5 space-y-1.5 text-xs font-mono">
+                      <div className="flex justify-between gap-2">
+                        <span className="font-sans text-white/50">
+                          {lang === 'en' ? 'Base Ingredient:' : 'วัตถุดิบหลัก:'}
+                        </span>
+                        <span className="text-white text-right">
+                          {lang === 'en' ? portion.rawIngredientNameEn : portion.rawIngredientName}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="font-sans text-white/50">
+                          {lang === 'en' ? 'Market Price:' : 'ราคาตลาด:'}
+                        </span>
+                        <span className="text-white text-right">
+                          {lang === 'en' ? portion.rawPurchaseCostEn : portion.rawPurchaseCost}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="font-sans text-white/50">
+                          {lang === 'en' ? 'Cooking Yield:' : 'Yield การหุง/ลวก:'}
+                        </span>
+                        <span className="text-emerald-400 font-bold text-right">
+                          {lang === 'en' ? portion.cookingYieldEn : portion.cookingYield}
+                        </span>
+                      </div>
+                      <div className="flex justify-between pt-1 border-t border-white/10 font-bold text-sm">
+                        <span className="font-sans text-white">
+                          {lang === 'en' ? 'Cost per Dish:' : 'ต้นทุนต่อจาน:'}
+                        </span>
+                        <span className="text-[#FFC107]">฿{Number(portion.costPerPortion || 0).toFixed(2)}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="font-sans text-white/50">
-                        {lang === 'en' ? 'Market Price:' : 'ราคาตลาด:'}
-                      </span>
-                      <span className="text-white">
-                        {lang === 'en' ? portion.rawPurchaseCostEn : portion.rawPurchaseCost}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-sans text-white/50">
-                        {lang === 'en' ? 'Cooking Yield:' : 'Yield การหุง/ลวก:'}
-                      </span>
-                      <span className="text-emerald-400 font-bold">
-                        {lang === 'en' ? portion.cookingYieldEn : portion.cookingYield}
-                      </span>
-                    </div>
-                    <div className="flex justify-between pt-1 border-t border-white/10 font-bold text-sm">
-                      <span className="font-sans text-white">
-                        {lang === 'en' ? 'Cost per Dish:' : 'ต้นทุนต่อจาน:'}
-                      </span>
-                      <span className="text-[#FFC107]">฿{portion.costPerPortion.toFixed(2)}</span>
-                    </div>
+
+                    {(lang === 'en' ? portion.dishesUsingEn : portion.dishesUsing)?.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1">
+                        {(lang === 'en' ? portion.dishesUsingEn : portion.dishesUsing).map((dish, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 text-[10px] text-white/60"
+                          >
+                            {dish}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -2301,6 +2540,579 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE / EDIT CENTRAL BASE RECIPE MODAL */}
+      {isBaseRecipeMetaModalOpen && editingBaseRecipeMeta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="modal-panel-fixed bg-[#1a1a1a] rounded-3xl max-w-md w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
+              <h3 className="font-bold text-white text-base">
+                {baseRecipes.some((r) => r.id === editingBaseRecipeMeta.id)
+                  ? lang === 'en'
+                    ? 'Edit Central Base Recipe'
+                    : 'แก้ไขชื่อสูตรอาหารกลาง'
+                  : lang === 'en'
+                  ? 'Create New Central Base Recipe'
+                  : 'สร้างสูตรอาหารกลางใหม่'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsBaseRecipeMetaModalOpen(false)}
+                className="p-1 rounded-xl text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBaseRecipeMetaModal} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
+                <div>
+                  <label className="block text-white/80 font-bold mb-1">
+                    {lang === 'en' ? 'Base Recipe Name (Thai)' : 'ชื่อสูตรอาหารกลาง (ไทย)'}{' '}
+                    <span className="text-[#F27D26]">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder={
+                      lang === 'en'
+                        ? 'e.g. Classic Holy Basil Stir-fry Base'
+                        : 'เช่น สูตรผัดกะเพรามาตรฐาน, สูตรข้าวผัดกลาง'
+                    }
+                    value={editingBaseRecipeMeta.name || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      setBaseRecipeMetaError(null);
+                      setEditingBaseRecipeMeta((prev) =>
+                        prev ? { ...prev, name: nextTh, thaiName: nextTh } : prev
+                      );
+                      baseRecipeTranslationScheduler.schedule('baseRecipe', () => {
+                        setEditingBaseRecipeMeta((prev) => {
+                          if (!prev) return prev;
+                          const currTh = prev.name || '';
+                          const nextEn = computeAutoEnglishName({
+                            previousThai: prevBaseRecipeThaiRef.current,
+                            nextThai: currTh,
+                            currentEnglish: prev.englishName,
+                            isManuallyEdited: Boolean(prev.englishNameManual),
+                          });
+                          prevBaseRecipeThaiRef.current = currTh;
+                          return { ...prev, englishName: nextEn };
+                        });
+                      });
+                    }}
+                    onBlur={() => baseRecipeTranslationScheduler.flush('baseRecipe')}
+                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="block text-white/80 font-bold">
+                      {lang === 'en' ? 'Base Recipe Name (English)' : 'ชื่อสูตรอาหารกลาง (English)'}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        baseRecipeTranslationScheduler.cancel('baseRecipe');
+                        prevBaseRecipeThaiRef.current = editingBaseRecipeMeta.name || '';
+                        setEditingBaseRecipeMeta({
+                          ...editingBaseRecipeMeta,
+                          englishName: translateThaiToEnglish(editingBaseRecipeMeta.name || ''),
+                          englishNameManual: false,
+                        });
+                      }}
+                      className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                    >
+                      {lang === 'en' ? 'Re-translate from Thai' : 'แปลใหม่จากภาษาไทย'}
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder={
+                      lang === 'en'
+                        ? 'Auto-translated English recipe name'
+                        : 'ชื่อภาษาอังกฤษ (แปลอัตโนมัติหรือแก้เองได้)'
+                    }
+                    value={editingBaseRecipeMeta.englishName || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      baseRecipeTranslationScheduler.cancel('baseRecipe');
+                      setBaseRecipeMetaError(null);
+                      setEditingBaseRecipeMeta({
+                        ...editingBaseRecipeMeta,
+                        englishName: val,
+                        englishNameManual: Boolean(val.trim()),
+                      });
+                    }}
+                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-amber-200 focus:outline-none focus:border-[#F27D26]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-white/80 font-bold mb-1">
+                    {lang === 'en' ? 'Short Description (Optional)' : 'คำอธิบายย่อ (ไม่บังคับ)'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={
+                      lang === 'en'
+                        ? 'e.g. Shared across all stir-fried basil options'
+                        : 'เช่น ใช้ร่วมกับเมนูกะเพราทุกเนื้อสัตว์'
+                    }
+                    value={editingBaseRecipeMeta.description || ''}
+                    onChange={(e) =>
+                      setEditingBaseRecipeMeta({ ...editingBaseRecipeMeta, description: e.target.value })
+                    }
+                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
+                  />
+                </div>
+
+                {baseRecipeMetaError && (
+                  <div className="p-2.5 bg-rose-500/15 border border-rose-500/30 rounded-xl text-[11px] text-rose-300 font-semibold">
+                    {baseRecipeMetaError}
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex justify-end gap-2 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsBaseRecipeMetaModalOpen(false)}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white font-semibold cursor-pointer"
+                >
+                  {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer"
+                >
+                  {baseRecipes.some((r) => r.id === editingBaseRecipeMeta.id)
+                    ? lang === 'en'
+                      ? 'Save Changes'
+                      : 'บันทึกการแก้ไข'
+                    : lang === 'en'
+                    ? 'Create Base Recipe'
+                    : 'สร้างสูตรอาหารกลาง'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CENTRAL BASE RECIPE CONFIRM MODAL */}
+      {baseRecipeToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="modal-panel bg-[#1a1a1a] rounded-3xl max-w-sm w-full shadow-2xl border border-white/20 text-white p-5 space-y-4 text-xs">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-bold text-white text-sm">
+                  {lang === 'en' ? 'Delete Central Base Recipe?' : 'ยืนยันลบสูตรอาหารกลาง?'}
+                </h3>
+                <p className="text-white/65 leading-relaxed">
+                  {lang === 'en'
+                    ? `Delete "${getLocalizedText(lang, baseRecipeToDelete.thaiName || baseRecipeToDelete.name, baseRecipeToDelete.englishName)}"? Existing menu items will keep their current ingredient costs.`
+                    : `ต้องการลบสูตร "${baseRecipeToDelete.name}" ใช่หรือไม่? (เมนูที่เคยเชื่อมไว้จะยังคงรายการวัตถุดิบปัจจุบันไว้)`}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBaseRecipeToDelete(null)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white font-semibold cursor-pointer"
+              >
+                {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteBaseRecipe}
+                className="px-4 py-2 bg-rose-500 hover:bg-rose-600 rounded-xl text-white font-bold cursor-pointer"
+              >
+                {lang === 'en' ? 'Delete' : 'ลบสูตร'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD / EDIT RICE & NOODLE PORTION MODAL */}
+      {isPortionModalOpen && editingPortion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="modal-panel-fixed bg-[#1a1a1a] rounded-3xl max-w-lg w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
+              <h3 className="font-bold text-white text-base">
+                {portionRecipes.some((p) => p.id === editingPortion.id)
+                  ? lang === 'en'
+                    ? 'Edit Rice & Noodle Recipe'
+                    : 'แก้ไขสูตรข้าวและเส้น'
+                  : lang === 'en'
+                  ? 'Add Rice & Noodle Recipe'
+                  : 'เพิ่มสูตรข้าวและเส้นใหม่'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsPortionModalOpen(false)}
+                className="p-1 rounded-xl text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePortionModal} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-3.5 scrollbar-thin">
+                {/* Type + Linked Stock Ingredient */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en' ? 'Category Type' : 'ประเภท'}
+                    </label>
+                    <select
+                      value={editingPortion.type || 'ข้าว'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditingPortion((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                type: val,
+                                typeEn:
+                                  val === 'ข้าว'
+                                    ? 'Rice'
+                                    : val === 'เส้น'
+                                    ? 'Noodles'
+                                    : translateThaiToEnglish(val),
+                              }
+                            : prev
+                        );
+                      }}
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white cursor-pointer focus:border-[#F27D26]"
+                    >
+                      <option value="ข้าว" className="bg-[#1a1a1a]">
+                        {lang === 'en' ? 'Rice (ข้าว)' : 'ข้าว'}
+                      </option>
+                      <option value="เส้น" className="bg-[#1a1a1a]">
+                        {lang === 'en' ? 'Noodles (เส้น)' : 'เส้น'}
+                      </option>
+                      <option value="อื่นๆ" className="bg-[#1a1a1a]">
+                        {lang === 'en' ? 'Other' : 'อื่นๆ'}
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en'
+                        ? 'Link to Stock Ingredient (Optional)'
+                        : 'เชื่อมวัตถุดิบในคลัง (ไม่บังคับ)'}
+                    </label>
+                    <select
+                      value={editingPortion.linkedIngredientId || ''}
+                      onChange={(e) => handleLinkIngredientToPortion(e.target.value)}
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white cursor-pointer focus:border-[#F27D26]"
+                    >
+                      <option value="" className="bg-[#1a1a1a]">
+                        {lang === 'en' ? '-- Custom / Not Linked --' : '-- กำหนดเอง / ไม่เชื่อม --'}
+                      </option>
+                      {riceAndNoodleIngredients.map((ing) => (
+                        <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
+                          {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Name TH & EN */}
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en' ? 'Recipe Name (Thai)' : 'ชื่อสูตรข้าว/เส้น (ไทย)'}{' '}
+                      <span className="text-[#F27D26]">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder={
+                        lang === 'en'
+                          ? 'e.g. Steamed Jasmine Rice (200g)'
+                          : 'เช่น ข้าวสวยหอมมะลิ (จานหลัก 200g)'
+                      }
+                      value={editingPortion.name || ''}
+                      onChange={(e) => {
+                        const nextTh = e.target.value;
+                        setPortionFormError(null);
+                        setEditingPortion((prev) => (prev ? { ...prev, name: nextTh } : prev));
+                        portionTranslationScheduler.schedule('portion', () => {
+                          setEditingPortion((prev) => {
+                            if (!prev) return prev;
+                            const currTh = prev.name || '';
+                            const nextEn = computeAutoEnglishName({
+                              previousThai: prevPortionThaiRef.current,
+                              nextThai: currTh,
+                              currentEnglish: prev.nameEn,
+                              isManuallyEdited: false,
+                            });
+                            prevPortionThaiRef.current = currTh;
+                            return { ...prev, nameEn: nextEn };
+                          });
+                        });
+                      }}
+                      onBlur={() => portionTranslationScheduler.flush('portion')}
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="block text-white/80 font-bold">
+                        {lang === 'en' ? 'Recipe Name (English)' : 'ชื่อสูตร (English)'}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          portionTranslationScheduler.cancel('portion');
+                          prevPortionThaiRef.current = editingPortion.name || '';
+                          setEditingPortion({
+                            ...editingPortion,
+                            nameEn: translateThaiToEnglish(editingPortion.name || ''),
+                          });
+                        }}
+                        className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                      >
+                        {lang === 'en' ? 'Re-translate' : 'แปลใหม่จากไทย'}
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={lang === 'en' ? 'English recipe name' : 'ชื่อภาษาอังกฤษ'}
+                      value={editingPortion.nameEn || ''}
+                      onChange={(e) => {
+                        portionTranslationScheduler.cancel('portion');
+                        setEditingPortion({ ...editingPortion, nameEn: e.target.value });
+                      }}
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-amber-200 focus:outline-none focus:border-[#F27D26]"
+                    />
+                  </div>
+                </div>
+
+                {/* Base Ingredient + Market Price */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en' ? 'Base Ingredient (TH)' : 'วัตถุดิบหลัก'}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={lang === 'en' ? 'e.g. Jasmine Rice' : 'เช่น ข้าวสารหอมมะลิ'}
+                      value={editingPortion.rawIngredientName || ''}
+                      onChange={(e) =>
+                        setEditingPortion({ ...editingPortion, rawIngredientName: e.target.value })
+                      }
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en' ? 'Market Price Label' : 'ราคาตลาด (แสดงในการ์ด)'}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={lang === 'en' ? 'e.g. ฿42 / kg' : 'เช่น ฿42 / กก.'}
+                      value={editingPortion.rawPurchaseCost || ''}
+                      onChange={(e) =>
+                        setEditingPortion({
+                          ...editingPortion,
+                          rawPurchaseCost: e.target.value,
+                          rawPurchaseCostEn: e.target.value,
+                        })
+                      }
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
+                    />
+                  </div>
+                </div>
+
+                {/* Serving grams, Yield, Cost per dish */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en' ? 'Serving Size (g)' : 'ขนาดเสิร์ฟ (กรัม)'}{' '}
+                      <span className="text-[#F27D26]">*</span>
+                    </label>
+                    <NumericInput
+                      type="number"
+                      min="1"
+                      step="any"
+                      required
+                      value={editingPortion.portionGram ?? 150}
+                      onChange={(e) => {
+                        const gram = parseFloat(e.target.value) || 0;
+                        setPortionFormError(null);
+                        setEditingPortion((prev) => {
+                          if (!prev) return prev;
+                          let nextCost = prev.costPerPortion;
+                          const linked = prev.linkedIngredientId
+                            ? ingredientsMap.get(prev.linkedIngredientId)
+                            : undefined;
+                          if (linked && gram > 0) {
+                            const conv = convertUnit(gram, 'g', linked.usageUnit || linked.baseUnit || 'g');
+                            const eff = conv.success ? conv.convertedQuantity : gram;
+                            nextCost = Number(((linked.costPerBaseUnit || 0) * eff).toFixed(2));
+                          }
+                          return { ...prev, portionGram: gram, costPerPortion: nextCost };
+                        });
+                      }}
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl font-mono font-bold text-white focus:border-[#F27D26]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en' ? 'Cooking Yield' : 'Yield การหุง/ลวก'}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="100%"
+                      value={editingPortion.cookingYield || ''}
+                      onChange={(e) =>
+                        setEditingPortion({
+                          ...editingPortion,
+                          cookingYield: e.target.value,
+                          cookingYieldEn: e.target.value,
+                        })
+                      }
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl font-mono font-bold text-emerald-400 focus:outline-none focus:border-[#F27D26]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-white/80 font-bold mb-1">
+                      {lang === 'en' ? 'Cost / Dish (฿)' : 'ต้นทุนต่อจาน (฿)'}{' '}
+                      <span className="text-[#F27D26]">*</span>
+                    </label>
+                    <NumericInput
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      required
+                      value={editingPortion.costPerPortion ?? 0}
+                      onChange={(e) => {
+                        setPortionFormError(null);
+                        setEditingPortion({
+                          ...editingPortion,
+                          costPerPortion: parseFloat(e.target.value) || 0,
+                        });
+                      }}
+                      className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl font-mono font-bold text-[#FFC107] focus:border-[#F27D26]"
+                    />
+                  </div>
+                </div>
+
+                {/* Dishes using (comma separated) */}
+                <div>
+                  <label className="block text-white/80 font-bold mb-1">
+                    {lang === 'en'
+                      ? 'Used in Dishes (comma-separated, optional)'
+                      : 'เมนูที่ใช้ (คั่นด้วยเครื่องหมายจุลภาค , ไม่บังคับ)'}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder={
+                      lang === 'en'
+                        ? 'e.g. All Holy Basil Dishes, Garlic Pork'
+                        : 'เช่น กะเพราทุกเมนู, หมูกระเทียม'
+                    }
+                    value={(editingPortion.dishesUsing || []).join(', ')}
+                    onChange={(e) => {
+                      const list = e.target.value
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                      setEditingPortion({
+                        ...editingPortion,
+                        dishesUsing: list,
+                        dishesUsingEn: list,
+                      });
+                    }}
+                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
+                  />
+                </div>
+
+                {portionFormError && (
+                  <div className="p-2.5 bg-rose-500/15 border border-rose-500/30 rounded-xl text-[11px] text-rose-300 font-semibold">
+                    {portionFormError}
+                  </div>
+                )}
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex justify-end gap-2 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsPortionModalOpen(false)}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white font-semibold cursor-pointer"
+                >
+                  {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl shadow-lg shadow-[#F27D26]/20 cursor-pointer"
+                >
+                  {portionRecipes.some((p) => p.id === editingPortion.id)
+                    ? lang === 'en'
+                      ? 'Save Recipe'
+                      : 'บันทึกการแก้ไข'
+                    : lang === 'en'
+                    ? 'Add Recipe'
+                    : 'เพิ่มสูตรข้าว/เส้น'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE RICE & NOODLE PORTION CONFIRM MODAL */}
+      {portionToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="modal-panel bg-[#1a1a1a] rounded-3xl max-w-sm w-full shadow-2xl border border-white/20 text-white p-5 space-y-4 text-xs">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-bold text-white text-sm">
+                  {lang === 'en' ? 'Delete Rice / Noodle Recipe?' : 'ยืนยันลบสูตรข้าวและเส้น?'}
+                </h3>
+                <p className="text-white/65 leading-relaxed">
+                  {lang === 'en'
+                    ? `Delete "${portionToDelete.nameEn || portionToDelete.name}"?`
+                    : `ต้องการลบสูตร "${portionToDelete.name}" ใช่หรือไม่?`}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPortionToDelete(null)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white font-semibold cursor-pointer"
+              >
+                {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeletePortion}
+                className="px-4 py-2 bg-rose-500 hover:bg-rose-600 rounded-xl text-white font-bold cursor-pointer"
+              >
+                {lang === 'en' ? 'Delete' : 'ลบสูตร'}
+              </button>
+            </div>
           </div>
         </div>
       )}

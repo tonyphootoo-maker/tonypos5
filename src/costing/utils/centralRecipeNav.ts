@@ -1,4 +1,4 @@
-import { MenuItem, MenuVariant } from '../types';
+import { CentralBaseRecipe, MenuItem, MenuVariant, PackagingLineItem, RecipeItem } from '../types';
 
 export type CentralRecipeOriginPage =
   | 'pos'
@@ -80,3 +80,193 @@ export function resolveCentralRecipeMenuTarget(
 
   return null;
 }
+
+export function isVariantProteinRecipeItem(it: RecipeItem, proteinType?: string): boolean {
+  if (
+    it.proteinCategory === 'SHRIMP' ||
+    it.proteinCategory === 'SQUID' ||
+    it.proteinCategory === 'PORK' ||
+    it.proteinCategory === 'CHICKEN' ||
+    it.proteinCategory === 'BEEF' ||
+    it.proteinCategory === 'OTHER' ||
+    it.id?.startsWith('primary_1_') ||
+    it.id?.startsWith('primary_2_')
+  ) {
+    return true;
+  }
+
+  if (
+    it.type === 'SAUCE' ||
+    it.ingredientType === 'SAUCE' ||
+    it.type === 'PACKAGING' ||
+    it.ingredientType === 'PACKAGING' ||
+    it.type === 'PREPARED_ITEM' ||
+    it.ingredientType === 'PREPARED_ITEM'
+  ) {
+    return false;
+  }
+
+  const name = (it.name || '').trim().toLowerCase();
+  if (
+    name.includes('น้ำปลา') ||
+    name.includes('น้ำมัน') ||
+    name.includes('ซอส') ||
+    name.includes('ผง') ||
+    name.includes('ซีอิ๊ว') ||
+    name.includes('กะปิ') ||
+    name.includes('กุ้งแห้ง') ||
+    name.includes('ใบ') ||
+    name.includes('พริก') ||
+    name.includes('กระเทียม') ||
+    name.includes('หอม') ||
+    name.includes('ไข่') ||
+    name.includes('ผัก') ||
+    name.includes('น้ำตาล') ||
+    name.includes('เกลือ') ||
+    name.includes('ข้าว')
+  ) {
+    return false;
+  }
+
+  if (
+    name.includes('หมู') ||
+    name.includes('ไก่') ||
+    name.includes('เนื้อ') ||
+    name.includes('กุ้ง') ||
+    name.includes('หมึก') ||
+    name.includes('ไส้กรอก') ||
+    name.includes('ปลา') ||
+    name.includes('ทะเล') ||
+    name.includes('ซีฟู้ด')
+  ) {
+    return true;
+  }
+
+  if (proteinType && proteinType.trim()) {
+    const pType = proteinType.trim().toLowerCase();
+    if (name === pType || name.startsWith(pType)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function derivePackagingFromBaseRecipe(baseRecipe: CentralBaseRecipe): {
+  packagingCost: number;
+  packagingItems: PackagingLineItem[];
+} {
+  const pkgFromItems: PackagingLineItem[] = (baseRecipe.items || [])
+    .filter((it) => it.type === 'PACKAGING' || it.ingredientType === 'PACKAGING')
+    .map((it, idx) => ({
+      id: it.id || `pkg_${idx}_${it.ingredientId}`,
+      name: it.name,
+      cost:
+        typeof it.calculatedLineCost === 'number'
+          ? it.calculatedLineCost
+          : (Number(it.quantity) || 0) * (Number(it.calculatedUnitCost) || 0),
+    }));
+
+  const packagingItems =
+    pkgFromItems.length > 0
+      ? pkgFromItems
+      : (baseRecipe.packagingItems || []).map((p) => ({ ...p }));
+
+  const packagingCost =
+    packagingItems.length > 0
+      ? Number(packagingItems.reduce((sum, p) => sum + (Number(p.cost) || 0), 0).toFixed(2))
+      : Number(baseRecipe.packagingCost) || 0;
+
+  return { packagingCost, packagingItems };
+}
+
+export function applyBaseRecipeToVariant(
+  variant: MenuVariant,
+  baseRecipe: CentralBaseRecipe
+): MenuVariant {
+  const proteinItems = (variant.recipeItems || []).filter((it) =>
+    isVariantProteinRecipeItem(it, variant.proteinType)
+  );
+  const clonedBaseItems = (baseRecipe.items || []).map((it) => ({ ...it }));
+  const { packagingCost, packagingItems } = derivePackagingFromBaseRecipe(baseRecipe);
+
+  const seenIds = new Set<string>();
+  const combinedRecipeItems: RecipeItem[] = [];
+  for (const item of [...proteinItems, ...clonedBaseItems]) {
+    let safeId = item.id || `item_${combinedRecipeItems.length}_${item.ingredientId}`;
+    if (seenIds.has(safeId)) {
+      safeId = `${safeId}_${combinedRecipeItems.length}`;
+    }
+    seenIds.add(safeId);
+    combinedRecipeItems.push({ ...item, id: safeId });
+  }
+
+  return {
+    ...variant,
+    baseRecipeId: baseRecipe.id,
+    recipeItems: combinedRecipeItems,
+    packagingCost:
+      packagingItems.length > 0 ? packagingCost : variant.packagingCost,
+    packagingItems:
+      packagingItems.length > 0 ? packagingItems : variant.packagingItems,
+  };
+}
+
+export function syncBaseRecipeToLinkedMenus(
+  menus: MenuItem[],
+  baseRecipe: CentralBaseRecipe
+): { updatedMenus: MenuItem[]; changedMenus: MenuItem[]; linkedCount: number } {
+  const changedMenus: MenuItem[] = [];
+  let linkedCount = 0;
+
+  const updatedMenus = menus.map((menu) => {
+    let menuChanged = false;
+    const nextVariants = (menu.variants || []).map((variant) => {
+      if (variant.baseRecipeId !== baseRecipe.id) {
+        return variant;
+      }
+      menuChanged = true;
+      linkedCount += 1;
+      return applyBaseRecipeToVariant(variant, baseRecipe);
+    });
+    if (!menuChanged) return menu;
+    const updatedMenu: MenuItem = {
+      ...menu,
+      variants: nextVariants,
+      updatedAt: new Date().toISOString(),
+    };
+    changedMenus.push(updatedMenu);
+    return updatedMenu;
+  });
+
+  return { updatedMenus, changedMenus, linkedCount };
+}
+
+export function detachBaseRecipeFromMenus(
+  menus: MenuItem[],
+  baseRecipeId: string
+): { updatedMenus: MenuItem[]; changedMenus: MenuItem[] } {
+  const changedMenus: MenuItem[] = [];
+  const updatedMenus = menus.map((menu) => {
+    let menuChanged = false;
+    const nextVariants = (menu.variants || []).map((variant) => {
+      if (variant.baseRecipeId !== baseRecipeId) {
+        return variant;
+      }
+      menuChanged = true;
+      const copy = { ...variant };
+      delete copy.baseRecipeId;
+      return copy;
+    });
+    if (!menuChanged) return menu;
+    const updatedMenu: MenuItem = {
+      ...menu,
+      variants: nextVariants,
+      updatedAt: new Date().toISOString(),
+    };
+    changedMenus.push(updatedMenu);
+    return updatedMenu;
+  });
+  return { updatedMenus, changedMenus };
+}
+

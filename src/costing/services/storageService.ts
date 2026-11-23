@@ -17,6 +17,8 @@ import {
   PackagingItem,
   AppBackupPackage,
   StockCountSnapshot,
+  CentralBaseRecipe,
+  RiceNoodlePortion,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -28,6 +30,7 @@ import {
   INITIAL_EXPENSES,
   INITIAL_SALES_ORDERS,
   INITIAL_WASTE_LOG,
+  INITIAL_RICE_NOODLE_PORTIONS,
 } from '../data/initialData';
 import { calculateIngredientCost, deriveGpMultiplierFromSettings } from './calculationEngine';
 import { generateId, generateOrderNumber } from '../utils/id';
@@ -55,6 +58,8 @@ const STORAGE_KEYS = {
   EMPLOYEES: 'tonys_employees_v1',
   PACKAGING: 'tonys_packaging_v1',
   STOCK_COUNTS: 'tonys_stock_counts_v1',
+  BASE_RECIPES: 'tonys_base_recipes_v1',
+  RICE_NOODLE_PORTIONS: 'tonys_rice_noodle_portions_v1',
   LAST_BACKUP: 'tonys_last_backup_time',
   OVERHEAD_COMPAT: 'tonys-kitchen-overhead-v1',
 };
@@ -426,6 +431,20 @@ export const StorageService = {
     safeSave(STORAGE_KEYS.STOCK_COUNTS, counts);
   },
 
+  getBaseRecipes(): CentralBaseRecipe[] {
+    return safeLoad(STORAGE_KEYS.BASE_RECIPES, []);
+  },
+  saveBaseRecipes(recipes: CentralBaseRecipe[]): void {
+    safeSave(STORAGE_KEYS.BASE_RECIPES, recipes);
+  },
+
+  getRiceNoodlePortions(): RiceNoodlePortion[] {
+    return safeLoad(STORAGE_KEYS.RICE_NOODLE_PORTIONS, INITIAL_RICE_NOODLE_PORTIONS);
+  },
+  saveRiceNoodlePortions(portions: RiceNoodlePortion[]): void {
+    safeSave(STORAGE_KEYS.RICE_NOODLE_PORTIONS, portions);
+  },
+
   resetToDefaults(): void {
     // Only remove keys belonging to Tony's Restaurant System - NEVER clear entire localStorage
     Object.values(STORAGE_KEYS).forEach((key) => {
@@ -451,6 +470,8 @@ export const StorageService = {
     safeSave(STORAGE_KEYS.EMPLOYEES, []);
     safeSave(STORAGE_KEYS.PACKAGING, []);
     safeSave(STORAGE_KEYS.STOCK_COUNTS, []);
+    safeSave(STORAGE_KEYS.BASE_RECIPES, []);
+    safeSave(STORAGE_KEYS.RICE_NOODLE_PORTIONS, INITIAL_RICE_NOODLE_PORTIONS);
   },
 
   // EXPORT TO EXCEL WORKBOOK
@@ -745,6 +766,8 @@ export const StorageService = {
         employees: this.getEmployees(),
         packagingItems: this.getPackagingItems(),
         stockCounts: this.getStockCounts(),
+        baseRecipes: this.getBaseRecipes(),
+        riceNoodlePortions: this.getRiceNoodlePortions(),
       },
     };
     return backup;
@@ -927,6 +950,14 @@ export const StorageService = {
     if (Array.isArray(p.stockCounts)) {
       this.saveStockCounts(p.stockCounts);
       counts.stockCounts = p.stockCounts.length;
+    }
+    if (Array.isArray(p.baseRecipes)) {
+      this.saveBaseRecipes(p.baseRecipes);
+      counts.baseRecipes = p.baseRecipes.length;
+    }
+    if (Array.isArray(p.riceNoodlePortions)) {
+      this.saveRiceNoodlePortions(p.riceNoodlePortions);
+      counts.riceNoodlePortions = p.riceNoodlePortions.length;
     }
 
     this.recordBackupCompleted();

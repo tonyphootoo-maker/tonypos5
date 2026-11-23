@@ -423,6 +423,36 @@
         "countedBy": { "type": "string" }
       }
     },
+    "CostBaseRecipe": {
+      "title": "CostBaseRecipe",
+      "description": "Standalone user-created central base recipe shared across menu options",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "thaiName": { "type": "string" },
+        "englishName": { "type": "string" },
+        "description": { "type": "string" },
+        "packagingCost": { "type": "number" },
+        "active": { "type": "boolean" }
+      }
+    },
+    "CostRiceNoodlePortion": {
+      "title": "CostRiceNoodlePortion",
+      "description": "User-managed rice and noodle portioning & yield cost record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "nameEn": { "type": "string" },
+        "type": { "type": "string" },
+        "typeEn": { "type": "string" },
+        "portionGram": { "type": "number" },
+        "costPerPortion": { "type": "number" },
+        "yieldPercent": { "type": "number" },
+        "active": { "type": "boolean" }
+      }
+    },
     "PublicStore": {
       "title": "PublicStore",
       "description": "Sanitized public storefront menu and online ordering settings with zero recipe/cost fields",
@@ -511,6 +541,8 @@
     "/users/{uid}/costPriceHistory/{historyId}": { "schema": "CostPriceHistory", "description": "Costing price history" },
     "/users/{uid}/costSalesOrders/{orderId}": { "schema": "CostSaleOrder", "description": "Costing sale orders" },
     "/users/{uid}/costStockCounts/{snapshotId}": { "schema": "CostStockCount", "description": "Dated stock count snapshots" },
+    "/users/{uid}/costBaseRecipes/{recipeId}": { "schema": "CostBaseRecipe", "description": "User-created standalone central base recipes" },
+    "/users/{uid}/costRiceNoodlePortions/{portionId}": { "schema": "CostRiceNoodlePortion", "description": "Rice and noodle portion costing recipes" },
     "/publicStoreIndex/{indexId}": { "schema": "PublicStoreIndex", "description": "Default public storefront mapping" },
     "/publicStores/{storeId}": { "schema": "PublicStore", "description": "Published public storefront menu and config" },
     "/publicStores/{storeId}/images/{imageId}": { "schema": "PublicStoreImage", "description": "Published public storefront dish and QR images" },

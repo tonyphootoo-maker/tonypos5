@@ -3,8 +3,13 @@ import {
   resolveCentralRecipeMenuTarget,
   getCentralRecipeOriginLabel,
   CENTRAL_RECIPE_BUTTON_LABELS,
+  derivePackagingFromBaseRecipe,
+  applyBaseRecipeToVariant,
+  syncBaseRecipeToLinkedMenus,
+  detachBaseRecipeFromMenus,
 } from '../../costing/utils/centralRecipeNav';
-import { MenuItem, MenuVariant } from '../../costing/types';
+import { INITIAL_RICE_NOODLE_PORTIONS } from '../../costing/data/initialData';
+import { CentralBaseRecipe, MenuItem, MenuVariant, RecipeItem } from '../../costing/types';
 
 function makeVariant(id: string, menuId: string, active = true): MenuVariant {
   return {
@@ -90,3 +95,203 @@ describe('centralRecipeNav helpers', () => {
     );
   });
 });
+
+describe('CentralBaseRecipe & RiceNoodlePortion helpers', () => {
+  const makeBaseRecipe = (): CentralBaseRecipe => ({
+    id: 'base_kaprao',
+    name: 'สูตรกะเพรากลาง',
+    englishName: 'Central Kaprao Base',
+    items: [
+      {
+        id: 'base_sauce_1',
+        type: 'SAUCE',
+        ingredientType: 'SAUCE',
+        ingredientId: 'sauce_1',
+        sauceId: 'sauce_1',
+        name: 'ซอสกะเพรา',
+        quantity: 30,
+        unit: 'g',
+        calculatedUnitCost: 0.1,
+        calculatedLineCost: 3,
+      },
+      {
+        id: 'base_pkg_1',
+        type: 'PACKAGING',
+        ingredientType: 'PACKAGING',
+        ingredientId: 'pkg_kraft',
+        name: 'กล่องกระดาษ',
+        quantity: 1,
+        unit: 'ชิ้น',
+        calculatedUnitCost: 2.5,
+        calculatedLineCost: 2.5,
+      },
+      {
+        id: 'base_pkg_2',
+        type: 'PACKAGING',
+        ingredientType: 'PACKAGING',
+        ingredientId: 'pkg_cutlery',
+        name: 'ช้อนส้อม',
+        quantity: 1,
+        unit: 'ชุด',
+        calculatedUnitCost: 1.2,
+        calculatedLineCost: 1.2,
+      },
+    ],
+    active: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  it('derives packagingItems and rounded packagingCost from base recipe items', () => {
+    const base = makeBaseRecipe();
+    const { packagingCost, packagingItems } = derivePackagingFromBaseRecipe(base);
+    expect(packagingItems).toHaveLength(2);
+    expect(packagingCost).toBe(3.7);
+  });
+
+  it('applies base recipe to variant while preserving multi-protein items', () => {
+    const shrimpItem: RecipeItem = {
+      id: 'primary_1_shrimp',
+      type: 'INGREDIENT',
+      ingredientType: 'INGREDIENT',
+      ingredientId: 'ing_shrimp',
+      name: 'กุ้งสด',
+      quantity: 60,
+      unit: 'g',
+      proteinCategory: 'SHRIMP',
+      calculatedUnitCost: 0.35,
+      calculatedLineCost: 21,
+    };
+    const squidItem: RecipeItem = {
+      id: 'primary_2_squid',
+      type: 'INGREDIENT',
+      ingredientType: 'INGREDIENT',
+      ingredientId: 'ing_squid',
+      name: 'ปลาหมึก',
+      quantity: 50,
+      unit: 'g',
+      proteinCategory: 'SQUID',
+      calculatedUnitCost: 0.25,
+      calculatedLineCost: 12.5,
+    };
+    const oldSauce: RecipeItem = {
+      id: 'old_sauce',
+      type: 'SAUCE',
+      ingredientType: 'SAUCE',
+      ingredientId: 'sauce_old',
+      name: 'ซอสเก่า',
+      quantity: 20,
+      unit: 'g',
+      calculatedUnitCost: 0.1,
+      calculatedLineCost: 2,
+    };
+    const variant: MenuVariant = {
+      ...makeVariant('var_seafood', 'menu_1'),
+      proteinType: 'ทะเล',
+      recipeItems: [shrimpItem, squidItem, oldSauce],
+    };
+
+    const updated = applyBaseRecipeToVariant(variant, makeBaseRecipe());
+    expect(updated.baseRecipeId).toBe('base_kaprao');
+    expect(updated.recipeItems.map((r) => r.ingredientId)).toEqual([
+      'ing_shrimp',
+      'ing_squid',
+      'sauce_1',
+      'pkg_kraft',
+      'pkg_cutlery',
+    ]);
+    expect(updated.packagingCost).toBe(3.7);
+    expect(updated.packagingItems).toHaveLength(2);
+  });
+
+  it('syncs updated base recipe only to linked variants across menus', () => {
+    const linkedVariant: MenuVariant = {
+      ...makeVariant('v1', 'm1'),
+      baseRecipeId: 'base_kaprao',
+      recipeItems: [
+        {
+          id: 'primary_1_pork',
+          type: 'INGREDIENT',
+          ingredientId: 'ing_pork',
+          name: 'หมูสับ',
+          quantity: 80,
+          unit: 'g',
+          proteinCategory: 'PORK',
+        },
+      ],
+    };
+    const unlinkedVariant: MenuVariant = {
+      ...makeVariant('v2', 'm1'),
+      baseRecipeId: 'other_base',
+      recipeItems: [
+        {
+          id: 'keep_me',
+          type: 'SAUCE',
+          ingredientId: 'sauce_other',
+          name: 'ซอสอื่น',
+          quantity: 15,
+          unit: 'g',
+        },
+      ],
+    };
+
+    const menus: MenuItem[] = [
+      makeMenu('m1', 'เมนู 1', [linkedVariant, unlinkedVariant]),
+      makeMenu('m2', 'เมนู 2', [makeVariant('v3', 'm2')]),
+    ];
+
+    const { updatedMenus, changedMenus, linkedCount } = syncBaseRecipeToLinkedMenus(
+      menus,
+      makeBaseRecipe()
+    );
+    expect(linkedCount).toBe(1);
+    expect(changedMenus).toHaveLength(1);
+    expect(changedMenus[0].id).toBe('m1');
+    expect(updatedMenus[0].variants[0].recipeItems.map((i) => i.ingredientId)).toEqual([
+      'ing_pork',
+      'sauce_1',
+      'pkg_kraft',
+      'pkg_cutlery',
+    ]);
+    expect(updatedMenus[0].variants[1].recipeItems.map((i) => i.ingredientId)).toEqual([
+      'sauce_other',
+    ]);
+    expect(updatedMenus[1]).toBe(menus[1]);
+  });
+
+  it('detaches deleted baseRecipeId while keeping variant recipe items intact', () => {
+    const linkedVariant: MenuVariant = {
+      ...makeVariant('v1', 'm1'),
+      baseRecipeId: 'base_kaprao',
+      recipeItems: [
+        {
+          id: 's1',
+          type: 'SAUCE',
+          ingredientId: 'sauce_1',
+          name: 'ซอสกะเพรา',
+          quantity: 30,
+          unit: 'g',
+        },
+      ],
+    };
+    const menus: MenuItem[] = [makeMenu('m1', 'เมนู 1', [linkedVariant])];
+
+    const { updatedMenus, changedMenus } = detachBaseRecipeFromMenus(menus, 'base_kaprao');
+    expect(changedMenus).toHaveLength(1);
+    expect(updatedMenus[0].variants[0].baseRecipeId).toBeUndefined();
+    expect(updatedMenus[0].variants[0].recipeItems).toHaveLength(1);
+  });
+
+  it('provides non-empty active INITIAL_RICE_NOODLE_PORTIONS records', () => {
+    expect(INITIAL_RICE_NOODLE_PORTIONS.length).toBeGreaterThanOrEqual(5);
+    for (const p of INITIAL_RICE_NOODLE_PORTIONS) {
+      expect(p.id).toBeTruthy();
+      expect(p.name).toBeTruthy();
+      expect(p.active).toBe(true);
+      expect(p.portionGram).toBeGreaterThan(0);
+      expect(p.costPerPortion).toBeGreaterThan(0);
+      expect(p.yieldPercent).toBeGreaterThan(0);
+    }
+  });
+});
+

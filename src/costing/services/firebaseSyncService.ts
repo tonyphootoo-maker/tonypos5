@@ -53,6 +53,8 @@ export const COST_COLLECTIONS = {
   PRICE_HISTORY: 'costPriceHistory',
   SALES_ORDERS: 'costSalesOrders',
   STOCK_COUNTS: 'costStockCounts',
+  BASE_RECIPES: 'costBaseRecipes',
+  RICE_NOODLE_PORTIONS: 'costRiceNoodlePortions',
 } as const;
 
 export const COLLECTIONS = COST_COLLECTIONS;
@@ -255,6 +257,8 @@ export const FirebaseSyncService = {
       const priceHistory = StorageService.getPriceHistory();
       const salesOrders = StorageService.getSalesOrders();
       const stockCounts = StorageService.getStockCounts();
+      const baseRecipes = StorageService.getBaseRecipes();
+      const riceNoodlePortions = StorageService.getRiceNoodlePortions();
 
       await this.saveUserDoc(userId, COST_COLLECTIONS.SETTINGS, 'default', settings);
       await Promise.all([
@@ -271,6 +275,8 @@ export const FirebaseSyncService = {
         this.batchSaveUser(userId, COST_COLLECTIONS.PRICE_HISTORY, priceHistory),
         this.batchSaveUser(userId, COST_COLLECTIONS.SALES_ORDERS, salesOrders),
         this.batchSaveUser(userId, COST_COLLECTIONS.STOCK_COUNTS, stockCounts),
+        this.batchSaveUser(userId, COST_COLLECTIONS.BASE_RECIPES, baseRecipes),
+        this.batchSaveUser(userId, COST_COLLECTIONS.RICE_NOODLE_PORTIONS, riceNoodlePortions),
       ]);
 
       const count =
@@ -287,7 +293,9 @@ export const FirebaseSyncService = {
         suppliers.length +
         priceHistory.length +
         salesOrders.length +
-        stockCounts.length;
+        stockCounts.length +
+        baseRecipes.length +
+        riceNoodlePortions.length;
 
       return { success: true, count };
     } catch (err: any) {

@@ -23,7 +23,7 @@ import {
   GripVertical,
   BookOpen,
 } from 'lucide-react';
-import { CENTRAL_RECIPE_BUTTON_LABELS } from '../utils/centralRecipeNav';
+import { CENTRAL_RECIPE_BUTTON_LABELS, derivePackagingFromBaseRecipe } from '../utils/centralRecipeNav';
 import {
   MenuItem,
   MenuVariant,
@@ -32,6 +32,7 @@ import {
   RestaurantSettings,
   RecipeCostBreakdown,
   RecipeItem,
+  CentralBaseRecipe,
 } from '../types';
 import {
   calculateVariantCostBreakdown,
@@ -202,6 +203,7 @@ interface FoodCostViewProps {
   menus: MenuItem[];
   ingredients: Ingredient[];
   sauces: Sauce[];
+  baseRecipes?: CentralBaseRecipe[];
   settings: RestaurantSettings;
   lang?: 'th' | 'en';
   initialServingMode?: 'ON_RICE' | 'A_LA_CARTE';
@@ -224,6 +226,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   menus,
   ingredients,
   sauces,
+  baseRecipes = [],
   settings,
   lang: propLang,
   initialServingMode,
@@ -1273,13 +1276,26 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       (it) => !isProteinRecipeItem(it, clonedVariant.proteinType)
     );
     let initialBaseRecipeId = '';
-    if (existingNonProteins.length > 0) {
+    if (
+      clonedVariant.baseRecipeId &&
+      baseRecipes.some((r) => r.id === clonedVariant.baseRecipeId && r.active !== false)
+    ) {
+      initialBaseRecipeId = `base:${clonedVariant.baseRecipeId}`;
+    } else if (existingNonProteins.length > 0) {
       const sig = (list: RecipeItem[]) => list.map((x) => `${x.ingredientId}:${x.name}:${x.quantity}`).sort().join('|');
       const currentSig = sig(existingNonProteins);
-      const matchedMenuOpt =
-        baseRecipeMenuOptions.find((opt) => opt.menu.id === menu.id && sig(opt.items) === currentSig) ||
-        baseRecipeMenuOptions.find((opt) => sig(opt.items) === currentSig);
-      initialBaseRecipeId = matchedMenuOpt ? matchedMenuOpt.menu.id : '__custom__';
+      const matchedStandalone = baseRecipes.find(
+        (r) => r.active !== false && sig(r.items || []) === currentSig
+      );
+      if (matchedStandalone) {
+        initialBaseRecipeId = `base:${matchedStandalone.id}`;
+        clonedVariant.baseRecipeId = matchedStandalone.id;
+      } else {
+        const matchedMenuOpt =
+          baseRecipeMenuOptions.find((opt) => opt.menu.id === menu.id && sig(opt.items) === currentSig) ||
+          baseRecipeMenuOptions.find((opt) => sig(opt.items) === currentSig);
+        initialBaseRecipeId = matchedMenuOpt ? matchedMenuOpt.menu.id : '__custom__';
+      }
     }
 
     setIsAddingCustomUnit(false);
@@ -1566,7 +1582,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       robinhoodPrice: Number(v.robinhoodPrice) || Math.round(baseSellingPrice * robinhoodMultiplier),
       overheadCost: v.overheadCost !== undefined && !isNaN(Number(v.overheadCost)) ? Number(v.overheadCost) : 6.0,
       packagingCost: v.packagingCost !== undefined && !isNaN(Number(v.packagingCost)) ? Number(v.packagingCost) : 9.0,
+      packagingItems: v.packagingItems,
       recipeItems: finalRecipeItems,
+      baseRecipeId: v.baseRecipeId || undefined,
       active: v.active !== undefined ? v.active : true,
       isOutOfStock: v.isOutOfStock || false,
       availableChannels: v.availableChannels || ['DINE_IN', 'TAKEAWAY', 'GRAB', 'LINEMAN'],
@@ -4459,6 +4477,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 );
                 const baseRecipeCostPreview = computeBaseRecipeItemsCost(currentNonProteinItems);
                 const selectedBaseId = variantModalState.selectedBaseRecipeMenuId || '';
+                const activeStandaloneRecipes = baseRecipes.filter((r) => r.active !== false);
 
                 return (
                   <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-2xl space-y-2">
@@ -4478,31 +4497,56 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     <select
                       value={selectedBaseId}
                       onChange={(e) => {
-                        const chosenMenuId = e.target.value;
-                        if (chosenMenuId === '__custom__') return;
+                        const chosenValue = e.target.value;
+                        if (chosenValue === '__custom__') return;
                         setVariantModalState((prev) => {
                           const existingProteins = (prev.variant?.recipeItems || []).filter((it) =>
                             isProteinRecipeItem(it, prev.variant?.proteinType)
                           );
-                          if (!chosenMenuId) {
+                          if (!chosenValue) {
                             return {
                               ...prev,
                               selectedBaseRecipeMenuId: '',
                               variant: {
                                 ...prev.variant,
+                                baseRecipeId: undefined,
                                 recipeItems: existingProteins,
                               },
                             };
                           }
+                          if (chosenValue.startsWith('base:')) {
+                            const recipeId = chosenValue.slice(5);
+                            const matchedBase = baseRecipes.find((r) => r.id === recipeId);
+                            const clonedBase = (matchedBase?.items || []).map((it) => ({ ...it }));
+                            const pkgInfo = matchedBase
+                              ? derivePackagingFromBaseRecipe(matchedBase)
+                              : { packagingCost: 0, packagingItems: [] };
+                            return {
+                              ...prev,
+                              selectedBaseRecipeMenuId: chosenValue,
+                              variant: {
+                                ...prev.variant,
+                                baseRecipeId: recipeId,
+                                recipeItems: [...existingProteins, ...clonedBase],
+                                ...(pkgInfo.packagingItems.length > 0
+                                  ? {
+                                      packagingCost: pkgInfo.packagingCost,
+                                      packagingItems: pkgInfo.packagingItems,
+                                    }
+                                  : {}),
+                              },
+                            };
+                          }
                           const matchedOpt = baseRecipeMenuOptions.find(
-                            (opt) => opt.menu.id === chosenMenuId
+                            (opt) => opt.menu.id === chosenValue
                           );
                           const clonedBase = (matchedOpt?.items || []).map((it) => ({ ...it }));
                           return {
                             ...prev,
-                            selectedBaseRecipeMenuId: chosenMenuId,
+                            selectedBaseRecipeMenuId: chosenValue,
                             variant: {
                               ...prev.variant,
+                              baseRecipeId: undefined,
                               recipeItems: [...existingProteins, ...clonedBase],
                             },
                           };
@@ -4522,11 +4566,28 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             : `สูตรอาหารกลางของตัวเลือกนี้ (${currentNonProteinItems.length} รายการ)`}
                         </option>
                       )}
-                      {baseRecipeMenuOptions.map(({ menu: bMenu, items }) => (
-                        <option key={bMenu.id} value={bMenu.id}>
-                          {getLocalizedText(lang, bMenu.thaiName || bMenu.name, bMenu.englishName)} ({items.length} {isEn ? 'items' : 'รายการ'})
-                        </option>
-                      ))}
+                      {activeStandaloneRecipes.length > 0 && (
+                        <optgroup label={isEn ? 'Central Base Recipes' : 'สูตรอาหารกลาง (คลังสูตรอาหารกลาง)'}>
+                          {activeStandaloneRecipes.map((recipe) => {
+                            const itemCount = (recipe.items || []).length;
+                            const recipeCost = computeBaseRecipeItemsCost(recipe.items || []);
+                            return (
+                              <option key={recipe.id} value={`base:${recipe.id}`}>
+                                {getLocalizedText(lang, recipe.thaiName || recipe.name, recipe.englishName)} ({itemCount} {isEn ? 'items' : 'รายการ'} · ฿{recipeCost.toFixed(2)})
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+                      {baseRecipeMenuOptions.length > 0 && (
+                        <optgroup label={isEn ? 'Existing Menu Base Recipes' : 'สูตรจากเมนูที่มีอยู่'}>
+                          {baseRecipeMenuOptions.map(({ menu: bMenu, items }) => (
+                            <option key={bMenu.id} value={bMenu.id}>
+                              {getLocalizedText(lang, bMenu.thaiName || bMenu.name, bMenu.englishName)} ({items.length} {isEn ? 'items' : 'รายการ'})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                 );
