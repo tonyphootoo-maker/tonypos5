@@ -32,6 +32,7 @@ import {
   getLocalizedText,
   containsThaiCharacters,
   resolveEntityEnglishName,
+  learnShopTranslation,
 } from '../utils/thaiToEnglish';
 import {
   useDebouncedTranslationScheduler,
@@ -948,6 +949,16 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
     try {
       await saveDocument('dishes', dishToSave, isNew);
+      if (finalDishTh && dishToSave.name) {
+        learnShopTranslation(finalDishTh, dishToSave.name, { isManual: isDishManual });
+      }
+      for (const variant of dishToSave.variants || []) {
+        if (variant.nameTh && variant.name) {
+          learnShopTranslation(variant.nameTh, variant.name, {
+            isManual: Boolean(variant.nameEnManual),
+          });
+        }
+      }
       if (editingDishPreviewUrl) {
         if (dishToSave.imageId) {
           loadedDishImageIdsRef.current.set(dishToSave.id, dishToSave.imageId);
@@ -2551,6 +2562,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 version: editingCategory.version || 1,
               };
               await saveDocument('categories', catToSave, isNew);
+              if (finalTh && catToSave.name) {
+                learnShopTranslation(finalTh, catToSave.name, { isManual: isCatManual });
+              }
               if (isDishModalOpen && editingDish && isNew) {
                 setEditingDish((prev) => (prev ? { ...prev, categoryId: catToSave.id } : prev));
               }
@@ -2716,6 +2730,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 version: editingChannel.version || 1,
               };
               await saveDocument('channels', chToSave, isNew);
+              if (finalTh && chToSave.name) {
+                learnShopTranslation(finalTh, chToSave.name, { isManual: isChManual });
+              }
               setIsChannelModalOpen(false);
               setEditingChannel(null);
               loadData();

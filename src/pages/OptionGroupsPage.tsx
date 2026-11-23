@@ -14,7 +14,11 @@ import {
   getOptionChoiceEffectiveQuantity,
 } from '../engine/calculations';
 import { subscribeCollection, saveDocument, deleteDocument, saveOptionGroupsOrder } from '../data/db';
-import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
+import {
+  translateThaiToEnglish,
+  computeAutoEnglishName,
+  learnShopTranslation,
+} from '../utils/thaiToEnglish';
 import {
   useDebouncedTranslationScheduler,
   needsEnglishReview,
@@ -136,6 +140,16 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
     };
 
     await saveDocument('optionGroups', groupToSave, isNew);
+    if (finalNameTh && resolvedGroupEn) {
+      learnShopTranslation(finalNameTh, resolvedGroupEn, { isManual: isGroupManual });
+    }
+    for (const choice of normalizedChoices) {
+      if (choice.nameTh && choice.name) {
+        learnShopTranslation(choice.nameTh, choice.name, {
+          isManual: Boolean(choice.nameEnManual),
+        });
+      }
+    }
     setIsEditorOpen(false);
     setEditingGroup(null);
     loadData();

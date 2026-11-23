@@ -9,6 +9,10 @@ import {
   getShopTranslationGlossary,
   setShopTranslationGlossary,
   clearShopTranslationGlossary,
+  getBuiltInFoodDictionary,
+  learnShopTranslation,
+  removeShopTranslationEntry,
+  subscribeShopTranslationGlossary,
 } from '../../utils/thaiToEnglish';
 import {
   createDebouncedTranslationScheduler,
@@ -340,6 +344,65 @@ describe('thaiToEnglish culinary translation & auto-sync (Phase 1)', () => {
     expect(preview.items.find((i) => i.id === 'cv1')?.newEnglish).toBe(
       'Thai Fish Cakes (Tod Mun Pla) (Plate)'
     );
+  });
+
+  it('embeds expanded culinary food dictionary and learns/recalls unknown & custom shop terms', () => {
+    const builtIn = getBuiltInFoodDictionary();
+    expect(builtIn.length).toBeGreaterThan(250);
+    expect(
+      builtIn.some(
+        (e) => e.thai === 'ข้าวซอยไก่' && e.english === 'Khao Soi Chicken Curry Noodles'
+      )
+    ).toBe(true);
+
+    // Newly embedded cafe, northern, pasta & noodle dishes translate out of the box
+    expect(translateThaiToEnglish('มัทฉะลาเต้')).toBe('Matcha Latte');
+    expect(translateThaiToEnglish('สปาเก็ตตี้คาโบนาร่า')).toBe('Spaghetti Carbonara');
+    expect(translateThaiToEnglish('ข้าวซอยไก่')).toBe('Khao Soi Chicken Curry Noodles');
+
+    // Unknown term initially fails translation (Rule A)
+    expect(translateThaiToEnglish('ชาอู่หลงน้ำผึ้ง')).toBe('');
+
+    // Ignored placeholders do NOT pollute the shop dictionary
+    expect(learnShopTranslation('ชาอู่หลงน้ำผึ้ง', 'Standard')).toBe(false);
+    expect(learnShopTranslation('ชาอู่หลงน้ำผึ้ง', 'New Variant')).toBe(false);
+    expect(getShopTranslationGlossary()['ชาอู่หลงน้ำผึ้ง']).toBeUndefined();
+
+    // Auto-learns an unknown Thai term saved by user and recalls it immediately
+    const listener = vi.fn();
+    const unsub = subscribeShopTranslationGlossary(listener);
+    expect(learnShopTranslation('ชาอู่หลงน้ำผึ้ง', 'Honey Oolong Tea')).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(translateThaiToEnglish('ชาอู่หลงน้ำผึ้ง')).toBe('Honey Oolong Tea');
+
+    // Built-in match with identical English does not duplicate into shop glossary unless manually customized
+    expect(learnShopTranslation('มัทฉะลาเต้', 'Matcha Latte', { isManual: false })).toBe(false);
+    expect(getShopTranslationGlossary()['มัทฉะลาเต้']).toBeUndefined();
+
+    // Manual override of built-in term IS saved and takes precedence
+    expect(
+      learnShopTranslation('มัทฉะลาเต้', 'Ceremonial Uji Matcha Latte', { isManual: true })
+    ).toBe(true);
+    expect(translateThaiToEnglish('มัทฉะลาเต้')).toBe('Ceremonial Uji Matcha Latte');
+
+    // Unknown custom ingredient learns without isManual and works dynamically inside compound phrases via DP segmentation
+    expect(translateThaiToEnglish('มัทฉะมัลเบอร์รี่ครีม')).toBe('');
+    expect(learnShopTranslation('มัลเบอร์รี่ครีม', 'Mulberry Cream')).toBe(true);
+    expect(translateThaiToEnglish('มัทฉะมัลเบอร์รี่ครีม')).toBe('Matcha Mulberry Cream');
+
+    // Manual override of DP-composed term also takes precedence inside compound phrases
+    expect(learnShopTranslation('ไข่มุกดำ', 'Black Boba', { isManual: true })).toBe(true);
+    expect(translateThaiToEnglish('ชานมไข่มุกดำ')).toBe('Milk Tea Black Boba');
+
+    // Removing custom term restores default built-in or empty state cleanly
+    removeShopTranslationEntry('มัทฉะลาเต้');
+    expect(translateThaiToEnglish('มัทฉะลาเต้')).toBe('Matcha Latte');
+    removeShopTranslationEntry('ชาอู่หลงน้ำผึ้ง');
+    expect(translateThaiToEnglish('ชาอู่หลงน้ำผึ้ง')).toBe('');
+    removeShopTranslationEntry('มัลเบอร์รี่ครีม');
+    expect(translateThaiToEnglish('มัทฉะมัลเบอร์รี่ครีม')).toBe('');
+
+    unsub();
   });
 });
 

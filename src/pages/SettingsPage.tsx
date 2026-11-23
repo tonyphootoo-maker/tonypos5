@@ -57,6 +57,12 @@ import {
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { FoodDictionaryModal } from '../components/FoodDictionaryModal';
+import {
+  getShopTranslationGlossary,
+  subscribeShopTranslationGlossary,
+  getBuiltInFoodDictionary,
+} from '../utils/thaiToEnglish';
 
 interface Props {
   settings: SettingsDoc;
@@ -97,6 +103,11 @@ export const SettingsPage: React.FC<Props> = ({
     unresolvedCount: number;
   }>({ skippedManualCount: 0, unresolvedCount: 0 });
   const [retranslateFeedback, setRetranslateFeedback] = useState<string | null>(null);
+  const [isDictionaryModalOpen, setIsDictionaryModalOpen] = useState(false);
+  const [customDictCount, setCustomDictCount] = useState<number>(
+    () => Object.keys(getShopTranslationGlossary()).length
+  );
+  const builtInDictCount = getBuiltInFoodDictionary().length;
   const loadedDatasetRef = useRef<{
     dishes: DishDoc[];
     optionGroups: OptionGroupDoc[];
@@ -118,6 +129,13 @@ export const SettingsPage: React.FC<Props> = ({
       });
     }
   }, [settings]);
+
+  useEffect(() => {
+    setCustomDictCount(Object.keys(getShopTranslationGlossary()).length);
+    return subscribeShopTranslationGlossary((entries) => {
+      setCustomDictCount(Object.keys(entries).length);
+    });
+  }, []);
 
   const handleQrUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1132,23 +1150,37 @@ export const SettingsPage: React.FC<Props> = ({
                 : 'Scan menus, variants, options, categories, ingredients, and sauces while preserving manually edited English names.'}
             </p>
           </div>
-          <button
-            type="button"
-            disabled={isScanningTranslations}
-            onClick={handleScanRetranslations}
-            className="px-4 py-2 bg-neutral-100 hover:bg-orange-50 text-neutral-800 hover:text-orange-700 rounded-xl text-xs font-bold border border-neutral-300 hover:border-orange-300 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
-          >
-            <Languages className="w-3.5 h-3.5 text-orange-600" />
-            <span>
-              {isScanningTranslations
-                ? lang === 'th'
-                  ? 'กำลังสแกน...'
-                  : 'Scanning...'
-                : lang === 'th'
-                ? 'ตรวจสอบและดูตัวอย่าง'
-                : 'Scan & Preview'}
-            </span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsDictionaryModalOpen(true)}
+              className="px-4 py-2 bg-orange-50 hover:bg-orange-100 text-orange-800 rounded-xl text-xs font-bold border border-orange-300 flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-orange-600" />
+              <span>
+                {lang === 'th'
+                  ? `พจนานุกรมอาหาร (${builtInDictCount + customDictCount})`
+                  : `Food Dictionary (${builtInDictCount + customDictCount})`}
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={isScanningTranslations}
+              onClick={handleScanRetranslations}
+              className="px-4 py-2 bg-neutral-100 hover:bg-orange-50 text-neutral-800 hover:text-orange-700 rounded-xl text-xs font-bold border border-neutral-300 hover:border-orange-300 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+            >
+              <Languages className="w-3.5 h-3.5 text-orange-600" />
+              <span>
+                {isScanningTranslations
+                  ? lang === 'th'
+                    ? 'กำลังสแกน...'
+                    : 'Scanning...'
+                  : lang === 'th'
+                  ? 'ตรวจสอบและดูตัวอย่าง'
+                  : 'Scan & Preview'}
+              </span>
+            </button>
+          </div>
         </div>
 
         {retranslateFeedback && (
@@ -1426,6 +1458,12 @@ export const SettingsPage: React.FC<Props> = ({
           </div>
         </div>
       )}
+      <FoodDictionaryModal
+        isOpen={isDictionaryModalOpen}
+        lang={lang}
+        onClose={() => setIsDictionaryModalOpen(false)}
+        onRetranslateClick={handleScanRetranslations}
+      />
     </div>
   );
 };

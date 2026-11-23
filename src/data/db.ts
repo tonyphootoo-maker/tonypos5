@@ -1777,3 +1777,70 @@ export async function importFullDatabase(backupData: Record<string, unknown>): P
     }
   }
 }
+
+// ==========================================
+// Shop Culinary Translation Dictionary Sync
+// ==========================================
+export interface TranslationGlossaryDoc {
+  id: 'translationGlossary';
+  entries: Record<string, string>;
+  updatedAt: string;
+  version: number;
+}
+
+export async function saveTranslationGlossaryToCloud(
+  entries: Record<string, string>
+): Promise<void> {
+  const user = auth?.currentUser;
+  if (!user || user.isAnonymous || !db) return;
+
+  const path = `users/${user.uid}/settings/translationGlossary`;
+  const ref = doc(db, path);
+  const payload: TranslationGlossaryDoc = {
+    id: 'translationGlossary',
+    entries: { ...entries },
+    updatedAt: new Date().toISOString(),
+    version: 1,
+  };
+
+  try {
+    await setDoc(ref, stripUndefined(payload));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, path);
+  }
+}
+
+export function subscribeTranslationGlossary(
+  onData: (entries: Record<string, string> | null) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const user = auth?.currentUser;
+  if (!user || user.isAnonymous || !db) {
+    onData(null);
+    return () => {};
+  }
+
+  const path = `users/${user.uid}/settings/translationGlossary`;
+  const ref = doc(db, path);
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+      const data = snap.data() as Partial<TranslationGlossaryDoc> | undefined;
+      const entries =
+        data?.entries && typeof data.entries === 'object' && !Array.isArray(data.entries)
+          ? (data.entries as Record<string, string>)
+          : {};
+      onData(entries);
+    },
+    (err) => {
+      console.error('Translation glossary listener error:', err);
+      onError?.(err);
+      handleFirestoreError(err, OperationType.GET, path);
+    }
+  );
+}
+

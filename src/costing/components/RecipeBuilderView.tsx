@@ -42,6 +42,7 @@ import {
   containsThaiCharacters,
   getLocalizedText,
   localizeUnit,
+  learnShopTranslation,
 } from '../../utils/thaiToEnglish';
 import {
   useDebouncedTranslationScheduler,
@@ -960,6 +961,9 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
     if (onSaveSauce) {
       onSaveSauce(finalSauce);
+    }
+    if (trimmedTh && trimmedEn) {
+      learnShopTranslation(trimmedTh, trimmedEn, { isManual });
     }
     setSauceFormError(null);
     setSelectedSauce(finalSauce);

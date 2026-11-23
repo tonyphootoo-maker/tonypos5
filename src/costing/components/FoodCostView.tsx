@@ -50,6 +50,7 @@ import {
   containsThaiCharacters,
   getLocalizedText,
   localizeUnit,
+  learnShopTranslation,
 } from '../../utils/thaiToEnglish';
 import {
   useDebouncedTranslationScheduler,
@@ -679,6 +680,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       console.error(err);
     }
 
+    if (trimmed && newCategoryEnglishInput.trim()) {
+      learnShopTranslation(trimmed, newCategoryEnglishInput.trim(), { isManual: true });
+    }
+
     setSelectedCategory(trimmed);
     if (editingMenu) {
       setEditingMenu({ ...editingMenu, category: trimmed });
@@ -738,6 +743,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
       // 3. Set selectedCategory to new name
       setSelectedCategory(trimmed);
+    }
+
+    if (trimmed && editCategoryEnglishInput.trim()) {
+      learnShopTranslation(trimmed, editCategoryEnglishInput.trim(), { isManual: true });
     }
 
     setIsEditCategoryModalOpen(false);
@@ -1034,6 +1043,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     };
 
     onSaveMenu(finalMenu);
+    if (trimmedTh && trimmedEn) {
+      learnShopTranslation(trimmedTh, trimmedEn, { isManual });
+    }
     setIsMenuModalOpen(false);
   };
 
@@ -1577,6 +1589,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
     try {
       onSaveMenu(updatedMenu);
+      if (derivedNameTh && derivedNameEn) {
+        learnShopTranslation(derivedNameTh, derivedNameEn, { isManual: isVariantManual });
+      }
       closeVariantModalCleanly();
       return { ok: true, menuId: updatedMenu.id, variantId: finalVariant.id };
     } catch (err) {

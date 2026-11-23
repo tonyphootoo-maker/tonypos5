@@ -51,6 +51,7 @@ import {
   getLocalizedText,
   containsThaiCharacters,
   resolveEntityEnglishName,
+  learnShopTranslation,
 } from '../utils/thaiToEnglish';
 import {
   useDebouncedTranslationScheduler,
@@ -1550,6 +1551,16 @@ export const TablesPosPage: React.FC<Props> = ({
       }
 
       await saveDocument('dishes', dishToSave, isNew);
+      if (finalDishTh && dishToSave.name) {
+        learnShopTranslation(finalDishTh, dishToSave.name, { isManual: isDishManual });
+      }
+      for (const variant of dishToSave.variants || []) {
+        if (variant.nameTh && variant.name) {
+          learnShopTranslation(variant.nameTh, variant.name, {
+            isManual: Boolean(variant.nameEnManual),
+          });
+        }
+      }
       setDishes((prev) =>
         isNew
           ? [...prev, dishToSave].sort((a, b) => (a.order || 0) - (b.order || 0))

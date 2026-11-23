@@ -82,6 +82,40 @@ export function normalizeThaiForTranslation(input: string): string {
 // ============================================================================
 const GLOSSARY_STORAGE_KEY = 'tonys_shop_translation_glossary_v1';
 let inMemoryGlossary: Record<string, string> = {};
+type GlossaryChangeListener = (entries: Record<string, string>) => void;
+const glossaryListeners = new Set<GlossaryChangeListener>();
+
+function notifyGlossaryListeners(snapshot: Record<string, string>): void {
+  const copy = { ...snapshot };
+  for (const listener of glossaryListeners) {
+    try {
+      listener(copy);
+    } catch {
+      // Ignore subscriber errors so dictionary updates never fail
+    }
+  }
+}
+
+export function subscribeShopTranslationGlossary(
+  listener: GlossaryChangeListener
+): () => void {
+  glossaryListeners.add(listener);
+  return () => {
+    glossaryListeners.delete(listener);
+  };
+}
+
+function sanitizeGlossaryEntries(entries: Record<string, string>): Record<string, string> {
+  const cleaned: Record<string, string> = {};
+  for (const [k, v] of Object.entries(entries || {})) {
+    const normKey = normalizeThaiForTranslation(k);
+    const val = (v || '').trim();
+    if (normKey && HAS_THAI_RE.test(normKey) && val && !HAS_THAI_RE.test(val)) {
+      cleaned[normKey] = val;
+    }
+  }
+  return cleaned;
+}
 
 function readBrowserGlossary(): Record<string, string> | null {
   try {
@@ -116,16 +150,27 @@ export function getShopTranslationGlossary(): Record<string, string> {
 }
 
 export function setShopTranslationGlossary(entries: Record<string, string>): void {
-  const cleaned: Record<string, string> = {};
-  for (const [k, v] of Object.entries(entries || {})) {
-    const normKey = normalizeThaiForTranslation(k);
-    const val = (v || '').trim();
-    if (normKey && val && !HAS_THAI_RE.test(val)) {
-      cleaned[normKey] = val;
-    }
-  }
+  const cleaned = sanitizeGlossaryEntries(entries);
   inMemoryGlossary = cleaned;
   writeBrowserGlossary(cleaned);
+  notifyGlossaryListeners(cleaned);
+}
+
+export function mergeShopTranslationGlossary(
+  entries: Record<string, string>,
+  options: { replace?: boolean; notify?: boolean } = {}
+): Record<string, string> {
+  const { replace = false, notify = false } = options;
+  const cleanedIncoming = sanitizeGlossaryEntries(entries);
+  const next = replace
+    ? cleanedIncoming
+    : { ...getShopTranslationGlossary(), ...cleanedIncoming };
+  inMemoryGlossary = next;
+  writeBrowserGlossary(next);
+  if (notify) {
+    notifyGlossaryListeners(next);
+  }
+  return { ...next };
 }
 
 export function upsertShopTranslationEntry(thaiTerm: string, englishTerm: string): void {
@@ -133,14 +178,28 @@ export function upsertShopTranslationEntry(thaiTerm: string, englishTerm: string
   const val = (englishTerm || '').trim();
   if (!normKey || !val || HAS_THAI_RE.test(val)) return;
   const current = getShopTranslationGlossary();
+  if (current[normKey] === val) return;
   current[normKey] = val;
   inMemoryGlossary = current;
   writeBrowserGlossary(current);
+  notifyGlossaryListeners(current);
+}
+
+export function removeShopTranslationEntry(thaiTerm: string): void {
+  const normKey = normalizeThaiForTranslation(thaiTerm);
+  if (!normKey) return;
+  const current = getShopTranslationGlossary();
+  if (!(normKey in current)) return;
+  delete current[normKey];
+  inMemoryGlossary = current;
+  writeBrowserGlossary(current);
+  notifyGlossaryListeners(current);
 }
 
 export function clearShopTranslationGlossary(): void {
   inMemoryGlossary = {};
   writeBrowserGlossary({});
+  notifyGlossaryListeners({});
 }
 
 // ============================================================================
@@ -901,6 +960,106 @@ const PHRASE_DICTIONARY: Array<[string, string]> = [
   ['อื่นๆ', 'Other'],
   ['อื่น ๆ', 'Other'],
   ['ทั่วไป', 'General'],
+
+  // Expanded Embedded Thai & Cafe Culinary Dictionary
+  ['ผัดซีอิ๊วหมู', 'Pad See Ew with Pork'],
+  ['ผัดซีอิ๊วไก่', 'Pad See Ew with Chicken'],
+  ['ผัดซีอิ๊วกุ้ง', 'Pad See Ew with Shrimp'],
+  ['ผัดซีอิ๊วทะเล', 'Pad See Ew with Seafood'],
+  ['ราดหน้าหมู', 'Stir-Fried Noodles in Gravy with Pork'],
+  ['ราดหน้าไก่', 'Stir-Fried Noodles in Gravy with Chicken'],
+  ['ราดหน้าทะเล', 'Stir-Fried Noodles in Gravy with Seafood'],
+  ['ข้าวผัดพริกแกง', 'Red Curry Paste Fried Rice'],
+  ['ข้าวผัดพริกเผา', 'Roasted Chili Paste Fried Rice'],
+  ['ข้าวหมูทอดกระเทียม', 'Fried Garlic Pork Rice'],
+  ['ข้าวไก่ทอด', 'Fried Chicken Rice'],
+  ['ข้าวไก่เทอริยากิ', 'Teriyaki Chicken Rice'],
+  ['ข้าวหน้าเป็ด', 'Roasted Duck Rice'],
+  ['ข้าวหมูอบ', 'Baked Pork Rice'],
+  ['ข้าวซอยไก่', 'Khao Soi Chicken Curry Noodles'],
+  ['ข้าวซอยเนื้อ', 'Khao Soi Beef Curry Noodles'],
+  ['ข้าวซอย', 'Khao Soi Northern Curry Noodles'],
+  ['ขนมจีนน้ำเงี้ยว', 'Fermented Rice Noodles with Northern Spicy Tomato Sauce'],
+  ['ผัดมาม่า', 'Stir-Fried Instant Noodles'],
+  ['ผัดวุ้นเส้น', 'Stir-Fried Glass Noodles'],
+  ['มาม่าต้มยำ', 'Tom Yum Instant Noodles'],
+  ['กุ้งแช่น้ำปลา', 'Raw Shrimp in Spicy Fish Sauce'],
+  ['กุ้งชุบแป้งทอด', 'Tempura Shrimp'],
+  ['ปลาหมึกชุบแป้งทอด', 'Crispy Fried Calamari'],
+  ['ปลากะพงลุยสวน', 'Deep-Fried Sea Bass with Thai Herb Salad'],
+  ['ยำปลาดุกฟู', 'Crispy Flaked Catfish Salad'],
+  ['ยำสามกรอบ', 'Three-Crispy Spicy Salad'],
+  ['ยำถั่วพู', 'Winged Bean Spicy Salad'],
+  ['ยำเห็ดรวม', 'Mixed Mushroom Spicy Salad'],
+  ['ไก่ผัดขิง', 'Stir-Fried Chicken with Ginger'],
+  ['หมูมะนาว', 'Boiled Pork in Spicy Lime Garlic Sauce'],
+  ['หมูคั่วเกลือ', 'Crispy Pork Stir-Fried with Chili & Salt'],
+  ['ซี่โครงหมูอบน้ำผึ้ง', 'Honey-Glazed Baked Pork Ribs'],
+  ['ไส้อั่ว', 'Northern Thai Herb Sausage'],
+  ['น้ำพริกหนุ่ม', 'Northern Green Chili Dip'],
+  ['น้ำพริกอ่อง', 'Northern Thai Pork & Tomato Chili Dip'],
+  ['ปูอบวุ้นเส้น', 'Baked Crab with Glass Noodles'],
+  ['หอยแมลงภู่อบหม้อดิน', 'Steamed Mussels in Clay Pot'],
+  ['หอยนางรมทรงเครื่อง', 'Fresh Oysters with Thai Condiments'],
+  ['ต้มยำหัวปลา', 'Tom Yum Fish Head Soup'],
+  ['ต้มยำเห็ด', 'Mushroom Tom Yum Soup'],
+  ['แกงเลียง', 'Thai Spicy Vegetable & Herb Soup'],
+  ['แกงเทโพ', 'Red Curry with Pork Belly & Morning Glory'],
+  ['ไข่ลูกเขย', 'Deep-Fried Boiled Eggs in Tamarind Sauce'],
+  ['ไข่ตุ๋น', 'Steamed Savory Egg Custard'],
+  ['ไข่กระทะ', 'Pan-Fried Eggs with Toppings'],
+  ['หมูกระทะ', 'Thai BBQ & Hot Pot'],
+  ['ชาบู', 'Shabu-Shabu'],
+  ['จิ้มจุ่ม', 'Thai Clay-Pot Herb Hot Pot'],
+  ['สลัดผัก', 'Garden Vegetable Salad'],
+  ['ซีซาร์สลัด', 'Caesar Salad'],
+  ['ชีสบอล', 'Cheese Balls'],
+  ['หอมทอด', 'Crispy Onion Rings'],
+  ['ปีกไก่บาร์บีคิว', 'BBQ Chicken Wings'],
+  ['ขนมปังกระเทียม', 'Garlic Bread'],
+  ['สปาเก็ตตี้ขี้เมาทะเล', 'Drunken Seafood Spaghetti'],
+  ['สปาเก็ตตี้คาโบนาร่า', 'Spaghetti Carbonara'],
+  ['สปาเก็ตตี้ซอสมะเขือเทศ', 'Spaghetti Bolognese / Tomato Sauce'],
+  ['สปาเก็ตตี้', 'Spaghetti'],
+  ['ชาเขียวมัทฉะ', 'Matcha Green Tea'],
+  ['มัทฉะลาเต้', 'Matcha Latte'],
+  ['มัทฉะ', 'Matcha'],
+  ['ชาพีช', 'Peach Tea'],
+  ['โซดามะนาว', 'Lime Soda'],
+  ['แดงมะนาวโซดา', 'Red Syrup Lime Soda'],
+  ['น้ำผึ้งมะนาว', 'Honey Lime Juice'],
+  ['น้ำแตงโมปั่น', 'Watermelon Smoothie'],
+  ['น้ำมะม่วงปั่น', 'Mango Smoothie'],
+  ['น้ำเสาวรส', 'Passion Fruit Juice'],
+  ['ช็อกโกแลตเย็น', 'Iced Chocolate'],
+  ['นมชมพู', 'Iced Pink Milk'],
+  ['ลอดช่อง', 'Pandan Noodles in Coconut Milk'],
+  ['เฉาก๊วย', 'Grass Jelly'],
+  ['ข้าวเหนียวทุเรียน', 'Durian Sticky Rice'],
+  ['โรตี', 'Crispy Roti Flatbread'],
+  ['บราวนี่', 'Chocolate Brownie'],
+  ['ชีสเค้ก', 'Cheesecake'],
+  ['วาฟเฟิล', 'Waffle'],
+  ['ฮันนี่โทสต์', 'Honey Toast'],
+  ['หม่าล่า', 'Mala Spicy'],
+  ['วิปปิ้งครีม', 'Whipping Cream'],
+  ['ชีสมอสซาเรลล่า', 'Mozzarella Cheese'],
+  ['เชดดาร์ชีส', 'Cheddar Cheese'],
+  ['พาร์เมซานชีส', 'Parmesan Cheese'],
+  ['ซอสบาร์บีคิว', 'BBQ Sauce'],
+  ['โชยุ', 'Japanese Soy Sauce'],
+  ['มิริน', 'Mirin'],
+  ['ทูน่า', 'Tuna'],
+  ['แซลมอน', 'Salmon'],
+  ['อะโวคาโด', 'Avocado'],
+  ['มะม่วง', 'Mango'],
+  ['สตรอว์เบอร์รี', 'Strawberry'],
+  ['ลิ้นจี่', 'Lychee'],
+  ['เสาวรส', 'Passion Fruit'],
+  ['แตงโม', 'Watermelon'],
+  ['ทุเรียน', 'Durian'],
+  ['น้ำเชื่อม', 'Sugar Syrup'],
+  ['ไข่มุก', 'Tapioca Pearls (Boba)'],
 ];
 
 const SINGLE_WORD_DICTIONARY: Record<string, string> = {
@@ -1037,6 +1196,31 @@ const DP_DICTIONARY_ENTRIES: Array<[string, string]> = Array.from(EXACT_DICTIONA
   .filter(([th]) => !DP_HAZARDOUS_TOKENS.has(th))
   .sort((a, b) => b[0].length - a[0].length);
 
+export interface EmbeddedFoodDictionaryEntry {
+  thai: string;
+  english: string;
+  kind: 'phrase' | 'word';
+}
+
+const SINGLE_WORD_KEYS = new Set(
+  Object.keys(SINGLE_WORD_DICTIONARY).map((k) => normalizeThaiForTranslation(k))
+);
+
+/**
+ * Returns a read-only view of all culinary terms embedded in the app dictionary.
+ */
+export function getBuiltInFoodDictionary(): EmbeddedFoodDictionaryEntry[] {
+  const result: EmbeddedFoodDictionaryEntry[] = [];
+  for (const [thai, english] of EXACT_DICTIONARY.entries()) {
+    result.push({
+      thai,
+      english,
+      kind: SINGLE_WORD_KEYS.has(thai) ? 'word' : 'phrase',
+    });
+  }
+  return result;
+}
+
 function toTitleCase(text: string): string {
   const lowercaseWords = new Set(['with', 'and', 'on', 'in', 'the', 'of', 'for', 'or', 'by', 'to', 'a']);
   return text
@@ -1101,13 +1285,43 @@ const COOKING_MODIFIER_PREFIX_MAP: Record<string, string> = {
 };
 
 /**
- * 100%-coverage DP segmentation over known safe dictionary tokens + ASCII segments.
+ * 100%-coverage DP segmentation over known safe dictionary tokens + user glossary + ASCII segments.
  * Returns null immediately if ANY Thai character cannot be covered completely (Rule A).
  */
-function segmentThai100Percent(thaiInput: string): string | null {
+function segmentThai100Percent(
+  thaiInput: string,
+  glossary: Record<string, string> = {}
+): string | null {
   const n = thaiInput.length;
   if (n === 0) return null;
   if (!HAS_THAI_RE.test(thaiInput)) return thaiInput;
+
+  const glossaryEntries: Array<[string, string, boolean]> = [];
+  const seenGlossaryKeys = new Set<string>();
+  for (const [rawTh, rawEn] of Object.entries(glossary)) {
+    const th = normalizeThaiForTranslation(rawTh);
+    const en = (rawEn || '').trim();
+    if (
+      th &&
+      HAS_THAI_RE.test(th) &&
+      !DP_HAZARDOUS_TOKENS.has(th) &&
+      en &&
+      !HAS_THAI_RE.test(en) &&
+      !seenGlossaryKeys.has(th)
+    ) {
+      seenGlossaryKeys.add(th);
+      glossaryEntries.push([th, en, true]);
+    }
+  }
+
+  const dpEntries: Array<[string, string, boolean]> = glossaryEntries.length
+    ? [
+        ...glossaryEntries,
+        ...DP_DICTIONARY_ENTRIES.filter(([th]) => !seenGlossaryKeys.has(th)).map(
+          ([th, en]) => [th, en, false] as [string, string, boolean]
+        ),
+      ].sort((a, b) => b[0].length - a[0].length)
+    : DP_DICTIONARY_ENTRIES.map(([th, en]) => [th, en, false] as [string, string, boolean]);
 
   type Step = { nextIndex: number; tokens: string[]; score: number } | null;
   const memo = new Array<Step | undefined>(n + 1);
@@ -1145,13 +1359,13 @@ function segmentThai100Percent(thaiInput: string): string | null {
 
     let best: Step = null;
 
-    // 3. Dictionary phrases & safe words (must achieve 100% coverage of remainder)
-    for (const [thPhrase, enTranslation] of DP_DICTIONARY_ENTRIES) {
+    // 3. Dictionary phrases, user glossary terms & safe words (must achieve 100% coverage of remainder)
+    for (const [thPhrase, enTranslation, isCustomGlossary] of dpEntries) {
       if (remaining.startsWith(thPhrase)) {
         const rest = solve(pos + thPhrase.length);
         if (rest) {
-          // Prefer fewer, longer phrase matches
-          const candidateScore = rest.score + 100 - thPhrase.length;
+          // Prefer fewer, longer phrase matches; user glossary gets a slight tie-break boost
+          const candidateScore = rest.score + (isCustomGlossary ? 99 : 100) - thPhrase.length;
           if (!best || candidateScore < best.score) {
             best = {
               nextIndex: n,
@@ -1469,8 +1683,8 @@ function resolveCompoundClauseInternal(
     }
   }
 
-  // Step 3f: Strict 100%-coverage DP word/phrase segmentation (fails cleanly on any partial match)
-  const dpEn = segmentThai100Percent(trimmed);
+  // Step 3f: Strict 100%-coverage DP word/phrase segmentation (including learned user glossary)
+  const dpEn = segmentThai100Percent(trimmed, glossary);
   if (dpEn) {
     return {
       en: dpEn,
@@ -1595,6 +1809,53 @@ const DEFAULT_PLACEHOLDER_EN_VALUES = new Set([
   'choice 2',
   'standard',
 ]);
+
+/**
+ * Automatically learns and persists unknown Thai food terms or user-customized English translations
+ * into the shop dictionary so future items and compound dishes translate automatically.
+ * Returns true if the persistent dictionary was updated.
+ */
+export function learnShopTranslation(
+  thaiTerm?: string | null,
+  englishTerm?: string | null,
+  options: { isManual?: boolean } = {}
+): boolean {
+  const normTh = normalizeThaiForTranslation((thaiTerm || '').trim());
+  const cleanEn = (englishTerm || '').trim();
+  if (!normTh || !HAS_THAI_RE.test(normTh)) return false;
+  if (!cleanEn || HAS_THAI_RE.test(cleanEn) || cleanEn.length > 120) return false;
+
+  // Never pollute the dictionary with default English UI placeholders unless Thai actually translates to that
+  const cleanLower = cleanEn.toLowerCase();
+  const builtIn = resolveCompoundClauseInternal(normTh, {}, 0);
+  const builtInEn = builtIn ? toTitleCase(builtIn.en.replace(/\s+/g, ' ').trim()) : '';
+
+  if (
+    DEFAULT_PLACEHOLDER_EN_VALUES.has(cleanLower) &&
+    builtInEn.toLowerCase() !== cleanLower
+  ) {
+    return false;
+  }
+
+  const current = getShopTranslationGlossary();
+  if (current[normTh] === cleanEn) {
+    return false;
+  }
+
+  // Learn when:
+  // 1) The built-in embedded dictionary doesn't know this Thai term (builtInEn === ''), OR
+  // 2) The user explicitly customized the English translation (isManual) to something different from built-in
+  const isUnknownToBuiltIn = !builtInEn;
+  const isCustomOverride =
+    Boolean(options.isManual) && builtInEn.toLowerCase() !== cleanLower;
+
+  if (!isUnknownToBuiltIn && !isCustomOverride) {
+    return false;
+  }
+
+  upsertShopTranslationEntry(normTh, cleanEn);
+  return true;
+}
 
 /**
  * Computes the next English name value when the Thai name changes.

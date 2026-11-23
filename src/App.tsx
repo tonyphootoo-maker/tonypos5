@@ -13,8 +13,15 @@ import {
   signInWithGoogle,
   subscribeSettings,
   subscribeCollection,
+  subscribeTranslationGlossary,
+  saveTranslationGlossaryToCloud,
   firebaseInitError,
 } from './data/db';
+import {
+  getShopTranslationGlossary,
+  mergeShopTranslationGlossary,
+  subscribeShopTranslationGlossary,
+} from './utils/thaiToEnglish';
 import { publishMenuToPublicStore } from './data/onlineDb';
 import { resolveAppMode } from './engine/onlineOrdering';
 import { Navigation, AppPage } from './components/Navigation';
@@ -236,8 +243,25 @@ export default function App() {
     let isMounted = true;
     let unsubSettings: (() => void) | null = null;
     let unsubShifts: (() => void) | null = null;
+    let unsubGlossaryCloud: (() => void) | null = null;
+    let unsubGlossaryLocal: (() => void) | null = null;
+    let glossarySaveTimer: ReturnType<typeof setTimeout> | null = null;
+    let isApplyingCloudGlossary = false;
+    let hasMergedInitialCloudGlossary = false;
 
     const cleanupDataSubs = () => {
+      if (glossarySaveTimer) {
+        clearTimeout(glossarySaveTimer);
+        glossarySaveTimer = null;
+      }
+      if (unsubGlossaryLocal) {
+        unsubGlossaryLocal();
+        unsubGlossaryLocal = null;
+      }
+      if (unsubGlossaryCloud) {
+        unsubGlossaryCloud();
+        unsubGlossaryCloud = null;
+      }
       if (unsubSettings) {
         unsubSettings();
         unsubSettings = null;
@@ -246,6 +270,7 @@ export default function App() {
         unsubShifts();
         unsubShifts = null;
       }
+      hasMergedInitialCloudGlossary = false;
     };
 
     // Safety timeout: Never stay stuck on loading screen
@@ -309,6 +334,58 @@ export default function App() {
           },
           (err) => {
             console.error('Error subscribing shifts:', err);
+          }
+        );
+
+        unsubGlossaryLocal = subscribeShopTranslationGlossary((nextEntries) => {
+          if (!isMounted || isApplyingCloudGlossary) return;
+          if (glossarySaveTimer) clearTimeout(glossarySaveTimer);
+          glossarySaveTimer = setTimeout(() => {
+            saveTranslationGlossaryToCloud(nextEntries).catch((err) => {
+              console.warn('Failed to sync shop glossary to cloud:', err);
+            });
+          }, 500);
+        });
+
+        unsubGlossaryCloud = subscribeTranslationGlossary(
+          (cloudEntries) => {
+            if (!isMounted) return;
+            isApplyingCloudGlossary = true;
+            try {
+              const localBefore = getShopTranslationGlossary();
+              if (!hasMergedInitialCloudGlossary) {
+                hasMergedInitialCloudGlossary = true;
+                if (cloudEntries === null) {
+                  if (Object.keys(localBefore).length > 0) {
+                    saveTranslationGlossaryToCloud(localBefore).catch((err) => {
+                      console.warn('Initial shop glossary push warning:', err);
+                    });
+                  }
+                } else {
+                  const merged = mergeShopTranslationGlossary(cloudEntries, {
+                    replace: false,
+                    notify: false,
+                  });
+                  const cloudJson = JSON.stringify(cloudEntries);
+                  const mergedJson = JSON.stringify(merged);
+                  if (mergedJson !== cloudJson && Object.keys(merged).length > 0) {
+                    saveTranslationGlossaryToCloud(merged).catch((err) => {
+                      console.warn('Merged shop glossary push warning:', err);
+                    });
+                  }
+                }
+              } else if (cloudEntries !== null) {
+                mergeShopTranslationGlossary(cloudEntries, {
+                  replace: true,
+                  notify: false,
+                });
+              }
+            } finally {
+              isApplyingCloudGlossary = false;
+            }
+          },
+          (err) => {
+            console.warn('Error subscribing translation glossary:', err);
           }
         );
       } else {

@@ -41,6 +41,7 @@ import {
   containsThaiCharacters,
   getLocalizedText,
   localizeUnit,
+  learnShopTranslation,
 } from '../../utils/thaiToEnglish';
 import {
   useDebouncedTranslationScheduler,
@@ -383,6 +384,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
         console.error('Failed to save category order', err);
       }
     }
+    if (trimmed && newCategoryEnglishName.trim()) {
+      learnShopTranslation(trimmed, newCategoryEnglishName.trim(), { isManual: true });
+    }
     setSelectedCategory(trimmed);
     setNewCategoryName('');
     setNewCategoryEnglishName('');
@@ -463,6 +467,10 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       if (selectedCategory === editingCategoryOldName) {
         setSelectedCategory(trimmed);
       }
+    }
+
+    if (trimmed && editCategoryEnglishName.trim()) {
+      learnShopTranslation(trimmed, editCategoryEnglishName.trim(), { isManual: true });
     }
 
     setIsEditCategoryModalOpen(false);
@@ -722,6 +730,9 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     };
 
     onSaveIngredient(completeIngredient);
+    if (trimmedTh && trimmedEn) {
+      learnShopTranslation(trimmedTh, trimmedEn, { isManual });
+    }
     setIsEditingModalOpen(false);
     setEditingIngredient(null);
   };
