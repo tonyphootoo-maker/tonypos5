@@ -1478,36 +1478,104 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             const dishCount = dishes.filter((d) => d.categoryId === cat.id).length;
 
             return (
-              <button
+              <div
                 key={cat.id}
-                type="button"
-                onClick={() => setSelectedCategoryId(cat.id)}
-                className={`h-10 px-3 rounded-xl flex items-center gap-2 font-bold text-xs cursor-pointer transition-all shrink-0 active:translate-y-[1px] ${
+                className={`h-10 rounded-xl flex items-center shrink-0 transition-all border ${
                   isSelected
-                    ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_8px_16px_-6px_rgba(234,88,12,0.32)]'
-                    : 'bg-white text-slate-800 hover:bg-orange-50/70 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
+                    ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white border-orange-600 shadow-[0_3px_0_#c2410c,0_8px_16px_-6px_rgba(234,88,12,0.32)]'
+                    : 'bg-white text-slate-800 hover:bg-orange-50/70 border-slate-200 shadow-[0_2px_0_#e2e8f0]'
                 }`}
               >
-                <Utensils
-                  className={`w-3.5 h-3.5 shrink-0 ${
-                    isSelected ? 'text-amber-200' : 'text-orange-500'
-                  }`}
-                />
-                <div className="text-left">
-                  <div className="leading-tight font-extrabold whitespace-nowrap">
-                    {lang === 'th' && cat.nameTh ? cat.nameTh : cat.name}
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategoryId(cat.id)}
+                  className="h-full pl-3 pr-2 flex items-center gap-2 font-bold text-xs cursor-pointer active:translate-y-[1px]"
+                >
+                  <Utensils
+                    className={`w-3.5 h-3.5 shrink-0 ${
+                      isSelected ? 'text-amber-200' : 'text-orange-500'
+                    }`}
+                  />
+                  <div className="text-left">
+                    <div className="leading-tight font-extrabold whitespace-nowrap">
+                      {lang === 'th' && cat.nameTh ? cat.nameTh : cat.name}
+                    </div>
+                    <div
+                      className={`text-[9.5px] font-semibold leading-none mt-0.5 ${
+                        isSelected ? 'text-orange-100' : 'text-slate-500'
+                      }`}
+                    >
+                      {dishCount} {lang === 'th' ? 'เมนู' : 'dishes'}
+                    </div>
                   </div>
-                  <div
-                    className={`text-[9.5px] font-semibold leading-none mt-0.5 ${
-                      isSelected ? 'text-orange-100' : 'text-slate-500'
+                </button>
+                <div
+                  className={`flex items-center pr-1 border-l ${
+                    isSelected ? 'border-white/25' : 'border-slate-200'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      translationScheduler.cancel('cat');
+                      manualEnKeysRef.current.delete('cat');
+                      if (cat.nameEnManual && (cat.name || '').trim()) {
+                        manualEnKeysRef.current.add('cat');
+                      }
+                      prevCatThaiRef.current = cat.nameTh || '';
+                      setEditingCategory(cat);
+                      setIsCategoryModalOpen(true);
+                    }}
+                    title={lang === 'th' ? 'แก้ไขหมวดหมู่' : 'Edit Category'}
+                    className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'text-white/90 hover:text-white hover:bg-black/15'
+                        : 'text-slate-400 hover:text-orange-600 hover:bg-orange-50'
                     }`}
                   >
-                    {dishCount} {lang === 'th' ? 'เมนู' : 'dishes'}
-                  </div>
+                    <Edit2 className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDelete({
+                        type: 'category',
+                        id: cat.id,
+                        label: lang === 'th' && cat.nameTh ? cat.nameTh : cat.name,
+                      });
+                    }}
+                    title={lang === 'th' ? 'ลบหมวดหมู่' : 'Delete Category'}
+                    className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'text-white/90 hover:text-white hover:bg-black/15'
+                        : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                    }`}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
                 </div>
-              </button>
+              </div>
             );
           })}
+
+          <button
+            type="button"
+            onClick={() => {
+              translationScheduler.cancel('cat');
+              manualEnKeysRef.current.delete('cat');
+              prevCatThaiRef.current = '';
+              setEditingCategory({ name: '', nameTh: '', order: categories.length + 1 });
+              setIsCategoryModalOpen(true);
+            }}
+            className="h-10 px-3 rounded-xl flex items-center gap-1.5 font-bold text-xs cursor-pointer transition-all shrink-0 bg-orange-50 hover:bg-orange-100 text-orange-800 border border-orange-300 shadow-[0_2px_0_#fed7aa] active:translate-y-[1px]"
+          >
+            <Plus className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+            <span className="whitespace-nowrap">
+              {lang === 'th' ? '+ เพิ่มหมวดหมู่' : '+ Add Category'}
+            </span>
+          </button>
         </div>
       )}
 
@@ -1627,9 +1695,52 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-neutral-700 mb-1">
-                    {t.menuCost.dishCategory}
-                  </label>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="block text-xs font-bold text-neutral-700">
+                      {t.menuCost.dishCategory}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {(() => {
+                        const currentCat = categories.find(
+                          (c) => c.id === (editingDish.categoryId || categories[0]?.id)
+                        );
+                        if (!currentCat) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              translationScheduler.cancel('cat');
+                              manualEnKeysRef.current.delete('cat');
+                              if (currentCat.nameEnManual && (currentCat.name || '').trim()) {
+                                manualEnKeysRef.current.add('cat');
+                              }
+                              prevCatThaiRef.current = currentCat.nameTh || '';
+                              setEditingCategory(currentCat);
+                              setIsCategoryModalOpen(true);
+                            }}
+                            className="text-[11px] font-bold text-neutral-600 hover:text-orange-600 hover:underline flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3" />
+                            <span>{lang === 'th' ? 'แก้ไข' : 'Edit'}</span>
+                          </button>
+                        );
+                      })()}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          translationScheduler.cancel('cat');
+                          manualEnKeysRef.current.delete('cat');
+                          prevCatThaiRef.current = '';
+                          setEditingCategory({ name: '', nameTh: '', order: categories.length + 1 });
+                          setIsCategoryModalOpen(true);
+                        }}
+                        className="text-[11px] font-bold text-orange-600 hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>{lang === 'th' ? '+ เพิ่มหมวดหมู่' : '+ Add Category'}</span>
+                      </button>
+                    </div>
+                  </div>
                   <select
                     value={editingDish.categoryId || categories[0]?.id || ''}
                     onChange={(e) => setEditingDish({ ...editingDish, categoryId: e.target.value })}
@@ -2440,6 +2551,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 version: editingCategory.version || 1,
               };
               await saveDocument('categories', catToSave, isNew);
+              if (isDishModalOpen && editingDish && isNew) {
+                setEditingDish((prev) => (prev ? { ...prev, categoryId: catToSave.id } : prev));
+              }
               setIsCategoryModalOpen(false);
               setEditingCategory(null);
               loadData();
@@ -2447,7 +2561,13 @@ export const MenuFoodCostPage: React.FC<Props> = ({
             className="modal-panel bg-white rounded-3xl shadow-2xl max-w-sm w-full border border-orange-200"
           >
             <div className="modal-header bg-gradient-to-r from-orange-500 to-red-500 text-white flex items-center justify-between">
-              <h3 className="font-extrabold text-base">{t.menuCost.addCategory}</h3>
+              <h3 className="font-extrabold text-base">
+                {editingCategory.id
+                  ? lang === 'th'
+                    ? 'แก้ไขหมวดหมู่'
+                    : 'Edit Category'
+                  : t.menuCost.addCategory}
+              </h3>
               <button
                 type="button"
                 onClick={() => setIsCategoryModalOpen(false)}

@@ -1,8 +1,155 @@
-import { Ingredient, MenuItem, MenuVariant } from '../types';
+import { Ingredient, MenuItem, MenuVariant, RecipeItem } from '../types';
 import { DishDoc, DishVariant } from '../../types';
 import { resolveEntityEnglishName } from '../../utils/thaiToEnglish';
+import { convertUnit } from '../engine/units';
 
 export type SpreadsheetServingMode = 'ON_RICE' | 'A_LA_CARTE';
+
+export function isPrimaryProteinItem(it: RecipeItem, proteinType?: string): boolean {
+  if (
+    it.proteinCategory === 'SHRIMP' ||
+    it.proteinCategory === 'SQUID' ||
+    it.proteinCategory === 'PORK' ||
+    it.proteinCategory === 'CHICKEN' ||
+    it.proteinCategory === 'BEEF' ||
+    it.proteinCategory === 'OTHER' ||
+    it.id?.startsWith('primary_1_') ||
+    it.id?.startsWith('primary_2_')
+  ) {
+    return true;
+  }
+
+  if (
+    it.type === 'SAUCE' ||
+    it.ingredientType === 'SAUCE' ||
+    it.type === 'PACKAGING' ||
+    it.ingredientType === 'PACKAGING' ||
+    it.type === 'PREPARED_ITEM' ||
+    it.ingredientType === 'PREPARED_ITEM'
+  ) {
+    return false;
+  }
+
+  const name = (it.name || '').trim().toLowerCase();
+  if (
+    name.includes('น้ำปลา') ||
+    name.includes('น้ำมัน') ||
+    name.includes('ซอส') ||
+    name.includes('ผง') ||
+    name.includes('ซีอิ๊ว') ||
+    name.includes('กะปิ') ||
+    name.includes('กุ้งแห้ง') ||
+    name.includes('ใบ') ||
+    name.includes('พริก') ||
+    name.includes('กระเทียม') ||
+    name.includes('หอม') ||
+    name.includes('ไข่') ||
+    name.includes('ผัก') ||
+    name.includes('น้ำตาล') ||
+    name.includes('เกลือ') ||
+    name.includes('ข้าว')
+  ) {
+    return false;
+  }
+
+  if (
+    name.includes('หมู') ||
+    name.includes('ไก่') ||
+    name.includes('เนื้อ') ||
+    name.includes('กุ้ง') ||
+    name.includes('หมึก') ||
+    name.includes('ไส้กรอก') ||
+    name.includes('ปลา') ||
+    name.includes('ทะเล') ||
+    name.includes('ซีฟู้ด')
+  ) {
+    return true;
+  }
+
+  if (proteinType && proteinType.trim()) {
+    const pType = proteinType.trim().toLowerCase();
+    if (name === pType || name.startsWith(pType)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function extractPrimaryRecipeItems(v: MenuVariant): {
+  isSeafood: boolean;
+  shrimpItem?: RecipeItem;
+  squidItem?: RecipeItem;
+  primary1?: RecipeItem;
+  primary2?: RecipeItem;
+  allPrimaryItems: RecipeItem[];
+} {
+  const pName = (v.proteinType || v.name || '').toLowerCase();
+  const isSeafood = Boolean(
+    v.proteinType?.includes('ทะเล') ||
+      pName.includes('ทะเล') ||
+      v.proteinType?.includes('ซีฟู้ด') ||
+      pName.includes('ซีฟู้ด') ||
+      (pName.includes('กุ้ง') && pName.includes('หมึก'))
+  );
+
+  const items = v.recipeItems || [];
+  const shrimpItem = items.find(
+    (it) => it.proteinCategory === 'SHRIMP' || (it.name || '').toLowerCase().includes('กุ้ง')
+  );
+  const squidItem = items.find(
+    (it) =>
+      it.proteinCategory === 'SQUID' ||
+      (it.name || '').toLowerCase().includes('หมึก') ||
+      (it.name || '').toLowerCase().includes('ปลาหมึก')
+  );
+
+  let primaryMatches = items.filter((it) => isPrimaryProteinItem(it, v.proteinType));
+  if (primaryMatches.length === 0 && items.length > 0) {
+    primaryMatches = [items[0]];
+  }
+
+  // Respect explicit primary_1_ / primary_2_ slot ordering when present
+  const explicit1 = primaryMatches.find((it) => it.id?.startsWith('primary_1_'));
+  const explicit2 = primaryMatches.find((it) => it.id?.startsWith('primary_2_'));
+  const primary1 = explicit1 || primaryMatches[0];
+  const primary2 =
+    explicit2 && explicit2 !== primary1
+      ? explicit2
+      : primaryMatches.find((it) => it !== primary1);
+
+  return {
+    isSeafood,
+    shrimpItem,
+    squidItem,
+    primary1,
+    primary2,
+    allPrimaryItems: primaryMatches,
+  };
+}
+
+export function computeIngredientUnitCostForRecipeItem(
+  item: RecipeItem | undefined,
+  ingredientsMap: Map<string, Ingredient>,
+  fallbackUnitCost: number = 0
+): number {
+  if (!item) return fallbackUnitCost;
+  const ing = item.ingredientId ? ingredientsMap.get(item.ingredientId) : undefined;
+  if (ing) {
+    const baseUnitCost =
+      ing.costPerBaseUnit ||
+      (ing.purchaseQuantity > 0
+        ? ing.purchasePrice / (ing.purchaseQuantity * ((ing.yieldPercent || 100) / 100))
+        : 0);
+    if (baseUnitCost > 0) {
+      const targetUnit = ing.usageUnit || ing.baseUnit || item.unit || 'g';
+      const itemUnit = item.unit || targetUnit;
+      const conv = convertUnit(1, itemUnit, targetUnit);
+      return conv.success ? baseUnitCost * conv.convertedQuantity : baseUnitCost;
+    }
+  }
+  return item.calculatedUnitCost || fallbackUnitCost;
+}
 
 function normalizePosCostId(raw: string): string {
   const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -104,6 +251,7 @@ export interface SpreadsheetRowMetrics {
   sellingPrice: number;
   baseWeight: number;
   proteinWeight: number;
+  secondaryProteinWeight?: number;
   proteinUnitCost: number;
   shrimpQty: number;
   squidQty: number;
@@ -224,6 +372,7 @@ export function calculateSpreadsheetRowMetrics(params: {
   servingMode?: SpreadsheetServingMode;
   sellingPriceOverride?: number;
   proteinWeightOverride?: number;
+  secondaryProteinWeightOverride?: number;
   shrimpQtyOverride?: number;
   squidQtyOverride?: number;
 }): SpreadsheetRowMetrics {
@@ -234,18 +383,20 @@ export function calculateSpreadsheetRowMetrics(params: {
     servingMode = 'ON_RICE',
     sellingPriceOverride,
     proteinWeightOverride,
+    secondaryProteinWeightOverride,
     shrimpQtyOverride,
     squidQtyOverride,
   } = params;
 
   const pName = (v.proteinType || v.name || '').toLowerCase();
-  const isSeafood = Boolean(
-    v.proteinType?.includes('ทะเล') ||
-      pName.includes('ทะเล') ||
-      v.proteinType?.includes('ซีฟู้ด') ||
-      pName.includes('ซีฟู้ด') ||
-      (pName.includes('กุ้ง') && pName.includes('หมึก'))
-  );
+  const {
+    isSeafood,
+    shrimpItem: shrimpItemFromRecipe,
+    squidItem: squidItemFromRecipe,
+    primary1: proteinItem,
+    primary2: secondaryProteinItem,
+    allPrimaryItems,
+  } = extractPrimaryRecipeItems(v);
 
   // Template defaults matching Food Cost spreadsheet when not customized
   const baseSellingPrice = resolveVariantBaseSellingPrice(menu, v);
@@ -279,30 +430,7 @@ export function calculateSpreadsheetRowMetrics(params: {
   const sellingPrice =
     sellingPriceOverride !== undefined ? sellingPriceOverride : baseSellingPrice;
 
-  const proteinItem =
-    (v.recipeItems || []).find((it) => {
-      const lower = (it.name || '').toLowerCase();
-      return (
-        it.proteinCategory ||
-        lower.includes('หมู') ||
-        lower.includes('ไก่') ||
-        lower.includes('เนื้อ') ||
-        lower.includes('กุ้ง') ||
-        lower.includes('หมึก') ||
-        lower.includes('ไส้กรอก') ||
-        lower.includes('ปลา')
-      );
-    }) || (v.recipeItems && v.recipeItems[0]);
-
-  let proteinUnitCost = proteinItem?.calculatedUnitCost || 0;
-  if (!proteinUnitCost && proteinItem?.ingredientId) {
-    const ing = ingredientsMap.get(proteinItem.ingredientId);
-    if (ing) {
-      proteinUnitCost =
-        ing.costPerBaseUnit ||
-        ing.purchasePrice / (ing.purchaseQuantity * ((ing.yieldPercent || 100) / 100));
-    }
-  }
+  let proteinUnitCost = computeIngredientUnitCostForRecipeItem(proteinItem, ingredientsMap, 0);
   if (!proteinUnitCost && pName) {
     for (const ing of ingredientsMap.values()) {
       const ingLower = ing.name.toLowerCase();
@@ -327,24 +455,22 @@ export function calculateSpreadsheetRowMetrics(params: {
     else proteinUnitCost = 0.2;
   }
 
-  const shrimpItemFromRecipe = (v.recipeItems || []).find(
-    (it) => it.proteinCategory === 'SHRIMP' || (it.name || '').toLowerCase().includes('กุ้ง')
-  );
-  const squidItemFromRecipe = (v.recipeItems || []).find(
-    (it) =>
-      it.proteinCategory === 'SQUID' ||
-      (it.name || '').toLowerCase().includes('หมึก') ||
-      (it.name || '').toLowerCase().includes('ปลาหมึก')
-  );
-
   const defaultShrimp = shrimpItemFromRecipe?.quantity || 4;
   const defaultSquid = squidItemFromRecipe?.quantity || 40;
 
   const shrimpQty = shrimpQtyOverride !== undefined ? shrimpQtyOverride : defaultShrimp;
   const squidQty = squidQtyOverride !== undefined ? squidQtyOverride : defaultSquid;
 
-  const shrimpUnitCost = shrimpItemFromRecipe?.calculatedUnitCost || 8.5;
-  const squidUnitCost = squidItemFromRecipe?.calculatedUnitCost || 0.388;
+  const shrimpUnitCost = computeIngredientUnitCostForRecipeItem(
+    shrimpItemFromRecipe,
+    ingredientsMap,
+    8.5
+  );
+  const squidUnitCost = computeIngredientUnitCostForRecipeItem(
+    squidItemFromRecipe,
+    ingredientsMap,
+    0.388
+  );
   const shrimpTotalCost = Math.round(shrimpQty * shrimpUnitCost);
   const squidTotalCost = Math.round(squidQty * squidUnitCost);
   const seafoodCombinedCost = shrimpTotalCost + squidTotalCost;
@@ -356,15 +482,33 @@ export function calculateSpreadsheetRowMetrics(params: {
       ? proteinItem.quantity
       : baseWeight;
 
+  const secondaryProteinWeight =
+    secondaryProteinWeightOverride !== undefined
+      ? secondaryProteinWeightOverride
+      : secondaryProteinItem?.quantity;
+
+  const secondaryProteinUnitCost = computeIngredientUnitCostForRecipeItem(
+    secondaryProteinItem,
+    ingredientsMap,
+    0
+  );
+
+  const primary1Cost = proteinWeight * proteinUnitCost;
+  const primary2Cost =
+    secondaryProteinItem && secondaryProteinWeight !== undefined
+      ? secondaryProteinWeight * secondaryProteinUnitCost
+      : 0;
+
   const proteinCost = isSeafood
     ? seafoodCombinedCost
-    : Math.round(proteinWeight * proteinUnitCost);
+    : Math.round(primary1Cost + primary2Cost);
 
+  const primarySet = new Set<RecipeItem>(allPrimaryItems);
   let sumCentral = 0;
   (v.recipeItems || []).forEach((it) => {
     const lower = (it.name || '').toLowerCase();
     const isMeatOrSeafood =
-      it === proteinItem ||
+      primarySet.has(it) ||
       (isSeafood &&
         (lower.includes('กุ้ง') ||
           lower.includes('หมึก') ||
@@ -411,6 +555,7 @@ export function calculateSpreadsheetRowMetrics(params: {
     sellingPrice,
     baseWeight,
     proteinWeight,
+    ...(secondaryProteinWeight !== undefined ? { secondaryProteinWeight } : {}),
     proteinUnitCost,
     shrimpQty,
     squidQty,

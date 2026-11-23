@@ -456,6 +456,7 @@ export function calculateVariantCostBreakdown(
       item.proteinCategory === 'PORK' ||
       item.proteinCategory === 'CHICKEN' ||
       item.proteinCategory === 'BEEF' ||
+      item.proteinCategory === 'OTHER' ||
       lowerName.includes('หมู') ||
       lowerName.includes('ไก่') ||
       lowerName.includes('เนื้อ') ||

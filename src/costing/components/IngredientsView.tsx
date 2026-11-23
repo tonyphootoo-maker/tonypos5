@@ -102,7 +102,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     'บรรจุภัณฑ์',
   ];
 
-  // Custom & Category order states with localStorage persistence
+  // Custom, Hidden-Default & Category order states with localStorage persistence
   const [isAddCategoryModalOpen, setIsAddCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryEnglishName, setNewCategoryEnglishName] = useState('');
@@ -114,6 +114,23 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       return [];
     }
   });
+  const [hiddenDefaultCategories, setHiddenDefaultCategories] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('cost_hidden_ingredient_categories');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Edit / Delete Category modal state
+  const [isEditCategoryModalOpen, setIsEditCategoryModalOpen] = useState(false);
+  const [editingCategoryOldName, setEditingCategoryOldName] = useState('');
+  const [editingCategoryNewName, setEditingCategoryNewName] = useState('');
+  const [editCategoryEnglishName, setEditCategoryEnglishName] = useState('');
+  const [editCategoryError, setEditCategoryError] = useState<string | null>(null);
+  const [isDeleteCategoryModalOpen, setIsDeleteCategoryModalOpen] = useState(false);
+  const [deletingCategoryName, setDeletingCategoryName] = useState('');
 
   const [categoryOrder, setCategoryOrder] = useState<string[]>(() => {
     try {
@@ -126,7 +143,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
 
   const rawCategories = Array.from(
     new Set([
-      ...defaultCategories,
+      ...defaultCategories.filter((c) => !hiddenDefaultCategories.includes(c)),
       ...customCategories,
       ...ingredients.map((i) => i.category).filter(Boolean),
     ])
@@ -343,8 +360,15 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     e.preventDefault();
     const trimmed = newCategoryName.trim();
     if (!trimmed) return;
+    if (hiddenDefaultCategories.includes(trimmed)) {
+      const nextHidden = hiddenDefaultCategories.filter((c) => c !== trimmed);
+      setHiddenDefaultCategories(nextHidden);
+      try {
+        localStorage.setItem('cost_hidden_ingredient_categories', JSON.stringify(nextHidden));
+      } catch {}
+    }
     if (!allCategories.includes(trimmed)) {
-      const updated = [...customCategories, trimmed];
+      const updated = Array.from(new Set([...customCategories, trimmed]));
       setCustomCategories(updated);
       try {
         localStorage.setItem('cost_custom_ingredient_categories', JSON.stringify(updated));
@@ -363,6 +387,134 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     setNewCategoryName('');
     setNewCategoryEnglishName('');
     setIsAddCategoryModalOpen(false);
+  };
+
+  const handleOpenEditCategory = (catName: string) => {
+    setEditingCategoryOldName(catName);
+    setEditingCategoryNewName(catName);
+    setEditCategoryEnglishName(translateThaiToEnglish(catName));
+    setEditCategoryError(null);
+    setIsEditCategoryModalOpen(true);
+  };
+
+  const handleSaveEditCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = editingCategoryNewName.trim();
+    if (!trimmed) {
+      setEditCategoryError(lang === 'th' ? 'กรุณากรอกชื่อหมวดหมู่' : 'Please enter a category name');
+      return;
+    }
+    if (trimmed !== editingCategoryOldName && allCategories.includes(trimmed)) {
+      setEditCategoryError(lang === 'th' ? 'มีหมวดหมู่นี้อยู่ในระบบแล้ว' : 'This category already exists');
+      return;
+    }
+
+    if (trimmed !== editingCategoryOldName) {
+      const now = new Date().toISOString();
+      ingredients.forEach((ing) => {
+        if (ing.category === editingCategoryOldName) {
+          onSaveIngredient({
+            ...ing,
+            category: trimmed as IngredientCategory,
+            updatedAt: now,
+          });
+        }
+      });
+
+      if (hiddenDefaultCategories.includes(trimmed)) {
+        const nextHidden = hiddenDefaultCategories.filter((c) => c !== trimmed);
+        setHiddenDefaultCategories(nextHidden);
+        try {
+          localStorage.setItem('cost_hidden_ingredient_categories', JSON.stringify(nextHidden));
+        } catch {}
+      }
+
+      if (defaultCategories.includes(editingCategoryOldName)) {
+        const nextHidden = Array.from(new Set([...hiddenDefaultCategories, editingCategoryOldName]));
+        setHiddenDefaultCategories(nextHidden);
+        try {
+          localStorage.setItem('cost_hidden_ingredient_categories', JSON.stringify(nextHidden));
+        } catch {}
+      }
+
+      const updatedCustom = customCategories.some((c) => c === editingCategoryOldName)
+        ? customCategories.map((c) => (c === editingCategoryOldName ? trimmed : c))
+        : defaultCategories.includes(trimmed) && !hiddenDefaultCategories.includes(trimmed)
+        ? customCategories
+        : [...customCategories, trimmed];
+      const uniqueCustom = Array.from(new Set(updatedCustom));
+      setCustomCategories(uniqueCustom);
+      try {
+        localStorage.setItem('cost_custom_ingredient_categories', JSON.stringify(uniqueCustom));
+      } catch (err) {
+        console.error('Failed to update custom categories', err);
+      }
+
+      const baseOrder = categoryOrder.length > 0 ? categoryOrder : allCategories;
+      const updatedOrder = Array.from(
+        new Set(baseOrder.map((c) => (c === editingCategoryOldName ? trimmed : c)))
+      );
+      if (!updatedOrder.includes(trimmed)) updatedOrder.push(trimmed);
+      setCategoryOrder(updatedOrder);
+      try {
+        localStorage.setItem('cost_ingredient_category_order', JSON.stringify(updatedOrder));
+      } catch {}
+
+      if (selectedCategory === editingCategoryOldName) {
+        setSelectedCategory(trimmed);
+      }
+    }
+
+    setIsEditCategoryModalOpen(false);
+    setEditCategoryError(null);
+  };
+
+  const handleOpenDeleteCategory = (catName: string) => {
+    setDeletingCategoryName(catName);
+    setIsDeleteCategoryModalOpen(true);
+  };
+
+  const handleConfirmDeleteCategory = () => {
+    if (!deletingCategoryName) return;
+    const remaining = allCategories.filter((c) => c !== deletingCategoryName);
+    const fallbackCategory = remaining[0] || 'อื่นๆ';
+    const now = new Date().toISOString();
+
+    ingredients.forEach((ing) => {
+      if (ing.category === deletingCategoryName) {
+        onSaveIngredient({
+          ...ing,
+          category: fallbackCategory as IngredientCategory,
+          updatedAt: now,
+        });
+      }
+    });
+
+    if (defaultCategories.includes(deletingCategoryName)) {
+      const nextHidden = Array.from(new Set([...hiddenDefaultCategories, deletingCategoryName]));
+      setHiddenDefaultCategories(nextHidden);
+      try {
+        localStorage.setItem('cost_hidden_ingredient_categories', JSON.stringify(nextHidden));
+      } catch {}
+    }
+
+    const updatedCustom = customCategories.filter((c) => c !== deletingCategoryName);
+    setCustomCategories(updatedCustom);
+    try {
+      localStorage.setItem('cost_custom_ingredient_categories', JSON.stringify(updatedCustom));
+    } catch {}
+
+    const updatedOrder = categoryOrder.filter((c) => c !== deletingCategoryName);
+    setCategoryOrder(updatedOrder);
+    try {
+      localStorage.setItem('cost_ingredient_category_order', JSON.stringify(updatedOrder));
+    } catch {}
+
+    if (selectedCategory === deletingCategoryName) {
+      setSelectedCategory(fallbackCategory);
+    }
+    setIsDeleteCategoryModalOpen(false);
+    setDeletingCategoryName('');
   };
 
   // Filtered ingredients
@@ -777,6 +929,42 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   />
                   <span>{catLabel}</span>
                 </div>
+
+                {/* Edit Category Name Button */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenEditCategory(cat);
+                  }}
+                  className={`p-1 transition-all cursor-pointer ${
+                    isSelected
+                      ? 'hover:bg-black/15 text-black/70 hover:text-black'
+                      : 'text-white/40 hover:text-[#F27D26] hover:bg-white/10'
+                  }`}
+                  title={lang === 'th' ? `แก้ไขชื่อหมวดหมู่ "${catLabel}"` : `Edit "${catLabel}"`}
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+
+                {/* Delete Category Button */}
+                {allCategories.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenDeleteCategory(cat);
+                    }}
+                    className={`p-1 transition-all cursor-pointer ${
+                      isSelected
+                        ? 'hover:bg-black/15 text-black/70 hover:text-rose-900'
+                        : 'text-white/35 hover:text-rose-400 hover:bg-white/10'
+                    }`}
+                    title={lang === 'th' ? `ลบหมวดหมู่ "${catLabel}"` : `Delete "${catLabel}"`}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                )}
 
                 {/* Move Right Button */}
                 <button
@@ -1832,6 +2020,161 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT CATEGORY MODAL */}
+      {isEditCategoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div className="modal-panel bg-[#1a1a1a] rounded-2xl max-w-md w-full shadow-2xl border border-white/20 text-white animate-in fade-in zoom-in-95 duration-150">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-[#F27D26]" />
+                <span>{lang === 'th' ? 'แก้ไขชื่อหมวดหมู่วัตถุดิบ' : 'Edit Ingredient Category'}</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEditCategoryModalOpen(false);
+                  setEditCategoryError(null);
+                }}
+                className="p-1 text-white/50 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditCategory} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
+                <div>
+                  <label className="block font-bold text-white/80 mb-1.5">
+                    {lang === 'th' ? 'ชื่อหมวดหมู่ (ไทย)' : 'Category Name (Thai)'}{' '}
+                    <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    required
+                    value={editingCategoryNewName}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      setEditCategoryEnglishName((currEn) =>
+                        computeAutoEnglishName({
+                          previousThai: editingCategoryNewName,
+                          nextThai: nextTh,
+                          currentEnglish: currEn,
+                        })
+                      );
+                      setEditingCategoryNewName(nextTh);
+                      if (editCategoryError) setEditCategoryError(null);
+                    }}
+                    className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-white font-medium focus:border-[#F27D26] focus:outline-none"
+                  />
+                  {editCategoryError && (
+                    <p className="text-[11px] text-rose-400 mt-1 font-semibold">{editCategoryError}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block font-bold text-white/80 mb-1.5">
+                    {lang === 'th' ? 'ชื่อภาษาอังกฤษ (แปลอัตโนมัติ)' : 'English Name (Auto-translated)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editCategoryEnglishName}
+                    onChange={(e) => setEditCategoryEnglishName(e.target.value)}
+                    className="w-full p-2.5 bg-black/40 border border-white/15 rounded-xl text-amber-200 font-medium focus:border-[#F27D26] focus:outline-none"
+                  />
+                </div>
+
+                <div className="p-3 bg-white/5 border border-white/10 rounded-xl text-[11px] text-white/70 leading-relaxed">
+                  {lang === 'th'
+                    ? `วัตถุดิบในหมวดหมู่ "${editingCategoryOldName}" (${ingredients.filter((i) => i.category === editingCategoryOldName).length} รายการ) จะถูกอัปเดตเป็นชื่อใหม่โดยอัตโนมัติ`
+                    : `${ingredients.filter((i) => i.category === editingCategoryOldName).length} ingredients in "${getLocalizedText('en', editingCategoryOldName)}" will update automatically.`}
+                </div>
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex items-center justify-end gap-2 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditCategoryModalOpen(false);
+                    setEditCategoryError(null);
+                  }}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-colors cursor-pointer"
+                >
+                  {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[#F27D26] hover:bg-[#d96817] text-black font-bold rounded-xl shadow-md shadow-[#F27D26]/20 transition-all cursor-pointer"
+                >
+                  {lang === 'th' ? 'บันทึกการแก้ไข' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CATEGORY CONFIRMATION MODAL */}
+      {isDeleteCategoryModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div className="modal-panel bg-[#1a1a1a] rounded-2xl max-w-md w-full shadow-2xl border border-white/20 text-white animate-in fade-in zoom-in-95 duration-150">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-rose-400" />
+                <span>{lang === 'th' ? 'ยืนยันการลบหมวดหมู่วัตถุดิบ' : 'Confirm Delete Category'}</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsDeleteCategoryModalOpen(false)}
+                className="p-1 text-white/50 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body space-y-3 text-xs">
+              <div className="p-3.5 bg-rose-500/15 border border-rose-500/30 rounded-xl flex items-start gap-2.5 text-rose-200">
+                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-white">
+                    {lang === 'th'
+                      ? `ต้องการลบหมวดหมู่ "${deletingCategoryName}" ใช่หรือไม่?`
+                      : `Delete category "${getLocalizedText('en', deletingCategoryName)}"?`}
+                  </p>
+                  <p className="text-[11px] leading-relaxed text-white/75">
+                    {ingredients.filter((i) => i.category === deletingCategoryName).length > 0
+                      ? lang === 'th'
+                        ? `วัตถุดิบในหมวดนี้ (${ingredients.filter((i) => i.category === deletingCategoryName).length} รายการ) จะถูกย้ายไปยังหมวด "${allCategories.find((c) => c !== deletingCategoryName) || 'อื่นๆ'}" โดยไม่สูญหาย`
+                        : `${ingredients.filter((i) => i.category === deletingCategoryName).length} ingredients will move to "${getLocalizedText('en', allCategories.find((c) => c !== deletingCategoryName) || 'อื่นๆ')}".`
+                      : lang === 'th'
+                      ? 'ไม่มีวัตถุดิบในหมวดหมู่นี้ ระบบจะลบหมวดหมู่นี้ออกทันที'
+                      : 'No ingredients in this category. It will be removed immediately.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-footer bg-[#1a1a1a] flex items-center justify-end gap-2 border-t border-white/10 text-xs">
+              <button
+                type="button"
+                onClick={() => setIsDeleteCategoryModalOpen(false)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold cursor-pointer"
+              >
+                {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCategory}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{lang === 'th' ? 'ยืนยันการลบหมวดหมู่' : 'Delete Category'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

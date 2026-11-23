@@ -19,6 +19,8 @@ import {
   resolveVariantBaseSellingPrice,
   resolveVariantTakeawayPrice,
   computeChannelPriceFromMultiplier,
+  extractPrimaryRecipeItems,
+  computeIngredientUnitCostForRecipeItem,
 } from '../services/spreadsheetCostHelper';
 import { convertUnit } from '../engine/units';
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
@@ -176,6 +178,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
         sellingPrice?: number;
         takeawayPrice?: number;
         proteinWeight?: number;
+        secondaryProteinWeight?: number;
         grabPrice?: number;
         linemanPrice?: number;
         robinhoodPrice?: number;
@@ -255,7 +258,14 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
 
   const handleCellChange = (
     variantId: string,
-    field: 'sellingPrice' | 'takeawayPrice' | 'proteinWeight' | 'grabPrice' | 'linemanPrice' | 'robinhoodPrice',
+    field:
+      | 'sellingPrice'
+      | 'takeawayPrice'
+      | 'proteinWeight'
+      | 'secondaryProteinWeight'
+      | 'grabPrice'
+      | 'linemanPrice'
+      | 'robinhoodPrice',
     val: number
   ) => {
     const editKey = `${variantId}_${currentServingMode}`;
@@ -379,26 +389,45 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
         }
         if (field === 'proteinWeight') {
           const recipeItems = [...(v.recipeItems || [])];
-          const proteinIdx = recipeItems.findIndex((it) => {
-            const lower = it.name.toLowerCase();
-            return (
-              it.proteinCategory ||
-              lower.includes('หมู') ||
-              lower.includes('ไก่') ||
-              lower.includes('เนื้อ') ||
-              lower.includes('กุ้ง') ||
-              lower.includes('หมึก') ||
-              lower.includes('ไส้กรอก') ||
-              lower.includes('ปลา')
-            );
-          });
+          const primary1 = extractPrimaryRecipeItems(v).primary1;
+          const proteinIdx = primary1
+            ? recipeItems.findIndex((it) => it === primary1)
+            : -1;
 
           if (proteinIdx >= 0) {
             const item = recipeItems[proteinIdx];
-            const unitCost = item.calculatedUnitCost || 0;
+            const unitCost = computeIngredientUnitCostForRecipeItem(
+              item,
+              ingredientsMap,
+              item.calculatedUnitCost || 0
+            );
             recipeItems[proteinIdx] = {
               ...item,
               quantity: val,
+              calculatedUnitCost: unitCost,
+              calculatedLineCost: val * unitCost,
+            };
+          }
+          return { ...v, recipeItems };
+        }
+        if (field === 'secondaryProteinWeight') {
+          const recipeItems = [...(v.recipeItems || [])];
+          const primary2 = extractPrimaryRecipeItems(v).primary2;
+          const secondaryIdx = primary2
+            ? recipeItems.findIndex((it) => it === primary2)
+            : -1;
+
+          if (secondaryIdx >= 0) {
+            const item = recipeItems[secondaryIdx];
+            const unitCost = computeIngredientUnitCostForRecipeItem(
+              item,
+              ingredientsMap,
+              item.calculatedUnitCost || 0
+            );
+            recipeItems[secondaryIdx] = {
+              ...item,
+              quantity: val,
+              calculatedUnitCost: unitCost,
               calculatedLineCost: val * unitCost,
             };
           }
@@ -966,31 +995,21 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       ? localEdits[v.id]!.takeawayPrice!
                       : baseTakeawayPrice);
 
-              // 2. Find protein recipe item
-              const proteinItem = (v.recipeItems || []).find((it) => {
-                const lower = it.name.toLowerCase();
-                return (
-                  it.proteinCategory ||
-                  lower.includes('หมู') ||
-                  lower.includes('ไก่') ||
-                  lower.includes('เนื้อ') ||
-                  lower.includes('กุ้ง') ||
-                  lower.includes('หมึก') ||
-                  lower.includes('ไส้กรอก') ||
-                  lower.includes('ปลา')
-                );
-              }) || (v.recipeItems && v.recipeItems[0]);
+              // 2. Find primary protein recipe items (supports single or dual ingredients)
+              const {
+                shrimpItem: shrimpItemFromRecipe,
+                squidItem: squidItemFromRecipe,
+                primary1: proteinItem,
+                primary2: secondaryProteinItem,
+                allPrimaryItems,
+              } = extractPrimaryRecipeItems(v);
 
               // 3. Protein unit cost (per gram or per piece)
-              let proteinUnitCost = proteinItem?.calculatedUnitCost || 0;
-              if (!proteinUnitCost && proteinItem?.ingredientId) {
-                const ing = ingredientsMap.get(proteinItem.ingredientId);
-                if (ing) {
-                  proteinUnitCost =
-                    ing.costPerBaseUnit ||
-                    ing.purchasePrice / (ing.purchaseQuantity * (ing.yieldPercent / 100));
-                }
-              }
+              let proteinUnitCost = computeIngredientUnitCostForRecipeItem(
+                proteinItem,
+                ingredientsMap,
+                0
+              );
               if (!proteinUnitCost) {
                 // Look up matching ingredient from ingredientsMap by protein name
                 for (const ing of ingredientsMap.values()) {
@@ -1016,14 +1035,7 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 else proteinUnitCost = 0.20;
               }
 
-              // 4. Seafood dual quantities (กุ้ง และ หมึก) or single protein weight
-              const shrimpItemFromRecipe = (v.recipeItems || []).find(
-                (it) => it.proteinCategory === 'SHRIMP' || it.name.toLowerCase().includes('กุ้ง')
-              );
-              const squidItemFromRecipe = (v.recipeItems || []).find(
-                (it) => it.proteinCategory === 'SQUID' || it.name.toLowerCase().includes('หมึก') || it.name.toLowerCase().includes('ปลาหมึก')
-              );
-
+              // 4. Seafood dual quantities (กุ้ง และ หมึก) or single/dual primary ingredient weights
               const defaultShrimp = shrimpItemFromRecipe?.quantity || 4;
               const defaultSquid = squidItemFromRecipe?.quantity || 40;
 
@@ -1041,12 +1053,16 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                       ? localEdits[v.id]!.seafoodSquidQty!
                       : defaultSquid);
 
-              const shrimpUnitCost = shrimpItemFromRecipe?.calculatedUnitCost
-                ?? ingredientsMap.get(shrimpItemFromRecipe?.ingredientId || 'ing_shrimp_xl')?.costPerBaseUnit
-                ?? 0;
-              const squidUnitCost = squidItemFromRecipe?.calculatedUnitCost
-                ?? ingredientsMap.get(squidItemFromRecipe?.ingredientId || 'ing_squid_fresh')?.costPerBaseUnit
-                ?? 0;
+              const shrimpUnitCost = computeIngredientUnitCostForRecipeItem(
+                shrimpItemFromRecipe,
+                ingredientsMap,
+                ingredientsMap.get('ing_shrimp_xl')?.costPerBaseUnit ?? 0
+              );
+              const squidUnitCost = computeIngredientUnitCostForRecipeItem(
+                squidItemFromRecipe,
+                ingredientsMap,
+                ingredientsMap.get('ing_squid_fresh')?.costPerBaseUnit ?? 0
+              );
               const shrimpTotalCost = shrimpQty * shrimpUnitCost;
               const squidTotalCost = squidQty * squidUnitCost;
               const seafoodCombinedCost = shrimpTotalCost + squidTotalCost;
@@ -1061,11 +1077,31 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                           ? proteinItem.quantity
                           : baseWeight));
 
+              const hasSecondaryIngredient = !isSeafood && Boolean(secondaryProteinItem);
+              const secondaryProteinWeight =
+                localEdits[editKey]?.secondaryProteinWeight !== undefined
+                  ? localEdits[editKey]!.secondaryProteinWeight!
+                  : (localEdits[v.id]?.secondaryProteinWeight !== undefined
+                      ? localEdits[v.id]!.secondaryProteinWeight!
+                      : (secondaryProteinItem?.quantity ?? 0));
+              const secondaryProteinUnitCost = computeIngredientUnitCostForRecipeItem(
+                secondaryProteinItem,
+                ingredientsMap,
+                0
+              );
+              const primary1Cost = proteinWeight * proteinUnitCost;
+              const primary2Cost = hasSecondaryIngredient
+                ? secondaryProteinWeight * secondaryProteinUnitCost
+                : 0;
+
               // 6. Protein cost per dish (full precision)
-              const proteinCostNum = isSeafood ? seafoodCombinedCost : proteinWeight * proteinUnitCost;
+              const proteinCostNum = isSeafood
+                ? seafoodCombinedCost
+                : primary1Cost + primary2Cost;
 
               // 7. Central ingredients cost (converted units, skip rice in a la carte mode, zero magic fallback)
               let sumCentral = 0;
+              const primarySet = new Set(allPrimaryItems);
               const effectiveRecipeItems = (v.recipeItems || []).map((it) => {
                 if (currentServingMode === 'A_LA_CARTE') {
                   const lower = it.name.toLowerCase();
@@ -1076,6 +1112,9 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 if (it === proteinItem && !isSeafood) {
                   return { ...it, quantity: proteinWeight };
                 }
+                if (secondaryProteinItem && it === secondaryProteinItem && !isSeafood) {
+                  return { ...it, quantity: secondaryProteinWeight };
+                }
                 if (isSeafood && (it.proteinCategory === 'SHRIMP' || it.name.toLowerCase().includes('กุ้ง'))) {
                   return { ...it, quantity: shrimpQty };
                 }
@@ -1085,10 +1124,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                 return it;
               });
 
-              effectiveRecipeItems.forEach((it) => {
+              effectiveRecipeItems.forEach((it, idx) => {
+                const origItem = (v.recipeItems || [])[idx];
                 const lower = it.name.toLowerCase();
                 const isMeatOrSeafood =
-                  it === proteinItem ||
+                  (origItem && primarySet.has(origItem)) ||
                   (isSeafood && (lower.includes('กุ้ง') || lower.includes('หมึก') || it.proteinCategory === 'SHRIMP' || it.proteinCategory === 'SQUID'));
                 if (!isMeatOrSeafood && it.quantity > 0) {
                   const ing = ingredientsMap.get(it.ingredientId);
@@ -1248,7 +1288,20 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
               const robinhoodProfit = Number((robinhoodNetSelling - totalCostNum - deliveryPkgAmount).toFixed(2));
               const robinhoodMargin = robinhoodNetSelling > 0 ? Number(((robinhoodProfit / robinhoodNetSelling) * 100).toFixed(1)) : 0;
 
-              // Helper for rendering protein weight cell (single input or dual seafood input)
+              // Helper for rendering protein weight cell (single input or dual ingredient input)
+              const primary1Label = (() => {
+                if (!proteinItem) return lang === 'th' ? 'วัตถุดิบ 1' : 'Ing 1';
+                const ing = proteinItem.ingredientId ? ingredientsMap.get(proteinItem.ingredientId) : undefined;
+                const raw = ing ? getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName) : proteinItem.name;
+                return (raw || '').split(' (')[0].slice(0, 10);
+              })();
+              const primary2Label = (() => {
+                if (!secondaryProteinItem) return lang === 'th' ? 'วัตถุดิบ 2' : 'Ing 2';
+                const ing = secondaryProteinItem.ingredientId ? ingredientsMap.get(secondaryProteinItem.ingredientId) : undefined;
+                const raw = ing ? getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName) : secondaryProteinItem.name;
+                return (raw || '').split(' (')[0].slice(0, 10);
+              })();
+
               const renderProteinWeightInput = (compact: boolean = false) => {
                 if (isSeafood) {
                   return (
@@ -1282,6 +1335,49 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                           title={lang === 'th' ? 'น้ำหนักปลาหมึก (กรัม)' : 'Squid weight (g)'}
                         />
                         <span className="text-[9px] text-stone-500">g</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (hasSecondaryIngredient && secondaryProteinItem) {
+                  return (
+                    <div className="flex flex-col gap-1 items-center justify-center py-0.5">
+                      <div className="flex items-center gap-1">
+                        <span
+                          className="text-[9px] font-black text-amber-900 bg-amber-100 px-1 py-0.2 rounded border border-amber-300 max-w-[54px] truncate"
+                          title={proteinItem?.name || primary1Label}
+                        >
+                          {primary1Label}
+                        </span>
+                        <NumericInput
+                          min="0"
+                          value={proteinWeight}
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'proteinWeight', val)
+                          }
+                          className={`${compact ? 'w-10' : 'w-12'} px-1 py-0.5 text-center font-bold text-stone-900 bg-white border border-amber-400 rounded focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs font-mono`}
+                          title={proteinItem?.name || primary1Label}
+                        />
+                        <span className="text-[9px] text-stone-500">{localizeUnit(proteinItem?.unit || 'g', lang)}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span
+                          className="text-[9px] font-black text-sky-900 bg-sky-100 px-1 py-0.2 rounded border border-sky-300 max-w-[54px] truncate"
+                          title={secondaryProteinItem.name || primary2Label}
+                        >
+                          {primary2Label}
+                        </span>
+                        <NumericInput
+                          min="0"
+                          value={secondaryProteinWeight}
+                          onValueChange={(val) =>
+                            handleCellChange(v.id, 'secondaryProteinWeight', val)
+                          }
+                          className={`${compact ? 'w-10' : 'w-12'} px-1 py-0.5 text-center font-bold text-stone-900 bg-white border border-sky-400 rounded focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs font-mono`}
+                          title={secondaryProteinItem.name || primary2Label}
+                        />
+                        <span className="text-[9px] text-stone-500">{localizeUnit(secondaryProteinItem.unit || 'g', lang)}</span>
                       </div>
                     </div>
                   );
@@ -1460,6 +1556,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         {isSeafood && (
                           <div className="text-[9px] text-stone-500 font-normal leading-tight">
                             {lang === 'th' ? `กุ้ง ${shrimpTotalCost.toFixed(1)} + หมึก ${squidTotalCost.toFixed(1)}` : `Shrimp ${shrimpTotalCost.toFixed(1)} + Squid ${squidTotalCost.toFixed(1)}`}
+                          </div>
+                        )}
+                        {!isSeafood && hasSecondaryIngredient && (
+                          <div className="text-[9px] text-stone-500 font-normal leading-tight">
+                            {`${primary1Label} ${primary1Cost.toFixed(1)} + ${primary2Label} ${primary2Cost.toFixed(1)}`}
                           </div>
                         )}
                       </td>
@@ -1641,6 +1742,11 @@ export const MenuPricingSpreadsheetTable: React.FC<MenuPricingSpreadsheetTablePr
                         {isSeafood && (
                           <div className="text-[8px] text-stone-500 font-normal leading-tight">
                             {lang === 'th' ? `กุ้ง${shrimpTotalCost.toFixed(1)}+หมึก${squidTotalCost.toFixed(1)}` : `Shr${shrimpTotalCost.toFixed(1)}+Sq${squidTotalCost.toFixed(1)}`}
+                          </div>
+                        )}
+                        {!isSeafood && hasSecondaryIngredient && (
+                          <div className="text-[8px] text-stone-500 font-normal leading-tight">
+                            {`${primary1Label}${primary1Cost.toFixed(1)}+${primary2Label}${primary2Cost.toFixed(1)}`}
                           </div>
                         )}
                       </td>

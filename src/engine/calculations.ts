@@ -295,6 +295,7 @@ export function calculateOptionChoiceCost(
 ): { cost: number; hasMissing: boolean } {
   let cost = 0;
   let hasMissing = false;
+  const choiceQty = Math.max(1, Number(choice.quantity) || 1);
 
   if (Array.isArray(choice.ingredients)) {
     for (const line of choice.ingredients) {
@@ -303,7 +304,7 @@ export function calculateOptionChoiceCost(
       if (!ing || isMissingCost(effectiveCost)) {
         hasMissing = true;
       } else {
-        cost += line.quantity * effectiveCost;
+        cost += line.quantity * effectiveCost * choiceQty;
       }
     }
   }

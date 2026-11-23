@@ -2806,7 +2806,10 @@ export const TablesPosPage: React.FC<Props> = ({
                                 : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
                             }`}
                           >
-                            <span>{lang === 'th' && choice.nameTh ? choice.nameTh : choice.name}</span>
+                            <span>
+                              {lang === 'th' && choice.nameTh ? choice.nameTh : choice.name}
+                              {Number(choice.quantity) > 1 ? ` ×${choice.quantity}` : ''}
+                            </span>
                             {choice.price > 0 && (
                               <span className="font-bold">+{formatMoney(choice.price)}</span>
                             )}

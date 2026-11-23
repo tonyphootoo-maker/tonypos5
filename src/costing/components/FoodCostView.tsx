@@ -108,7 +108,9 @@ const isProteinRecipeItem = (it: RecipeItem, proteinType?: string): boolean => {
     it.proteinCategory === 'PORK' ||
     it.proteinCategory === 'CHICKEN' ||
     it.proteinCategory === 'BEEF' ||
-    it.proteinCategory === 'OTHER'
+    it.proteinCategory === 'OTHER' ||
+    it.id?.startsWith('primary_1_') ||
+    it.id?.startsWith('primary_2_')
   ) {
     return true;
   }
@@ -169,6 +171,19 @@ const isProteinRecipeItem = (it: RecipeItem, proteinType?: string): boolean => {
 
   return false;
 };
+
+const resolveProteinCategoryFromName = (name: string): RecipeItem['proteinCategory'] => {
+  const lower = (name || '').toLowerCase();
+  if (lower.includes('กุ้ง')) return 'SHRIMP';
+  if (lower.includes('หมึก') || lower.includes('ปลาหมึก')) return 'SQUID';
+  if (lower.includes('หมู')) return 'PORK';
+  if (lower.includes('ไก่')) return 'CHICKEN';
+  if (lower.includes('เนื้อ')) return 'BEEF';
+  return 'OTHER';
+};
+
+const SEAFOOD_SHRIMP_FALLBACK_ID = '__seafood_shrimp__';
+const SEAFOOD_SQUID_FALLBACK_ID = '__seafood_squid__';
 
 const extractBaseRecipeItemsForMenu = (menuItem: MenuItem): RecipeItem[] => {
   for (const variant of menuItem.variants || []) {
@@ -357,6 +372,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   }, [ingredients, settings.customPurchaseUnits]);
 
   const [isAddingCustomUnit, setIsAddingCustomUnit] = useState(false);
+  const [customUnitTargetSlot, setCustomUnitTargetSlot] = useState<1 | 2>(1);
   const [customUnitInput, setCustomUnitInput] = useState('');
 
   const variantFormRef = React.useRef<HTMLFormElement | null>(null);
@@ -373,6 +389,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     selectedIngredientId: string;
     meatQuantity: number;
     meatUnit: string;
+    selectedCategory2?: string;
+    selectedIngredientId2?: string;
+    meatQuantity2?: number;
+    meatUnit2?: string;
     seafoodShrimpQty?: number;
     seafoodSquidQty?: number;
     selectedBaseRecipeMenuId?: string;
@@ -399,6 +419,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedIngredientId: state.selectedIngredientId || '',
       meatQuantity: Number(state.meatQuantity) || 0,
       meatUnit: state.meatUnit || 'g',
+      selectedCategory2: state.selectedCategory2 || '',
+      selectedIngredientId2: state.selectedIngredientId2 || '',
+      meatQuantity2: Number(state.meatQuantity2) || 0,
+      meatUnit2: state.meatUnit2 || 'g',
       seafoodShrimpQty: Number(state.seafoodShrimpQty) || 0,
       seafoodSquidQty: Number(state.seafoodSquidQty) || 0,
       selectedBaseRecipeMenuId: state.selectedBaseRecipeMenuId || '',
@@ -414,6 +438,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     selectedIngredientId: string;
     meatQuantity: number;
     meatUnit: string;
+    selectedCategory2?: string;
+    selectedIngredientId2: string;
+    meatQuantity2: number;
+    meatUnit2: string;
     seafoodShrimpQty?: number;
     seafoodSquidQty?: number;
     isEnglishManuallyEdited?: boolean;
@@ -427,6 +455,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     selectedIngredientId: '',
     meatQuantity: 80,
     meatUnit: 'g',
+    selectedCategory2: 'เนื้อสัตว์และอาหารทะเล',
+    selectedIngredientId2: '',
+    meatQuantity2: 0,
+    meatUnit2: 'g',
     seafoodShrimpQty: 4,
     seafoodSquidQty: 40,
     isEnglishManuallyEdited: false,
@@ -446,6 +478,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         selectedIngredientId: variantModalState.selectedIngredientId,
         meatQuantity: variantModalState.meatQuantity,
         meatUnit: variantModalState.meatUnit,
+        selectedCategory2: variantModalState.selectedCategory2,
+        selectedIngredientId2: variantModalState.selectedIngredientId2,
+        meatQuantity2: variantModalState.meatQuantity2,
+        meatUnit2: variantModalState.meatUnit2,
         seafoodShrimpQty: variantModalState.seafoodShrimpQty,
         seafoodSquidQty: variantModalState.seafoodSquidQty,
         selectedBaseRecipeMenuId: variantModalState.selectedBaseRecipeMenuId,
@@ -466,6 +502,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedIngredientId: '',
       meatQuantity: 80,
       meatUnit: 'g',
+      selectedIngredientId2: '',
+      meatQuantity2: 0,
+      meatUnit2: 'g',
       isEnglishManuallyEdited: false,
       selectedBaseRecipeMenuId: '',
     });
@@ -481,7 +520,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(updated));
       } catch {}
     }
-    setVariantModalState((prev) => ({ ...prev, meatUnit: trimmed }));
+    setVariantModalState((prev) =>
+      customUnitTargetSlot === 2 ? { ...prev, meatUnit2: trimmed } : { ...prev, meatUnit: trimmed }
+    );
     setCustomUnitInput('');
     setIsAddingCustomUnit(false);
   };
@@ -493,9 +534,11 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     try {
       localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(updated));
     } catch {}
-    if (variantModalState.meatUnit === unitToDelete) {
-      setVariantModalState((prev) => ({ ...prev, meatUnit: updated[0] || 'g' }));
-    }
+    setVariantModalState((prev) => ({
+      ...prev,
+      ...(prev.meatUnit === unitToDelete ? { meatUnit: updated[0] || 'g' } : {}),
+      ...(prev.meatUnit2 === unitToDelete ? { meatUnit2: updated[0] || 'g' } : {}),
+    }));
   };
 
   // Variant Delete Modal state
@@ -1059,6 +1102,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedIngredientId: defaultIng ? defaultIng.id : '',
       meatQuantity: initialQty,
       meatUnit: initialUnit,
+      selectedCategory2: 'เนื้อสัตว์และอาหารทะเล',
+      selectedIngredientId2: '',
+      meatQuantity2: 0,
+      meatUnit2: 'g',
       seafoodShrimpQty: 4,
       seafoodSquidQty: 40,
       isEnglishManuallyEdited: false,
@@ -1072,6 +1119,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedIngredientId: nextAddState.selectedIngredientId,
       meatQuantity: nextAddState.meatQuantity,
       meatUnit: nextAddState.meatUnit,
+      selectedCategory2: nextAddState.selectedCategory2,
+      selectedIngredientId2: nextAddState.selectedIngredientId2,
+      meatQuantity2: nextAddState.meatQuantity2,
+      meatUnit2: nextAddState.meatUnit2,
       seafoodShrimpQty: nextAddState.seafoodShrimpQty,
       seafoodSquidQty: nextAddState.seafoodSquidQty,
       selectedBaseRecipeMenuId: nextAddState.selectedBaseRecipeMenuId,
@@ -1083,23 +1134,39 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   };
 
   const handleOpenEditVariant = (menu: MenuItem, variant: MenuVariant) => {
-    // Detect linked ingredient if exists
-    let matchedIngId = '';
-    const proteinItem = (variant.recipeItems || []).find((it) =>
+    const primaryMatches = (variant.recipeItems || []).filter((it) =>
       isProteinRecipeItem(it, variant.proteinType)
-    ) || (variant.recipeItems && variant.recipeItems[0]);
+    );
+    const allItems = variant.recipeItems || [];
+    const orderedMatches =
+      primaryMatches.length > 0
+        ? primaryMatches
+        : allItems.length > 0
+        ? [allItems[0]]
+        : [];
 
-    if (proteinItem?.ingredientId) {
-      matchedIngId = proteinItem.ingredientId;
-    } else {
-      const pName = (variant.proteinType || variant.name).toLowerCase();
-      const matched = ingredients.find(
-        (i) => i.name.toLowerCase().includes(pName) || pName.includes(i.name.toLowerCase().split(' ')[0])
+    const explicit1 = orderedMatches.find((it) => it.id?.startsWith('primary_1_'));
+    const explicit2 = orderedMatches.find((it) => it.id?.startsWith('primary_2_'));
+    const primary1 = explicit1 || orderedMatches[0];
+    const primary2 =
+      explicit2 && explicit2 !== primary1
+        ? explicit2
+        : orderedMatches.find((it) => it !== primary1);
+
+    const resolveMatchedIng = (item: RecipeItem | undefined, fallbackHint?: string): Ingredient | undefined => {
+      if (item?.ingredientId) {
+        const direct = ingredients.find((i) => i.id === item.ingredientId);
+        if (direct) return direct;
+      }
+      const hint = (item?.name || fallbackHint || '').trim().toLowerCase();
+      if (!hint) return undefined;
+      return ingredients.find(
+        (i) =>
+          i.name.toLowerCase().includes(hint) ||
+          hint.includes(i.name.toLowerCase().split(' ')[0])
       );
-      if (matched) matchedIngId = matched.id;
-    }
+    };
 
-    const defaultQty = proteinItem?.quantity || (variant.proteinType?.includes('กุ้ง') ? 4 : 80);
     const isSeafoodItem =
       variant.proteinType?.includes('ทะเล') ||
       variant.proteinType?.includes('ซีฟู้ด') ||
@@ -1111,11 +1178,49 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       (it) => it.proteinCategory === 'SQUID' || it.name.includes('หมึก')
     );
 
-    const matchedIng = ingredients.find((i) => i.id === matchedIngId);
-    const initialUnit = String(proteinItem?.unit || matchedIng?.usageUnit || matchedIng?.baseUnit || 'g');
+    const shrimpDbIng = ingredients.find((i) => i.id === 'ing_shrimp_xl' || i.name.includes('กุ้ง'));
+    const squidDbIng = ingredients.find((i) => i.id === 'ing_squid_fresh' || i.name.includes('หมึก'));
 
-    if (initialUnit && !portionUnits.includes(initialUnit)) {
-      const nextUnits = [...portionUnits, initialUnit];
+    let matchedIng1 = isSeafoodItem
+      ? (resolveMatchedIng(existingShrimp, 'กุ้ง') || shrimpDbIng)
+      : resolveMatchedIng(primary1, variant.proteinType || variant.name);
+    let matchedIng2 = isSeafoodItem
+      ? (resolveMatchedIng(existingSquid, 'หมึก') || squidDbIng)
+      : resolveMatchedIng(primary2);
+
+    const matchedIngId1 = matchedIng1
+      ? matchedIng1.id
+      : isSeafoodItem
+      ? SEAFOOD_SHRIMP_FALLBACK_ID
+      : (primary1?.ingredientId || '');
+    const matchedIngId2 = matchedIng2
+      ? matchedIng2.id
+      : isSeafoodItem
+      ? SEAFOOD_SQUID_FALLBACK_ID
+      : (primary2?.ingredientId || '');
+
+    const slot1Item = isSeafoodItem ? existingShrimp : primary1;
+    const slot2Item = isSeafoodItem ? existingSquid : primary2;
+
+    const defaultQty1 = isSeafoodItem
+      ? (existingShrimp?.quantity || 4)
+      : (slot1Item?.quantity || (variant.proteinType?.includes('กุ้ง') ? 4 : 80));
+    const defaultQty2 = isSeafoodItem
+      ? (existingSquid?.quantity || 40)
+      : (slot2Item?.quantity || 0);
+
+    const initialUnit1 = String(
+      slot1Item?.unit || matchedIng1?.usageUnit || matchedIng1?.baseUnit || (isSeafoodItem ? 'ตัว' : 'g')
+    );
+    const initialUnit2 = String(
+      slot2Item?.unit || matchedIng2?.usageUnit || matchedIng2?.baseUnit || 'g'
+    );
+
+    const unitsToRegister = [initialUnit1, initialUnit2].filter(
+      (u) => u && !portionUnits.includes(u)
+    );
+    if (unitsToRegister.length > 0) {
+      const nextUnits = mergeUniqueUnits(portionUnits, unitsToRegister);
       setPortionUnits(nextUnits);
       try {
         localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(nextUnits));
@@ -1172,10 +1277,14 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       mode: 'EDIT' as const,
       menu,
       variant: clonedVariant,
-      selectedCategory: isSeafoodItem ? 'เนื้อสัตว์และอาหารทะเล' : (matchedIng?.category || 'เนื้อสัตว์และอาหารทะเล'),
-      selectedIngredientId: isSeafoodItem ? 'seafood_combo' : matchedIngId,
-      meatQuantity: defaultQty,
-      meatUnit: initialUnit,
+      selectedCategory: matchedIng1?.category || 'เนื้อสัตว์และอาหารทะเล',
+      selectedIngredientId: matchedIngId1,
+      meatQuantity: defaultQty1,
+      meatUnit: initialUnit1,
+      selectedCategory2: matchedIng2?.category || 'เนื้อสัตว์และอาหารทะเล',
+      selectedIngredientId2: matchedIngId2,
+      meatQuantity2: defaultQty2,
+      meatUnit2: initialUnit2,
       seafoodShrimpQty: existingShrimp?.quantity || 4,
       seafoodSquidQty: existingSquid?.quantity || 40,
       isEnglishManuallyEdited: isManualVar,
@@ -1189,6 +1298,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       selectedIngredientId: nextEditState.selectedIngredientId,
       meatQuantity: nextEditState.meatQuantity,
       meatUnit: nextEditState.meatUnit,
+      selectedCategory2: nextEditState.selectedCategory2,
+      selectedIngredientId2: nextEditState.selectedIngredientId2,
+      meatQuantity2: nextEditState.meatQuantity2,
+      meatUnit2: nextEditState.meatUnit2,
       seafoodShrimpQty: nextEditState.seafoodShrimpQty,
       seafoodSquidQty: nextEditState.seafoodSquidQty,
       selectedBaseRecipeMenuId: nextEditState.selectedBaseRecipeMenuId,
@@ -1227,17 +1340,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     }
     const targetMenu = variantModalState.menu;
     const v = variantModalState.variant;
-    const linkedIng = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
-    const isSeafoodSelected =
-      variantModalState.selectedIngredientId === 'seafood_combo' ||
-      (v.proteinType || '').includes('ทะเล') ||
-      (v.proteinType || '').includes('ซีฟู้ด');
+    const ing1Id = variantModalState.selectedIngredientId;
+    const ing2Id = variantModalState.selectedIngredientId2;
+    const linkedIng1 = ingredients.find((i) => i.id === ing1Id);
+    const linkedIng2 = ingredients.find((i) => i.id === ing2Id);
+    const isSlot1ShrimpFallback = ing1Id === SEAFOOD_SHRIMP_FALLBACK_ID;
+    const isSlot2SquidFallback = ing2Id === SEAFOOD_SQUID_FALLBACK_ID;
+    const isLegacySeafood = ing1Id === 'seafood_combo';
 
-    if (!isSeafoodSelected && !variantModalState.selectedIngredientId) {
+    if (!isLegacySeafood && !ing1Id) {
       setVariantModalError(
         isEn
-          ? 'Please select an ingredient from database before saving.'
-          : 'กรุณาเลือกวัตถุดิบจากฐานข้อมูลก่อนบันทึก'
+          ? 'Please select Ingredient 1 from database before saving.'
+          : 'กรุณาเลือกวัตถุดิบที่ 1 จากฐานข้อมูลก่อนบันทึก'
       );
       variantFormRef.current?.reportValidity();
       return { ok: false };
@@ -1266,23 +1381,40 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
     setVariantModalError(null);
 
-    const derivedProtein = isSeafoodSelected
+    const slot1Name = linkedIng1
+      ? linkedIng1.name
+      : isSlot1ShrimpFallback || isLegacySeafood
+      ? 'กุ้งสด (XL)'
+      : (v.proteinType?.trim() || 'หมูสับ');
+    const slot2Name = linkedIng2
+      ? linkedIng2.name
+      : isSlot2SquidFallback || isLegacySeafood
+      ? 'ปลาหมึกกล้วยสด'
+      : '';
+
+    const isShrimpAndSquid =
+      isLegacySeafood ||
+      ((slot1Name.includes('กุ้ง') || isSlot1ShrimpFallback) &&
+        (slot2Name.includes('หมึก') || isSlot2SquidFallback));
+
+    const derivedProtein = isShrimpAndSquid
       ? 'ทะเล'
-      : linkedIng
-        ? linkedIng.name.split(' (')[0]
-        : (v.proteinType?.trim() || 'หมูสับ');
+      : linkedIng1 && linkedIng2
+      ? `${linkedIng1.name.split(' (')[0]}+${linkedIng2.name.split(' (')[0]}`
+      : linkedIng1
+      ? linkedIng1.name.split(' (')[0]
+      : (v.proteinType?.trim() || 'หมูสับ');
 
     const pType = derivedProtein;
-    const chosenUnit = (variantModalState.meatUnit || linkedIng?.usageUnit || linkedIng?.baseUnit || 'g').trim();
-    const qty = Number(variantModalState.meatQuantity) || (pType.includes('กุ้ง') ? 4 : isPieceLikeUnit(chosenUnit) ? 1 : 80);
 
     // Keep existing non-protein recipe items (base recipe herbs, sauces, packaging, etc.)
     const existingOtherItems = (v.recipeItems || []).filter(
-      (it) => !isProteinRecipeItem(it, pType)
+      (it) => !isProteinRecipeItem(it, v.proteinType) && !isProteinRecipeItem(it, pType)
     );
 
+    const ts = Date.now();
     let finalRecipeItems: RecipeItem[];
-    if (isSeafoodSelected) {
+    if (isLegacySeafood) {
       const shrimpIng = ingredients.find((i) => i.id === 'ing_shrimp_xl' || i.name.includes('กุ้ง'));
       const squidIng = ingredients.find((i) => i.id === 'ing_squid_fresh' || i.name.includes('หมึก'));
       const sQty = Number(variantModalState.seafoodShrimpQty) || 4;
@@ -1292,7 +1424,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
       finalRecipeItems = [
         {
-          id: 'sea_shrimp_' + Date.now(),
+          id: 'sea_shrimp_' + ts,
           ingredientType: 'INGREDIENT',
           ingredientId: shrimpIng ? shrimpIng.id : 'ing_shrimp_xl',
           name: shrimpIng ? shrimpIng.name : 'กุ้งสด (XL)',
@@ -1303,7 +1435,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           calculatedLineCost: Number((sUnitCost * sQty).toFixed(2)),
         },
         {
-          id: 'sea_squid_' + Date.now(),
+          id: 'sea_squid_' + ts,
           ingredientType: 'INGREDIENT',
           ingredientId: squidIng ? squidIng.id : 'ing_squid_fresh',
           name: squidIng ? squidIng.name : 'ปลาหมึกกล้วยสด',
@@ -1316,22 +1448,78 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         ...existingOtherItems,
       ];
     } else {
-      let effectiveQtyForBase = qty;
-      if (linkedIng) {
-        const conv = convertUnit(qty, chosenUnit, linkedIng.usageUnit || linkedIng.baseUnit || 'g');
+      const chosenUnit1 = (
+        variantModalState.meatUnit ||
+        linkedIng1?.usageUnit ||
+        linkedIng1?.baseUnit ||
+        (isSlot1ShrimpFallback ? 'ตัว' : 'g')
+      ).trim();
+      const qty1 =
+        Number(variantModalState.meatQuantity) ||
+        (slot1Name.includes('กุ้ง') ? 4 : isPieceLikeUnit(chosenUnit1) ? 1 : 80);
+
+      let effectiveQty1 = qty1;
+      const unitCost1 = linkedIng1?.costPerBaseUnit ?? (isSlot1ShrimpFallback ? 8.5 : 0);
+      if (linkedIng1) {
+        const conv = convertUnit(qty1, chosenUnit1, linkedIng1.usageUnit || linkedIng1.baseUnit || 'g');
         if (conv.success) {
-          effectiveQtyForBase = conv.convertedQuantity;
+          effectiveQty1 = conv.convertedQuantity;
         }
       }
-      const proteinRecipeItem: RecipeItem = {
-        ingredientId: linkedIng ? linkedIng.id : '',
-        name: linkedIng ? linkedIng.name : pType,
-        quantity: qty,
-        unit: chosenUnit,
-        calculatedUnitCost: linkedIng?.costPerBaseUnit || 0,
-        calculatedLineCost: Number(((linkedIng?.costPerBaseUnit || 0) * effectiveQtyForBase).toFixed(2)),
+
+      const item1: RecipeItem = {
+        id: isShrimpAndSquid ? `sea_shrimp_${ts}` : `primary_1_${ts}`,
+        ingredientType: 'INGREDIENT',
+        ingredientId: linkedIng1 ? linkedIng1.id : isSlot1ShrimpFallback ? 'ing_shrimp_xl' : '',
+        name: slot1Name,
+        quantity: qty1,
+        unit: chosenUnit1,
+        proteinCategory: isSlot1ShrimpFallback
+          ? 'SHRIMP'
+          : resolveProteinCategoryFromName(slot1Name),
+        calculatedUnitCost: unitCost1,
+        calculatedLineCost: Number((unitCost1 * effectiveQty1).toFixed(2)),
       };
-      finalRecipeItems = [proteinRecipeItem, ...existingOtherItems];
+
+      const primaryItems: RecipeItem[] = [item1];
+
+      if (ing2Id && (linkedIng2 || isSlot2SquidFallback)) {
+        const chosenUnit2 = (
+          variantModalState.meatUnit2 ||
+          linkedIng2?.usageUnit ||
+          linkedIng2?.baseUnit ||
+          'g'
+        ).trim();
+        const qty2 =
+          Number(variantModalState.meatQuantity2) ||
+          (slot2Name.includes('หมึก') ? 40 : isPieceLikeUnit(chosenUnit2) ? 1 : 40);
+
+        let effectiveQty2 = qty2;
+        const unitCost2 = linkedIng2?.costPerBaseUnit ?? (isSlot2SquidFallback ? 0.388 : 0);
+        if (linkedIng2) {
+          const conv = convertUnit(qty2, chosenUnit2, linkedIng2.usageUnit || linkedIng2.baseUnit || 'g');
+          if (conv.success) {
+            effectiveQty2 = conv.convertedQuantity;
+          }
+        }
+
+        const item2: RecipeItem = {
+          id: isShrimpAndSquid ? `sea_squid_${ts}` : `primary_2_${ts + 1}`,
+          ingredientType: 'INGREDIENT',
+          ingredientId: linkedIng2 ? linkedIng2.id : isSlot2SquidFallback ? 'ing_squid_fresh' : '',
+          name: slot2Name,
+          quantity: qty2,
+          unit: chosenUnit2,
+          proteinCategory: isSlot2SquidFallback
+            ? 'SQUID'
+            : resolveProteinCategoryFromName(slot2Name),
+          calculatedUnitCost: unitCost2,
+          calculatedLineCost: Number((unitCost2 * effectiveQty2).toFixed(2)),
+        };
+        primaryItems.push(item2);
+      }
+
+      finalRecipeItems = [...primaryItems, ...existingOtherItems];
     }
 
     translationScheduler.cancelAll();
@@ -1839,6 +2027,122 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               ? `Auto-calculated from Takeaway price × Owner-Defined GP% (Grab +${getEffectiveDeliveryGpPercent(settings, 'grab').toFixed(1)}%, LINE MAN +${getEffectiveDeliveryGpPercent(settings, 'lineman').toFixed(1)}%)`
               : `คำนวณอัตโนมัติจาก ราคาหน้าร้านใส่กล่อง × ค่า GP เดลิเวอรี (Grab +${getEffectiveDeliveryGpPercent(settings, 'grab').toFixed(1)}%, LINE MAN +${getEffectiveDeliveryGpPercent(settings, 'lineman').toFixed(1)}%)`}
           </span>
+        </div>
+
+        {/* Category Filter & Management Bar + Search */}
+        <div className="pt-2 border-t border-stone-200 flex flex-col lg:flex-row lg:items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {categories.map((cat) => {
+              const isAll = cat === 'ALL';
+              const isActive = selectedCategory === cat;
+              const count = isAll
+                ? menus.length
+                : menus.filter((m) => m.category === cat).length;
+
+              return (
+                <div
+                  key={cat}
+                  className={`inline-flex items-center rounded-xl border transition-all ${
+                    isActive
+                      ? 'bg-[#F27D26] text-white border-[#c2580e] shadow-xs'
+                      : 'bg-stone-100 text-stone-800 border-stone-200 hover:bg-stone-200/70'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-2.5 py-1 text-xs font-bold cursor-pointer flex items-center gap-1 ${
+                      isActive ? 'text-white' : 'text-stone-800'
+                    }`}
+                  >
+                    <span>{isAll ? (isEn ? 'All' : 'ทั้งหมด') : getLocalizedText(lang, cat)}</span>
+                    <span
+                      className={`text-[10px] font-mono px-1 rounded ${
+                        isActive ? 'bg-black/20 text-white' : 'bg-white text-stone-600'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                  {!isAll && (
+                    <div
+                      className={`flex items-center pr-1 border-l ${
+                        isActive ? 'border-white/30' : 'border-stone-300'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEditCategory(cat);
+                        }}
+                        title={isEn ? 'Edit category name' : 'แก้ไขชื่อหมวดหมู่'}
+                        className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                          isActive
+                            ? 'text-white/90 hover:text-white hover:bg-black/15'
+                            : 'text-stone-500 hover:text-[#F27D26] hover:bg-white'
+                        }`}
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenDeleteCategory(cat);
+                        }}
+                        title={isEn ? 'Delete category' : 'ลบหมวดหมู่'}
+                        className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                          isActive
+                            ? 'text-white/90 hover:text-white hover:bg-black/15'
+                            : 'text-stone-400 hover:text-rose-600 hover:bg-white'
+                        }`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => {
+                translationScheduler.cancel('costAddCat');
+                prevAddCatThaiRef.current = '';
+                setCategoryError(null);
+                setNewCategoryInput('');
+                setNewCategoryEnglishInput('');
+                setIsAddCategoryModalOpen(true);
+              }}
+              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <FolderPlus className="w-3.5 h-3.5 text-[#F27D26]" />
+              <span>{isEn ? '+ Add Category' : '+ เพิ่มหมวดหมู่'}</span>
+            </button>
+          </div>
+
+          <div className="relative w-full lg:w-60 shrink-0">
+            <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder={isEn ? 'Search menu or option...' : 'ค้นหาชื่อเมนู หรือตัวเลือก...'}
+              className="w-full pl-8 pr-7 py-1.5 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 placeholder:text-stone-400 focus:outline-none focus:border-[#F27D26] focus:bg-white"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="p-0.5 rounded-full text-stone-400 hover:text-stone-700 absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer"
+                title={isEn ? 'Clear search' : 'ล้างคำค้นหา'}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -2818,6 +3122,58 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </div>
               </div>
 
+              {/* Menu Category selector + Add Category shortcut */}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className="block text-stone-700 font-bold text-xs">
+                    {isEn ? 'Food Category' : 'หมวดหมู่อาหาร'}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {editingMenu.category && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditCategory(editingMenu.category!)}
+                        className="text-[11px] font-bold text-stone-600 hover:text-[#F27D26] hover:underline flex items-center gap-0.5 cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>{isEn ? 'Edit' : 'แก้ไข'}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        translationScheduler.cancel('costAddCat');
+                        prevAddCatThaiRef.current = '';
+                        setCategoryError(null);
+                        setNewCategoryInput('');
+                        setNewCategoryEnglishInput('');
+                        setIsAddCategoryModalOpen(true);
+                      }}
+                      className="text-[11px] font-bold text-[#F27D26] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{isEn ? '+ Add Category' : '+ เพิ่มหมวดหมู่'}</span>
+                    </button>
+                  </div>
+                </div>
+                <select
+                  value={editingMenu.category || ''}
+                  onChange={(e) => setEditingMenu({ ...editingMenu, category: e.target.value })}
+                  className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] cursor-pointer"
+                >
+                  {Array.from(
+                    new Set([
+                      ...categories.filter((c) => c !== 'ALL'),
+                      ...(editingMenu.category ? [editingMenu.category] : []),
+                    ])
+                  ).map((cat) => (
+                    <option key={cat} value={cat}>
+                      {getLocalizedText(lang, cat)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {/* Status toggles */}
               <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -3431,7 +3787,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                 </span>
                 <div>
                   <h3 className="font-black text-stone-950 text-base">
-                    {isEn ? '+ Add Option / Variant' : '+ เพิ่มตัวเลือก'}
+                    {variantModalState.mode === 'ADD'
+                      ? (isEn ? '+ Add Option / Variant' : '+ เพิ่มตัวเลือก')
+                      : (isEn ? 'Edit Option / Variant' : 'แก้ไขตัวเลือก')}
                   </h3>
                   <p className="text-xs text-stone-500 font-medium">
                     {isEn ? 'Menu:' : 'เมนู:'}{' '}
@@ -3456,53 +3814,167 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               onSubmit={handleSaveVariantModal}
               className="modal-body space-y-4 text-xs"
             >
-              {/* 1. เลือกวัตถุดิบจากฐานข้อมูล (เหลือเฉพาะข้อ 1. เชื่อมข้อมูลจากฐานข้อมูลโดยตรง) */}
-              <div className="p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-2xl space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="block text-stone-900 font-black text-xs">
-                    {isEn ? 'Select Ingredient from Database' : 'เลือกวัตถุดิบจากฐานข้อมูล'}{' '}
-                    <span className="text-[#F27D26]">*</span>
-                  </label>
-                  <span className="text-[10px] text-amber-800 font-bold bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300">
-                    {isEn ? 'Auto-linked to Real Cost' : 'เชื่อมโยงต้นทุนจริงอัตโนมัติ'}
-                  </span>
-                </div>
+              {/* 1 & 2. เลือกวัตถุดิบที่ต้องใช้ (รองรับ 2 วัตถุดิบคู่กัน แบบเดียวกับเมนูทะเล) */}
+              {(() => {
+                const activeCat1 =
+                  variantModalState.selectedCategory === 'ALL' ||
+                  groupedIngredients.some(([cat]) => cat === variantModalState.selectedCategory)
+                    ? (variantModalState.selectedCategory || 'ALL')
+                    : 'ALL';
+                const catIngs1 =
+                  activeCat1 === 'ALL'
+                    ? ingredients
+                    : (groupedIngredients.find(([cat]) => cat === activeCat1)?.[1] || []);
+                const showSeafoodPreset =
+                  activeCat1 === 'ALL' || activeCat1 === 'เนื้อสัตว์และอาหารทะเล';
 
-                {(() => {
-                  const activeCategory =
-                    variantModalState.selectedCategory === 'ALL' ||
-                    groupedIngredients.some(([cat]) => cat === variantModalState.selectedCategory)
-                      ? (variantModalState.selectedCategory || 'ALL')
-                      : 'ALL';
-                  const filteredCategoryIngredients =
-                    activeCategory === 'ALL'
-                      ? ingredients
-                      : (groupedIngredients.find(([cat]) => cat === activeCategory)?.[1] || []);
-                  const showSeafoodComboOption =
-                    activeCategory === 'ALL' || activeCategory === 'เนื้อสัตว์และอาหารทะเล';
-                  const totalChoicesInCat =
-                    filteredCategoryIngredients.length + (showSeafoodComboOption ? 1 : 0);
+                const activeCat2 =
+                  variantModalState.selectedCategory2 === 'ALL' ||
+                  groupedIngredients.some(([cat]) => cat === variantModalState.selectedCategory2)
+                    ? (variantModalState.selectedCategory2 || 'ALL')
+                    : 'ALL';
+                const catIngs2 =
+                  activeCat2 === 'ALL'
+                    ? ingredients
+                    : (groupedIngredients.find(([cat]) => cat === activeCat2)?.[1] || []);
 
-                  return (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {/* ช่องที่ 1: หัวข้อหมวดหมู่วัตถุดิบ */}
-                      <div>
-                        <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                          {isEn ? '1. Ingredient Category' : '1. หมวดหมู่วัตถุดิบ'}
-                        </label>
+                const linkedIng1 = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
+                const linkedIng2 = ingredients.find((i) => i.id === variantModalState.selectedIngredientId2);
+                const isSlot1ShrimpFallback =
+                  variantModalState.selectedIngredientId === SEAFOOD_SHRIMP_FALLBACK_ID;
+                const isSlot2SquidFallback =
+                  variantModalState.selectedIngredientId2 === SEAFOOD_SQUID_FALLBACK_ID;
+
+                const unitCost1 = linkedIng1?.costPerBaseUnit ?? (isSlot1ShrimpFallback ? 8.5 : 0);
+                const unitCost2 = linkedIng2?.costPerBaseUnit ?? (isSlot2SquidFallback ? 0.388 : 0);
+                const activeUnit1 =
+                  variantModalState.meatUnit ||
+                  linkedIng1?.usageUnit ||
+                  linkedIng1?.baseUnit ||
+                  (isSlot1ShrimpFallback ? 'ตัว' : 'g');
+                const activeUnit2 =
+                  variantModalState.meatUnit2 ||
+                  linkedIng2?.usageUnit ||
+                  linkedIng2?.baseUnit ||
+                  'g';
+
+                const buildSuggestedOptionName = (
+                  id1: string,
+                  id2: string
+                ): string => {
+                  const mName = variantModalState.menu?.name || '';
+                  const i1 = ingredients.find((i) => i.id === id1);
+                  const i2 = ingredients.find((i) => i.id === id2);
+                  const n1 = i1
+                    ? i1.name.split(' (')[0]
+                    : id1 === SEAFOOD_SHRIMP_FALLBACK_ID
+                    ? 'กุ้ง'
+                    : '';
+                  const n2 = i2
+                    ? i2.name.split(' (')[0]
+                    : id2 === SEAFOOD_SQUID_FALLBACK_ID
+                    ? 'ปลาหมึก'
+                    : '';
+                  if ((n1.includes('กุ้ง') && n2.includes('หมึก')) || (id1 === SEAFOOD_SHRIMP_FALLBACK_ID && id2 === SEAFOOD_SQUID_FALLBACK_ID)) {
+                    return `${mName} ทะเล`.trim();
+                  }
+                  if (n1 && n2) return `${mName} ${n1}+${n2}`.trim();
+                  if (n1) return `${mName} ${n1}`.trim();
+                  return mName;
+                };
+
+                const applySeafoodPreset = () => {
+                  const shrimpDb = ingredients.find(
+                    (i) => i.id === 'ing_shrimp_xl' || i.name.includes('กุ้ง')
+                  );
+                  const squidDb = ingredients.find(
+                    (i) => i.id === 'ing_squid_fresh' || i.name.includes('หมึก')
+                  );
+                  const unit1 = String(shrimpDb?.usageUnit || shrimpDb?.baseUnit || 'ตัว');
+                  const unit2 = String(squidDb?.usageUnit || squidDb?.baseUnit || 'g');
+                  const nextUnits = mergeUniqueUnits(portionUnits, [unit1, unit2]);
+                  if (nextUnits.length !== portionUnits.length) {
+                    setPortionUnits(nextUnits);
+                    try {
+                      localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(nextUnits));
+                    } catch {}
+                  }
+                  const vNameTh = `${variantModalState.menu?.name || ''} ทะเล`.trim();
+                  setVariantModalState((prev) => ({
+                    ...prev,
+                    selectedCategory: shrimpDb?.category || 'เนื้อสัตว์และอาหารทะเล',
+                    selectedIngredientId: shrimpDb ? shrimpDb.id : SEAFOOD_SHRIMP_FALLBACK_ID,
+                    meatQuantity: prev.seafoodShrimpQty || 4,
+                    meatUnit: unit1,
+                    selectedCategory2: squidDb?.category || 'เนื้อสัตว์และอาหารทะเล',
+                    selectedIngredientId2: squidDb ? squidDb.id : SEAFOOD_SQUID_FALLBACK_ID,
+                    meatQuantity2: prev.seafoodSquidQty || 40,
+                    meatUnit2: unit2,
+                    variant: {
+                      ...prev.variant,
+                      proteinType: 'ทะเล',
+                      name: vNameTh,
+                      thaiName: vNameTh,
+                      englishName: prev.isEnglishManuallyEdited
+                        ? prev.variant?.englishName
+                        : translateThaiToEnglish(vNameTh),
+                    },
+                  }));
+                };
+
+                return (
+                  <div className="p-3.5 bg-sky-50/70 border border-sky-300 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <label className="block text-sky-950 font-black text-xs">
+                        {isEn
+                          ? 'Ingredients Required (2 Dual Ingredient Slots):'
+                          : 'สัดส่วนวัตถุดิบที่ต้องใช้ (ใส่ได้ 2 วัตถุดิบคู่กัน):'}{' '}
+                        <span className="text-[#F27D26]">*</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={applySeafoodPreset}
+                        className="text-[10px] text-sky-900 hover:bg-sky-200 bg-sky-100 px-2 py-0.5 rounded-md font-bold border border-sky-300 cursor-pointer transition-colors"
+                        title={
+                          isEn
+                            ? 'Quick-fill Shrimp + Squid combo'
+                            : 'กดเพื่อเติมคู่วัตถุดิบทันที (กุ้งสด + ปลาหมึกสด)'
+                        }
+                      >
+                        {isEn ? '🌊 Fill Seafood (Shrimp + Squid)' : '🌊 เติมคู่ทะเล (กุ้ง + หมึก)'}
+                      </button>
+                    </div>
+
+                    {/* 2 Side-by-Side Ingredient Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Card 1: วัตถุดิบที่ 1 */}
+                      <div className="bg-white p-2.5 rounded-xl border border-amber-300 shadow-2xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-amber-950 font-bold text-xs">
+                            {isEn ? '1. Primary Ingredient 1' : '1. วัตถุดิบที่ 1'}{' '}
+                            <span className="text-rose-500">*</span>
+                          </span>
+                          <span className="text-[10px] text-stone-500 font-mono">
+                            {unitCost1 > 0
+                              ? `@ ฿${unitCost1.toFixed(unitCost1 < 1 ? 3 : 2)}/${localizeUnit(
+                                  linkedIng1?.usageUnit || linkedIng1?.baseUnit || 'ตัว',
+                                  lang
+                                )}`
+                              : isEn
+                              ? 'Select DB'
+                              : 'เลือกฐานข้อมูล'}
+                          </span>
+                        </div>
+
                         <select
-                          value={activeCategory}
+                          value={activeCat1}
                           onChange={(e) => {
                             const nextCat = e.target.value;
                             setVariantModalState((prev) => {
-                              const currentIng = ingredients.find(
-                                (i) => i.id === prev.selectedIngredientId
-                              );
+                              const currIng = ingredients.find((i) => i.id === prev.selectedIngredientId);
                               const stillValid =
                                 nextCat === 'ALL' ||
-                                (prev.selectedIngredientId === 'seafood_combo' &&
-                                  nextCat === 'เนื้อสัตว์และอาหารทะเล') ||
-                                (currentIng && (currentIng.category || 'อื่นๆ') === nextCat);
+                                (currIng && (currIng.category || 'อื่นๆ') === nextCat);
                               return {
                                 ...prev,
                                 selectedCategory: nextCat,
@@ -3510,47 +3982,60 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               };
                             });
                           }}
-                          className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26] cursor-pointer"
+                          className="w-full p-2 bg-stone-50 border border-[#D6CEBE] rounded-lg text-stone-800 text-[11px] font-semibold focus:outline-none focus:border-[#F27D26] cursor-pointer"
+                          title={isEn ? 'Filter category 1' : 'กรองหมวดหมู่วัตถุดิบ 1'}
                         >
                           <option value="ALL">
                             {isEn
-                              ? `📁 All Categories (${ingredients.length + 1})`
-                              : `📁 ทุกหมวดหมู่ (${ingredients.length + 1})`}
+                              ? `📁 All Categories (${ingredients.length})`
+                              : `📁 ทุกหมวดหมู่ (${ingredients.length})`}
                           </option>
-                          {groupedIngredients.map(([cat, catIngs]) => {
-                            const count =
-                              catIngs.length + (cat === 'เนื้อสัตว์และอาหารทะเล' ? 1 : 0);
-                            return (
-                              <option key={cat} value={cat}>
-                                {getLocalizedText(lang, cat)} ({count})
-                              </option>
-                            );
-                          })}
+                          {groupedIngredients.map(([cat, catIngs]) => (
+                            <option key={cat} value={cat}>
+                              {getLocalizedText(lang, cat)} ({catIngs.length})
+                            </option>
+                          ))}
                         </select>
-                      </div>
 
-                      {/* ช่องที่ 2: วัตถุดิบในหมวดหมู่นั้น */}
-                      <div>
-                        <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                          {isEn ? '2. Ingredient in Category' : '2. วัตถุดิบในหมวดหมู่'}{' '}
-                          <span className="text-[#F27D26]">*</span>
-                        </label>
                         <select
                           required
                           value={variantModalState.selectedIngredientId}
                           onChange={(e) => {
                             const ingId = e.target.value;
                             if (ingId === 'seafood_combo') {
-                              const vNameTh = `${variantModalState.menu?.name || ''} ทะเล`.trim();
+                              applySeafoodPreset();
+                              return;
+                            }
+                            if (!ingId) {
+                              setVariantModalState((prev) => ({ ...prev, selectedIngredientId: '' }));
+                              return;
+                            }
+                            const ing = ingredients.find((i) => i.id === ingId);
+                            if (ing) {
+                              const nextUnit = String(ing.usageUnit || ing.baseUnit || 'g');
+                              const defaultQty = isPieceLikeUnit(nextUnit)
+                                ? nextUnit === 'ตัว'
+                                  ? 4
+                                  : 1
+                                : 80;
+                              if (!portionUnits.includes(nextUnit)) {
+                                const nextUnits = [...portionUnits, nextUnit];
+                                setPortionUnits(nextUnits);
+                                try {
+                                  localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(nextUnits));
+                                } catch {}
+                              }
+                              const vNameTh = buildSuggestedOptionName(ingId, variantModalState.selectedIngredientId2);
+                              const pTypeLabel = ing.name.split(' (')[0];
                               setVariantModalState((prev) => ({
                                 ...prev,
-                                selectedCategory: 'เนื้อสัตว์และอาหารทะเล',
-                                selectedIngredientId: 'seafood_combo',
-                                seafoodShrimpQty: prev.seafoodShrimpQty || 4,
-                                seafoodSquidQty: prev.seafoodSquidQty || 40,
+                                selectedCategory: ing.category || prev.selectedCategory,
+                                selectedIngredientId: ingId,
+                                meatQuantity: defaultQty,
+                                meatUnit: nextUnit,
                                 variant: {
                                   ...prev.variant,
-                                  proteinType: 'ทะเล',
+                                  proteinType: pTypeLabel,
                                   name: vNameTh,
                                   thaiName: vNameTh,
                                   englishName: prev.isEnglishManuallyEdited
@@ -3558,328 +4043,254 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                                     : translateThaiToEnglish(vNameTh),
                                 },
                               }));
-                            } else if (ingId) {
-                              const ing = ingredients.find((i) => i.id === ingId);
-                              if (ing) {
-                                const pName = ing.name.split(' (')[0];
-                                const nextUnit = String(ing.usageUnit || ing.baseUnit || 'g');
-                                const defaultQty = isPieceLikeUnit(nextUnit)
-                                  ? (nextUnit === 'ตัว' ? 4 : 1)
-                                  : 80;
-                                const vNameTh = `${variantModalState.menu?.name || ''} ${pName}`.trim();
-
-                                if (!portionUnits.includes(nextUnit)) {
-                                  const nextUnits = [...portionUnits, nextUnit];
-                                  setPortionUnits(nextUnits);
-                                  try {
-                                    localStorage.setItem(
-                                      PORTION_UNITS_STORAGE_KEY,
-                                      JSON.stringify(nextUnits)
-                                    );
-                                  } catch {}
-                                }
-
-                                setVariantModalState((prev) => ({
-                                  ...prev,
-                                  selectedCategory: ing.category || prev.selectedCategory,
-                                  selectedIngredientId: ingId,
-                                  meatQuantity: defaultQty,
-                                  meatUnit: nextUnit,
-                                  variant: {
-                                    ...prev.variant,
-                                    proteinType: pName,
-                                    name: vNameTh,
-                                    thaiName: vNameTh,
-                                    englishName: prev.isEnglishManuallyEdited
-                                      ? prev.variant?.englishName
-                                      : translateThaiToEnglish(vNameTh),
-                                  },
-                                }));
-                              }
-                            } else {
-                              setVariantModalState((prev) => ({
-                                ...prev,
-                                selectedIngredientId: '',
-                              }));
                             }
                           }}
-                          className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26] cursor-pointer"
+                          className="w-full p-2 bg-amber-50/40 border border-amber-300 rounded-lg text-stone-900 text-xs font-bold focus:outline-none focus:border-amber-600 cursor-pointer"
                         >
                           <option value="">
-                            {isEn
-                              ? `-- Select Ingredient (${totalChoicesInCat} items) --`
-                              : `-- เลือกวัตถุดิบในหมวดนี้ (${totalChoicesInCat} รายการ) --`}
+                            {isEn ? '-- Select Ingredient 1 --' : '-- เลือกวัตถุดิบที่ 1 --'}
                           </option>
-                          {showSeafoodComboOption && (
+                          {showSeafoodPreset && (
                             <option value="seafood_combo" className="font-bold text-[#F27D26]">
                               {isEn
-                                ? '🌊 Seafood Combo (Fresh Shrimp + Fresh Squid)'
+                                ? '🌊 Seafood Combo (Shrimp + Squid)'
                                 : '🌊 ทะเล (กุ้งสด + ปลาหมึกสด คู่กัน)'}
                             </option>
                           )}
-                          {filteredCategoryIngredients.map((ing) => (
+                          {isSlot1ShrimpFallback && (
+                            <option value={SEAFOOD_SHRIMP_FALLBACK_ID}>
+                              🦐 กุ้งสด (XL) (ตัว)
+                            </option>
+                          )}
+                          {catIngs1.map((ing) => (
                             <option key={ing.id} value={ing.id}>
                               {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)} (
                               {localizeUnit(ing.usageUnit || ing.baseUnit || 'g', lang)})
                             </option>
                           ))}
                         </select>
-                      </div>
-                    </div>
-                  );
-                })()}
 
-                {/* Editable Bilingual Option Names (TH + Auto EN) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                      {isEn ? 'Option Name (TH)' : 'ชื่อตัวเลือก (ไทย)'} <span className="text-[#F27D26]">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={variantModalState.variant?.name || ''}
-                      onChange={(e) => {
-                        const nextTh = e.target.value;
-                        setVariantModalState((prev) => ({
-                          ...prev,
-                          variant: {
-                            ...prev.variant,
-                            name: nextTh,
-                            thaiName: nextTh,
-                          },
-                        }));
-                        translationScheduler.schedule('costVariant', () => {
-                          setVariantModalState((prev) => {
-                            const currTh = prev.variant?.name || '';
-                            const autoEn = prev.isEnglishManuallyEdited
-                              ? prev.variant?.englishName || ''
-                              : computeAutoEnglishName({
-                                  previousThai: prevVariantThaiRef.current,
-                                  nextThai: currTh,
-                                  currentEnglish: prev.variant?.englishName,
-                                  isManuallyEdited: Boolean(prev.isEnglishManuallyEdited),
-                                });
-                            prevVariantThaiRef.current = currTh;
-                            return {
-                              ...prev,
-                              variant: {
-                                ...prev.variant,
-                                englishName: autoEn,
-                              },
-                            };
-                          });
-                        });
-                      }}
-                      onBlur={() => translationScheduler.flush('costVariant')}
-                      placeholder={isEn ? 'e.g. Stir-Fried Holy Basil with Pork' : 'เช่น กะเพราหมูสับ'}
-                      className="w-full p-2 bg-white border border-amber-300 rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
-                    />
-                  </div>
-                  <div>
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <div className="flex items-center gap-1.5">
-                        <label className="block text-[11px] font-bold text-stone-700">
-                          {isEn ? 'Option Name (EN)' : 'ชื่อตัวเลือก (English)'}
-                        </label>
-                        {needsEnglishReview(
-                          variantModalState.variant?.name,
-                          variantModalState.variant?.englishName
-                        ) && (
-                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
-                            <AlertTriangle className="w-3 h-3 shrink-0" />
-                            <span>{isEn ? 'Needs EN' : 'รอตรวจสอบ EN'}</span>
+                        <div className="flex items-center gap-1.5">
+                          <NumericInput
+                            min="0"
+                            step="any"
+                            value={variantModalState.meatQuantity}
+                            onValueChange={(val) =>
+                              setVariantModalState((prev) => ({
+                                ...prev,
+                                meatQuantity: val,
+                                ...(isSlot1ShrimpFallback || linkedIng1?.name.includes('กุ้ง')
+                                  ? { seafoodShrimpQty: val }
+                                  : {}),
+                              }))
+                            }
+                            className="w-20 p-2 bg-amber-50/50 border border-amber-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-amber-600"
+                          />
+                          <select
+                            value={activeUnit1}
+                            onChange={(e) =>
+                              setVariantModalState((prev) => ({
+                                ...prev,
+                                meatUnit: e.target.value,
+                              }))
+                            }
+                            className="flex-1 min-w-0 p-2 bg-stone-50 border border-[#D6CEBE] rounded-lg text-stone-900 text-xs font-bold focus:outline-none focus:border-[#F27D26] cursor-pointer"
+                          >
+                            {portionUnits.map((u) => (
+                              <option key={u} value={u}>
+                                {getPortionUnitLabel(u)}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomUnitTargetSlot(1);
+                              setIsAddingCustomUnit((p) => (customUnitTargetSlot === 1 ? !p : true));
+                            }}
+                            className="p-2 rounded-lg border border-amber-300 bg-amber-50 text-[#F27D26] hover:bg-amber-100 cursor-pointer shrink-0"
+                            title={isEn ? 'Add custom unit' : 'เพิ่มหน่วยเอง'}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Card 2: วัตถุดิบที่ 2 */}
+                      <div className="bg-white p-2.5 rounded-xl border border-sky-300 shadow-2xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sky-950 font-bold text-xs">
+                            {isEn ? '2. Ingredient 2 (Optional)' : '2. วัตถุดิบที่ 2 (ถ้ามี)'}
                           </span>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          translationScheduler.cancel('costVariant');
-                          prevVariantThaiRef.current = variantModalState.variant?.name || '';
-                          setVariantModalState((prev) => ({
-                            ...prev,
-                            isEnglishManuallyEdited: false,
-                            variant: {
-                              ...prev.variant,
-                              englishName: translateThaiToEnglish(prev.variant?.name || ''),
-                              englishNameManual: false,
-                            },
-                          }));
-                        }}
-                        className="text-[10px] font-bold text-[#F27D26] hover:underline cursor-pointer"
-                      >
-                        {isEn ? 'Re-translate' : 'แปลใหม่'}
-                      </button>
-                    </div>
-                    <input
-                      type="text"
-                      value={variantModalState.variant?.englishName || ''}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        translationScheduler.cancel('costVariant');
-                        const hasManual = Boolean(val.trim());
-                        setVariantModalState((prev) => ({
-                          ...prev,
-                          isEnglishManuallyEdited: hasManual,
-                          variant: {
-                            ...prev.variant,
-                            englishName: val,
-                            englishNameManual: hasManual,
-                          },
-                        }));
-                      }}
-                      placeholder={isEn ? 'Auto-translated culinary English name' : 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ'}
-                      className="w-full p-2 bg-white border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
-                    />
-                  </div>
-                </div>
-              </div>
+                          <span className="text-[10px] text-stone-500 font-mono">
+                            {variantModalState.selectedIngredientId2 && unitCost2 > 0
+                              ? `@ ฿${unitCost2.toFixed(unitCost2 < 1 ? 3 : 2)}/${localizeUnit(
+                                  linkedIng2?.usageUnit || linkedIng2?.baseUnit || 'g',
+                                  lang
+                                )}`
+                              : isEn
+                              ? 'Paired'
+                              : 'คู่กัน'}
+                          </span>
+                        </div>
 
-              {/* 2. ปริมาณเนื้อสัตว์ที่ใช้ */}
-              {(() => {
-                const pType = (variantModalState.variant?.proteinType || '').toLowerCase();
-                const isSeafoodChoice =
-                  variantModalState.selectedIngredientId === 'seafood_combo' ||
-                  pType.includes('ทะเล') ||
-                  pType.includes('ซีฟู้ด');
-
-                if (isSeafoodChoice) {
-                  return (
-                    <div className="p-3 bg-sky-50 border border-sky-300 rounded-2xl space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-black text-sky-950 text-xs flex items-center gap-1.5">
-                          <span>
+                        <select
+                          value={activeCat2}
+                          onChange={(e) => {
+                            const nextCat = e.target.value;
+                            setVariantModalState((prev) => {
+                              const currIng = ingredients.find((i) => i.id === prev.selectedIngredientId2);
+                              const stillValid =
+                                nextCat === 'ALL' ||
+                                !prev.selectedIngredientId2 ||
+                                (currIng && (currIng.category || 'อื่นๆ') === nextCat);
+                              return {
+                                ...prev,
+                                selectedCategory2: nextCat,
+                                selectedIngredientId2: stillValid ? prev.selectedIngredientId2 : '',
+                              };
+                            });
+                          }}
+                          className="w-full p-2 bg-stone-50 border border-[#D6CEBE] rounded-lg text-stone-800 text-[11px] font-semibold focus:outline-none focus:border-sky-500 cursor-pointer"
+                          title={isEn ? 'Filter category 2' : 'กรองหมวดหมู่วัตถุดิบ 2'}
+                        >
+                          <option value="ALL">
                             {isEn
-                              ? '🌊 Seafood Ratio (Shrimp + Squid required):'
-                              : '🌊 สัดส่วนวัตถุดิบทะเล (กุ้งสด + ปลาหมึกสด ต้องมีทั้งคู่):'}
-                          </span>
-                        </span>
-                        <span className="text-[10px] text-sky-800 bg-sky-100 px-2 py-0.5 rounded-md font-bold border border-sky-300">
-                          {isEn ? 'Seafood Rule (pc / g)' : 'Seafood Rule (แยกชิ้น/กรัม)'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="bg-white p-2.5 rounded-xl border border-amber-300 shadow-2xs space-y-1">
-                          <label className="block text-amber-950 font-bold text-xs">
-                            {isEn ? '🦐 Fresh Shrimp (XL):' : '🦐 กุ้งสด (XL):'}
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <NumericInput
-                              min="0"
-                              step="any"
-                              value={variantModalState.seafoodShrimpQty}
-                              onValueChange={(val) =>
-                                setVariantModalState((prev) => ({
-                                  ...prev,
-                                  seafoodShrimpQty: val,
-                                }))
-                              }
-                              className="w-24 p-2 bg-amber-50/50 border border-amber-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-amber-600"
-                            />
-                            <span className="text-xs text-stone-700 font-bold">{isEn ? 'pc' : 'ตัว'}</span>
-                            <span className="text-[10px] text-stone-500 ml-auto">
-                              (@ ฿8.50/{isEn ? 'pc' : 'ตัว'})
-                            </span>
-                          </div>
-                        </div>
-                        <div className="bg-white p-2.5 rounded-xl border border-sky-300 shadow-2xs space-y-1">
-                          <label className="block text-sky-950 font-bold text-xs">
-                            {isEn ? '🦑 Fresh Squid:' : '🦑 ปลาหมึกกล้วยสด:'}
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <NumericInput
-                              min="0"
-                              step="any"
-                              value={variantModalState.seafoodSquidQty}
-                              onValueChange={(val) =>
-                                setVariantModalState((prev) => ({
-                                  ...prev,
-                                  seafoodSquidQty: val,
-                                }))
-                              }
-                              className="w-24 p-2 bg-sky-50/50 border border-sky-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-sky-600"
-                            />
-                            <span className="text-xs text-stone-700 font-bold">{isEn ? 'g' : 'กรัม (g)'}</span>
-                            <span className="text-[10px] text-stone-500 ml-auto">
-                              (@ ฿0.388/g)
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const activeUnit = variantModalState.meatUnit || 'g';
-
-                return (
-                  <div className="space-y-2 p-3 bg-white border border-[#EAE4D9] rounded-2xl">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <label className="block text-stone-800 font-bold text-xs">
-                        {isEn ? 'Protein Portion per Dish' : 'ปริมาณเนื้อสัตว์ที่ใช้ต่อจาน'}{' '}
-                        <span className="text-stone-500 font-normal">
-                          ({getPortionUnitLabel(activeUnit)})
-                        </span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingCustomUnit((p) => !p)}
-                        className="text-[11px] font-bold text-[#F27D26] hover:underline flex items-center gap-0.5 cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>{isEn ? 'Add Custom Unit' : 'เพิ่มหน่วยเอง'}</span>
-                      </button>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <NumericInput
-                        min="0"
-                        step="any"
-                        value={variantModalState.meatQuantity}
-                        onValueChange={(val) =>
-                          setVariantModalState((prev) => ({
-                            ...prev,
-                            meatQuantity: val,
-                          }))
-                        }
-                        className="w-28 p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26]"
-                      />
-
-                      {/* Unit Dropdown Selector */}
-                      <select
-                        value={activeUnit}
-                        onChange={(e) =>
-                          setVariantModalState((prev) => ({
-                            ...prev,
-                            meatUnit: e.target.value,
-                          }))
-                        }
-                        className="p-2.5 bg-stone-50 border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-bold focus:outline-none focus:border-[#F27D26] cursor-pointer"
-                        title={isEn ? 'Select portion unit' : 'เลือกหน่วยวัดปริมาณ'}
-                      >
-                        {portionUnits.map((u) => (
-                          <option key={u} value={u}>
-                            {getPortionUnitLabel(u)}
+                              ? `📁 All Categories (${ingredients.length})`
+                              : `📁 ทุกหมวดหมู่ (${ingredients.length})`}
                           </option>
-                        ))}
-                      </select>
+                          {groupedIngredients.map(([cat, catIngs]) => (
+                            <option key={cat} value={cat}>
+                              {getLocalizedText(lang, cat)} ({catIngs.length})
+                            </option>
+                          ))}
+                        </select>
 
-                      {/* Delete Selected Unit Button */}
-                      <button
-                        type="button"
-                        disabled={portionUnits.length <= 1}
-                        onClick={() => handleDeleteCustomUnit(activeUnit)}
-                        className="p-2 rounded-xl border border-stone-200 text-stone-400 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 disabled:opacity-30 cursor-pointer transition-colors"
-                        title={isEn ? `Remove unit "${activeUnit}"` : `ลบหน่วย "${activeUnit}" ออกจากรายการ`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        <select
+                          value={variantModalState.selectedIngredientId2}
+                          onChange={(e) => {
+                            const ingId2 = e.target.value;
+                            if (!ingId2) {
+                              const vNameTh = buildSuggestedOptionName(variantModalState.selectedIngredientId, '');
+                              setVariantModalState((prev) => ({
+                                ...prev,
+                                selectedIngredientId2: '',
+                                meatQuantity2: 0,
+                                variant: {
+                                  ...prev.variant,
+                                  name: vNameTh || prev.variant?.name,
+                                  thaiName: vNameTh || prev.variant?.thaiName,
+                                  englishName: prev.isEnglishManuallyEdited
+                                    ? prev.variant?.englishName
+                                    : translateThaiToEnglish(vNameTh || prev.variant?.name || ''),
+                                },
+                              }));
+                              return;
+                            }
+                            const ing2 = ingredients.find((i) => i.id === ingId2);
+                            if (ing2) {
+                              const nextUnit2 = String(ing2.usageUnit || ing2.baseUnit || 'g');
+                              const defaultQty2 = isPieceLikeUnit(nextUnit2)
+                                ? nextUnit2 === 'ตัว'
+                                  ? 4
+                                  : 1
+                                : 40;
+                              if (!portionUnits.includes(nextUnit2)) {
+                                const nextUnits = [...portionUnits, nextUnit2];
+                                setPortionUnits(nextUnits);
+                                try {
+                                  localStorage.setItem(PORTION_UNITS_STORAGE_KEY, JSON.stringify(nextUnits));
+                                } catch {}
+                              }
+                              const vNameTh = buildSuggestedOptionName(variantModalState.selectedIngredientId, ingId2);
+                              setVariantModalState((prev) => ({
+                                ...prev,
+                                selectedCategory2: ing2.category || prev.selectedCategory2,
+                                selectedIngredientId2: ingId2,
+                                meatQuantity2: defaultQty2,
+                                meatUnit2: nextUnit2,
+                                variant: {
+                                  ...prev.variant,
+                                  name: vNameTh,
+                                  thaiName: vNameTh,
+                                  englishName: prev.isEnglishManuallyEdited
+                                    ? prev.variant?.englishName
+                                    : translateThaiToEnglish(vNameTh),
+                                },
+                              }));
+                            }
+                          }}
+                          className="w-full p-2 bg-sky-50/40 border border-sky-300 rounded-lg text-stone-900 text-xs font-bold focus:outline-none focus:border-sky-600 cursor-pointer"
+                        >
+                          <option value="">
+                            {isEn ? '-- None (Use 1 Ingredient Only) --' : '-- ไม่ใช้วัตถุดิบที่ 2 (ใช้ 1 อย่าง) --'}
+                          </option>
+                          {isSlot2SquidFallback && (
+                            <option value={SEAFOOD_SQUID_FALLBACK_ID}>
+                              🦑 ปลาหมึกกล้วยสด (g)
+                            </option>
+                          )}
+                          {catIngs2.map((ing) => (
+                            <option key={ing.id} value={ing.id}>
+                              {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)} (
+                              {localizeUnit(ing.usageUnit || ing.baseUnit || 'g', lang)})
+                            </option>
+                          ))}
+                        </select>
+
+                        <div className="flex items-center gap-1.5">
+                          <NumericInput
+                            min="0"
+                            step="any"
+                            disabled={!variantModalState.selectedIngredientId2}
+                            value={variantModalState.meatQuantity2}
+                            onValueChange={(val) =>
+                              setVariantModalState((prev) => ({
+                                ...prev,
+                                meatQuantity2: val,
+                                ...(isSlot2SquidFallback || linkedIng2?.name.includes('หมึก')
+                                  ? { seafoodSquidQty: val }
+                                  : {}),
+                              }))
+                            }
+                            className="w-20 p-2 bg-sky-50/50 border border-sky-400 rounded-lg text-stone-900 text-xs font-bold font-mono focus:outline-none focus:border-sky-600 disabled:opacity-40"
+                          />
+                          <select
+                            disabled={!variantModalState.selectedIngredientId2}
+                            value={activeUnit2}
+                            onChange={(e) =>
+                              setVariantModalState((prev) => ({
+                                ...prev,
+                                meatUnit2: e.target.value,
+                              }))
+                            }
+                            className="flex-1 min-w-0 p-2 bg-stone-50 border border-[#D6CEBE] rounded-lg text-stone-900 text-xs font-bold focus:outline-none focus:border-sky-500 cursor-pointer disabled:opacity-40"
+                          >
+                            {portionUnits.map((u) => (
+                              <option key={u} value={u}>
+                                {getPortionUnitLabel(u)}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={!variantModalState.selectedIngredientId2}
+                            onClick={() => {
+                              setCustomUnitTargetSlot(2);
+                              setIsAddingCustomUnit((p) => (customUnitTargetSlot === 2 ? !p : true));
+                            }}
+                            className="p-2 rounded-lg border border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 cursor-pointer disabled:opacity-40 shrink-0"
+                            title={isEn ? 'Add custom unit' : 'เพิ่มหน่วยเอง'}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
                     {/* Inline Add Custom Unit Box */}
                     {isAddingCustomUnit && (
-                      <div className="flex items-center gap-2 pt-2 border-t border-stone-100">
+                      <div className="flex items-center gap-2 p-2 bg-white border border-sky-200 rounded-xl">
                         <input
                           type="text"
                           value={customUnitInput}
@@ -3890,13 +4301,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               handleAddCustomUnit();
                             }
                           }}
-                          placeholder={isEn ? 'New unit name e.g. scoop, pack, cup' : 'พิมพ์ชื่อหน่วยใหม่ เช่น ทัพพี, ห่อ, กล่องเล็ก'}
-                          className="flex-1 p-2 bg-stone-50 border border-[#D6CEBE] rounded-xl text-xs font-semibold text-stone-900 focus:outline-none focus:border-[#F27D26]"
+                          placeholder={
+                            isEn
+                              ? `New unit for Ingredient ${customUnitTargetSlot} e.g. scoop, pack`
+                              : `พิมพ์ชื่อหน่วยใหม่สำหรับวัตถุดิบ ${customUnitTargetSlot} เช่น ทัพพี, ห่อ`
+                          }
+                          className="flex-1 p-2 bg-stone-50 border border-[#D6CEBE] rounded-lg text-xs font-semibold text-stone-900 focus:outline-none focus:border-[#F27D26]"
                         />
                         <button
                           type="button"
                           onClick={handleAddCustomUnit}
-                          className="px-3 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-xl text-[11px] cursor-pointer"
+                          className="px-3 py-2 bg-[#F27D26] hover:bg-[#d96817] text-white font-bold rounded-lg text-[11px] cursor-pointer"
                         >
                           {isEn ? 'Add Unit' : 'เพิ่มหน่วย'}
                         </button>
@@ -3906,12 +4321,118 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                             setIsAddingCustomUnit(false);
                             setCustomUnitInput('');
                           }}
-                          className="px-2.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-600 font-semibold rounded-xl text-[11px] cursor-pointer"
+                          className="px-2.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-600 font-semibold rounded-lg text-[11px] cursor-pointer"
                         >
                           {isEn ? 'Cancel' : 'ยกเลิก'}
                         </button>
                       </div>
                     )}
+
+                    {/* Editable Bilingual Option Names (TH + Auto EN) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-sky-200/80">
+                      <div>
+                        <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                          {isEn ? 'Option Name (TH)' : 'ชื่อตัวเลือก (ไทย)'} <span className="text-[#F27D26]">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={variantModalState.variant?.name || ''}
+                          onChange={(e) => {
+                            const nextTh = e.target.value;
+                            setVariantModalState((prev) => ({
+                              ...prev,
+                              variant: {
+                                ...prev.variant,
+                                name: nextTh,
+                                thaiName: nextTh,
+                              },
+                            }));
+                            translationScheduler.schedule('costVariant', () => {
+                              setVariantModalState((prev) => {
+                                const currTh = prev.variant?.name || '';
+                                const autoEn = prev.isEnglishManuallyEdited
+                                  ? prev.variant?.englishName || ''
+                                  : computeAutoEnglishName({
+                                      previousThai: prevVariantThaiRef.current,
+                                      nextThai: currTh,
+                                      currentEnglish: prev.variant?.englishName,
+                                      isManuallyEdited: Boolean(prev.isEnglishManuallyEdited),
+                                    });
+                                prevVariantThaiRef.current = currTh;
+                                return {
+                                  ...prev,
+                                  variant: {
+                                    ...prev.variant,
+                                    englishName: autoEn,
+                                  },
+                                };
+                              });
+                            });
+                          }}
+                          onBlur={() => translationScheduler.flush('costVariant')}
+                          placeholder={isEn ? 'e.g. Stir-Fried Holy Basil with Pork' : 'เช่น กะเพราหมูสับ'}
+                          className="w-full p-2 bg-white border border-amber-300 rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-1.5">
+                            <label className="block text-[11px] font-bold text-stone-700">
+                              {isEn ? 'Option Name (EN)' : 'ชื่อตัวเลือก (English)'}
+                            </label>
+                            {needsEnglishReview(
+                              variantModalState.variant?.name,
+                              variantModalState.variant?.englishName
+                            ) && (
+                              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>{isEn ? 'Needs EN' : 'รอตรวจสอบ EN'}</span>
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              translationScheduler.cancel('costVariant');
+                              prevVariantThaiRef.current = variantModalState.variant?.name || '';
+                              setVariantModalState((prev) => ({
+                                ...prev,
+                                isEnglishManuallyEdited: false,
+                                variant: {
+                                  ...prev.variant,
+                                  englishName: translateThaiToEnglish(prev.variant?.name || ''),
+                                  englishNameManual: false,
+                                },
+                              }));
+                            }}
+                            className="text-[10px] font-bold text-[#F27D26] hover:underline cursor-pointer"
+                          >
+                            {isEn ? 'Re-translate' : 'แปลใหม่'}
+                          </button>
+                        </div>
+                        <input
+                          type="text"
+                          value={variantModalState.variant?.englishName || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            translationScheduler.cancel('costVariant');
+                            const hasManual = Boolean(val.trim());
+                            setVariantModalState((prev) => ({
+                              ...prev,
+                              isEnglishManuallyEdited: hasManual,
+                              variant: {
+                                ...prev.variant,
+                                englishName: val,
+                                englishNameManual: hasManual,
+                              },
+                            }));
+                          }}
+                          placeholder={isEn ? 'Auto-translated culinary English name' : 'ชื่อภาษาอังกฤษที่แปลอัตโนมัติ'}
+                          className="w-full p-2 bg-white border border-amber-300 rounded-xl text-amber-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26]"
+                        />
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
@@ -4226,46 +4747,84 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
               {/* 5. Live Calculation Preview Card */}
               {(() => {
-                const pType = (variantModalState.variant?.proteinType || '').toLowerCase();
-                const isSeafoodChoice =
-                  variantModalState.selectedIngredientId === 'seafood_combo' ||
-                  pType.includes('ทะเล') ||
-                  pType.includes('ซีฟู้ด');
+                const isLegacySeafood = variantModalState.selectedIngredientId === 'seafood_combo';
 
                 let meatCost = 0;
                 let costDetail = '';
 
-                if (isSeafoodChoice) {
+                if (isLegacySeafood) {
                   const shrimpIng = ingredients.find((i) => i.id === 'ing_shrimp_xl' || i.name.includes('กุ้ง'));
                   const squidIng = ingredients.find((i) => i.id === 'ing_squid_fresh' || i.name.includes('หมึก'));
-                  const sCost = (shrimpIng?.costPerBaseUnit || 0) * (Number(variantModalState.seafoodShrimpQty) || 0);
-                  const qCost = (squidIng?.costPerBaseUnit || 0) * (Number(variantModalState.seafoodSquidQty) || 0);
+                  const sCost = (shrimpIng?.costPerBaseUnit || 8.5) * (Number(variantModalState.seafoodShrimpQty) || 0);
+                  const qCost = (squidIng?.costPerBaseUnit || 0.388) * (Number(variantModalState.seafoodSquidQty) || 0);
                   meatCost = sCost + qCost;
-                  costDetail =
-                    shrimpIng || squidIng
-                      ? (isEn
-                          ? `Shrimp ฿${sCost.toFixed(2)} + Squid ฿${qCost.toFixed(2)}`
-                          : `กุ้ง ฿${sCost.toFixed(2)} + หมึก ฿${qCost.toFixed(2)}`)
-                      : (isEn ? 'Missing ingredient price' : 'ยังไม่มีข้อมูลราคาวัตถุดิบ');
+                  costDetail = isEn
+                    ? `Shrimp ฿${sCost.toFixed(2)} + Squid ฿${qCost.toFixed(2)}`
+                    : `กุ้ง ฿${sCost.toFixed(2)} + หมึก ฿${qCost.toFixed(2)}`;
                 } else {
-                  const linked = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
-                  const unitCost = linked?.costPerBaseUnit || 0;
-                  const rawQty = Number(variantModalState.meatQuantity) || 0;
-                  const chosenUnit = variantModalState.meatUnit || linked?.usageUnit || linked?.baseUnit || 'g';
-                  let effectiveQty = rawQty;
-                  if (linked) {
-                    const conv = convertUnit(rawQty, chosenUnit, linked.usageUnit || linked.baseUnit || 'g');
+                  const linked1 = ingredients.find((i) => i.id === variantModalState.selectedIngredientId);
+                  const isSlot1ShrimpFb = variantModalState.selectedIngredientId === SEAFOOD_SHRIMP_FALLBACK_ID;
+                  const unitCost1 = linked1?.costPerBaseUnit ?? (isSlot1ShrimpFb ? 8.5 : 0);
+                  const rawQty1 = Number(variantModalState.meatQuantity) || 0;
+                  const chosenUnit1 =
+                    variantModalState.meatUnit ||
+                    linked1?.usageUnit ||
+                    linked1?.baseUnit ||
+                    (isSlot1ShrimpFb ? 'ตัว' : 'g');
+                  let effectiveQty1 = rawQty1;
+                  if (linked1) {
+                    const conv = convertUnit(rawQty1, chosenUnit1, linked1.usageUnit || linked1.baseUnit || 'g');
                     if (conv.success) {
-                      effectiveQty = conv.convertedQuantity;
+                      effectiveQty1 = conv.convertedQuantity;
                     }
                   }
-                  meatCost = unitCost * effectiveQty;
-                  if (linked && unitCost > 0) {
-                    const baseU = linked.usageUnit || linked.baseUnit || 'g';
+                  const slot1Cost = unitCost1 * effectiveQty1;
+
+                  const linked2 = ingredients.find((i) => i.id === variantModalState.selectedIngredientId2);
+                  const isSlot2SquidFb = variantModalState.selectedIngredientId2 === SEAFOOD_SQUID_FALLBACK_ID;
+                  const hasSlot2 = Boolean(variantModalState.selectedIngredientId2 && (linked2 || isSlot2SquidFb));
+                  let slot2Cost = 0;
+                  if (hasSlot2) {
+                    const unitCost2 = linked2?.costPerBaseUnit ?? (isSlot2SquidFb ? 0.388 : 0);
+                    const rawQty2 = Number(variantModalState.meatQuantity2) || 0;
+                    const chosenUnit2 =
+                      variantModalState.meatUnit2 ||
+                      linked2?.usageUnit ||
+                      linked2?.baseUnit ||
+                      'g';
+                    let effectiveQty2 = rawQty2;
+                    if (linked2) {
+                      const conv = convertUnit(rawQty2, chosenUnit2, linked2.usageUnit || linked2.baseUnit || 'g');
+                      if (conv.success) {
+                        effectiveQty2 = conv.convertedQuantity;
+                      }
+                    }
+                    slot2Cost = unitCost2 * effectiveQty2;
+                  }
+
+                  meatCost = slot1Cost + slot2Cost;
+                  if (hasSlot2) {
+                    const name1 = (
+                      linked1
+                        ? getLocalizedText(lang, linked1.thaiName || linked1.name, linked1.englishName)
+                        : isSlot1ShrimpFb
+                        ? (isEn ? 'Shrimp' : 'กุ้ง')
+                        : (isEn ? 'Ing 1' : 'วัตถุดิบ 1')
+                    ).split(' (')[0];
+                    const name2 = (
+                      linked2
+                        ? getLocalizedText(lang, linked2.thaiName || linked2.name, linked2.englishName)
+                        : isSlot2SquidFb
+                        ? (isEn ? 'Squid' : 'หมึก')
+                        : (isEn ? 'Ing 2' : 'วัตถุดิบ 2')
+                    ).split(' (')[0];
+                    costDetail = `${name1} ฿${slot1Cost.toFixed(2)} + ${name2} ฿${slot2Cost.toFixed(2)}`;
+                  } else if (linked1 && unitCost1 > 0) {
+                    const baseU = linked1.usageUnit || linked1.baseUnit || 'g';
                     costDetail =
                       baseU === 'g'
-                        ? (isEn ? `฿${(unitCost * 1000).toFixed(0)}/kg` : `฿${(unitCost * 1000).toFixed(0)}/กก.`)
-                        : `฿${unitCost.toFixed(2)}/${localizeUnit(baseU, lang)}`;
+                        ? (isEn ? `฿${(unitCost1 * 1000).toFixed(0)}/kg` : `฿${(unitCost1 * 1000).toFixed(0)}/กก.`)
+                        : `฿${unitCost1.toFixed(2)}/${localizeUnit(baseU, lang)}`;
                   } else {
                     costDetail = isEn ? 'No ingredient selected or missing price' : 'ยังไม่ได้เลือกวัตถุดิบหรือยังไม่มีราคา';
                   }

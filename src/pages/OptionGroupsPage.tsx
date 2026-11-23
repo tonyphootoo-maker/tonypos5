@@ -8,7 +8,7 @@ import {
 } from '../types';
 import { translations } from '../i18n/translations';
 import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
-import { subscribeCollection, saveDocument, deleteDocument } from '../data/db';
+import { subscribeCollection, saveDocument, deleteDocument, saveOptionGroupsOrder } from '../data/db';
 import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
 import {
   useDebouncedTranslationScheduler,
@@ -23,9 +23,10 @@ import {
   Edit2,
   ArrowUp,
   ArrowDown,
+  ChevronLeft,
+  ChevronRight,
+  GripVertical,
   X,
-  CheckCircle2,
-  DollarSign,
   AlertTriangle,
 } from 'lucide-react';
 
@@ -43,6 +44,8 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
   const [editingGroup, setEditingGroup] = useState<Partial<OptionGroupDoc> | null>(null);
   const [pendingDeleteGroup, setPendingDeleteGroup] = useState<OptionGroupDoc | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const manualEnKeysRef = useRef<Set<string>>(new Set());
   const prevGroupThaiRef = useRef<string>('');
   const prevChoiceThaiRef = useRef<Map<string, string>>(new Map());
@@ -54,7 +57,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
 
   useEffect(() => {
     const unsubGroups = subscribeCollection<OptionGroupDoc>('optionGroups', (ogs) => {
-      setOptionGroups([...ogs].sort((a, b) => (a.order || 0) - (b.order || 0)));
+      setOptionGroups([...ogs].sort((a, b) => (a.order || 0) - (b.order || 0) || a.id.localeCompare(b.id)));
     });
     const unsubIngs = subscribeCollection<IngredientDoc>('ingredients', (ings) => {
       setIngredients(ings);
@@ -104,6 +107,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
           ...(cTh ? { nameTh: cTh } : {}),
           nameEnManual: isChoiceManual,
           price: Number(c.price) || 0,
+          quantity: Math.max(1, Math.round(Number(c.quantity) || 1)),
           ...(c.ingredients ? { ingredients: c.ingredients } : {}),
         } as OptionChoice;
       })
@@ -143,13 +147,107 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
     setEditingGroup({ ...editingGroup, choices });
   };
 
+  // Persist reordered option groups freely
+  const applyGroupsReorder = async (nextGroups: OptionGroupDoc[]) => {
+    const withOrder = nextGroups.map((grp, idx) => ({
+      ...grp,
+      order: idx + 1,
+    }));
+    setOptionGroups(withOrder);
+    try {
+      await saveOptionGroupsOrder(
+        withOrder.map((g) => ({ id: g.id, order: g.order, version: g.version }))
+      );
+    } catch (err) {
+      console.error('Failed to reorder option groups:', err);
+    }
+  };
+
+  const handleMoveGroup = async (groupId: string, direction: 'prev' | 'next') => {
+    const fromIdx = optionGroups.findIndex((g) => g.id === groupId);
+    if (fromIdx === -1) return;
+    const targetIdx = direction === 'prev' ? fromIdx - 1 : fromIdx + 1;
+    if (targetIdx < 0 || targetIdx >= optionGroups.length) return;
+    const reordered = [...optionGroups];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(targetIdx, 0, moved);
+    await applyGroupsReorder(reordered);
+  };
+
+  const handleGroupDragStart = (e: React.DragEvent, groupId: string) => {
+    setDraggedGroupId(groupId);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', groupId);
+    } catch {}
+  };
+
+  const handleGroupDragOver = (e: React.DragEvent, groupId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverGroupId !== groupId) {
+      setDragOverGroupId(groupId);
+    }
+  };
+
+  const handleGroupDrop = async (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const sourceId = draggedGroupId || e.dataTransfer.getData('text/plain');
+    setDraggedGroupId(null);
+    setDragOverGroupId(null);
+    if (!sourceId || sourceId === targetId) return;
+    const fromIdx = optionGroups.findIndex((g) => g.id === sourceId);
+    const toIdx = optionGroups.findIndex((g) => g.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const reordered = [...optionGroups];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    await applyGroupsReorder(reordered);
+  };
+
+  const handleGroupDragEnd = () => {
+    setDraggedGroupId(null);
+    setDragOverGroupId(null);
+  };
+
+  const openEditGroupModal = (group: OptionGroupDoc) => {
+    translationScheduler.cancelAll();
+    manualEnKeysRef.current.clear();
+    if (group.nameEnManual) {
+      manualEnKeysRef.current.add('group');
+    }
+    prevGroupThaiRef.current = group.nameTh || '';
+    prevChoiceThaiRef.current.clear();
+    (group.choices || []).forEach((c) => {
+      prevChoiceThaiRef.current.set(c.id, c.nameTh || '');
+      if (c.nameEnManual) {
+        manualEnKeysRef.current.add(`choice_${c.id}`);
+      }
+    });
+    setEditingGroup({
+      ...group,
+      choices: (group.choices || []).map((c) => ({
+        ...c,
+        quantity: Math.max(1, Math.round(Number(c.quantity) || 1)),
+      })),
+    });
+    setIsEditorOpen(true);
+  };
+
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-4 select-none">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
-          <Sliders className="w-6 h-6 text-amber-600" />
-          <span>{t.nav.optionGroups}</span>
-        </h2>
+        <div>
+          <h2 className="text-xl sm:text-2xl font-black text-neutral-900 tracking-tight flex items-center gap-2">
+            <Sliders className="w-6 h-6 text-amber-600" />
+            <span>{t.nav.optionGroups}</span>
+          </h2>
+          <p className="text-[11px] text-neutral-500 mt-0.5">
+            {lang === 'th'
+              ? 'ลากวางการ์ดหรือกดปุ่มลูกศร เพื่อจัดลำดับตำแหน่งกลุ่มตัวเลือกได้อย่างอิสระ'
+              : 'Drag & drop cards or use arrows to freely reorder option groups'}
+          </p>
+        </div>
 
         <button
           onClick={() => {
@@ -161,108 +259,172 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               name: '',
               nameTh: '',
               minSelect: 0,
-              maxSelect: 0,
+              maxSelect: 1,
               choices: [
-                { id: `c_${Date.now()}_1`, nameTh: '', name: '', price: 0 },
-                { id: `c_${Date.now()}_2`, nameTh: '', name: '', price: 0 },
+                { id: `c_${Date.now()}_1`, nameTh: '', name: '', price: 0, quantity: 1 },
+                { id: `c_${Date.now()}_2`, nameTh: '', name: '', price: 0, quantity: 1 },
               ],
             });
             setIsEditorOpen(true);
           }}
-          className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105"
+          className="px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-bold shadow-md shadow-orange-500/20 flex items-center gap-1.5 cursor-pointer hover:brightness-105 shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span>{t.menuCost.addOptionGroup}</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {optionGroups.map((group) => (
-          <div
-            key={group.id}
-            className="p-4 bg-white rounded-2xl border border-neutral-200 shadow-xs flex flex-col justify-between"
-          >
-            <div>
-              <div className="flex items-start justify-between">
-                <div>
-                  <h4 className="font-black text-base text-neutral-900">
-                    {lang === 'th' && group.nameTh ? group.nameTh : group.name}
-                  </h4>
-                  <span className="text-[10px] font-bold text-neutral-400">
-                    Min {group.minSelect} • Max {group.maxSelect}
+      {/* 2-Column Left-Right Summary Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {optionGroups.map((group, idx) => {
+          const choicesList = group.choices || [];
+          const prices = choicesList.map((c) => Number(c.price) || 0);
+          const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+          const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+          const missingCostCount = choicesList.filter((c) =>
+            calculateOptionChoiceCost(c, ingredientsMap).hasMissing
+          ).length;
+          const previewNames = choicesList
+            .slice(0, 3)
+            .map((c) => {
+              const label = lang === 'th' && c.nameTh ? c.nameTh : c.name;
+              const qty = Math.max(1, Math.round(Number(c.quantity) || 1));
+              return qty > 1 ? `${label} ×${qty}` : label;
+            })
+            .filter(Boolean);
+          const isDragged = draggedGroupId === group.id;
+          const isDragOver = dragOverGroupId === group.id;
+
+          return (
+            <div
+              key={group.id}
+              draggable
+              onDragStart={(e) => handleGroupDragStart(e, group.id)}
+              onDragOver={(e) => handleGroupDragOver(e, group.id)}
+              onDrop={(e) => handleGroupDrop(e, group.id)}
+              onDragEnd={handleGroupDragEnd}
+              className={`p-4 bg-white rounded-2xl border shadow-xs flex flex-col justify-between transition-all ${
+                isDragged
+                  ? 'opacity-40 scale-[0.98] border-orange-400 ring-2 ring-orange-300'
+                  : isDragOver
+                  ? 'border-orange-500 ring-2 ring-orange-400 bg-orange-50/30'
+                  : 'border-neutral-200 hover:border-orange-300'
+              }`}
+            >
+              <div className="space-y-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <div
+                      className="mt-0.5 p-1 text-neutral-400 hover:text-neutral-700 cursor-grab active:cursor-grabbing rounded-lg hover:bg-neutral-100 shrink-0"
+                      title={lang === 'th' ? 'ลากเพื่อย้ายตำแหน่ง' : 'Drag to reorder'}
+                    >
+                      <GripVertical className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="font-black text-base text-neutral-900 truncate">
+                        {lang === 'th' && group.nameTh ? group.nameTh : group.name}
+                      </h4>
+                      {lang === 'th' && group.nameTh && group.name && group.name !== group.nameTh && (
+                        <p className="text-[11px] text-neutral-400 font-medium truncate">
+                          {group.name}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card Order + Actions */}
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() => handleMoveGroup(group.id, 'prev')}
+                      className="p-1 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg disabled:opacity-20 cursor-pointer"
+                      title={lang === 'th' ? 'ย้ายขึ้น/ซ้าย' : 'Move earlier'}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === optionGroups.length - 1}
+                      onClick={() => handleMoveGroup(group.id, 'next')}
+                      className="p-1 text-neutral-400 hover:text-neutral-800 hover:bg-neutral-100 rounded-lg disabled:opacity-20 cursor-pointer"
+                      title={lang === 'th' ? 'ย้ายลง/ขวา' : 'Move later'}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEditGroupModal(group)}
+                      className="p-1.5 text-neutral-600 hover:text-orange-600 rounded-lg hover:bg-neutral-100 cursor-pointer"
+                      title={lang === 'th' ? 'แก้ไขกลุ่มตัวเลือก' : 'Edit group'}
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPendingDeleteGroup(group)}
+                      className="p-1.5 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
+                      title={t.common.delete}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Condensed Summary Metrics & Preview */}
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="px-2 py-0.5 rounded-lg bg-neutral-100 text-neutral-700 font-bold border border-neutral-200">
+                    {lang === 'th'
+                      ? `เลือก ${group.minSelect ?? 0}–${group.maxSelect ?? 1}`
+                      : `Min ${group.minSelect ?? 0} • Max ${group.maxSelect ?? 1}`}
                   </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 font-bold border border-amber-200">
+                    {choicesList.length} {lang === 'th' ? 'ตัวเลือก' : 'choices'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-lg bg-orange-50 text-orange-700 font-bold border border-orange-200">
+                    {maxPrice <= 0
+                      ? lang === 'th'
+                        ? 'ฟรีทุกตัวเลือก'
+                        : 'All Free'
+                      : minPrice === maxPrice
+                      ? `+฿${formatMoney(maxPrice)}`
+                      : minPrice <= 0
+                      ? `ฟรี – +฿${formatMoney(maxPrice)}`
+                      : `+฿${formatMoney(minPrice)} – +฿${formatMoney(maxPrice)}`}
+                  </span>
+                  {missingCostCount > 0 && (
+                    <span className="px-2 py-0.5 rounded-lg bg-rose-100 text-rose-700 font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3 h-3" />
+                      <span>
+                        {missingCostCount} {t.menuCost.missingCost}
+                      </span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="px-2.5 py-1.5 bg-neutral-50 rounded-xl border border-neutral-100 text-xs text-neutral-600 font-medium truncate">
+                  {previewNames.length > 0 ? (
+                    <>
+                      <span>{previewNames.join(', ')}</span>
+                      {choicesList.length > 3 && (
+                        <span className="text-neutral-400 font-semibold">
+                          {' '}
+                          {lang === 'th'
+                            ? `และอีก ${choicesList.length - 3} รายการ...`
+                            : `+${choicesList.length - 3} more...`}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-neutral-400">
+                      {lang === 'th' ? 'ยังไม่มีรายการตัวเลือก' : 'No choices yet'}
+                    </span>
+                  )}
                 </div>
               </div>
-
-              {/* Choices list */}
-              <div className="mt-3 space-y-1.5">
-                {group.choices.map((c) => {
-                  const choiceCostCalc = calculateOptionChoiceCost(c, ingredientsMap);
-                  return (
-                    <div
-                      key={c.id}
-                      className="flex justify-between items-center p-2 bg-neutral-50 rounded-xl text-xs border border-neutral-100 font-semibold"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span>{lang === 'th' && c.nameTh ? c.nameTh : c.name}</span>
-                        {choiceCostCalc.hasMissing && (
-                          <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                            <AlertTriangle className="w-2.5 h-2.5" />
-                            <span>{t.menuCost.missingCost}</span>
-                          </span>
-                        )}
-                        {choiceCostCalc.cost > 0 && (
-                          <span className="text-[10px] text-neutral-500 font-normal">
-                            (Cost ฿{formatMoney(choiceCostCalc.cost)})
-                          </span>
-                        )}
-                      </div>
-                      <span className="font-bold text-orange-600">
-                        {c.price > 0 ? `+฿${formatMoney(c.price)}` : 'Free'}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
             </div>
-
-            <div className="flex justify-end gap-1.5 mt-4 pt-2 border-t border-neutral-100">
-              <button
-                onClick={() => {
-                  translationScheduler.cancelAll();
-                  manualEnKeysRef.current.clear();
-                  if (group.nameEnManual) {
-                    manualEnKeysRef.current.add('group');
-                  }
-                  prevGroupThaiRef.current = group.nameTh || '';
-                  prevChoiceThaiRef.current.clear();
-                  (group.choices || []).forEach((c) => {
-                    prevChoiceThaiRef.current.set(c.id, c.nameTh || '');
-                    if (c.nameEnManual) {
-                      manualEnKeysRef.current.add(`choice_${c.id}`);
-                    }
-                  });
-                  setEditingGroup({
-                    ...group,
-                    choices: (group.choices || []).map((c) => ({ ...c })),
-                  });
-                  setIsEditorOpen(true);
-                }}
-                className="p-1.5 text-neutral-600 hover:text-orange-600 rounded-lg hover:bg-neutral-100 cursor-pointer"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setPendingDeleteGroup(group)}
-                className="p-1.5 text-neutral-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
-                title={t.common.delete}
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Group Editor Modal */}
@@ -289,7 +451,8 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               </button>
             </div>
 
-            <div className="modal-body space-y-4">
+            {/* Locked Non-Scrolling Group Header Fields: Name (TH/EN) + Min/Max */}
+            <div className="shrink-0 px-5 sm:px-6 py-3.5 border-b border-neutral-200 bg-white space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs font-bold text-neutral-700 mb-1">
@@ -403,29 +566,17 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                   />
                 </div>
               </div>
+            </div>
 
-              {/* Choices with Reorder Buttons (▲ ▼) & Thai-first + Auto-EN */}
+            {/* Scrollable Choices Section */}
+            <div className="modal-body space-y-3">
+              {/* Choices with Reorder Buttons (▲ ▼), Thai-first + Auto-EN, Price & Default Quantity */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-xs font-bold text-neutral-800">{t.menuCost.optionsList}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newChoice: OptionChoice = {
-                        id: `c_${Date.now()}`,
-                        nameTh: '',
-                        name: '',
-                        price: 0,
-                      };
-                      setEditingGroup({
-                        ...editingGroup,
-                        choices: [...(editingGroup.choices || []), newChoice],
-                      });
-                    }}
-                    className="text-xs text-orange-600 hover:text-orange-700 font-bold cursor-pointer"
-                  >
-                    {t.menuCost.addChoice}
-                  </button>
+                  <span className="text-[11px] font-semibold text-neutral-400">
+                    {(editingGroup.choices || []).length} {lang === 'th' ? 'รายการ' : 'items'}
+                  </span>
                 </div>
 
                 <div className="space-y-2">
@@ -454,7 +605,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                         </button>
                       </div>
 
-                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                         <input
                           type="text"
                           required={!choice.name}
@@ -530,7 +681,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center gap-1 shrink-0" title={t.menuCost.choicePrice}>
                         <span className="text-[11px] font-bold text-neutral-500">+฿</span>
                         <NumericInput
                           min={0}
@@ -541,7 +692,32 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                             updated[idx] = { ...updated[idx], price: val };
                             setEditingGroup({ ...editingGroup, choices: updated });
                           }}
-                          className="w-16 px-1.5 py-1 text-right bg-white border border-neutral-300 rounded-lg text-xs font-bold"
+                          className="w-14 px-1.5 py-1 text-right bg-white border border-neutral-300 rounded-lg text-xs font-bold"
+                        />
+                      </div>
+
+                      {/* Default Quantity Input */}
+                      <div
+                        className="flex items-center gap-1 shrink-0"
+                        title={lang === 'th' ? 'จำนวนเริ่มต้นต่อการเลือก' : 'Default quantity'}
+                      >
+                        <span className="text-[10px] font-bold text-neutral-500">
+                          {lang === 'th' ? 'จำนวน' : 'Qty'}
+                        </span>
+                        <NumericInput
+                          min={1}
+                          step={1}
+                          value={choice.quantity ?? 1}
+                          fallbackValue={1}
+                          onValueChange={(val) => {
+                            const updated = [...(editingGroup.choices || [])];
+                            updated[idx] = {
+                              ...updated[idx],
+                              quantity: Math.max(1, Math.round(val)),
+                            };
+                            setEditingGroup({ ...editingGroup, choices: updated });
+                          }}
+                          className="w-12 px-1.5 py-1 text-center bg-white border border-neutral-300 rounded-lg text-xs font-bold"
                         />
                       </div>
 
@@ -562,20 +738,43 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               </div>
             </div>
 
-            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => setIsEditorOpen(false)}
-                className="px-3 py-1.5 bg-white text-neutral-700 border border-neutral-300 rounded-xl text-xs font-bold cursor-pointer"
+                onClick={() => {
+                  const newChoice: OptionChoice = {
+                    id: `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                    nameTh: '',
+                    name: '',
+                    price: 0,
+                    quantity: 1,
+                  };
+                  setEditingGroup({
+                    ...editingGroup,
+                    choices: [...(editingGroup.choices || []), newChoice],
+                  });
+                }}
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-orange-700 border border-orange-300 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1"
               >
-                {t.common.cancel}
+                <Plus className="w-3.5 h-3.5" />
+                <span>{t.menuCost.addChoice.replace(/^\+\s*/, '')}</span>
               </button>
-              <button
-                type="submit"
-                className="px-5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
-              >
-                {t.common.save}
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditorOpen(false)}
+                  className="px-3 py-1.5 bg-white text-neutral-700 border border-neutral-300 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  {t.common.cancel}
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-1.5 bg-gradient-to-r from-orange-500 to-red-500 text-white rounded-xl text-xs font-black shadow-md cursor-pointer"
+                >
+                  {t.common.save}
+                </button>
+              </div>
             </div>
           </form>
         </div>
