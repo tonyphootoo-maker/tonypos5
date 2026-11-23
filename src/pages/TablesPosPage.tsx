@@ -2924,13 +2924,15 @@ export const TablesPosPage: React.FC<Props> = ({
             onClose={() => setIsPaymentModalOpen(false)}
             onPaymentSuccess={(paidBill) => {
               setIsPaymentModalOpen(false);
+              setIsReceiptModalOpen(false);
+              setReceiptBillToView(null);
               setOpenBills((prev) => prev.filter((b) => b.id !== paidBill.id));
-              setReceiptBillToView(paidBill);
-              setIsCheckReceipt(false);
-              setIsReceiptModalOpen(true);
               setActiveBill(null);
               setCartItems([]);
               setOrderDiscount(0);
+              setTargetTableIdForSave(null);
+              setSelectedCategoryId(null);
+              setTopViewMode('bills');
             }}
           />
         );

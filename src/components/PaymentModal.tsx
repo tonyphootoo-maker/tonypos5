@@ -540,15 +540,6 @@ export const PaymentModal: React.FC<Props> = ({
 
           <div className="flex items-center gap-1 shrink-0">
             <LanguageToggle lang={lang} className="mr-0.5" />
-            <button
-              type="button"
-              onClick={() => setShowCheckReceipt(true)}
-              title={t.pos.printCheckReceipt}
-              aria-label={t.pos.printCheckReceipt}
-              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-neutral-400 hover:text-neutral-800 hover:bg-neutral-200/70 transition-colors cursor-pointer"
-            >
-              <Printer className="w-5 h-5" />
-            </button>
 
             <button
               type="button"
@@ -571,26 +562,42 @@ export const PaymentModal: React.FC<Props> = ({
 
         {/* Main 2-Column Body */}
         <div className="relative flex-1 min-h-0 flex flex-col md:flex-row bg-[#f3f4f6] overflow-hidden">
-          {/* Left Sidebar: Payment Method List */}
-          <div className="md:w-48 lg:w-52 shrink-0 p-2 md:py-3 md:pl-3 md:pr-1.5 grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-col gap-1.5 border-b md:border-b-0 border-neutral-200 overflow-y-auto overscroll-contain">
-            {PAYMENT_TABS.map((tab) => {
-              const isActive = activeTabId === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => handleSelectTab(tab)}
-                  className={`min-h-[44px] px-2.5 md:px-4 py-2.5 md:py-3.5 rounded-md flex items-center justify-center md:justify-start gap-2 md:gap-3 text-xs sm:text-sm transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-orange-100 text-orange-900 font-bold shadow-xs border border-orange-300'
-                      : 'bg-transparent text-neutral-500 hover:text-orange-800 hover:bg-orange-50/70 font-medium border border-transparent'
-                  }`}
-                >
-                  <TabIcon tabId={tab.id} active={isActive} />
-                  <span className="truncate">{lang === 'th' ? tab.labelTh : tab.labelEn}</span>
-                </button>
-              );
-            })}
+          {/* Left Sidebar: Payment Method List + Bottom-Left Large Print Button (Desktop/Tablet) */}
+          <div className="md:w-48 lg:w-52 shrink-0 flex flex-col border-b md:border-b-0 border-neutral-200 overflow-hidden">
+            <div className="flex-1 min-h-0 p-2 md:py-3 md:pl-3 md:pr-1.5 grid grid-cols-2 sm:grid-cols-4 md:flex md:flex-col gap-1.5 overflow-y-auto overscroll-contain">
+              {PAYMENT_TABS.map((tab) => {
+                const isActive = activeTabId === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => handleSelectTab(tab)}
+                    className={`min-h-[44px] px-2.5 md:px-4 py-2.5 md:py-3.5 rounded-md flex items-center justify-center md:justify-start gap-2 md:gap-3 text-xs sm:text-sm transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-orange-100 text-orange-900 font-bold shadow-xs border border-orange-300'
+                        : 'bg-transparent text-neutral-500 hover:text-orange-800 hover:bg-orange-50/70 font-medium border border-transparent'
+                    }`}
+                  >
+                    <TabIcon tabId={tab.id} active={isActive} />
+                    <span className="truncate">{lang === 'th' ? tab.labelTh : tab.labelEn}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Bottom-Left Large Print Button (Desktop/Tablet) */}
+            <div className="hidden md:block shrink-0 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#f3f4f6] border-t border-neutral-200/80">
+              <button
+                type="button"
+                onClick={() => setShowCheckReceipt(true)}
+                title={t.pos.printCheckReceipt}
+                aria-label={t.pos.printCheckReceipt}
+                className="w-full min-h-[48px] py-3 sm:py-3.5 px-4 bg-white hover:bg-orange-50 active:scale-[0.99] text-neutral-800 border-2 border-neutral-300 hover:border-orange-400 rounded-sm font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+              >
+                <Printer className="w-5 h-5 text-orange-600 shrink-0" />
+                <span>{t.common.print}</span>
+              </button>
+            </div>
           </div>
 
           {/* Right Main Workspace */}
@@ -846,13 +853,23 @@ export const PaymentModal: React.FC<Props> = ({
 
             </div>
 
-            {/* Pinned Full-Width Green Confirm CTA */}
-            <div className="shrink-0 px-3 sm:px-4 md:pl-2.5 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#f3f4f6] border-t border-neutral-200/80">
+            {/* Pinned Bottom CTA Row (Mobile: Large Print Bottom-Left + Confirm; Desktop: Confirm Full Width) */}
+            <div className="shrink-0 px-3 sm:px-4 md:pl-2.5 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#f3f4f6] border-t border-neutral-200/80 flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowCheckReceipt(true)}
+                title={t.pos.printCheckReceipt}
+                aria-label={t.pos.printCheckReceipt}
+                className="md:hidden shrink-0 min-h-[48px] py-3 px-4 bg-white hover:bg-orange-50 active:scale-[0.99] text-neutral-800 border-2 border-neutral-300 hover:border-orange-400 rounded-sm font-bold text-sm flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+              >
+                <Printer className="w-5 h-5 text-orange-600 shrink-0" />
+                <span>{t.common.print}</span>
+              </button>
               <button
                 type="button"
                 disabled={!canConfirm}
                 onClick={handleProcessPayment}
-                className="w-full min-h-[48px] py-3 sm:py-3.5 px-6 bg-[#31b237] hover:bg-[#2aa02f] active:scale-[0.99] text-white rounded-sm font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 min-h-[48px] py-3 sm:py-3.5 px-6 bg-[#31b237] hover:bg-[#2aa02f] active:scale-[0.99] text-white rounded-sm font-bold text-sm sm:text-base flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isSubmitting ? (
                   <span>{t.common.loading}</span>
