@@ -46,10 +46,11 @@ import {
   subscribeGuestOrdersByIds,
   subscribePublicStore,
 } from '../data/onlineDb';
-import { formatMoney } from '../engine/calculations';
+import { formatMoney, getOptionChoiceEffectiveQuantity } from '../engine/calculations';
 import { toDateSafe } from '../engine/onlineOrdering';
 import { getLocalizedText } from '../utils/thaiToEnglish';
 import { useLanguage } from '../contexts/LanguageContext';
+import { LanguageToggle } from '../components/LanguageToggle';
 
 interface CartEntry {
   key: string;
@@ -377,12 +378,14 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       for (const cId of chosenIds) {
         const choice = grp.choices.find((c) => c.id === cId);
         if (choice) {
+          const effQty = getOptionChoiceEffectiveQuantity(choice);
+          const baseChoiceName = getLocalizedText(lang, choice.nameTh || choice.name, choice.name);
           optionsExtra += choice.price;
           flatOptions.push({
             groupId: grp.id,
             groupName: getLocalizedText(lang, grp.nameTh || grp.name, grp.name),
             choiceId: choice.id,
-            choiceName: getLocalizedText(lang, choice.nameTh || choice.name, choice.name),
+            choiceName: effQty > 1 ? `${baseChoiceName} ×${effQty}` : baseChoiceName,
             price: choice.price,
           });
         }
@@ -551,7 +554,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#FAF8F5] flex flex-col items-center justify-center p-6 text-slate-800">
+      <div className="min-h-screen bg-[#FAF8F5] flex flex-col items-center justify-center p-6 text-slate-800 relative">
+        <div className="absolute top-4 right-4">
+          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
+        </div>
         <Loader2 className="w-8 h-8 animate-spin text-orange-600 mb-3" />
         <p className="text-sm font-bold">{lang === 'th' ? 'กำลังโหลดเมนูอาหาร...' : 'Loading storefront menu...'}</p>
       </div>
@@ -560,7 +566,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
 
   if (authError) {
     return (
-      <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-6">
+      <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-6 relative">
+        <div className="absolute top-4 right-4">
+          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
+        </div>
         <div className="max-w-md w-full bg-white rounded-3xl border border-rose-200 p-6 text-center space-y-3 shadow-sm">
           <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
           <h2 className="text-lg font-extrabold text-slate-900">
@@ -574,7 +583,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
 
   if (!store || !storeId) {
     return (
-      <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-6">
+      <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-6 relative">
+        <div className="absolute top-4 right-4">
+          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
+        </div>
         <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200 p-7 text-center space-y-3 shadow-sm">
           <Store className="w-12 h-12 text-orange-500 mx-auto" />
           <h1 className="text-lg font-extrabold text-slate-900">
@@ -654,13 +666,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 </span>
               )}
             </button>
-            <button
-              type="button"
-              onClick={handleSwitchLang}
-              className="min-h-[40px] px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 cursor-pointer"
-            >
-              {lang === 'th' ? 'TH' : 'EN'}
-            </button>
+            <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
           </div>
         </div>
 
@@ -896,6 +902,9 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                               </span>
                               <span className="text-xs">
                                 {getLocalizedText(lang, ch.nameTh || ch.name, ch.name)}
+                                {getOptionChoiceEffectiveQuantity(ch) > 1
+                                  ? ` ×${getOptionChoiceEffectiveQuantity(ch)}`
+                                  : ''}
                               </span>
                             </div>
                             <span className="text-xs font-bold text-slate-600 tabular-nums">

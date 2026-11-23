@@ -7,7 +7,12 @@ import {
   Language,
 } from '../types';
 import { translations } from '../i18n/translations';
-import { formatMoney, calculateOptionChoiceCost } from '../engine/calculations';
+import {
+  formatMoney,
+  calculateOptionChoiceCost,
+  isOptionChoiceQuantityEnabled,
+  getOptionChoiceEffectiveQuantity,
+} from '../engine/calculations';
 import { subscribeCollection, saveDocument, deleteDocument, saveOptionGroupsOrder } from '../data/db';
 import { translateThaiToEnglish, computeAutoEnglishName } from '../utils/thaiToEnglish';
 import {
@@ -101,13 +106,15 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               isManuallyEdited: false,
             }).trim() || (cTh ? translateThaiToEnglish(cTh) : '');
         if (!cTh && !cEn) return null;
+        const usesQuantity = Boolean(c.hasQuantity);
         return {
           id: c.id,
           name: cEn || cTh,
           ...(cTh ? { nameTh: cTh } : {}),
           nameEnManual: isChoiceManual,
           price: Number(c.price) || 0,
-          quantity: Math.max(1, Math.round(Number(c.quantity) || 1)),
+          hasQuantity: usesQuantity,
+          quantity: usesQuantity ? Math.max(1, Math.round(Number(c.quantity) || 1)) : 1,
           ...(c.ingredients ? { ingredients: c.ingredients } : {}),
         } as OptionChoice;
       })
@@ -226,10 +233,14 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
     });
     setEditingGroup({
       ...group,
-      choices: (group.choices || []).map((c) => ({
-        ...c,
-        quantity: Math.max(1, Math.round(Number(c.quantity) || 1)),
-      })),
+      choices: (group.choices || []).map((c) => {
+        const usesQty = isOptionChoiceQuantityEnabled(c);
+        return {
+          ...c,
+          hasQuantity: usesQty,
+          quantity: usesQty ? Math.max(1, Math.round(Number(c.quantity) || 1)) : 1,
+        };
+      }),
     });
     setIsEditorOpen(true);
   };
@@ -261,8 +272,8 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
               minSelect: 0,
               maxSelect: 1,
               choices: [
-                { id: `c_${Date.now()}_1`, nameTh: '', name: '', price: 0, quantity: 1 },
-                { id: `c_${Date.now()}_2`, nameTh: '', name: '', price: 0, quantity: 1 },
+                { id: `c_${Date.now()}_1`, nameTh: '', name: '', price: 0, hasQuantity: false, quantity: 1 },
+                { id: `c_${Date.now()}_2`, nameTh: '', name: '', price: 0, hasQuantity: false, quantity: 1 },
               ],
             });
             setIsEditorOpen(true);
@@ -288,7 +299,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
             .slice(0, 3)
             .map((c) => {
               const label = lang === 'th' && c.nameTh ? c.nameTh : c.name;
-              const qty = Math.max(1, Math.round(Number(c.quantity) || 1));
+              const qty = getOptionChoiceEffectiveQuantity(c);
               return qty > 1 ? `${label} ×${qty}` : label;
             })
             .filter(Boolean);
@@ -696,29 +707,67 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                         />
                       </div>
 
-                      {/* Default Quantity Input */}
-                      <div
-                        className="flex items-center gap-1 shrink-0"
-                        title={lang === 'th' ? 'จำนวนเริ่มต้นต่อการเลือก' : 'Default quantity'}
-                      >
-                        <span className="text-[10px] font-bold text-neutral-500">
-                          {lang === 'th' ? 'จำนวน' : 'Qty'}
-                        </span>
-                        <NumericInput
-                          min={1}
-                          step={1}
-                          value={choice.quantity ?? 1}
-                          fallbackValue={1}
-                          onValueChange={(val) => {
+                      {/* Optional Quantity Toggle + Input */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
                             const updated = [...(editingGroup.choices || [])];
+                            const curr = updated[idx];
+                            const nextHasQty = !Boolean(curr?.hasQuantity);
                             updated[idx] = {
-                              ...updated[idx],
-                              quantity: Math.max(1, Math.round(val)),
+                              ...curr,
+                              hasQuantity: nextHasQty,
+                              quantity: nextHasQty
+                                ? Math.max(1, Math.round(Number(curr?.quantity) || 1))
+                                : 1,
                             };
                             setEditingGroup({ ...editingGroup, choices: updated });
                           }}
-                          className="w-12 px-1.5 py-1 text-center bg-white border border-neutral-300 rounded-lg text-xs font-bold"
-                        />
+                          className={`px-2 py-1 rounded-lg border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                            choice.hasQuantity
+                              ? 'bg-orange-50 text-orange-800 border-orange-300'
+                              : 'bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-100'
+                          }`}
+                          title={
+                            choice.hasQuantity
+                              ? lang === 'th'
+                                ? 'เปิดใส่จำนวน (คลิกเพื่อปิด)'
+                                : 'Quantity enabled (click to disable)'
+                              : lang === 'th'
+                              ? 'ไม่ต้องใส่จำนวน (คลิกเพื่อเปิดช่องใส่จำนวน)'
+                              : 'No quantity (click to enable quantity input)'
+                          }
+                        >
+                          <span
+                            className={`w-3 h-3 rounded-[4px] border flex items-center justify-center text-[9px] leading-none ${
+                              choice.hasQuantity
+                                ? 'bg-orange-600 border-orange-600 text-white'
+                                : 'border-neutral-400 bg-white text-transparent'
+                            }`}
+                          >
+                            ✓
+                          </span>
+                          <span>{lang === 'th' ? 'จำนวน' : 'Qty'}</span>
+                        </button>
+
+                        {choice.hasQuantity && (
+                          <NumericInput
+                            min={1}
+                            step={1}
+                            value={choice.quantity ?? 1}
+                            fallbackValue={1}
+                            onValueChange={(val) => {
+                              const updated = [...(editingGroup.choices || [])];
+                              updated[idx] = {
+                                ...updated[idx],
+                                quantity: Math.max(1, Math.round(val)),
+                              };
+                              setEditingGroup({ ...editingGroup, choices: updated });
+                            }}
+                            className="w-12 px-1.5 py-1 text-center bg-white border border-orange-300 rounded-lg text-xs font-bold"
+                          />
+                        )}
                       </div>
 
                       <button
@@ -747,6 +796,7 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                     nameTh: '',
                     name: '',
                     price: 0,
+                    hasQuantity: false,
                     quantity: 1,
                   };
                   setEditingGroup({

@@ -19,6 +19,7 @@ import { publishMenuToPublicStore } from './data/onlineDb';
 import { resolveAppMode } from './engine/onlineOrdering';
 import { Navigation, AppPage } from './components/Navigation';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { LanguageToggle } from './components/LanguageToggle';
 import { ShiftModal } from './components/ShiftModal';
 import { TablesPosPage } from './pages/TablesPosPage';
 import { FloorPlanPage } from './pages/FloorPlanPage';
@@ -37,7 +38,6 @@ import { resolveCostVariantDisplayNames } from './costing/services/spreadsheetCo
 import {
   UtensilsCrossed,
   Lock,
-  Globe,
   Loader2,
   AlertCircle,
 } from 'lucide-react';
@@ -160,7 +160,14 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
         g.minSelect,
         g.maxSelect,
         g.order ?? 0,
-        (g.choices || []).map((ch) => [ch.id, ch.name, ch.nameTh || '', ch.price]),
+        (g.choices || []).map((ch) => [
+          ch.id,
+          ch.name,
+          ch.nameTh || '',
+          ch.price,
+          Boolean(ch.hasQuantity),
+          ch.quantity ?? 1,
+        ]),
       ]),
     });
 
@@ -350,7 +357,10 @@ export default function App() {
     return (
       <Suspense
         fallback={
-          <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-4 text-slate-700 text-xs font-bold">
+          <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-4 text-slate-700 text-xs font-bold relative">
+            <div className="absolute top-4 right-4">
+              <LanguageToggle lang={lang} onToggleLang={handleToggleLanguage} />
+            </div>
             <Loader2 className="w-5 h-5 animate-spin text-orange-600 mr-2" />
             <span>{lang === 'th' ? 'กำลังโหลดเมนูออนไลน์...' : 'Loading Online Menu...'}</span>
           </div>
@@ -384,7 +394,10 @@ export default function App() {
         )}
         <Suspense
           fallback={
-            <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-200 text-xs font-bold">
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-200 text-xs font-bold relative">
+              <div className="absolute top-4 right-4">
+                <LanguageToggle variant="dark" lang={lang} onToggleLang={handleToggleLanguage} />
+              </div>
               <Loader2 className="w-5 h-5 animate-spin text-emerald-400 mr-2" />
               <span>{lang === 'th' ? 'กำลังโหลดแอป Rider...' : 'Loading Rider App...'}</span>
             </div>
@@ -399,7 +412,10 @@ export default function App() {
   // 1. Initial Loading Screen
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_#ffffff_0%,_#eef2f7_65%,_#e2e8f0_100%)] flex flex-col items-center justify-center p-4 text-slate-900 select-none">
+      <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_#ffffff_0%,_#eef2f7_65%,_#e2e8f0_100%)] flex flex-col items-center justify-center p-4 text-slate-900 select-none relative">
+        <div className="absolute top-4 right-4">
+          <LanguageToggle lang={lang} onToggleLang={handleToggleLanguage} />
+        </div>
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_5px_0_#c2410c,0_16px_30px_rgba(234,88,12,0.28)] border border-orange-300/60 mb-4">
           <UtensilsCrossed className="w-8 h-8 text-white" />
         </div>
@@ -418,13 +434,7 @@ export default function App() {
         {/* Top Bar with PWA Install & Language Switcher */}
         <div className="flex justify-end items-center gap-2">
           <PWAInstallButton lang={lang} variant="button" />
-          <button
-            onClick={handleToggleLanguage}
-            className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_2px_0_#e2e8f0]"
-          >
-            <Globe className="w-3.5 h-3.5 text-orange-600" />
-            <span>{lang === 'th' ? 'Switch to English' : 'เปลี่ยนเป็นภาษาไทย'}</span>
-          </button>
+          <LanguageToggle lang={lang} onToggleLang={handleToggleLanguage} />
         </div>
 
         {/* Center Clean 3D Login Card */}
@@ -511,7 +521,10 @@ export default function App() {
   // 3. Authenticated App Layout
   if (!settings) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 bg-transparent text-slate-600 text-xs">
+      <div className="min-h-screen flex items-center justify-center p-4 bg-transparent text-slate-600 text-xs relative">
+        <div className="absolute top-4 right-4">
+          <LanguageToggle lang={lang} onToggleLang={handleToggleLanguage} />
+        </div>
         <Loader2 className="w-5 h-5 animate-spin text-orange-600 mr-2" />
         <span>
           {lang === 'th' ? 'กำลังโหลดการตั้งค่าร้านค้า...' : 'Initializing store configuration...'}

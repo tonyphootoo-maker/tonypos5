@@ -4,6 +4,7 @@ import { translations } from '../i18n/translations';
 import { useLanguage } from '../contexts/LanguageContext';
 import { formatMoney } from '../engine/calculations';
 import { Printer, X, FileText } from 'lucide-react';
+import { LanguageToggle } from './LanguageToggle';
 
 interface Props {
   bill: BillDoc;
@@ -40,12 +41,15 @@ export const ReceiptModal: React.FC<Props> = ({
               {isCheckReceipt ? t.pos.printCheckReceipt : t.bills.reprintReceipt} - {bill.billNumber}
             </h3>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <LanguageToggle lang={lang} variant="header-accent" />
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Paper Format Selector & Print Action */}

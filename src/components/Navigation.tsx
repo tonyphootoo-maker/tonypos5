@@ -12,7 +12,6 @@ import {
   Settings,
   LogOut,
   Clock,
-  Globe,
   Sparkles,
   Calculator,
   BookOpen,
@@ -26,6 +25,7 @@ import { translations } from '../i18n/translations';
 import { useLanguage } from '../contexts/LanguageContext';
 import { OnlineStatusBadge } from './OnlineStatusBadge';
 import { PWAInstallButton } from './PWAInstallButton';
+import { LanguageToggle } from './LanguageToggle';
 import { signOutOwner } from '../data/db';
 
 export type AppPage =
@@ -370,14 +370,7 @@ export const Navigation: React.FC<Props> = ({
               <span className="truncate">{activeShift ? t.nav.shiftActive : t.nav.openShift}</span>
             </button>
 
-            <button
-              onClick={onToggleLang}
-              className="py-1.5 px-3 rounded-xl bg-white hover:bg-neutral-100 text-neutral-800 border border-neutral-300 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 cursor-pointer"
-              title={lang === 'th' ? 'สลับภาษา ไทย / อังกฤษ' : 'Toggle Thai / English'}
-            >
-              <Globe className="w-3.5 h-3.5 text-neutral-600" />
-              <span>{lang === 'th' ? 'ไทย' : 'EN'}</span>
-            </button>
+            <LanguageToggle lang={lang} onToggleLang={onToggleLang} />
           </div>
 
           {/* User Email & Sign Out */}
@@ -459,14 +452,7 @@ export const Navigation: React.FC<Props> = ({
           <PWAInstallButton lang={lang} variant="header" />
 
           {/* Language Switcher */}
-          <button
-            onClick={onToggleLang}
-            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-xs font-bold flex items-center gap-1.5 shadow-[0_2px_0_#e2e8f0] active:translate-y-[1px] transition-all cursor-pointer"
-            title={lang === 'th' ? 'สลับภาษา ไทย / อังกฤษ' : 'Toggle Thai / English'}
-          >
-            <Globe className="w-3.5 h-3.5 text-slate-600" />
-            <span>{lang === 'th' ? 'ไทย' : 'EN'}</span>
-          </button>
+          <LanguageToggle lang={lang} onToggleLang={onToggleLang} />
         </div>
       </div>
 

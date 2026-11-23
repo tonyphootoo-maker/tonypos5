@@ -21,6 +21,8 @@ import { resolveCostVariantDisplayNames } from '../costing/services/spreadsheetC
 import {
   calculateDishVariantCost,
   calculateIngredientEffectiveCost,
+  getOptionChoiceEffectiveQuantity,
+  isOptionChoiceQuantityEnabled,
   roundTo2,
 } from './calculations';
 
@@ -108,13 +110,17 @@ export function sanitizeMenuForPublicStore(params: {
       minSelect: Math.max(0, Number(g.minSelect) || 0),
       maxSelect: Math.max(1, Number(g.maxSelect) || 1),
       order: g.order ?? 0,
-      choices: (g.choices || []).map((ch) => ({
-        id: ch.id,
-        name: ch.name || '',
-        ...(ch.nameTh ? { nameTh: ch.nameTh } : {}),
-        price: Math.max(0, Number(ch.price) || 0),
-        ...(Number(ch.quantity) > 1 ? { quantity: Math.max(1, Math.round(Number(ch.quantity))) } : {}),
-      })),
+      choices: (g.choices || []).map((ch) => {
+        const usesQty = isOptionChoiceQuantityEnabled(ch);
+        const effQty = getOptionChoiceEffectiveQuantity(ch);
+        return {
+          id: ch.id,
+          name: ch.name || '',
+          ...(ch.nameTh ? { nameTh: ch.nameTh } : {}),
+          price: Math.max(0, Number(ch.price) || 0),
+          ...(usesQty && effQty > 1 ? { quantity: effQty } : {}),
+        };
+      }),
     }));
 
   const imageIdSet = new Set<string>();
@@ -375,7 +381,7 @@ export function calculateOnlineOrderCostSnapshot(params: {
       const group = optionGroupsMap.get(opt.groupId);
       const choice = group?.choices?.find((c) => c.id === opt.choiceId);
       if (choice && Array.isArray(choice.ingredients)) {
-        const choiceQty = Math.max(1, Number(choice.quantity) || 1);
+        const choiceQty = getOptionChoiceEffectiveQuantity(choice);
         for (const ingLine of choice.ingredients) {
           const ing = ingredientsMap.get(ingLine.ingredientId);
           if (ing) {

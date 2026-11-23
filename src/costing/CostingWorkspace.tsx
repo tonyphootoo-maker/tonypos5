@@ -64,6 +64,7 @@ import { LaborView } from './components/Financials/LaborView';
 import { ExecutiveDashboard } from './components/Dashboard/ExecutiveDashboard';
 import { AppIconModal } from './components/common/AppIconModal';
 import { useLanguage } from '../contexts/LanguageContext';
+import { LanguageToggle } from '../components/LanguageToggle';
 import {
   CentralRecipeOriginPage,
   CentralRecipeTarget,
@@ -857,22 +858,25 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           </button>
         </div>
 
-        {/* Single Push All Updated Costing & Menus straight to KinPOS POS */}
-        {(menus.length > 0 || ingredients.length > 0) && (
-          <button
-            type="button"
-            onClick={handlePushMenuToPOS}
-            disabled={isPushingToPos}
-            className="px-3.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60 whitespace-nowrap"
-          >
-            {isPushingToPos ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <UploadCloud className="w-3.5 h-3.5" />
-            )}
-            <span>{lang === 'th' ? 'ส่งเมนูนี้เข้า POS' : 'Push Menu to POS'}</span>
-          </button>
-        )}
+        {/* Right: Push All Updated Costing & Menus straight to KinPOS POS + Language Toggle */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {(menus.length > 0 || ingredients.length > 0) && (
+            <button
+              type="button"
+              onClick={handlePushMenuToPOS}
+              disabled={isPushingToPos}
+              className="px-3.5 py-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60 whitespace-nowrap"
+            >
+              {isPushingToPos ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <UploadCloud className="w-3.5 h-3.5" />
+              )}
+              <span>{lang === 'th' ? 'ส่งเมนูนี้เข้า POS' : 'Push Menu to POS'}</span>
+            </button>
+          )}
+          <LanguageToggle lang={lang} />
+        </div>
       </div>
 
       {/* Sync / Feedback Banners */}

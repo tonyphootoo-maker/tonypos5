@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { calculateOptionChoiceCost } from '../calculations';
+import {
+  calculateOptionChoiceCost,
+  isOptionChoiceQuantityEnabled,
+  getOptionChoiceEffectiveQuantity,
+} from '../calculations';
 import {
   sanitizeMenuForPublicStore,
   calculateOnlineOrderCostSnapshot,
@@ -151,6 +155,33 @@ describe('Dual-Ingredient Variant Costing & Option Choice Quantity', () => {
       });
     });
 
+    it('respects hasQuantity toggle: disables quantity even with stale quantity > 1 and treats hasQuantity=false as 1x', () => {
+      expect(isOptionChoiceQuantityEnabled({ hasQuantity: undefined, quantity: 1 })).toBe(false);
+      expect(isOptionChoiceQuantityEnabled({ hasQuantity: undefined, quantity: 3 })).toBe(true);
+      expect(isOptionChoiceQuantityEnabled({ hasQuantity: false, quantity: 3 })).toBe(false);
+      expect(isOptionChoiceQuantityEnabled({ hasQuantity: true, quantity: 2 })).toBe(true);
+
+      expect(getOptionChoiceEffectiveQuantity({ hasQuantity: undefined, quantity: 1 })).toBe(1);
+      expect(getOptionChoiceEffectiveQuantity({ hasQuantity: undefined, quantity: 3 })).toBe(3);
+      expect(getOptionChoiceEffectiveQuantity({ hasQuantity: false, quantity: 3 })).toBe(1);
+      expect(getOptionChoiceEffectiveQuantity({ hasQuantity: true, quantity: 2 })).toBe(2);
+
+      const disabledWithStaleQty: OptionChoice = {
+        id: 'ch_no_qty',
+        name: 'Less Spicy',
+        nameTh: 'เผ็ดน้อย',
+        price: 0,
+        hasQuantity: false,
+        quantity: 3, // stale value must be ignored when hasQuantity is false
+        ingredients: [{ ingredientId: 'ing_egg', quantity: 1 }],
+      };
+
+      expect(calculateOptionChoiceCost(disabledWithStaleQty, ingredientsMap)).toEqual({
+        cost: 5, // 1x instead of 3x
+        hasMissing: false,
+      });
+    });
+
     it('preserves quantity > 1 on PublicOptionChoice (omitting default 1) while stripping private cost fields, and factors quantity into calculateOnlineOrderCostSnapshot', () => {
       const settings: SettingsDoc = {
         id: 'main',
@@ -196,7 +227,16 @@ describe('Dual-Ingredient Variant Costing & Option Choice Quantity', () => {
               id: 'ch_triple_3',
               name: '3 Fried Eggs',
               price: 40,
+              hasQuantity: true,
               quantity: 3,
+              ingredients: [{ ingredientId: 'ing_egg', quantity: 1 }],
+            },
+            {
+              id: 'ch_disabled_stale',
+              name: 'Extra Herb',
+              price: 10,
+              hasQuantity: false,
+              quantity: 4,
               ingredients: [{ ingredientId: 'ing_egg', quantity: 1 }],
             },
           ],
@@ -252,6 +292,13 @@ describe('Dual-Ingredient Variant Costing & Option Choice Quantity', () => {
         quantity: 3,
       });
       expect('ingredients' in pubGroup.choices[1]).toBe(false);
+      // Disabled choice with stale quantity: 4 omits quantity from public choice
+      expect(pubGroup.choices[2]).toEqual({
+        id: 'ch_disabled_stale',
+        name: 'Extra Herb',
+        price: 10,
+      });
+      expect('quantity' in pubGroup.choices[2]).toBe(false);
 
       const snapshot = calculateOnlineOrderCostSnapshot({
         items: [
@@ -269,6 +316,13 @@ describe('Dual-Ingredient Variant Costing & Option Choice Quantity', () => {
                 choiceId: 'ch_triple_3',
                 choiceName: '3 Fried Eggs',
                 price: 40,
+              },
+              {
+                groupId: 'grp_addons',
+                groupName: 'Add-ons',
+                choiceId: 'ch_disabled_stale',
+                choiceName: 'Extra Herb',
+                price: 10,
               },
             ],
           },
@@ -293,8 +347,8 @@ describe('Dual-Ingredient Variant Costing & Option Choice Quantity', () => {
         ]),
       });
 
-      // Base dish 12 + (1 egg * 5 * choice.quantity 3 = 15) = 27 per order item * 2 qty = 54
-      expect(snapshot.foodCost).toBeCloseTo(54, 2);
+      // Base dish 12 + (1 egg * 5 * 3 = 15) + (1 egg * 5 * 1 = 5) = 32 per order item * 2 qty = 64
+      expect(snapshot.foodCost).toBeCloseTo(64, 2);
       expect(snapshot.packagingCost).toBeCloseTo(8, 2);
     });
   });

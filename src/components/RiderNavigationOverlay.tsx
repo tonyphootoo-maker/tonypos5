@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { Language, OnlineOrderDoc, PublicStoreDoc } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
+import { LanguageToggle } from './LanguageToggle';
 import { formatMoney } from '../engine/calculations';
 import {
   LatLngLiteralSimple,
@@ -591,15 +592,18 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
             <span className="text-slate-500 shrink-0">•</span>
             <span className="truncate">{order.deliveryAddress || '-'}</span>
           </div>
-          {order.customerPhone && (
-            <a
-              href={`tel:${order.customerPhone}`}
-              className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 shrink-0"
-            >
-              <Phone className="w-3 h-3" />
-              <span>{lang === 'th' ? 'โทร' : 'Call'}</span>
-            </a>
-          )}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {order.customerPhone && (
+              <a
+                href={`tel:${order.customerPhone}`}
+                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 shrink-0"
+              >
+                <Phone className="w-3 h-3" />
+                <span>{lang === 'th' ? 'โทร' : 'Call'}</span>
+              </a>
+            )}
+            <LanguageToggle variant="dark" lang={lang} />
+          </div>
         </div>
       </header>
 

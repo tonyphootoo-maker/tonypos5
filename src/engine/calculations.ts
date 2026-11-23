@@ -287,6 +287,31 @@ export function calculateDishVariantCost(
 }
 
 /**
+ * Determines whether an option choice enables quantity tracking.
+ * Backward compatible: legacy choices without `hasQuantity` enable it only if `quantity > 1`.
+ */
+export function isOptionChoiceQuantityEnabled(choice: {
+  hasQuantity?: boolean;
+  quantity?: number;
+}): boolean {
+  return choice.hasQuantity !== undefined
+    ? Boolean(choice.hasQuantity)
+    : Number(choice.quantity) > 1;
+}
+
+/**
+ * Returns the effective quantity multiplier for an option choice (1 when disabled).
+ */
+export function getOptionChoiceEffectiveQuantity(choice: {
+  hasQuantity?: boolean;
+  quantity?: number;
+}): number {
+  return isOptionChoiceQuantityEnabled(choice)
+    ? Math.max(1, Math.round(Number(choice.quantity) || 1))
+    : 1;
+}
+
+/**
  * Calculates additional cost of an option choice from its ingredient lines.
  */
 export function calculateOptionChoiceCost(
@@ -295,7 +320,7 @@ export function calculateOptionChoiceCost(
 ): { cost: number; hasMissing: boolean } {
   let cost = 0;
   let hasMissing = false;
-  const choiceQty = Math.max(1, Number(choice.quantity) || 1);
+  const choiceQty = getOptionChoiceEffectiveQuantity(choice);
 
   if (Array.isArray(choice.ingredients)) {
     for (const line of choice.ingredients) {

@@ -20,6 +20,7 @@ import { translations } from '../i18n/translations';
 import {
   calculateDishVariantCost,
   calculateOptionChoiceCost,
+  getOptionChoiceEffectiveQuantity,
   calculateBillFinancials,
   calculateEffectiveChannelPrice,
   calculateExVatFoodCostPercent,
@@ -534,11 +535,13 @@ export const TablesPosPage: React.FC<Props> = ({
             optionsPrice += choice.price || 0;
             optionsCost += optCostCalc.cost;
 
+            const effQty = getOptionChoiceEffectiveQuantity(choice);
+            const baseChoiceName = lang === 'th' && choice.nameTh ? choice.nameTh : choice.name;
             optionsSnapshot.push({
               groupId: group.id,
               groupName: lang === 'th' && group.nameTh ? group.nameTh : group.name,
               choiceId: choice.id,
-              choiceName: lang === 'th' && choice.nameTh ? choice.nameTh : choice.name,
+              choiceName: effQty > 1 ? `${baseChoiceName} ×${effQty}` : baseChoiceName,
               price: choice.price || 0,
               cost: optCostCalc.cost,
             });
@@ -2808,7 +2811,9 @@ export const TablesPosPage: React.FC<Props> = ({
                           >
                             <span>
                               {lang === 'th' && choice.nameTh ? choice.nameTh : choice.name}
-                              {Number(choice.quantity) > 1 ? ` ×${choice.quantity}` : ''}
+                              {getOptionChoiceEffectiveQuantity(choice) > 1
+                                ? ` ×${getOptionChoiceEffectiveQuantity(choice)}`
+                                : ''}
                             </span>
                             {choice.price > 0 && (
                               <span className="font-bold">+{formatMoney(choice.price)}</span>

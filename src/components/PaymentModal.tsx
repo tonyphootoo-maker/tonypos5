@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ReceiptModal } from './ReceiptModal';
+import { LanguageToggle } from './LanguageToggle';
 
 interface Props {
   bill: BillDoc;
@@ -495,7 +496,17 @@ export const PaymentModal: React.FC<Props> = ({
       onPaymentSuccess(updatedBill);
     } catch (err: unknown) {
       console.error('Payment error:', err);
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to finalize payment');
+      const rawMsg = err instanceof Error ? err.message : 'Failed to finalize payment';
+      let displayMsg = rawMsg;
+      try {
+        const parsed = JSON.parse(rawMsg) as { error?: unknown };
+        if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) {
+          displayMsg = parsed.error;
+        }
+      } catch {
+        // Keep raw message if not JSON
+      }
+      setErrorMsg(displayMsg);
     } finally {
       setIsSubmitting(false);
     }
@@ -527,7 +538,8 @@ export const PaymentModal: React.FC<Props> = ({
             {headerTitle}
           </h3>
 
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
+            <LanguageToggle lang={lang} className="mr-0.5" />
             <button
               type="button"
               onClick={() => setShowCheckReceipt(true)}

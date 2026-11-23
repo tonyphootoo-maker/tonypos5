@@ -28,6 +28,7 @@ import { formatMoney } from '../engine/calculations';
 import { toDateSafe } from '../engine/onlineOrdering';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { RiderNavigationOverlay } from '../components/RiderNavigationOverlay';
+import { LanguageToggle } from '../components/LanguageToggle';
 
 interface Props {
   lang?: Language;
@@ -194,7 +195,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative">
+        <div className="absolute top-4 right-4">
+          <LanguageToggle variant="dark" lang={lang} onToggleLang={toggleLang} />
+        </div>
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
         <p className="text-sm font-bold text-slate-300">
           {lang === 'th' ? 'กำลังโหลดงานจัดส่ง Rider...' : 'Loading Rider jobs...'}
@@ -223,13 +227,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
 
             <div className="flex items-center gap-2 shrink-0">
               <PWAInstallButton lang={lang} variant="button" appName="Tony's Kit Rider" theme="emerald" />
-              <button
-                type="button"
-                onClick={toggleLang}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-bold text-slate-200 cursor-pointer"
-              >
-                {lang === 'th' ? 'TH' : 'EN'}
-              </button>
+              <LanguageToggle variant="dark" lang={lang} onToggleLang={toggleLang} />
             </div>
           </div>
 

@@ -1297,10 +1297,11 @@ export async function payBillAtomic(
   const billRef = doc(db, `users/${uid}/bills/${bill.id}`);
   const summaryRef = doc(db, `users/${uid}/dailySummaries/${bill.workDate}`);
   const tableRef = bill.tableId ? doc(db, `users/${uid}/tables/${bill.tableId}`) : null;
+  const memberRef = bill.memberId ? doc(db, `users/${uid}/members/${bill.memberId}`) : null;
 
   try {
     await runTransaction(db, async (txn) => {
-      // 1. Verify bill state and version
+      // Phase 1: Execute ALL reads before ANY writes (required by Firestore)
       const billSnap = await txn.get(billRef);
       if (!billSnap.exists()) {
         throw new Error('Bill does not exist');
@@ -1313,17 +1314,18 @@ export async function payBillAtomic(
         throw new Error('VERSION_CONFLICT');
       }
 
-      // 2. Get existing daily summary or prepare empty baseline
       const summarySnap = await txn.get(summaryRef);
+      const tableSnap = tableRef ? await txn.get(tableRef) : null;
+      const memberSnap = memberRef ? await txn.get(memberRef) : null;
+
+      // Phase 2: Compute state updates
       const nowIso = new Date().toISOString();
       const baseSummary: DailySummaryDoc = summarySnap.exists()
         ? (summarySnap.data() as DailySummaryDoc)
         : createEmptyDailySummary(bill.workDate, nowIso);
-
-      // 3. Accumulate bill & exact per-channel values into daily summary
       const summary = applyBillToDailySummary(baseSummary, bill, payments, nowIso);
 
-      // 4. Update Bill to 'paid'
+      // Phase 3: Execute ALL writes
       txn.update(
         billRef,
         stripUndefined({
@@ -1335,42 +1337,32 @@ export async function payBillAtomic(
         })
       );
 
-      // 5. Update Daily Summary document atomically
       txn.set(summaryRef, stripUndefined(summary));
 
-      // 6. If table attached, free the table atomically
-      if (tableRef) {
-        const tableSnap = await txn.get(tableRef);
-        if (tableSnap.exists()) {
-          txn.update(
-            tableRef,
-            stripUndefined({
-              currentBillId: null,
-              updatedAt: nowIso,
-              version: (tableSnap.data().version || 0) + 1,
-            })
-          );
-        }
+      if (tableRef && tableSnap?.exists()) {
+        txn.update(
+          tableRef,
+          stripUndefined({
+            currentBillId: null,
+            updatedAt: nowIso,
+            version: (tableSnap.data().version || 0) + 1,
+          })
+        );
       }
 
-      // 7. Member points update if applicable
-      if (bill.memberId) {
-        const memberRef = doc(db, `users/${uid}/members/${bill.memberId}`);
-        const memberSnap = await txn.get(memberRef);
-        if (memberSnap.exists()) {
-          const mem = memberSnap.data() as MemberDoc;
-          const newPoints = Math.max(0, mem.points - (bill.pointsRedeemed || 0) + (bill.pointsEarned || 0));
-          txn.update(
-            memberRef,
-            stripUndefined({
-              points: newPoints,
-              totalSpent: roundTo2((mem.totalSpent || 0) + bill.netSales),
-              visitCount: (mem.visitCount || 0) + 1,
-              updatedAt: nowIso,
-              version: (mem.version || 0) + 1,
-            })
-          );
-        }
+      if (memberRef && memberSnap?.exists()) {
+        const mem = memberSnap.data() as MemberDoc;
+        const newPoints = Math.max(0, mem.points - (bill.pointsRedeemed || 0) + (bill.pointsEarned || 0));
+        txn.update(
+          memberRef,
+          stripUndefined({
+            points: newPoints,
+            totalSpent: roundTo2((mem.totalSpent || 0) + bill.netSales),
+            visitCount: (mem.visitCount || 0) + 1,
+            updatedAt: nowIso,
+            version: (mem.version || 0) + 1,
+          })
+        );
       }
     });
   } catch (error) {
@@ -1393,6 +1385,7 @@ export async function voidBillAtomic(
 
   try {
     await runTransaction(db, async (txn) => {
+      // Phase 1: Execute ALL reads before ANY writes (required by Firestore)
       const billSnap = await txn.get(billRef);
       if (!billSnap.exists()) {
         throw new Error('Bill not found');
@@ -1402,39 +1395,36 @@ export async function voidBillAtomic(
         throw new Error('Bill is already voided');
       }
 
+      const summaryRef =
+        bill.status === 'paid' ? doc(db, `users/${uid}/dailySummaries/${bill.workDate}`) : null;
+      const summarySnap = summaryRef ? await txn.get(summaryRef) : null;
+
+      const tableRef = bill.tableId ? doc(db, `users/${uid}/tables/${bill.tableId}`) : null;
+      const tableSnap = tableRef ? await txn.get(tableRef) : null;
+
+      // Phase 2: Execute ALL writes
       const nowIso = new Date().toISOString();
 
-      // If bill was already paid, we must deduct it from daily summary in the same transaction
-      if (bill.status === 'paid') {
-        const summaryRef = doc(db, `users/${uid}/dailySummaries/${bill.workDate}`);
-        const summarySnap = await txn.get(summaryRef);
-        if (summarySnap.exists()) {
-          const updatedSummary = revertBillFromDailySummary(
-            summarySnap.data() as DailySummaryDoc,
-            bill,
-            nowIso
-          );
-          txn.set(summaryRef, stripUndefined(updatedSummary));
-        }
+      if (summaryRef && summarySnap?.exists()) {
+        const updatedSummary = revertBillFromDailySummary(
+          summarySnap.data() as DailySummaryDoc,
+          bill,
+          nowIso
+        );
+        txn.set(summaryRef, stripUndefined(updatedSummary));
       }
 
-      // If attached to a table, free the table
-      if (bill.tableId) {
-        const tableRef = doc(db, `users/${uid}/tables/${bill.tableId}`);
-        const tableSnap = await txn.get(tableRef);
-        if (tableSnap.exists() && tableSnap.data().currentBillId === billId) {
-          txn.update(
-            tableRef,
-            stripUndefined({
-              currentBillId: null,
-              updatedAt: nowIso,
-              version: (tableSnap.data().version || 0) + 1,
-            })
-          );
-        }
+      if (tableRef && tableSnap?.exists() && tableSnap.data().currentBillId === billId) {
+        txn.update(
+          tableRef,
+          stripUndefined({
+            currentBillId: null,
+            updatedAt: nowIso,
+            version: (tableSnap.data().version || 0) + 1,
+          })
+        );
       }
 
-      // Update bill to voided
       txn.update(
         billRef,
         stripUndefined({

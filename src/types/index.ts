@@ -110,7 +110,8 @@ export interface OptionChoice {
   nameTh?: string;
   nameEnManual?: boolean;
   price: number; // Additional price
-  quantity?: number; // Default quantity (default: 1)
+  hasQuantity?: boolean; // Whether this choice uses a quantity multiplier
+  quantity?: number; // Default quantity when hasQuantity is true (default: 1)
   ingredients?: RecipeIngredientItem[]; // Cost lines for choice
 }
 
@@ -394,6 +395,7 @@ export interface PublicOptionChoice {
   name: string;
   nameTh?: string;
   price: number;
+  hasQuantity?: boolean;
   quantity?: number;
 }
 
