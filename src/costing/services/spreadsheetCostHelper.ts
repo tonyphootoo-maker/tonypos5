@@ -25,7 +25,10 @@ export function isPrimaryProteinItem(it: RecipeItem, proteinType?: string): bool
     it.type === 'PACKAGING' ||
     it.ingredientType === 'PACKAGING' ||
     it.type === 'PREPARED_ITEM' ||
-    it.ingredientType === 'PREPARED_ITEM'
+    it.ingredientType === 'PREPARED_ITEM' ||
+    it.type === 'RICE_NOODLE' ||
+    it.ingredientType === 'RICE_NOODLE' ||
+    Boolean(it.riceNoodlePortionId)
   ) {
     return false;
   }

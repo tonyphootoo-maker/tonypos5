@@ -7,9 +7,22 @@ import {
   applyBaseRecipeToVariant,
   syncBaseRecipeToLinkedMenus,
   detachBaseRecipeFromMenus,
+  isRiceNoodleRecipeItem,
+  buildRecipeItemFromRiceNoodlePortion,
+  computeRiceNoodleRecipeItemCost,
+  syncRiceNoodlePortionToBaseRecipes,
 } from '../../costing/utils/centralRecipeNav';
-import { INITIAL_RICE_NOODLE_PORTIONS } from '../../costing/data/initialData';
-import { CentralBaseRecipe, MenuItem, MenuVariant, RecipeItem } from '../../costing/types';
+import { calculateVariantCostBreakdown } from '../../costing/services/calculationEngine';
+import { INITIAL_RICE_NOODLE_PORTIONS, INITIAL_SETTINGS } from '../../costing/data/initialData';
+import {
+  CentralBaseRecipe,
+  Ingredient,
+  MenuItem,
+  MenuVariant,
+  RecipeItem,
+  RiceNoodlePortion,
+  Sauce,
+} from '../../costing/types';
 
 function makeVariant(id: string, menuId: string, active = true): MenuVariant {
   return {
@@ -140,6 +153,27 @@ describe('CentralBaseRecipe & RiceNoodlePortion helpers', () => {
     active: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+  });
+
+  const makePortion = (overrides?: Partial<RiceNoodlePortion>): RiceNoodlePortion => ({
+    id: 'portion_rice',
+    name: 'ข้าวสวยหอมมะลิ',
+    nameEn: 'Jasmine Rice',
+    type: 'ข้าว',
+    typeEn: 'Rice',
+    rawIngredientName: 'ข้าวสารหอมมะลิ',
+    rawIngredientNameEn: 'Raw Jasmine Rice',
+    rawPurchaseCost: '40 บาท / กก.',
+    rawPurchaseCostEn: '40 THB / kg',
+    cookingYield: 'Yield 220%',
+    cookingYieldEn: 'Yield 220%',
+    portionGram: 200,
+    yieldPercent: 220,
+    costPerPortion: 8.67,
+    dishesUsing: [],
+    dishesUsingEn: [],
+    active: true,
+    ...overrides,
   });
 
   it('derives packagingItems and rounded packagingCost from base recipe items', () => {
@@ -293,5 +327,179 @@ describe('CentralBaseRecipe & RiceNoodlePortion helpers', () => {
       expect(p.yieldPercent).toBeGreaterThan(0);
     }
   });
+
+  it('builds RICE_NOODLE recipe item from portion and computes scaled & fallback costs', () => {
+    const linkedPortion = makePortion({
+      id: 'portion_rice',
+      linkedIngredientId: 'ing_cooked_rice',
+      portionGram: 200,
+      costPerPortion: 10,
+    });
+    const customPortion = makePortion({
+      id: 'portion_flat',
+      name: 'เส้นใหญ่',
+      portionGram: 150,
+      costPerPortion: 6,
+      linkedIngredientId: undefined,
+    });
+
+    const builtLinked = buildRecipeItemFromRiceNoodlePortion(linkedPortion, 100, 'rn_fixed');
+    expect(builtLinked.id).toBe('rn_fixed');
+    expect(builtLinked.type).toBe('RICE_NOODLE');
+    expect(builtLinked.ingredientType).toBe('RICE_NOODLE');
+    expect(builtLinked.ingredientId).toBe('ing_cooked_rice');
+    expect(builtLinked.riceNoodlePortionId).toBe('portion_rice');
+    expect(builtLinked.quantity).toBe(100);
+    expect(builtLinked.unit).toBe('g');
+    expect(builtLinked.calculatedUnitCost).toBeCloseTo(0.05, 6);
+    expect(builtLinked.calculatedLineCost).toBe(5);
+    expect(isRiceNoodleRecipeItem(builtLinked)).toBe(true);
+
+    const builtCustom = buildRecipeItemFromRiceNoodlePortion(customPortion);
+    expect(builtCustom.ingredientId).toBe('portion_flat');
+    expect(builtCustom.quantity).toBe(150);
+    expect(builtCustom.calculatedLineCost).toBe(6);
+
+    const portionsMap = new Map<string, RiceNoodlePortion>([
+      [linkedPortion.id, linkedPortion],
+      [customPortion.id, customPortion],
+    ]);
+
+    const liveScaled = computeRiceNoodleRecipeItemCost(builtLinked, portionsMap);
+    expect(liveScaled.lineCost).toBe(5);
+    expect(liveScaled.missingPrice).toBe(false);
+
+    const servingUnitItem: RecipeItem = { ...builtCustom, quantity: 2, unit: 'เสิร์ฟ' };
+    const servingCost = computeRiceNoodleRecipeItemCost(servingUnitItem, portionsMap);
+    expect(servingCost.unitCost).toBe(6);
+    expect(servingCost.lineCost).toBe(12);
+
+    const fallbackCost = computeRiceNoodleRecipeItemCost(builtLinked, new Map());
+    expect(fallbackCost.unitCost).toBeCloseTo(0.05, 6);
+    expect(fallbackCost.lineCost).toBe(5);
+    expect(fallbackCost.missingPrice).toBe(false);
+  });
+
+  it('syncs updated RiceNoodlePortion to linked CentralBaseRecipe items without touching unlinked recipes', () => {
+    const initialPortion = makePortion({ id: 'portion_rice', portionGram: 200, costPerPortion: 8 });
+    const rnItem = buildRecipeItemFromRiceNoodlePortion(initialPortion, 200, 'rn_1');
+
+    const baseWithRn: CentralBaseRecipe = {
+      ...makeBaseRecipe(),
+      riceNoodlePortionId: 'portion_rice',
+      items: [rnItem, ...makeBaseRecipe().items],
+    };
+    const otherBase: CentralBaseRecipe = {
+      ...makeBaseRecipe(),
+      id: 'base_other',
+    };
+
+    const updatedPortion = makePortion({
+      id: 'portion_rice',
+      name: 'ข้าวสวยหอมมะลิ (คัดพิเศษ)',
+      portionGram: 200,
+      costPerPortion: 12,
+      linkedIngredientId: 'ing_rice_new',
+    });
+
+    const { updatedBaseRecipes, changedBaseRecipes } = syncRiceNoodlePortionToBaseRecipes(
+      [baseWithRn, otherBase],
+      updatedPortion
+    );
+    expect(changedBaseRecipes).toHaveLength(1);
+    expect(changedBaseRecipes[0].id).toBe('base_kaprao');
+    expect(updatedBaseRecipes[0].items[0].name).toBe('ข้าวสวยหอมมะลิ (คัดพิเศษ)');
+    expect(updatedBaseRecipes[0].items[0].ingredientId).toBe('ing_rice_new');
+    expect(updatedBaseRecipes[0].items[0].calculatedLineCost).toBe(12);
+    expect(updatedBaseRecipes[1]).toBe(otherBase);
+  });
+
+  it('carries RICE_NOODLE items cleanly into variants and calculates variant cost breakdown without missing ingredient error', () => {
+    const customPortion = makePortion({
+      id: 'portion_flat',
+      name: 'เส้นใหญ่',
+      portionGram: 150,
+      costPerPortion: 7.5,
+      linkedIngredientId: undefined,
+    });
+    const rnItem = buildRecipeItemFromRiceNoodlePortion(customPortion, 150, 'rn_item');
+
+    const baseRecipe: CentralBaseRecipe = {
+      ...makeBaseRecipe(),
+      riceNoodlePortionId: 'portion_flat',
+      items: [rnItem],
+    };
+
+    const porkProtein: RecipeItem = {
+      id: 'primary_1_pork',
+      type: 'INGREDIENT',
+      ingredientType: 'INGREDIENT',
+      ingredientId: 'ing_pork',
+      name: 'หมูสับ',
+      quantity: 100,
+      unit: 'g',
+      proteinCategory: 'PORK',
+    };
+    const staleRnItem: RecipeItem = {
+      ...rnItem,
+      id: 'old_rn',
+      name: 'เส้นเก่า',
+    };
+
+    const variant = applyBaseRecipeToVariant(
+      {
+        ...makeVariant('v_noodle', 'm_noodle'),
+        recipeItems: [porkProtein, staleRnItem],
+      },
+      baseRecipe
+    );
+
+    // RICE_NOODLE must not be treated as a protein item (so old_rn was replaced, not duplicated)
+    expect(variant.recipeItems).toHaveLength(2);
+    expect(variant.recipeItems.map((it) => it.id)).toEqual(['primary_1_pork', 'rn_item']);
+
+    const ingredientsMap = new Map<string, Ingredient>([
+      [
+        'ing_pork',
+        {
+          id: 'ing_pork',
+          name: 'หมูสับ',
+          category: 'เนื้อสัตว์และอาหารทะเล',
+          purchaseQuantity: 1000,
+          purchaseUnit: 'g',
+          purchasePrice: 120,
+          actualQuantity: 1000,
+          actualUnit: 'g',
+          yieldPercent: 100,
+          actualCost: 120,
+          baseUnit: 'g',
+          costPerBaseUnit: 0.12,
+          usageUnit: 'g',
+          active: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    ]);
+    const saucesMap = new Map<string, Sauce>();
+    const portionsMap = new Map<string, RiceNoodlePortion>([[customPortion.id, customPortion]]);
+
+    const breakdown = calculateVariantCostBreakdown(
+      variant,
+      'ก๋วยเตี๋ยวคั่วหมูสับ',
+      ingredientsMap,
+      saucesMap,
+      INITIAL_SETTINGS,
+      'grab',
+      portionsMap
+    );
+
+    expect(breakdown.hasReviewIssue).toBe(false);
+    expect(breakdown.hasMissingPrice).toBe(false);
+    expect(breakdown.meatCost).toBeCloseTo(12, 2);
+    expect(breakdown.centralIngredientCost).toBeCloseTo(7.5, 2);
+    expect(breakdown.totalIngredientCost).toBeCloseTo(19.5, 2);
+  });
 });
+
 

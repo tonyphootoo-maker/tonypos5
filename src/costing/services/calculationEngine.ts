@@ -7,7 +7,9 @@ import {
   RecipeItem,
   RestaurantSettings,
   ExpenseRecord,
+  RiceNoodlePortion,
 } from '../types';
+import { computeRiceNoodleRecipeItemCost, isRiceNoodleRecipeItem } from '../utils/centralRecipeNav';
 import { convertUnit, isPieceLikeUnit, normalizeUnitToken } from '../engine/units';
 import { roundUpToStep } from '../../engine/calculations';
 
@@ -359,7 +361,8 @@ export function calculateVariantCostBreakdown(
   ingredientsMap: Map<string, Ingredient>,
   saucesMap: Map<string, Sauce>,
   settings: RestaurantSettings,
-  deliveryChannel: DeliveryChannelId = 'grab'
+  deliveryChannel: DeliveryChannelId = 'grab',
+  riceNoodlePortionsMap?: Map<string, RiceNoodlePortion>
 ): RecipeCostBreakdown {
   let shrimpCost = 0;
   let squidCost = 0;
@@ -409,6 +412,15 @@ export function calculateVariantCostBreakdown(
         hasReviewIssue = true;
         reviewMessage = `ไม่พบสูตรซอส ID: ${item.ingredientId}`;
       }
+    } else if (isRiceNoodleRecipeItem(item)) {
+      const rnCost = computeRiceNoodleRecipeItemCost(item, riceNoodlePortionsMap);
+      itemName = rnCost.portion?.name || item.name;
+      unitCost = rnCost.unitCost;
+      if (rnCost.missingPrice) {
+        hasMissingPrice = true;
+        itemMissingPrice = true;
+      }
+      itemValid = true;
     } else {
       // INGREDIENT or PREPARED_ITEM
       const ing = ingredientsMap.get(item.ingredientId);

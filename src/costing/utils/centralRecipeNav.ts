@@ -1,4 +1,11 @@
-import { CentralBaseRecipe, MenuItem, MenuVariant, PackagingLineItem, RecipeItem } from '../types';
+import {
+  CentralBaseRecipe,
+  MenuItem,
+  MenuVariant,
+  PackagingLineItem,
+  RecipeItem,
+  RiceNoodlePortion,
+} from '../types';
 
 export type CentralRecipeOriginPage =
   | 'pos'
@@ -101,7 +108,10 @@ export function isVariantProteinRecipeItem(it: RecipeItem, proteinType?: string)
     it.type === 'PACKAGING' ||
     it.ingredientType === 'PACKAGING' ||
     it.type === 'PREPARED_ITEM' ||
-    it.ingredientType === 'PREPARED_ITEM'
+    it.ingredientType === 'PREPARED_ITEM' ||
+    it.type === 'RICE_NOODLE' ||
+    it.ingredientType === 'RICE_NOODLE' ||
+    Boolean(it.riceNoodlePortionId)
   ) {
     return false;
   }
@@ -270,3 +280,128 @@ export function detachBaseRecipeFromMenus(
   return { updatedMenus, changedMenus };
 }
 
+export function isRiceNoodleRecipeItem(it: RecipeItem): boolean {
+  return (
+    it.type === 'RICE_NOODLE' ||
+    it.ingredientType === 'RICE_NOODLE' ||
+    Boolean(it.riceNoodlePortionId)
+  );
+}
+
+export function buildRecipeItemFromRiceNoodlePortion(
+  portion: RiceNoodlePortion,
+  quantityInGrams?: number,
+  existingId?: string
+): RecipeItem {
+  const portionGram = Number(portion.portionGram) > 0 ? Number(portion.portionGram) : 100;
+  const qty =
+    quantityInGrams !== undefined && Number.isFinite(quantityInGrams) && quantityInGrams > 0
+      ? quantityInGrams
+      : portionGram;
+  const unitCostPerGram = portionGram > 0 ? (Number(portion.costPerPortion) || 0) / portionGram : 0;
+  const lineCost = Number((qty * unitCostPerGram).toFixed(2));
+
+  return {
+    id: existingId || `base_rn_${portion.id}_${Date.now()}`,
+    type: 'RICE_NOODLE',
+    ingredientType: 'RICE_NOODLE',
+    ingredientId: portion.linkedIngredientId || portion.id,
+    riceNoodlePortionId: portion.id,
+    name: portion.name,
+    quantity: qty,
+    unit: 'g',
+    calculatedUnitCost: Number(unitCostPerGram.toFixed(6)),
+    calculatedLineCost: lineCost,
+  };
+}
+
+export function computeRiceNoodleRecipeItemCost(
+  item: RecipeItem,
+  portionsMap?: Map<string, RiceNoodlePortion>
+): {
+  unitCost: number;
+  lineCost: number;
+  portion?: RiceNoodlePortion;
+  missingPrice: boolean;
+} {
+  const qty = Number(item.quantity) || 0;
+  const portion = item.riceNoodlePortionId ? portionsMap?.get(item.riceNoodlePortionId) : undefined;
+  const isServingUnit =
+    item.unit === 'เสิร์ฟ' ||
+    item.unit === 'จาน' ||
+    item.unit === 'portion' ||
+    item.unit === 'serving' ||
+    item.unit === 'ซอง' ||
+    item.unit === 'แพ็ค';
+
+  if (portion) {
+    const portionCost = Number(portion.costPerPortion) || 0;
+    const portionGram = Number(portion.portionGram) > 0 ? Number(portion.portionGram) : 100;
+    const unitCost = isServingUnit ? portionCost : portionCost / portionGram;
+    const lineCost = Number((qty * unitCost).toFixed(2));
+    return {
+      unitCost,
+      lineCost,
+      portion,
+      missingPrice: portionCost <= 0,
+    };
+  }
+
+  const fallbackUnit = Number(item.calculatedUnitCost) || 0;
+  const fallbackLine =
+    fallbackUnit > 0
+      ? Number((qty * fallbackUnit).toFixed(2))
+      : Number(item.calculatedLineCost) || 0;
+  return {
+    unitCost: fallbackUnit,
+    lineCost: fallbackLine,
+    missingPrice: fallbackUnit <= 0 && fallbackLine <= 0,
+  };
+}
+
+export function syncRiceNoodlePortionToBaseRecipes(
+  baseRecipes: CentralBaseRecipe[],
+  portion: RiceNoodlePortion
+): { updatedBaseRecipes: CentralBaseRecipe[]; changedBaseRecipes: CentralBaseRecipe[] } {
+  const changedBaseRecipes: CentralBaseRecipe[] = [];
+  const portionGram = Number(portion.portionGram) > 0 ? Number(portion.portionGram) : 100;
+  const unitCostPerGram = Number(((Number(portion.costPerPortion) || 0) / portionGram).toFixed(6));
+
+  const updatedBaseRecipes = baseRecipes.map((recipe) => {
+    let changed = false;
+    const nextItems = (recipe.items || []).map((it) => {
+      if (it.riceNoodlePortionId !== portion.id) return it;
+      changed = true;
+      const qty = Number(it.quantity) > 0 ? Number(it.quantity) : portionGram;
+      const isServingUnit =
+        it.unit === 'เสิร์ฟ' ||
+        it.unit === 'จาน' ||
+        it.unit === 'portion' ||
+        it.unit === 'serving' ||
+        it.unit === 'ซอง' ||
+        it.unit === 'แพ็ค';
+      const unitCost = isServingUnit ? Number(portion.costPerPortion) || 0 : unitCostPerGram;
+      return {
+        ...it,
+        type: 'RICE_NOODLE' as const,
+        ingredientType: 'RICE_NOODLE' as const,
+        ingredientId: portion.linkedIngredientId || portion.id,
+        name: portion.name,
+        quantity: qty,
+        calculatedUnitCost: unitCost,
+        calculatedLineCost: Number((qty * unitCost).toFixed(2)),
+      };
+    });
+
+    if (!changed) return recipe;
+    const updatedRecipe: CentralBaseRecipe = {
+      ...recipe,
+      items: nextItems,
+      updatedAt: new Date().toISOString(),
+    };
+    changedBaseRecipes.push(updatedRecipe);
+    return updatedRecipe;
+  });
+
+  return { updatedBaseRecipes, changedBaseRecipes };
+}

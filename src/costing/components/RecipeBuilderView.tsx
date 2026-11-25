@@ -19,7 +19,12 @@ import {
   AlertTriangle,
   ArrowLeft,
 } from 'lucide-react';
-import { resolveCentralRecipeMenuTarget } from '../utils/centralRecipeNav';
+import {
+  resolveCentralRecipeMenuTarget,
+  isRiceNoodleRecipeItem,
+  buildRecipeItemFromRiceNoodlePortion,
+  computeRiceNoodleRecipeItemCost,
+} from '../utils/centralRecipeNav';
 import {
   MenuItem,
   Ingredient,
@@ -152,6 +157,15 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     [sauces]
   );
 
+  const [localFallbackPortions, setLocalFallbackPortions] = useState<RiceNoodlePortion[]>(
+    () => INITIAL_RICE_NOODLE_PORTIONS
+  );
+  const portionRecipes = propRiceNoodlePortions ?? localFallbackPortions;
+  const riceNoodlePortionsMap = useMemo(
+    () => new Map<string, RiceNoodlePortion>(portionRecipes.map((p) => [p.id, p])),
+    [portionRecipes]
+  );
+
   // --- TAB 1: STANDALONE CENTRAL BASE RECIPES (คลังสูตรอาหารกลางที่สร้างโดยผู้ใช้) ---
   const [localFallbackBaseRecipes, setLocalFallbackBaseRecipes] = useState<CentralBaseRecipe[]>([]);
   const baseRecipes = propBaseRecipes ?? localFallbackBaseRecipes;
@@ -185,6 +199,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   // Create / Rename modal for standalone Central Base Recipe
   const [isBaseRecipeMetaModalOpen, setIsBaseRecipeMetaModalOpen] = useState(false);
   const [editingBaseRecipeMeta, setEditingBaseRecipeMeta] = useState<Partial<CentralBaseRecipe> | null>(null);
+  const [baseRecipeRiceNoodleQty, setBaseRecipeRiceNoodleQty] = useState<number>(200);
   const [baseRecipeMetaError, setBaseRecipeMetaError] = useState<string | null>(null);
   const prevBaseRecipeThaiRef = useRef<string>('');
   const baseRecipeTranslationScheduler = useDebouncedTranslationScheduler(600);
@@ -257,6 +272,15 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
   // Calculate unit cost and line cost for each item with unit conversion
   const getItemCost = (item: RecipeItem) => {
+    if (isRiceNoodleRecipeItem(item)) {
+      const rn = computeRiceNoodleRecipeItemCost(item, riceNoodlePortionsMap);
+      return {
+        unitCost: rn.unitCost,
+        lineCost: rn.lineCost,
+        missingPrice: rn.missingPrice,
+      };
+    }
+
     if (item.type === 'SAUCE') {
       const sauce = saucesMap.get(item.ingredientId || item.sauceId || '');
       if (sauce) {
@@ -351,7 +375,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     const updated = localBaseItems.map((current) => {
       if (current.id !== itemId) return current;
       const clone = { ...current };
-      if (clone.type === 'SAUCE') {
+      if (isRiceNoodleRecipeItem(clone)) {
+        const portion = riceNoodlePortionsMap.get(newSourceId);
+        if (portion) {
+          return buildRecipeItemFromRiceNoodlePortion(portion, portion.portionGram, clone.id);
+        }
+      } else if (clone.type === 'SAUCE') {
         const s = saucesMap.get(newSourceId);
         if (s) {
           const cost = calculateSauceCost(s, ingredientsMap);
@@ -556,6 +585,32 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     setHasUnsavedChanges(true);
   };
 
+  // Modal for adding Rice & Noodles (Yield & Portions) item to Base Recipe
+  const [isAddRiceNoodleModalOpen, setIsAddRiceNoodleModalOpen] = useState(false);
+  const [newRiceNoodlePortionId, setNewRiceNoodlePortionId] = useState<string>('');
+  const [newRiceNoodleQty, setNewRiceNoodleQty] = useState<number>(200);
+
+  const handleOpenAddRiceNoodleModal = () => {
+    const activePortions = portionRecipes.filter((p) => p.active !== false);
+    const first = activePortions[0] || portionRecipes[0];
+    setNewRiceNoodlePortionId(first?.id || '');
+    setNewRiceNoodleQty(first?.portionGram || 150);
+    setIsAddRiceNoodleModalOpen(true);
+  };
+
+  const handleConfirmAddRiceNoodle = (e: React.FormEvent) => {
+    e.preventDefault();
+    const portion = riceNoodlePortionsMap.get(newRiceNoodlePortionId) || portionRecipes[0];
+    if (!portion) return;
+    const newItem = buildRecipeItemFromRiceNoodlePortion(
+      portion,
+      newRiceNoodleQty > 0 ? newRiceNoodleQty : portion.portionGram
+    );
+    setLocalBaseItems([...localBaseItems, newItem]);
+    setHasUnsavedChanges(true);
+    setIsAddRiceNoodleModalOpen(false);
+  };
+
   const handleAddSideDish = () => {
     const defaultSide = SIDE_DISH_PRESETS[0];
     const newItem: RecipeItem = {
@@ -674,6 +729,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     baseRecipeTranslationScheduler.cancelAll();
     prevBaseRecipeThaiRef.current = '';
     setBaseRecipeMetaError(null);
+    setBaseRecipeRiceNoodleQty(200);
     setEditingBaseRecipeMeta({
       id: `base_recipe_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       name: '',
@@ -681,6 +737,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       englishName: '',
       englishNameManual: false,
       description: '',
+      riceNoodlePortionId: '',
       items: [],
       active: true,
       displayOrder: baseRecipes.length + 1,
@@ -697,6 +754,16 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     prevBaseRecipeThaiRef.current = thName;
     const storedEn = (recipe.englishName || '').trim();
     const isManual = Boolean(recipe.englishNameManual);
+    const effectiveItems =
+      currentBaseRecipe?.id === recipe.id && hasUnsavedChanges ? localBaseItems : recipe.items || [];
+    const linkedRnItem = effectiveItems.find((it) => isRiceNoodleRecipeItem(it));
+    const linkedRnId = recipe.riceNoodlePortionId || linkedRnItem?.riceNoodlePortionId || '';
+    const linkedPortion = linkedRnId ? riceNoodlePortionsMap.get(linkedRnId) : undefined;
+    setBaseRecipeRiceNoodleQty(
+      Number(linkedRnItem?.quantity) > 0
+        ? Number(linkedRnItem?.quantity)
+        : linkedPortion?.portionGram || 200
+    );
     setEditingBaseRecipeMeta({
       ...recipe,
       name: thName,
@@ -708,6 +775,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
           ? storedEn
           : translateThaiToEnglish(thName),
       englishNameManual: isManual,
+      riceNoodlePortionId: linkedRnId,
     });
     setIsBaseRecipeMetaModalOpen(true);
   };
@@ -734,10 +802,32 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
         }).trim() || translateThaiToEnglish(trimmedTh);
 
     const existing = baseRecipes.find((r) => r.id === editingBaseRecipeMeta.id);
-    const currentItems =
-      existing && currentBaseRecipe?.id === existing.id && hasUnsavedChanges
+    let currentItems = [
+      ...(existing && currentBaseRecipe?.id === existing.id && hasUnsavedChanges
         ? localBaseItems
-        : existing?.items || editingBaseRecipeMeta.items || [];
+        : existing?.items || editingBaseRecipeMeta.items || []),
+    ];
+
+    const selectedRnId = (editingBaseRecipeMeta.riceNoodlePortionId || '').trim();
+    const selectedPortion = selectedRnId ? riceNoodlePortionsMap.get(selectedRnId) : undefined;
+    const existingRnIndex = currentItems.findIndex((it) => isRiceNoodleRecipeItem(it));
+
+    if (selectedPortion) {
+      const targetQty =
+        baseRecipeRiceNoodleQty > 0 ? baseRecipeRiceNoodleQty : selectedPortion.portionGram;
+      const newRnItem = buildRecipeItemFromRiceNoodlePortion(
+        selectedPortion,
+        targetQty,
+        existingRnIndex >= 0 ? currentItems[existingRnIndex].id : undefined
+      );
+      if (existingRnIndex >= 0) {
+        currentItems[existingRnIndex] = newRnItem;
+      } else {
+        currentItems.push(newRnItem);
+      }
+    } else if (existingRnIndex >= 0) {
+      currentItems = currentItems.filter((it) => !isRiceNoodleRecipeItem(it));
+    }
 
     const recipeId =
       editingBaseRecipeMeta.id ||
@@ -750,6 +840,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       englishName: trimmedEn,
       englishNameManual: isManual,
       description: editingBaseRecipeMeta.description?.trim() || undefined,
+      riceNoodlePortionId: selectedPortion?.id || undefined,
       items: currentItems,
       packagingCost: existing?.packagingCost ?? editingBaseRecipeMeta.packagingCost ?? 0,
       packagingItems: existing?.packagingItems ?? editingBaseRecipeMeta.packagingItems ?? [],
@@ -823,8 +914,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       };
     });
 
+    const firstLinkedRn = enrichedBaseItems.find((it) => isRiceNoodleRecipeItem(it));
+
     const updatedRecipe: CentralBaseRecipe = {
       ...currentBaseRecipe,
+      riceNoodlePortionId: firstLinkedRn?.riceNoodlePortionId || undefined,
       items: enrichedBaseItems,
       packagingCost,
       packagingItems,
@@ -977,11 +1071,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
         ing.name.includes('วุ้นเส้น')
     );
   }, [ingredients]);
-
-  const [localFallbackPortions, setLocalFallbackPortions] = useState<RiceNoodlePortion[]>(
-    () => INITIAL_RICE_NOODLE_PORTIONS
-  );
-  const portionRecipes = propRiceNoodlePortions ?? localFallbackPortions;
 
   const [isPortionModalOpen, setIsPortionModalOpen] = useState(false);
   const [editingPortion, setEditingPortion] = useState<Partial<RiceNoodlePortion> | null>(null);
@@ -1486,6 +1575,24 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                             {recipe.description}
                           </p>
                         )}
+                        {(() => {
+                          const rnItems = displayItems.filter((it) => isRiceNoodleRecipeItem(it));
+                          if (rnItems.length === 0) return null;
+                          const firstPortion = rnItems[0].riceNoodlePortionId
+                            ? riceNoodlePortionsMap.get(rnItems[0].riceNoodlePortionId)
+                            : undefined;
+                          const label = firstPortion
+                            ? lang === 'en'
+                              ? firstPortion.nameEn || firstPortion.name
+                              : firstPortion.name
+                            : rnItems[0].name;
+                          return (
+                            <div className="mt-1 pl-3.5 flex items-center gap-1 text-[10px] text-[#FFC107] font-semibold truncate">
+                              <Wheat className="w-3 h-3 shrink-0" />
+                              <span className="truncate">{label}</span>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
@@ -1565,7 +1672,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     </h3>
                   </div>
 
-                  {/* 2 Add buttons: วัตถุดิบ, ซอสปรุง */}
+                  {/* 3 Add buttons: วัตถุดิบ, ซอสปรุง, ข้าวและเส้น */}
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       type="button"
@@ -1584,6 +1691,16 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{lang === 'en' ? '+ Sauce' : '+ ซอสปรุง'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenAddRiceNoodleModal}
+                      disabled={portionRecipes.length === 0}
+                      className="px-2.5 py-1.5 rounded-xl bg-[#FFC107]/15 hover:bg-[#FFC107]/25 text-[#FFC107] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#FFC107]/30 transition-colors disabled:opacity-40"
+                      title={lang === 'en' ? 'Link Rice & Noodles (Yield & Portions)' : 'เพิ่มรายการจากหมวด ข้าวและเส้น (Yield & Portions)'}
+                    >
+                      <Wheat className="w-3.5 h-3.5" />
+                      <span>{lang === 'en' ? '+ Rice & Noodles' : '+ ข้าวและเส้น'}</span>
                     </button>
                   </div>
                 </div>
@@ -1615,7 +1732,36 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                           return (
                             <tr key={`${item.id || 'item'}-${index}`} className="hover:bg-white/5 transition-colors">
                               <td className="py-2.5 px-3 font-sans font-medium text-white">
-                                {item.type === 'SAUCE' ? (
+                                {isRiceNoodleRecipeItem(item) ? (
+                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFC107]/15 text-[#FFC107] border border-[#FFC107]/30 text-[10px] font-bold shrink-0">
+                                      <Wheat className="w-3 h-3" />
+                                      <span>{lang === 'en' ? 'Rice/Noodles' : 'ข้าวและเส้น'}</span>
+                                    </span>
+                                    <select
+                                      value={item.riceNoodlePortionId || ''}
+                                      onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                      className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[240px] cursor-pointer"
+                                    >
+                                      {portionRecipes.map((p) => (
+                                        <option key={p.id} value={p.id} className="bg-[#1a1a1a]">
+                                          {lang === 'en' ? p.nameEn || p.name : p.name} ({p.portionGram}g · ฿{Number(p.costPerPortion || 0).toFixed(2)})
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {(() => {
+                                      const linkedP = item.riceNoodlePortionId
+                                        ? riceNoodlePortionsMap.get(item.riceNoodlePortionId)
+                                        : undefined;
+                                      if (!linkedP) return null;
+                                      return (
+                                        <span className="text-[10px] text-emerald-400 font-mono whitespace-nowrap">
+                                          Yield: {lang === 'en' ? linkedP.cookingYieldEn || linkedP.cookingYield : linkedP.cookingYield}
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
+                                ) : item.type === 'SAUCE' ? (
                                   <select
                                     value={item.ingredientId || item.sauceId}
                                     onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
@@ -2544,6 +2690,130 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
         </div>
       )}
 
+      {/* ADD RICE & NOODLES PORTION TO BASE RECIPE MODAL */}
+      {isAddRiceNoodleModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="modal-panel bg-[#1a1a1a] rounded-3xl max-w-md w-full shadow-2xl border border-white/20 text-white">
+            <div className="modal-header flex items-center justify-between border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <Wheat className="w-4 h-4 text-[#FFC107]" />
+                <h3 className="font-bold text-white text-base">
+                  {lang === 'en'
+                    ? '+ Add Rice & Noodles (Yield & Portions)'
+                    : '+ เพิ่มข้าวและเส้นจากหมวด Yield & Portions'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddRiceNoodleModalOpen(false)}
+                className="p-1 rounded-xl text-white/60 hover:text-white hover:bg-white/10 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmAddRiceNoodle} className="flex flex-col flex-1 min-h-0 text-xs">
+              <div className="modal-body space-y-4">
+                <div>
+                  <label className="block text-white/80 font-bold mb-1">
+                    {lang === 'en'
+                      ? '1. Select Rice / Noodle Recipe'
+                      : '1. เลือกสูตรจากหมวด ข้าวและเส้น (Yield & Portions)'}{' '}
+                    <span className="text-[#FFC107]">*</span>
+                  </label>
+                  <select
+                    value={newRiceNoodlePortionId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setNewRiceNoodlePortionId(nextId);
+                      const p = riceNoodlePortionsMap.get(nextId);
+                      if (p) {
+                        setNewRiceNoodleQty(p.portionGram || 150);
+                      }
+                    }}
+                    required
+                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl font-bold text-white cursor-pointer focus:border-[#FFC107]"
+                  >
+                    {portionRecipes.map((p) => (
+                      <option key={p.id} value={p.id} className="bg-[#1a1a1a]">
+                        {lang === 'en' ? p.nameEn || p.name : p.name} ({p.portionGram}g · ฿{Number(p.costPerPortion || 0).toFixed(2)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-white/80 font-bold">
+                      {lang === 'en' ? '2. Serving Weight (g)' : '2. ปริมาณที่ใช้ในสูตรกลาง (กรัม)'}{' '}
+                      <span className="text-[#FFC107]">*</span>
+                    </label>
+                    {newRiceNoodlePortionId && riceNoodlePortionsMap.get(newRiceNoodlePortionId) && (
+                      <span className="text-[11px] text-emerald-400 font-mono">
+                        Yield: {riceNoodlePortionsMap.get(newRiceNoodlePortionId)?.cookingYield}
+                      </span>
+                    )}
+                  </div>
+                  <NumericInput
+                    type="number"
+                    min="1"
+                    step="any"
+                    required
+                    value={newRiceNoodleQty}
+                    onChange={(e) => setNewRiceNoodleQty(parseFloat(e.target.value) || 0)}
+                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl font-mono font-bold text-white focus:border-[#FFC107]"
+                  />
+                </div>
+
+                {(() => {
+                  const p = riceNoodlePortionsMap.get(newRiceNoodlePortionId);
+                  if (!p) return null;
+                  const unitCost = p.portionGram > 0 ? p.costPerPortion / p.portionGram : 0;
+                  const lineCost = (newRiceNoodleQty > 0 ? newRiceNoodleQty : 0) * unitCost;
+                  return (
+                    <div className="p-3 rounded-2xl bg-[#FFC107]/10 border border-[#FFC107]/25 space-y-1">
+                      <div className="flex justify-between text-white/75">
+                        <span>{lang === 'en' ? 'Base Ingredient:' : 'วัตถุดิบหลัก:'}</span>
+                        <span className="font-semibold text-white">
+                          {lang === 'en' ? p.rawIngredientNameEn || p.rawIngredientName : p.rawIngredientName}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-white/75">
+                        <span>{lang === 'en' ? 'Standard Portion:' : 'ขนาดมาตรฐาน:'}</span>
+                        <span className="font-mono text-white">
+                          {p.portionGram}g (฿{Number(p.costPerPortion || 0).toFixed(2)})
+                        </span>
+                      </div>
+                      <div className="flex justify-between pt-1 border-t border-[#FFC107]/20 font-bold text-sm">
+                        <span className="text-white">{lang === 'en' ? 'Calculated Cost:' : 'ต้นทุนที่คำนวณได้:'}</span>
+                        <span className="font-mono text-[#FFC107]">฿{lineCost.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="modal-footer bg-[#1a1a1a] flex justify-end gap-2 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsAddRiceNoodleModalOpen(false)}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/15 rounded-xl text-white font-semibold cursor-pointer"
+                >
+                  {lang === 'en' ? 'Cancel' : 'ยกเลิก'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newRiceNoodlePortionId}
+                  className="px-5 py-2 bg-[#FFC107] hover:bg-[#e6ad00] text-black font-bold rounded-xl shadow-lg shadow-[#FFC107]/20 cursor-pointer disabled:opacity-50"
+                >
+                  {lang === 'en' ? '+ Add to Base Recipe' : '+ เพิ่มข้าว/เส้นลงสูตรกลาง'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* CREATE / EDIT CENTRAL BASE RECIPE MODAL */}
       {isBaseRecipeMetaModalOpen && editingBaseRecipeMeta && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
@@ -2669,6 +2939,86 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     }
                     className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
                   />
+                </div>
+
+                {/* Link Rice & Noodles (Yield & Portions) */}
+                <div className="p-3 rounded-2xl bg-[#FFC107]/10 border border-[#FFC107]/25 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="font-bold text-[#FFC107] flex items-center gap-1.5">
+                      <Wheat className="w-3.5 h-3.5" />
+                      <span>
+                        {lang === 'en'
+                          ? 'Link Rice & Noodles (Yield & Portions)'
+                          : 'เชื่อมโยงหมวดข้าวและเส้น (Yield & Portions)'}
+                      </span>
+                    </label>
+                  </div>
+                  <select
+                    value={editingBaseRecipeMeta.riceNoodlePortionId || ''}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setEditingBaseRecipeMeta((prev) =>
+                        prev ? { ...prev, riceNoodlePortionId: nextId } : prev
+                      );
+                      const p = nextId ? riceNoodlePortionsMap.get(nextId) : undefined;
+                      if (p) {
+                        setBaseRecipeRiceNoodleQty(p.portionGram || 150);
+                      }
+                    }}
+                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white cursor-pointer focus:border-[#FFC107]"
+                  >
+                    <option value="" className="bg-[#1a1a1a]">
+                      {lang === 'en'
+                        ? '-- None (No Rice / Noodles linked) --'
+                        : '-- ไม่เชื่อมข้าวและเส้น --'}
+                    </option>
+                    {portionRecipes.map((p) => (
+                      <option key={p.id} value={p.id} className="bg-[#1a1a1a]">
+                        {lang === 'en' ? p.nameEn || p.name : p.name} ({p.portionGram}g · Yield {p.cookingYield} · ฿{Number(p.costPerPortion || 0).toFixed(2)})
+                      </option>
+                    ))}
+                  </select>
+
+                  {editingBaseRecipeMeta.riceNoodlePortionId && (() => {
+                    const p = riceNoodlePortionsMap.get(editingBaseRecipeMeta.riceNoodlePortionId);
+                    if (!p) return null;
+                    const unitCost = p.portionGram > 0 ? p.costPerPortion / p.portionGram : 0;
+                    const computedCost = (baseRecipeRiceNoodleQty > 0 ? baseRecipeRiceNoodleQty : 0) * unitCost;
+                    return (
+                      <div className="space-y-2 pt-1 text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-white/80 font-semibold">
+                            {lang === 'en' ? 'Weight used in recipe (g):' : 'ปริมาณที่ใช้ในสูตร (กรัม):'}
+                          </label>
+                          <NumericInput
+                            type="number"
+                            min="1"
+                            step="any"
+                            value={baseRecipeRiceNoodleQty}
+                            onChange={(e) => setBaseRecipeRiceNoodleQty(parseFloat(e.target.value) || 0)}
+                            className="w-24 p-1.5 bg-black/50 border border-white/20 rounded-lg text-right font-mono font-bold text-white focus:border-[#FFC107]"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-white/65">
+                          <span>
+                            {lang === 'en' ? 'Base:' : 'วัตถุดิบหลัก:'}{' '}
+                            <strong className="text-white">
+                              {lang === 'en' ? p.rawIngredientNameEn || p.rawIngredientName : p.rawIngredientName}
+                            </strong>
+                          </span>
+                          <span className="text-emerald-400 font-mono">
+                            Yield: {lang === 'en' ? p.cookingYieldEn || p.cookingYield : p.cookingYield}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 border-t border-[#FFC107]/20 font-bold">
+                          <span className="text-white/85">
+                            {lang === 'en' ? 'Rice/Noodle Cost:' : 'ต้นทุนข้าวและเส้นในสูตร:'}
+                          </span>
+                          <span className="font-mono text-[#FFC107] text-xs">฿{computedCost.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {baseRecipeMetaError && (

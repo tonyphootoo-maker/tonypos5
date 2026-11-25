@@ -23,7 +23,12 @@ import {
   GripVertical,
   BookOpen,
 } from 'lucide-react';
-import { CENTRAL_RECIPE_BUTTON_LABELS, derivePackagingFromBaseRecipe } from '../utils/centralRecipeNav';
+import {
+  CENTRAL_RECIPE_BUTTON_LABELS,
+  derivePackagingFromBaseRecipe,
+  isRiceNoodleRecipeItem,
+  computeRiceNoodleRecipeItemCost,
+} from '../utils/centralRecipeNav';
 import {
   MenuItem,
   MenuVariant,
@@ -33,6 +38,7 @@ import {
   RecipeCostBreakdown,
   RecipeItem,
   CentralBaseRecipe,
+  RiceNoodlePortion,
 } from '../types';
 import {
   calculateVariantCostBreakdown,
@@ -123,7 +129,10 @@ const isProteinRecipeItem = (it: RecipeItem, proteinType?: string): boolean => {
     it.type === 'PACKAGING' ||
     it.ingredientType === 'PACKAGING' ||
     it.type === 'PREPARED_ITEM' ||
-    it.ingredientType === 'PREPARED_ITEM'
+    it.ingredientType === 'PREPARED_ITEM' ||
+    it.type === 'RICE_NOODLE' ||
+    it.ingredientType === 'RICE_NOODLE' ||
+    Boolean(it.riceNoodlePortionId)
   ) {
     return false;
   }
@@ -187,23 +196,12 @@ const resolveProteinCategoryFromName = (name: string): RecipeItem['proteinCatego
 const SEAFOOD_SHRIMP_FALLBACK_ID = '__seafood_shrimp__';
 const SEAFOOD_SQUID_FALLBACK_ID = '__seafood_squid__';
 
-const extractBaseRecipeItemsForMenu = (menuItem: MenuItem): RecipeItem[] => {
-  for (const variant of menuItem.variants || []) {
-    const nonProtein = (variant.recipeItems || []).filter(
-      (it) => !isProteinRecipeItem(it, variant.proteinType)
-    );
-    if (nonProtein.length > 0) {
-      return nonProtein.map((it) => ({ ...it }));
-    }
-  }
-  return [];
-};
-
 interface FoodCostViewProps {
   menus: MenuItem[];
   ingredients: Ingredient[];
   sauces: Sauce[];
   baseRecipes?: CentralBaseRecipe[];
+  riceNoodlePortions?: RiceNoodlePortion[];
   settings: RestaurantSettings;
   lang?: 'th' | 'en';
   initialServingMode?: 'ON_RICE' | 'A_LA_CARTE';
@@ -227,6 +225,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   ingredients,
   sauces,
   baseRecipes = [],
+  riceNoodlePortions = [],
   settings,
   lang: propLang,
   initialServingMode,
@@ -589,21 +588,17 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   // Fast maps
   const ingredientsMap = new Map<string, Ingredient>(ingredients.map((i) => [i.id, i]));
   const saucesMap = new Map<string, Sauce>(sauces.map((s) => [s.id, s]));
-
-  // Available Base Recipes extracted from menus for Variant modal linking (3.4)
-  const baseRecipeMenuOptions = useMemo(() => {
-    return menus
-      .map((m) => ({
-        menu: m,
-        items: extractBaseRecipeItemsForMenu(m),
-      }))
-      .filter((entry) => entry.items.length > 0);
-  }, [menus]);
+  const riceNoodlePortionsMap = new Map<string, RiceNoodlePortion>(
+    riceNoodlePortions.map((p) => [p.id, p])
+  );
 
   const computeBaseRecipeItemsCost = (items: RecipeItem[]): number => {
     return items.reduce((sum, it) => {
       const qty = Number(it.quantity) || 0;
       if (qty <= 0) return sum;
+      if (isRiceNoodleRecipeItem(it)) {
+        return sum + computeRiceNoodleRecipeItemCost(it, riceNoodlePortionsMap).lineCost;
+      }
       if (it.type === 'SAUCE' || it.ingredientType === 'SAUCE') {
         const s = saucesMap.get(it.sauceId || it.ingredientId);
         if (s && s.actualQuantity > 0) {
@@ -825,7 +820,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         ingredientsMap,
         saucesMap,
         settings,
-        activeChannel === 'LINEMAN' ? 'lineman' : 'grab'
+        activeChannel === 'LINEMAN' ? 'lineman' : 'grab',
+        riceNoodlePortionsMap
       );
       allRows.push({ menu, variant, breakdown });
     });
@@ -1061,7 +1057,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     const variantTh = `${menu.name} ${defaultProtein}`;
     translationScheduler.cancelAll();
     prevVariantThaiRef.current = variantTh;
-    const defaultBaseItems = extractBaseRecipeItemsForMenu(menu);
+    const siblingLinkedBase = (menu.variants || [])
+      .map((v) =>
+        v.baseRecipeId
+          ? baseRecipes.find((r) => r.id === v.baseRecipeId && r.active !== false)
+          : undefined
+      )
+      .find((r): r is CentralBaseRecipe => Boolean(r));
+    const defaultBaseItems = siblingLinkedBase
+      ? (siblingLinkedBase.items || []).map((it) => ({ ...it }))
+      : [];
+    const siblingPkgInfo = siblingLinkedBase
+      ? derivePackagingFromBaseRecipe(siblingLinkedBase)
+      : { packagingCost: 9.0, packagingItems: [] };
 
     if (initialUnit && !portionUnits.includes(initialUnit)) {
       const nextUnits = [...portionUnits, initialUnit];
@@ -1101,8 +1109,13 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       linemanPrice: Math.round(baseTakeaway * linemanMultiplier),
       robinhoodPrice: Math.round(baseTakeaway * robinhoodMultiplier),
       overheadCost: 6.0,
-      packagingCost: 9.0,
-      recipeItems: [...proteinItems, ...defaultBaseItems.map((it) => ({ ...it }))],
+      packagingCost:
+        siblingPkgInfo.packagingItems.length > 0 ? siblingPkgInfo.packagingCost : 9.0,
+      ...(siblingPkgInfo.packagingItems.length > 0
+        ? { packagingItems: siblingPkgInfo.packagingItems }
+        : {}),
+      baseRecipeId: siblingLinkedBase?.id,
+      recipeItems: [...proteinItems, ...defaultBaseItems],
       active: true,
     };
 
@@ -1124,7 +1137,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       seafoodShrimpQty: 4,
       seafoodSquidQty: 40,
       isEnglishManuallyEdited: false,
-      selectedBaseRecipeMenuId: defaultBaseItems.length > 0 ? menu.id : '',
+      selectedBaseRecipeMenuId: siblingLinkedBase ? `base:${siblingLinkedBase.id}` : '',
     };
     variantModalSnapshotRef.current = serializeVariantModalDraft({
       mode: 'ADD',
@@ -1291,10 +1304,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         initialBaseRecipeId = `base:${matchedStandalone.id}`;
         clonedVariant.baseRecipeId = matchedStandalone.id;
       } else {
-        const matchedMenuOpt =
-          baseRecipeMenuOptions.find((opt) => opt.menu.id === menu.id && sig(opt.items) === currentSig) ||
-          baseRecipeMenuOptions.find((opt) => sig(opt.items) === currentSig);
-        initialBaseRecipeId = matchedMenuOpt ? matchedMenuOpt.menu.id : '__custom__';
+        initialBaseRecipeId = '__custom__';
       }
     }
 
@@ -1660,7 +1670,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       ingredientsMap,
       saucesMap,
       settings,
-      activeChannel === 'LINEMAN' ? 'lineman' : 'grab'
+      activeChannel === 'LINEMAN' ? 'lineman' : 'grab',
+      riceNoodlePortionsMap
     );
 
     onSaveMenu(updatedMenu);
@@ -1701,7 +1712,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       ingredientsMap,
       saucesMap,
       settings,
-      activeChannel === 'LINEMAN' ? 'lineman' : 'grab'
+      activeChannel === 'LINEMAN' ? 'lineman' : 'grab',
+      riceNoodlePortionsMap
     );
 
     onSaveMenu(updatedMenu);
@@ -1737,7 +1749,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       ingredientsMap,
       saucesMap,
       settings,
-      activeChannel === 'LINEMAN' ? 'lineman' : 'grab'
+      activeChannel === 'LINEMAN' ? 'lineman' : 'grab',
+      riceNoodlePortionsMap
     );
 
     onSaveMenu(updatedMenu);
@@ -1917,7 +1930,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           ingredientsMap,
           saucesMap,
           nextSettings,
-          activeChannel === 'LINEMAN' ? 'lineman' : 'grab'
+          activeChannel === 'LINEMAN' ? 'lineman' : 'grab',
+          riceNoodlePortionsMap
         );
         setSelectedBreakdown({
           menu: updatedMenu,
@@ -4537,19 +4551,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               },
                             };
                           }
-                          const matchedOpt = baseRecipeMenuOptions.find(
-                            (opt) => opt.menu.id === chosenValue
-                          );
-                          const clonedBase = (matchedOpt?.items || []).map((it) => ({ ...it }));
-                          return {
-                            ...prev,
-                            selectedBaseRecipeMenuId: chosenValue,
-                            variant: {
-                              ...prev.variant,
-                              baseRecipeId: undefined,
-                              recipeItems: [...existingProteins, ...clonedBase],
-                            },
-                          };
+                          return prev;
                         });
                       }}
                       className="w-full p-2.5 bg-white border border-emerald-300 rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-emerald-600 cursor-pointer"
@@ -4577,15 +4579,6 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                               </option>
                             );
                           })}
-                        </optgroup>
-                      )}
-                      {baseRecipeMenuOptions.length > 0 && (
-                        <optgroup label={isEn ? 'Existing Menu Base Recipes' : 'สูตรจากเมนูที่มีอยู่'}>
-                          {baseRecipeMenuOptions.map(({ menu: bMenu, items }) => (
-                            <option key={bMenu.id} value={bMenu.id}>
-                              {getLocalizedText(lang, bMenu.thaiName || bMenu.name, bMenu.englishName)} ({items.length} {isEn ? 'items' : 'รายการ'})
-                            </option>
-                          ))}
                         </optgroup>
                       )}
                     </select>

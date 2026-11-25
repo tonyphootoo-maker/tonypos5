@@ -120,7 +120,13 @@ export interface Sauce {
   updatedAt: string;
 }
 
-export type RecipeItemType = 'INGREDIENT' | 'SAUCE' | 'PREPARED_ITEM' | 'PACKAGING' | 'OTHER';
+export type RecipeItemType =
+  | 'INGREDIENT'
+  | 'SAUCE'
+  | 'PREPARED_ITEM'
+  | 'PACKAGING'
+  | 'RICE_NOODLE'
+  | 'OTHER';
 
 export interface RecipeItem {
   id?: string;
@@ -128,6 +134,7 @@ export interface RecipeItem {
   ingredientType?: RecipeItemType;
   ingredientId: string;
   sauceId?: string;
+  riceNoodlePortionId?: string;
   name: string;
   quantity: number;
   unit: UnitType | string;
@@ -183,6 +190,8 @@ export interface CentralBaseRecipe {
   englishName?: string;
   englishNameManual?: boolean;
   description?: string;
+  riceNoodlePortionId?: string;
+  riceNoodleServings?: number;
   items: RecipeItem[];
   packagingCost?: number;
   packagingItems?: PackagingLineItem[];

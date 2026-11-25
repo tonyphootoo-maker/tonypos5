@@ -74,6 +74,7 @@ import {
   getCentralRecipeOriginLabel,
   syncBaseRecipeToLinkedMenus,
   detachBaseRecipeFromMenus,
+  syncRiceNoodlePortionToBaseRecipes,
 } from './utils/centralRecipeNav';
 
 export type CostingTabId =
@@ -752,6 +753,33 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
       portion.id,
       portion
     );
+
+    const { updatedBaseRecipes, changedBaseRecipes } = syncRiceNoodlePortionToBaseRecipes(
+      baseRecipes,
+      portion
+    );
+    if (changedBaseRecipes.length > 0) {
+      setBaseRecipes(updatedBaseRecipes);
+      StorageService.saveBaseRecipes(updatedBaseRecipes);
+      FirebaseSyncService.batchSaveUser(
+        user.uid,
+        COST_COLLECTIONS.BASE_RECIPES,
+        changedBaseRecipes
+      );
+
+      let workingMenus = menus;
+      let anyMenuChanged = false;
+      for (const changedBase of changedBaseRecipes) {
+        const res = syncBaseRecipeToLinkedMenus(workingMenus, changedBase);
+        if (res.changedMenus.length > 0) {
+          workingMenus = res.updatedMenus;
+          anyMenuChanged = true;
+        }
+      }
+      if (anyMenuChanged) {
+        handleBatchUpdateMenus(workingMenus);
+      }
+    }
   };
 
   const handleDeleteRiceNoodlePortion = (portionId: string) => {
@@ -1060,6 +1088,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             ingredients={ingredients}
             sauces={sauces}
             baseRecipes={baseRecipes}
+            riceNoodlePortions={riceNoodlePortions}
             settings={settings}
             lang={lang}
             initialServingMode="ON_RICE"
@@ -1079,6 +1108,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             ingredients={ingredients}
             sauces={sauces}
             baseRecipes={baseRecipes}
+            riceNoodlePortions={riceNoodlePortions}
             settings={settings}
             lang={lang}
             initialServingMode="A_LA_CARTE"

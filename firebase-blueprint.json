@@ -433,6 +433,8 @@
         "thaiName": { "type": "string" },
         "englishName": { "type": "string" },
         "description": { "type": "string" },
+        "riceNoodlePortionId": { "type": "string" },
+        "riceNoodleServings": { "type": "number" },
         "packagingCost": { "type": "number" },
         "active": { "type": "boolean" }
       }
