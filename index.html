@@ -13,7 +13,8 @@
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" /></noscript>
     <title>Tony's Kit - Restaurant POS &amp; Food Cost Engine</title>
     <meta name="description" content="Bilingual Thai/English restaurant POS, live food cost calculation, recipe engineering, floor plan tables, shifts, and financial P&amp;L reporting." />
     <meta property="og:title" content="Tony's Kit - Restaurant POS &amp; Food Cost Engine" />
@@ -48,7 +49,7 @@
           msgEl.style.color = '#e11d48';
           msgEl.innerText = 'Initialization Error: ' + (e.message || 'Script loading failure') + '\n(โปรดตรวจสอบการเชื่อมต่อหรือรีเฟรชหน้าเว็บ)';
         }
-      });
+      }, true);
       window.addEventListener('unhandledrejection', function(e) {
         var msgEl = document.getElementById('boot-status');
         if (msgEl) {
@@ -120,6 +121,6 @@
         }
       }, 12000);
     </script>
-    <script type="module" src="./src/main.tsx"></script>
+    <script type="module" src="./src/main.tsx" onerror="var s=document.getElementById('boot-status');var b=document.getElementById('boot-retry-btn');if(s){s.style.color='#e11d48';s.innerText='ไม่สามารถโหลดสคริปต์แอปได้ กรุณากดรีเฟรช / Failed to load app module';}if(b){b.style.display='inline-block';}"></script>
   </body>
 </html>

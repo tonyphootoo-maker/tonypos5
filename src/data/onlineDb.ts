@@ -41,8 +41,8 @@ import {
 } from '../types';
 import { DailySalesRecord } from '../costing/types/domain';
 import { MenuItem as CostMenuItem } from '../costing/types';
-import { COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
-import { StorageService } from '../costing/services/storageService';
+
+const COST_DAILY_SALES_COLLECTION = 'costDailySales';
 import {
   buildWebSyncDailySalesRecords,
   extractStoreIdFromLocation,
@@ -851,7 +851,7 @@ export async function syncCompletedOnlineOrdersToPnl(params: {
     packaging,
   });
 
-  const colRef = collection(db, 'users', uid, COST_COLLECTIONS.DAILY_SALES);
+  const colRef = collection(db, 'users', uid, COST_DAILY_SALES_COLLECTION);
   const existingSnap = await getDocs(colRef);
   const existingWebDocs = existingSnap.docs.filter((d) => d.id.startsWith('web_sync_'));
 
@@ -862,14 +862,14 @@ export async function syncCompletedOnlineOrdersToPnl(params: {
   // Remove stale web_sync_* docs no longer backed by any completed order
   for (const docSnap of existingWebDocs) {
     if (!targetRecords[docSnap.id]) {
-      batch.delete(doc(db, 'users', uid, COST_COLLECTIONS.DAILY_SALES, docSnap.id));
+      batch.delete(doc(db, 'users', uid, COST_DAILY_SALES_COLLECTION, docSnap.id));
       removedRecords += 1;
     }
   }
 
   // Upsert exact computed web_sync_* records
   for (const [docId, record] of Object.entries(targetRecords)) {
-    const docRef = doc(db, 'users', uid, COST_COLLECTIONS.DAILY_SALES, docId);
+    const docRef = doc(db, 'users', uid, COST_DAILY_SALES_COLLECTION, docId);
     batch.set(
       docRef,
       stripUndefined({
@@ -883,10 +883,11 @@ export async function syncCompletedOnlineOrdersToPnl(params: {
   try {
     await batch.commit();
   } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, `users/${uid}/${COST_COLLECTIONS.DAILY_SALES}`);
+    handleFirestoreError(err, OperationType.WRITE, `users/${uid}/${COST_DAILY_SALES_COLLECTION}`);
   }
 
   // Keep localStorage StorageService in sync
+  const { StorageService } = await import('../costing/services/storageService');
   const localExisting = StorageService.getDailySales().filter((r) => !r.id?.startsWith('web_sync_'));
   const mergedLocal = [...localExisting, ...Object.values(targetRecords)].sort(
     (a, b) => a.date.localeCompare(b.date) || (a.channelId || '').localeCompare(b.channelId || '')

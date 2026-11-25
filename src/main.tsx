@@ -1,10 +1,38 @@
-import {createRoot} from 'react-dom/client';
-import {registerSW} from 'virtual:pwa-register';
-import App from './App.tsx';
+import React, { Suspense, useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { registerSW } from 'virtual:pwa-register';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
-import { LanguageProvider } from './contexts/LanguageContext.tsx';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext.tsx';
 import { resolveAppMode } from './engine/onlineOrdering.ts';
 import './index.css';
+
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  importer: () => Promise<{ default: T }>
+): React.LazyExoticComponent<T> {
+  return React.lazy(() =>
+    importer().catch(
+      () =>
+        new Promise<{ default: T }>((resolve, reject) => {
+          setTimeout(() => {
+            importer().then(resolve, reject);
+          }, 600);
+        })
+    )
+  );
+}
+
+const LazyOwnerApp = lazyWithRetry(() => import('./App.tsx'));
+const LazyCustomerOrderPage = lazyWithRetry(() =>
+  import('./pages/CustomerOrderPage.tsx').then((m) => ({ default: m.CustomerOrderPage }))
+);
+const LazyRiderAppPage = lazyWithRetry(() =>
+  import('./pages/RiderAppPage.tsx').then((m) => ({ default: m.RiderAppPage }))
+);
+
+const entryMode =
+  typeof window !== 'undefined'
+    ? resolveAppMode(window.location.search, window.location.pathname)
+    : 'owner';
 
 // Register Tier 1 Google Maps Platform Demo Key quota & auth failure guard before render
 if (typeof window !== 'undefined') {
@@ -22,15 +50,98 @@ if (typeof window !== 'undefined') {
 }
 
 // Register Service Worker for Owner POS & Rider offline support (skip in Customer link mode to avoid iOS Safari/WebView SW cache/reload stalls)
-if (typeof window !== 'undefined' && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
-  const entryMode = resolveAppMode(window.location.search, window.location.pathname);
-  if (entryMode !== 'customer') {
-    try {
-      registerSW({ immediate: true });
-    } catch {
-      // Ignore SW registration errors on restricted WebViews
-    }
+if (
+  entryMode !== 'customer' &&
+  typeof window !== 'undefined' &&
+  typeof navigator !== 'undefined' &&
+  'serviceWorker' in navigator
+) {
+  try {
+    registerSW({ immediate: true });
+  } catch {
+    // Ignore SW registration errors on restricted WebViews
   }
+}
+
+function BootFallback({ mode }: { mode: 'customer' | 'rider' | 'owner' }) {
+  const { lang } = useLanguage();
+  const isDark = mode === 'rider';
+  const label =
+    mode === 'customer'
+      ? lang === 'th'
+        ? 'กำลังโหลดเมนูออนไลน์...'
+        : 'Loading Online Menu...'
+      : mode === 'rider'
+      ? lang === 'th'
+        ? 'กำลังโหลดแอป Rider...'
+        : 'Loading Rider App...'
+      : lang === 'th'
+      ? 'กำลังโหลดระบบ...'
+      : 'Loading...';
+
+  return (
+    <div
+      className={`min-h-screen flex flex-col items-center justify-center p-6 text-xs font-bold ${
+        isDark ? 'bg-slate-950 text-slate-200' : 'bg-[#FAF8F5] text-slate-700'
+      }`}
+    >
+      <div
+        className={`w-7 h-7 rounded-full border-2 border-t-transparent animate-spin mb-3 ${
+          isDark ? 'border-emerald-400' : 'border-orange-600'
+        }`}
+      />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function RiderEntryShell() {
+  const { lang } = useLanguage();
+  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handleQuota = () => setMapsQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleQuota);
+    return () => window.removeEventListener('gmp-quota-exceeded', handleQuota);
+  }, []);
+
+  return (
+    <>
+      {mapsQuotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-[70] shadow-sm">
+          <span>
+            {lang === 'th'
+              ? 'ใช้งานโควตา Google Maps Platform ครบกำหนดแล้ว หากคุณเป็นเจ้าของแอป โปรดดูวิธีอัปเดตบัญชีได้ที่ '
+              : 'Google Maps Platform quota reached. If you are the app owner, visit '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-semibold text-amber-950 hover:text-amber-800"
+            >
+              {lang === 'th' ? 'เว็บไซต์นักพัฒนา Maps' : 'maps developer site'}
+            </a>
+            {lang === 'th' ? '' : ' for instructions to update your account.'}
+          </span>
+        </div>
+      )}
+      <LazyRiderAppPage lang={lang} />
+    </>
+  );
+}
+
+function RootEntry() {
+  return (
+    <Suspense fallback={<BootFallback mode={entryMode} />}>
+      {entryMode === 'customer' ? (
+        <LazyCustomerOrderPage />
+      ) : entryMode === 'rider' ? (
+        <RiderEntryShell />
+      ) : (
+        <LazyOwnerApp />
+      )}
+    </Suspense>
+  );
 }
 
 // Remove initial bootstrap message once React mounts
@@ -42,7 +153,7 @@ if (bootMsg) {
 createRoot(document.getElementById('root')!).render(
   <LanguageProvider>
     <ErrorBoundary>
-      <App />
+      <RootEntry />
     </ErrorBoundary>
   </LanguageProvider>
 );
