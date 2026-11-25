@@ -232,6 +232,8 @@ export interface MenuItem {
   name: string; // e.g. "กะเพรา", "ข้าวผัด", "ต้มยำ"
   category: string;
   description?: string;
+  descriptionTh?: string;
+  descriptionEnManual?: boolean;
   active: boolean;
   isOutOfStock?: boolean;
   availableChannels?: string[];

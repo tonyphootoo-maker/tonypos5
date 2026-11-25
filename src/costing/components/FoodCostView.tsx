@@ -53,9 +53,12 @@ import {
 import { extractNetPriceFromMenuPrice } from '../../engine/calculations';
 import {
   translateThaiToEnglish,
+  translateThaiDescriptionToEnglish,
   computeAutoEnglishName,
+  computeAutoEnglishDescription,
   containsThaiCharacters,
   getLocalizedText,
+  resolveBilingualDescriptionFields,
   localizeUnit,
   learnShopTranslation,
 } from '../../utils/thaiToEnglish';
@@ -266,6 +269,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const [dragOverMenuId, setDragOverMenuId] = useState<string | null>(null);
   const menuNameClickTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMenuThaiRef = React.useRef<string>('');
+  const prevMenuDescThaiRef = React.useRef<string>('');
   const prevVariantThaiRef = React.useRef<string>('');
   const prevAddCatThaiRef = React.useRef<string>('');
   const prevEditCatThaiRef = React.useRef<string>('');
@@ -946,6 +950,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const handleOpenAddMenu = () => {
     translationScheduler.cancelAll();
     prevMenuThaiRef.current = '';
+    prevMenuDescThaiRef.current = '';
     const currentCat =
       selectedCategory !== 'ALL'
         ? selectedCategory
@@ -960,6 +965,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       thaiName: '',
       englishName: '',
       englishNameManual: false,
+      description: '',
+      descriptionTh: '',
+      descriptionEnManual: false,
       category: currentCat,
       variants: [
         {
@@ -1002,6 +1010,20 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         : storedEn && !containsThaiCharacters(storedEn)
         ? storedEn
         : translateThaiToEnglish(thName);
+    const resolvedDesc = resolveBilingualDescriptionFields(
+      cloned.description,
+      cloned.descriptionTh
+    );
+    const hasManualEnDesc =
+      Boolean(resolvedDesc.description) &&
+      (Boolean(cloned.descriptionEnManual) ||
+        (!cloned.descriptionTh &&
+          Boolean(cloned.description) &&
+          !containsThaiCharacters(cloned.description)));
+    cloned.description = resolvedDesc.description;
+    cloned.descriptionTh = resolvedDesc.descriptionTh;
+    cloned.descriptionEnManual = hasManualEnDesc;
+    prevMenuDescThaiRef.current = resolvedDesc.descriptionTh;
     setEditingMenu(cloned);
     setIsMenuModalOpen(true);
   };
@@ -1022,6 +1044,19 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
           isManuallyEdited: false,
         }).trim() || translateThaiToEnglish(trimmedTh);
 
+    const finalDescTh = (editingMenu.descriptionTh || '').trim();
+    const isDescManual =
+      Boolean(editingMenu.descriptionEnManual) && Boolean((editingMenu.description || '').trim());
+    const computedDescEn = isDescManual
+      ? (editingMenu.description || '').trim()
+      : computeAutoEnglishDescription({
+          previousThai: prevMenuDescThaiRef.current,
+          nextThai: finalDescTh,
+          currentEnglish: editingMenu.description || '',
+          isManuallyEdited: false,
+        }) || (finalDescTh ? translateThaiDescriptionToEnglish(finalDescTh) : '');
+    const finalDescEn = containsThaiCharacters(computedDescEn) ? '' : computedDescEn.trim();
+
     const finalMenu: MenuItem = {
       id: editingMenu.id || `menu_${Date.now()}`,
       name: trimmedTh,
@@ -1036,7 +1071,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       displayOrder: editingMenu.displayOrder || 1,
       variants: editingMenu.variants || [],
       active: editingMenu.active !== undefined ? editingMenu.active : true,
-      description: editingMenu.description,
+      ...(finalDescEn ? { description: finalDescEn } : {}),
+      ...(finalDescTh ? { descriptionTh: finalDescTh } : {}),
+      ...(finalDescEn || finalDescTh ? { descriptionEnManual: isDescManual } : {}),
       createdAt: editingMenu.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -3219,6 +3256,97 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* Bilingual Dish Description for Customer Ordering Page */}
+              <div className="space-y-2.5">
+                <div>
+                  <label className="block text-stone-700 mb-1 font-bold text-xs">
+                    {isEn ? 'Dish Description (Thai)' : 'คำอธิบายอาหาร (ภาษาไทย)'}
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder={
+                      isEn
+                        ? 'e.g. คำอธิบายเมนูภาษาไทย (shown to customers)'
+                        : 'เช่น ผัดกะเพราแท้สูตรโบราณ รสเข้มจัดจ้าน ใช้ใบกะเพราสด (แสดงหน้าสั่งอาหาร)'
+                    }
+                    value={editingMenu.descriptionTh || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      setEditingMenu((prev) => (prev ? { ...prev, descriptionTh: nextTh } : prev));
+                      translationScheduler.schedule('costMenuDesc', () => {
+                        setEditingMenu((prev) => {
+                          if (!prev) return prev;
+                          const currTh = prev.descriptionTh || '';
+                          const nextEn = computeAutoEnglishDescription({
+                            previousThai: prevMenuDescThaiRef.current,
+                            nextThai: currTh,
+                            currentEnglish: prev.description || '',
+                            isManuallyEdited: Boolean(prev.descriptionEnManual),
+                          });
+                          prevMenuDescThaiRef.current = currTh;
+                          return { ...prev, description: nextEn };
+                        });
+                      });
+                    }}
+                    onBlur={() => translationScheduler.flush('costMenuDesc')}
+                    className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26] resize-none"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <label className="block text-stone-700 font-bold text-xs">
+                        {isEn ? 'Dish Description (EN)' : 'คำอธิบายอาหาร (ภาษาอังกฤษ — EN)'}
+                      </label>
+                      {!translationScheduler.hasPending('costMenuDesc') &&
+                        Boolean((editingMenu.descriptionTh || '').trim()) &&
+                        (!(editingMenu.description || '').trim() ||
+                          containsThaiCharacters(editingMenu.description)) && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-600">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span>{isEn ? 'Add EN text' : 'กรุณาใส่คำอธิบาย EN'}</span>
+                          </span>
+                        )}
+                    </div>
+                    {editingMenu.descriptionTh &&
+                      translateThaiDescriptionToEnglish(editingMenu.descriptionTh) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            translationScheduler.cancel('costMenuDesc');
+                            prevMenuDescThaiRef.current = editingMenu.descriptionTh || '';
+                            setEditingMenu({
+                              ...editingMenu,
+                              description: translateThaiDescriptionToEnglish(
+                                editingMenu.descriptionTh || ''
+                              ),
+                              descriptionEnManual: false,
+                            });
+                          }}
+                          className="text-[11px] font-bold text-[#F27D26] hover:underline cursor-pointer shrink-0"
+                        >
+                          {isEn ? 'Re-translate' : 'แปลใหม่จากภาษาไทย'}
+                        </button>
+                      )}
+                  </div>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. Authentic traditional stir-fried holy basil with fresh garlic"
+                    value={editingMenu.description || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      translationScheduler.cancel('costMenuDesc');
+                      setEditingMenu({
+                        ...editingMenu,
+                        description: val,
+                        descriptionEnManual: Boolean(val.trim()),
+                      });
+                    }}
+                    className="w-full p-2.5 bg-amber-50/40 border border-[#D6CEBE] rounded-xl text-stone-900 text-xs focus:outline-none focus:border-[#F27D26] focus:ring-1 focus:ring-[#F27D26] resize-none"
+                  />
+                </div>
               </div>
 
               {/* Status toggles */}

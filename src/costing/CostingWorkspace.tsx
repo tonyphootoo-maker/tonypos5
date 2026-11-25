@@ -48,7 +48,10 @@ import {
 } from './services/spreadsheetCostHelper';
 import { upsertDailySalesRecord, normalizeUpsertChannelId } from './engine/calculations';
 import { formatPeriodCalculationLabel, normalizeToMonthly } from '../engine/calculations';
-import { syncAllCostingToPOS } from './services/posBridge';
+import {
+  syncAllCostingToPOS,
+  propagateCostMenuDescriptionToPos,
+} from './services/posBridge';
 import { AppIconService } from './services/appIconService';
 
 import { FoodCostView } from './components/FoodCostView';
@@ -620,6 +623,9 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
       menuSingleSaveTimersRef.current.delete(menu.id);
       pendingMenuSyncUntilRef.current = Date.now() + 1200;
       FirebaseSyncService.saveUserDoc(user.uid, COST_COLLECTIONS.MENUS, menu.id, menu);
+      propagateCostMenuDescriptionToPos(menu).catch((err) => {
+        console.warn('Propagate menu description to POS warning:', err);
+      });
     }, 250);
     menuSingleSaveTimersRef.current.set(menu.id, timer);
   };

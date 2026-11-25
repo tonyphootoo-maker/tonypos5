@@ -438,7 +438,7 @@ async function syncSingleMenuWithContext(
   );
   const syncedDesc = existingHasDesc
     ? resolveBilingualDescriptionFields(existingDish?.description, existingDish?.descriptionTh)
-    : resolveBilingualDescriptionFields(costMenu.description);
+    : resolveBilingualDescriptionFields(costMenu.description, costMenu.descriptionTh);
 
   const dishDoc: DishDoc = {
     id: existingDish ? existingDish.id : targetDishId,
@@ -454,7 +454,13 @@ async function syncSingleMenuWithContext(
     costMenuId: costMenu.id,
     ...(syncedDesc.description ? { description: syncedDesc.description } : {}),
     ...(syncedDesc.descriptionTh ? { descriptionTh: syncedDesc.descriptionTh } : {}),
-    ...(existingDish?.descriptionEnManual ? { descriptionEnManual: true } : {}),
+    ...(existingHasDesc
+      ? existingDish?.descriptionEnManual
+        ? { descriptionEnManual: true }
+        : {}
+      : costMenu.descriptionEnManual
+      ? { descriptionEnManual: true }
+      : {}),
     variants: finalVariants,
     optionGroupIds: existingDish?.optionGroupIds || [],
     order: existingDish?.order || existingDishes.length + 1,
@@ -478,6 +484,60 @@ async function syncSingleMenuWithContext(
     updatedIngredients,
     updatedSauces,
   };
+}
+
+/**
+ * Propagates bilingual dish descriptions edited in Costing Menu List ("รายการเมนูอาหาร")
+ * to any linked POS DishDoc so Customer Storefront updates immediately.
+ */
+export async function propagateCostMenuDescriptionToPos(costMenu: CostMenuItem): Promise<void> {
+  const existingDishes = await fetchCollection<DishDoc>('dishes');
+  const expectedPosId = `cost_dish_${normalizePosId(costMenu.id)}`;
+  const costTh = (costMenu.thaiName || costMenu.name || '').trim().toLowerCase();
+  const costEn = (costMenu.englishName || '').trim().toLowerCase();
+
+  const matchingDishes = existingDishes.filter(
+    (d) =>
+      d.costMenuId === costMenu.id ||
+      d.id === expectedPosId ||
+      (costTh && (d.nameTh || '').trim().toLowerCase() === costTh) ||
+      (costEn && (d.name || '').trim().toLowerCase() === costEn) ||
+      (d.variants || []).some((v) => v.costMenuId === costMenu.id)
+  );
+  if (matchingDishes.length === 0) return;
+
+  const resolvedDesc = resolveBilingualDescriptionFields(
+    costMenu.description,
+    costMenu.descriptionTh
+  );
+  const now = new Date().toISOString();
+
+  for (const dish of matchingDishes) {
+    const nextDesc = resolvedDesc.description || '';
+    const nextDescTh = resolvedDesc.descriptionTh || '';
+    const nextManual = Boolean(costMenu.descriptionEnManual && nextDesc);
+    if (
+      (dish.description || '') === nextDesc &&
+      (dish.descriptionTh || '') === nextDescTh &&
+      Boolean(dish.descriptionEnManual) === nextManual
+    ) {
+      continue;
+    }
+
+    const updatedDish: DishDoc = {
+      ...dish,
+      updatedAt: now,
+      version: (dish.version || 0) + 1,
+    };
+    if (nextDesc) updatedDish.description = nextDesc;
+    else delete updatedDish.description;
+    if (nextDescTh) updatedDish.descriptionTh = nextDescTh;
+    else delete updatedDish.descriptionTh;
+    if (nextDesc || nextDescTh) updatedDish.descriptionEnManual = nextManual;
+    else delete updatedDish.descriptionEnManual;
+
+    await saveDocument('dishes', updatedDish, false);
+  }
 }
 
 /**

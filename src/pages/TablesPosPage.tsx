@@ -52,10 +52,13 @@ import {
 import { compressImage } from '../utils/imageCompressor';
 import {
   translateThaiToEnglish,
+  translateThaiDescriptionToEnglish,
   computeAutoEnglishName,
+  computeAutoEnglishDescription,
   getLocalizedText,
   containsThaiCharacters,
   resolveEntityEnglishName,
+  resolveBilingualDescriptionFields,
   learnShopTranslation,
 } from '../utils/thaiToEnglish';
 import {
@@ -220,6 +223,7 @@ export const TablesPosPage: React.FC<Props> = ({
   const [isDeletingPosDish, setIsDeletingPosDish] = useState(false);
   const posManualEnKeysRef = useRef<Set<string>>(new Set());
   const posPrevDishThaiRef = useRef<string>('');
+  const posPrevDishDescThaiRef = useRef<string>('');
   const posPrevVarThaiMapRef = useRef<Map<string, string>>(new Map());
   const posTranslationScheduler = useDebouncedTranslationScheduler(600);
   const lastDishNameTapRef = useRef<{ dishId: string; ts: number } | null>(null);
@@ -262,6 +266,7 @@ export const TablesPosPage: React.FC<Props> = ({
       categoryId: dish.categoryId || '',
       imageId: dish.imageId || '',
       description: dish.description || '',
+      descriptionTh: dish.descriptionTh || '',
       costMenuId: dish.costMenuId || '',
       optionGroupIds: dish.optionGroupIds || [],
       variants: (dish.variants || []).map((v) => ({
@@ -1431,6 +1436,7 @@ export const TablesPosPage: React.FC<Props> = ({
     posTranslationScheduler.cancelAll();
     posManualEnKeysRef.current.clear();
     posPrevDishThaiRef.current = '';
+    posPrevDishDescThaiRef.current = '';
     posPrevVarThaiMapRef.current = new Map();
     setPosModalPriceOverrides({});
     setPosImageError(null);
@@ -1448,6 +1454,8 @@ export const TablesPosPage: React.FC<Props> = ({
       id: `dish_${Date.now()}`,
       name: '',
       nameTh: '',
+      description: '',
+      descriptionTh: '',
       categoryId: targetCategoryId,
       variants: [
         {
@@ -1486,7 +1494,18 @@ export const TablesPosPage: React.FC<Props> = ({
     if (dish.nameEnManual && (dish.name || '').trim()) {
       posManualEnKeysRef.current.add('dish');
     }
+    const resolvedDesc = resolveBilingualDescriptionFields(dish.description, dish.descriptionTh);
+    const hasManualEnDesc =
+      Boolean(resolvedDesc.description) &&
+      (Boolean(dish.descriptionEnManual) ||
+        (!dish.descriptionTh &&
+          Boolean(dish.description) &&
+          !containsThaiCharacters(dish.description)));
+    if (hasManualEnDesc) {
+      posManualEnKeysRef.current.add('dishDesc');
+    }
     posPrevDishThaiRef.current = dish.nameTh || '';
+    posPrevDishDescThaiRef.current = resolvedDesc.descriptionTh;
     posPrevVarThaiMapRef.current = new Map(
       (dish.variants || []).map((v) => [v.id, v.nameTh || ''])
     );
@@ -1514,6 +1533,9 @@ export const TablesPosPage: React.FC<Props> = ({
     }
     const draftDish: DishDoc = {
       ...dish,
+      description: resolvedDesc.description,
+      descriptionTh: resolvedDesc.descriptionTh,
+      descriptionEnManual: hasManualEnDesc,
       variants: (dish.variants || []).map((v) => ({
         ...v,
         ingredients: [...(v.ingredients || [])],
@@ -1650,6 +1672,18 @@ export const TablesPosPage: React.FC<Props> = ({
 
       const isNew = isCreatingDishInPos || !dishes.some((d) => d.id === editingDishInPos.id);
       const resolvedCostMenuId = matchedCostMenu?.id || editingDishInPos.costMenuId;
+      const finalDescTh = (editingDishInPos.descriptionTh || '').trim();
+      const isDescManual =
+        posManualEnKeysRef.current.has('dishDesc') && Boolean((editingDishInPos.description || '').trim());
+      const computedDescEn = isDescManual
+        ? (editingDishInPos.description || '').trim()
+        : computeAutoEnglishDescription({
+            previousThai: posPrevDishDescThaiRef.current,
+            nextThai: finalDescTh,
+            currentEnglish: editingDishInPos.description || '',
+            isManuallyEdited: false,
+          }) || (finalDescTh ? translateThaiDescriptionToEnglish(finalDescTh) : '');
+      const finalDescEn = containsThaiCharacters(computedDescEn) ? '' : computedDescEn.trim();
 
       const dishToSave: DishDoc = {
         ...editingDishInPos,
@@ -1678,6 +1712,12 @@ export const TablesPosPage: React.FC<Props> = ({
         updatedAt: new Date().toISOString(),
         version: isNew ? 1 : (editingDishInPos.version || 0) + 1,
       };
+      if (finalDescEn) dishToSave.description = finalDescEn;
+      else delete dishToSave.description;
+      if (finalDescTh) dishToSave.descriptionTh = finalDescTh;
+      else delete dishToSave.descriptionTh;
+      if (finalDescEn || finalDescTh) dishToSave.descriptionEnManual = isDescManual;
+      else delete dishToSave.descriptionEnManual;
       if (!editingDishInPos.imageId) {
         delete dishToSave.imageId;
       }
@@ -3718,6 +3758,99 @@ export const TablesPosPage: React.FC<Props> = ({
                       ) : null}
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Bilingual Dish Description for Customer Ordering Page */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-neutral-700 mb-1">
+                    {lang === 'th' ? 'คำอธิบายอาหาร (ภาษาไทย)' : 'Dish Description (Thai)'}
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editingDishInPos.descriptionTh || ''}
+                    onChange={(e) => {
+                      const nextTh = e.target.value;
+                      setEditingDishInPos({ ...editingDishInPos, descriptionTh: nextTh });
+                      posTranslationScheduler.schedule('dishDesc', () => {
+                        setEditingDishInPos((prev) => {
+                          if (!prev) return prev;
+                          const nextEn = computeAutoEnglishDescription({
+                            previousThai: posPrevDishDescThaiRef.current,
+                            nextThai: nextTh,
+                            currentEnglish: prev.description || '',
+                            isManuallyEdited: posManualEnKeysRef.current.has('dishDesc'),
+                          });
+                          posPrevDishDescThaiRef.current = nextTh;
+                          return { ...prev, description: nextEn };
+                        });
+                      });
+                    }}
+                    onBlur={() => posTranslationScheduler.flush('dishDesc')}
+                    placeholder={
+                      lang === 'th'
+                        ? 'เช่น ผัดกะเพราสูตรโบราณ รสจัดจ้าน ใช้ใบกะเพราสด (แสดงหน้าสั่งอาหาร)'
+                        : 'e.g. คำอธิบายเมนูภาษาไทย (shown to customers)'
+                    }
+                    className="w-full px-3 py-1.5 text-xs bg-white border border-orange-300 rounded-xl focus:ring-2 focus:ring-orange-500 resize-none"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <label className="block text-xs font-bold text-neutral-700">
+                        {lang === 'th' ? 'คำอธิบายอาหาร (EN)' : 'Dish Description (EN)'}
+                      </label>
+                      {!posTranslationScheduler.hasPending('dishDesc') &&
+                        Boolean((editingDishInPos.descriptionTh || '').trim()) &&
+                        (!(editingDishInPos.description || '').trim() ||
+                          containsThaiCharacters(editingDishInPos.description)) && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-700">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span>{lang === 'th' ? 'กรุณาใส่คำอธิบาย EN' : 'Add EN text'}</span>
+                          </span>
+                        )}
+                    </div>
+                    {editingDishInPos.descriptionTh &&
+                      translateThaiDescriptionToEnglish(editingDishInPos.descriptionTh) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            posTranslationScheduler.cancel('dishDesc');
+                            posManualEnKeysRef.current.delete('dishDesc');
+                            posPrevDishDescThaiRef.current = editingDishInPos.descriptionTh || '';
+                            setEditingDishInPos({
+                              ...editingDishInPos,
+                              description: translateThaiDescriptionToEnglish(
+                                editingDishInPos.descriptionTh || ''
+                              ),
+                              descriptionEnManual: false,
+                            });
+                          }}
+                          className="text-[10px] font-bold text-orange-600 hover:underline cursor-pointer shrink-0"
+                        >
+                          {lang === 'th' ? 'แปลใหม่' : 'Re-translate'}
+                        </button>
+                      )}
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={editingDishInPos.description || ''}
+                    onChange={(e) => {
+                      posTranslationScheduler.cancel('dishDesc');
+                      const val = e.target.value;
+                      if (val.trim()) posManualEnKeysRef.current.add('dishDesc');
+                      else posManualEnKeysRef.current.delete('dishDesc');
+                      setEditingDishInPos({
+                        ...editingDishInPos,
+                        description: val,
+                        descriptionEnManual: Boolean(val.trim()),
+                      });
+                    }}
+                    placeholder="e.g. Authentic Thai holy basil stir-fry with fresh garlic and chilies"
+                    className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500 resize-none"
+                  />
                 </div>
               </div>
 
