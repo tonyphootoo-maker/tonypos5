@@ -1956,3 +1956,145 @@ export function localizeUnit(unit: string | undefined | null, lang: 'th' | 'en')
   if (!raw || lang === 'th') return raw;
   return UNIT_EN_MAP[raw] || (HAS_THAI_RE.test(raw) ? translateThaiToEnglish(raw) || raw : raw);
 }
+
+const BUILTIN_DESCRIPTION_EN_MAP: Record<string, string> = {
+  'ผัดกะเพราแท้สูตรโบราณ รสเข้มจัดจ้าน ใช้ใบกะเพราสดและกระเทียมไทยแท้':
+    'Authentic traditional stir-fried holy basil with bold flavor, fresh holy basil leaves, and Thai garlic.',
+  'ข้าวผัดโบราณหอมกลิ่นกระทะ คลุกเคล้าไข่และต้นหอม':
+    'Classic wok-fried rice with smoky aroma, tossed with egg and spring onion.',
+  'ผัดไทยเส้นจันท์เหนียวนุ่ม น้ำซอสมะขามสูตรเฉพาะ ถั่วงอกและกุยช่ายสด':
+    'Chewy Chanthaburi rice noodles in signature tamarind sauce with fresh bean sprouts and garlic chives.',
+  'สุกี้ผัดแห้งหอมกลิ่นกระทะ เสิร์ฟพร้อมน้ำจิ้มสุกี้โบราณรสเด็ด':
+    'Wok-seared dry sukiyaki served with our signature classic sukiyaki dipping sauce.',
+  'เครื่องเคียงเสริมสำหรับเมนูราดข้าว':
+    'Additional side dish for rice-topped meals.',
+};
+
+/**
+ * Translates a Thai dish description into natural sentence-case English using
+ * the shop glossary, built-in description dictionary, or clean phrase fallback.
+ * Returns '' if unresolved (never emits partial or romanized Thai).
+ */
+export function translateThaiDescriptionToEnglish(input?: string | null): string {
+  const raw = (input || '').trim();
+  if (!raw) return '';
+  if (!HAS_THAI_RE.test(raw)) return raw;
+
+  const normalized = normalizeThaiForTranslation(raw);
+  if (!normalized) return '';
+
+  const glossary = getShopTranslationGlossary();
+  if (glossary[normalized] && !HAS_THAI_RE.test(glossary[normalized])) {
+    return glossary[normalized].trim();
+  }
+  if (BUILTIN_DESCRIPTION_EN_MAP[normalized]) {
+    return BUILTIN_DESCRIPTION_EN_MAP[normalized];
+  }
+
+  const parts = normalized.split(/\s+/).filter(Boolean);
+  if (parts.length > 1) {
+    const translatedParts: string[] = [];
+    for (const part of parts) {
+      if (!HAS_THAI_RE.test(part)) {
+        translatedParts.push(part);
+        continue;
+      }
+      const mapped =
+        glossary[part] || BUILTIN_DESCRIPTION_EN_MAP[part] || translateThaiToEnglish(part);
+      if (!mapped || HAS_THAI_RE.test(mapped)) {
+        translatedParts.length = 0;
+        break;
+      }
+      translatedParts.push(mapped);
+    }
+    if (translatedParts.length > 0) {
+      return translatedParts.join(' ');
+    }
+  }
+
+  const single = translateThaiToEnglish(normalized);
+  return single && !HAS_THAI_RE.test(single) ? single : '';
+}
+
+/**
+ * Computes the next English dish description when the Thai description changes.
+ * Preserves manually edited English descriptions and updates empty or previously auto-translated values.
+ */
+export function computeAutoEnglishDescription(params: {
+  previousThai?: string;
+  nextThai: string;
+  currentEnglish?: string;
+  isManuallyEdited?: boolean;
+}): string {
+  const { previousThai = '', nextThai, currentEnglish = '', isManuallyEdited = false } = params;
+  if (isManuallyEdited && currentEnglish.trim().length > 0) {
+    return currentEnglish;
+  }
+
+  const currEnTrimmed = currentEnglish.trim();
+  const prevAuto = previousThai.trim() ? translateThaiDescriptionToEnglish(previousThai) : '';
+
+  const shouldAutoUpdate =
+    !currEnTrimmed ||
+    currEnTrimmed === previousThai.trim() ||
+    HAS_THAI_RE.test(currEnTrimmed) ||
+    (prevAuto && currEnTrimmed.toLowerCase() === prevAuto.toLowerCase());
+
+  if (!shouldAutoUpdate) {
+    return currentEnglish;
+  }
+
+  return translateThaiDescriptionToEnglish(nextThai);
+}
+
+/**
+ * Normalizes bilingual dish description fields, migrating legacy Thai-only
+ * values stored in `description` into `descriptionTh` while keeping English in `description`.
+ */
+export function resolveBilingualDescriptionFields(
+  description?: string | null,
+  descriptionTh?: string | null
+): { description: string; descriptionTh: string } {
+  const rawTh = (descriptionTh || '').trim();
+  const rawDesc = (description || '').trim();
+
+  if (rawTh) {
+    const cleanEn =
+      rawDesc && !HAS_THAI_RE.test(rawDesc)
+        ? rawDesc
+        : translateThaiDescriptionToEnglish(rawTh);
+    return {
+      description: cleanEn,
+      descriptionTh: rawTh,
+    };
+  }
+
+  if (rawDesc && HAS_THAI_RE.test(rawDesc)) {
+    return {
+      description: translateThaiDescriptionToEnglish(rawDesc),
+      descriptionTh: rawDesc,
+    };
+  }
+
+  return {
+    description: rawDesc,
+    descriptionTh: '',
+  };
+}
+
+/**
+ * Resolves the dish description string to display in the active language (`th` | `en`),
+ * supporting both explicit `descriptionTh`/`description` pairs and legacy Thai-only `description`.
+ */
+export function getLocalizedDishDescription(
+  lang: 'th' | 'en',
+  description?: string | null,
+  descriptionTh?: string | null
+): string {
+  const resolved = resolveBilingualDescriptionFields(description, descriptionTh);
+  if (lang === 'th') {
+    return resolved.descriptionTh || resolved.description;
+  }
+  return resolved.description || resolved.descriptionTh;
+}
+

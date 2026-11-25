@@ -17,7 +17,7 @@ import {
 } from '../types';
 import { fetchCollection, saveDocument } from '../../data/db';
 import { calculateIngredientCostPerBaseUnit } from '../../engine/calculations';
-import { resolveEntityEnglishName } from '../../utils/thaiToEnglish';
+import { resolveBilingualDescriptionFields, resolveEntityEnglishName } from '../../utils/thaiToEnglish';
 import { convertUnit } from '../engine/units';
 import {
   resolveCostVariantLabel,
@@ -433,6 +433,13 @@ async function syncSingleMenuWithContext(
           },
         ];
 
+  const existingHasDesc = Boolean(
+    existingDish?.description?.trim() || existingDish?.descriptionTh?.trim()
+  );
+  const syncedDesc = existingHasDesc
+    ? resolveBilingualDescriptionFields(existingDish?.description, existingDish?.descriptionTh)
+    : resolveBilingualDescriptionFields(costMenu.description);
+
   const dishDoc: DishDoc = {
     id: existingDish ? existingDish.id : targetDishId,
     name: existingDish?.nameEnManual
@@ -445,7 +452,9 @@ async function syncSingleMenuWithContext(
     categoryId: existingDish?.categoryId || matchedCat.id,
     ...(existingDish?.imageId ? { imageId: existingDish.imageId } : {}),
     costMenuId: costMenu.id,
-    ...(costMenu.description ? { description: costMenu.description } : existingDish?.description ? { description: existingDish.description } : {}),
+    ...(syncedDesc.description ? { description: syncedDesc.description } : {}),
+    ...(syncedDesc.descriptionTh ? { descriptionTh: syncedDesc.descriptionTh } : {}),
+    ...(existingDish?.descriptionEnManual ? { descriptionEnManual: true } : {}),
     variants: finalVariants,
     optionGroupIds: existingDish?.optionGroupIds || [],
     order: existingDish?.order || existingDishes.length + 1,

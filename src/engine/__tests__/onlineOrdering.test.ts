@@ -21,6 +21,10 @@ import {
   resolveCostVariantDisplayNames,
   resolveCostVariantLabel,
 } from '../../costing/services/spreadsheetCostHelper';
+import {
+  getLocalizedDishDescription,
+  resolveBilingualDescriptionFields,
+} from '../../utils/thaiToEnglish';
 import type { MenuItem as CostMenuItem } from '../../costing/types';
 import {
   CategoryDoc,
@@ -670,5 +674,61 @@ describe('Online Ordering Engine', () => {
       dishes: [],
     });
     expect(parseFirestoreRestDocument(null)).toBeNull();
+  });
+
+  it('normalizes legacy Thai-only descriptions and preserves bilingual descriptions in publicStores', () => {
+    const legacyThaiDish: DishDoc = {
+      ...mockDishes[0],
+      id: 'dish_legacy_desc',
+      description: 'ผัดกะเพราแท้สูตรโบราณ รสเข้มจัดจ้าน ใช้ใบกะเพราสดและกระเทียมไทยแท้',
+      descriptionTh: undefined,
+    };
+    const customBilingualDish: DishDoc = {
+      ...mockDishes[0],
+      id: 'dish_bilingual_desc',
+      descriptionTh: 'เส้นจันท์ผัดซอสมะขามสูตรร้าน',
+      description: 'Stir-fried Chanthaburi noodles with house tamarind sauce',
+    };
+
+    const { publicStore } = sanitizeMenuForPublicStore({
+      storeId: 'store_1',
+      settings: mockSettings,
+      categories: mockCategories,
+      dishes: [legacyThaiDish, customBilingualDish],
+      optionGroups: mockOptionGroups,
+      publishedAt: nowIso,
+    });
+
+    const legacyPub = publicStore.dishes.find((d) => d.id === 'dish_legacy_desc')!;
+    const bilingualPub = publicStore.dishes.find((d) => d.id === 'dish_bilingual_desc')!;
+
+    expect(legacyPub.descriptionTh).toBe(
+      'ผัดกะเพราแท้สูตรโบราณ รสเข้มจัดจ้าน ใช้ใบกะเพราสดและกระเทียมไทยแท้'
+    );
+    expect(legacyPub.description).toBe(
+      'Authentic traditional stir-fried holy basil with bold flavor, fresh holy basil leaves, and Thai garlic.'
+    );
+    expect(getLocalizedDishDescription('th', legacyPub.description, legacyPub.descriptionTh)).toBe(
+      'ผัดกะเพราแท้สูตรโบราณ รสเข้มจัดจ้าน ใช้ใบกะเพราสดและกระเทียมไทยแท้'
+    );
+    expect(getLocalizedDishDescription('en', legacyPub.description, legacyPub.descriptionTh)).toBe(
+      'Authentic traditional stir-fried holy basil with bold flavor, fresh holy basil leaves, and Thai garlic.'
+    );
+
+    expect(bilingualPub.descriptionTh).toBe('เส้นจันท์ผัดซอสมะขามสูตรร้าน');
+    expect(bilingualPub.description).toBe(
+      'Stir-fried Chanthaburi noodles with house tamarind sauce'
+    );
+    expect(
+      getLocalizedDishDescription('th', bilingualPub.description, bilingualPub.descriptionTh)
+    ).toBe('เส้นจันท์ผัดซอสมะขามสูตรร้าน');
+    expect(
+      getLocalizedDishDescription('en', bilingualPub.description, bilingualPub.descriptionTh)
+    ).toBe('Stir-fried Chanthaburi noodles with house tamarind sauce');
+
+    expect(resolveBilingualDescriptionFields('Classic English only')).toEqual({
+      description: 'Classic English only',
+      descriptionTh: '',
+    });
   });
 });

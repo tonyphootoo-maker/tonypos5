@@ -59,7 +59,11 @@ import {
   updateOptionChoiceQuantityMap,
 } from '../engine/calculations';
 import { toDateSafe } from '../engine/onlineOrdering';
-import { getLocalizedText } from '../utils/thaiToEnglish';
+import {
+  getLocalizedDishDescription,
+  getLocalizedText,
+  resolveBilingualDescriptionFields,
+} from '../utils/thaiToEnglish';
 import { useLanguage } from '../contexts/LanguageContext';
 import { LanguageToggle } from '../components/LanguageToggle';
 import { NumericInput } from '../costing/components/common/NumericInput';
@@ -348,7 +352,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
           const matchEn = d.name.toLowerCase().includes(q);
           const matchTh = (d.nameTh || '').toLowerCase().includes(q);
           const matchLoc = getLocalizedText(lang, d.nameTh || d.name, d.name).toLowerCase().includes(q);
-          const matchDesc = (d.description || '').toLowerCase().includes(q);
+          const resolvedDesc = resolveBilingualDescriptionFields(d.description, d.descriptionTh);
+          const matchDesc =
+            resolvedDesc.description.toLowerCase().includes(q) ||
+            resolvedDesc.descriptionTh.toLowerCase().includes(q);
           if (!matchEn && !matchTh && !matchLoc && !matchDesc) return false;
         }
         return d.variants && d.variants.length > 0;
@@ -835,6 +842,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
             {filteredDishes.map((dish) => {
               const title = getLocalizedText(lang, dish.nameTh || dish.name, dish.name);
+              const dishDescription = getLocalizedDishDescription(
+                lang,
+                dish.description,
+                dish.descriptionTh
+              );
               const minPrice = Math.min(...dish.variants.map((v) => v.price));
               const photoUrl = dish.imageId ? dishImages[dish.imageId] : null;
               return (
@@ -859,8 +871,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                   <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
                     <div>
                       <h2 className="font-bold text-sm text-slate-900 line-clamp-2">{title}</h2>
-                      {dish.description && (
-                        <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{dish.description}</p>
+                      {dishDescription && (
+                        <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{dishDescription}</p>
                       )}
                     </div>
                     <div className="flex items-center justify-between pt-2">
@@ -922,6 +934,16 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
             </div>
 
             <div className="modal-body space-y-5">
+              {(() => {
+                const activeDesc = getLocalizedDishDescription(
+                  lang,
+                  activeDish.description,
+                  activeDish.descriptionTh
+                );
+                return activeDesc ? (
+                  <p className="text-xs text-slate-600 leading-relaxed">{activeDesc}</p>
+                ) : null;
+              })()}
               {/* Variants */}
               <div className="space-y-2">
                 <div className="text-xs font-extrabold text-slate-700">

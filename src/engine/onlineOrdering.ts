@@ -18,6 +18,7 @@ import {
 import { DailySalesRecord } from '../costing/types/domain';
 import { MenuItem as CostMenuItem } from '../costing/types';
 import { resolveCostVariantDisplayNames } from '../costing/services/spreadsheetCostHelper';
+import { resolveBilingualDescriptionFields } from '../utils/thaiToEnglish';
 import {
   calculateDishVariantCost,
   calculateIngredientEffectiveCost,
@@ -140,13 +141,15 @@ export function sanitizeMenuForPublicStore(params: {
       if (d.imageId) {
         imageIdSet.add(d.imageId);
       }
+      const resolvedDesc = resolveBilingualDescriptionFields(d.description, d.descriptionTh);
       return {
         id: d.id,
         name: d.name || '',
         ...(d.nameTh ? { nameTh: d.nameTh } : {}),
         categoryId: d.categoryId || '',
         ...(d.imageId ? { imageId: d.imageId } : {}),
-        ...(d.description ? { description: d.description } : {}),
+        ...(resolvedDesc.description ? { description: resolvedDesc.description } : {}),
+        ...(resolvedDesc.descriptionTh ? { descriptionTh: resolvedDesc.descriptionTh } : {}),
         order: d.order ?? 0,
         optionGroupIds: Array.isArray(d.optionGroupIds) ? [...d.optionGroupIds] : [],
         variants: (d.variants || []).map((v) => {

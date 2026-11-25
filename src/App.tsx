@@ -150,6 +150,7 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
         d.categoryId,
         d.imageId || '',
         d.description || '',
+        d.descriptionTh || '',
         d.order ?? 0,
         d.optionGroupIds || [],
         (d.variants || []).map((v) => {

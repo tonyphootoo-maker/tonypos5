@@ -145,6 +145,8 @@ export interface DishDoc extends BaseDoc {
   categoryId: string;
   imageId?: string;
   description?: string;
+  descriptionTh?: string;
+  descriptionEnManual?: boolean;
   costMenuId?: string;
   variants: DishVariant[]; // At least 1 default variant
   optionGroupIds: string[]; // Attached option groups
@@ -400,6 +402,7 @@ export interface PublicDish {
   categoryId: string;
   imageId?: string;
   description?: string;
+  descriptionTh?: string;
   variants: PublicDishVariant[];
   optionGroupIds: string[];
   order: number;
