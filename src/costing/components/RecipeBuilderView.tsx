@@ -12,6 +12,8 @@ import {
   SlidersHorizontal,
   Info,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Edit2,
   X,
   Package,
@@ -179,12 +181,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     if (linkedBaseId && (propBaseRecipes || []).some((r) => r.id === linkedBaseId)) {
       return linkedBaseId;
     }
-    return (propBaseRecipes || [])[0]?.id || '';
+    return '';
   });
 
   const currentBaseRecipe = useMemo(() => {
-    if (baseRecipes.length === 0) return null;
-    return baseRecipes.find((r) => r.id === selectedBaseRecipeId) || baseRecipes[0];
+    if (baseRecipes.length === 0 || !selectedBaseRecipeId) return null;
+    return baseRecipes.find((r) => r.id === selectedBaseRecipeId) || null;
   }, [baseRecipes, selectedBaseRecipeId]);
 
   const [localBaseItems, setLocalBaseItems] = useState<RecipeItem[]>([]);
@@ -236,7 +238,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     }
   }, [initialVariantId, initialMenuId, targetNonce, menus, baseRecipes]);
 
-  // Keep selectedBaseRecipeId pointing to a valid card if cards are added/deleted
+  // Clear selection if the expanded card was deleted
   useEffect(() => {
     if (baseRecipes.length === 0) {
       if (selectedBaseRecipeId !== '') setSelectedBaseRecipeId('');
@@ -247,8 +249,11 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       }
       return;
     }
-    if (!baseRecipes.some((r) => r.id === selectedBaseRecipeId)) {
-      setSelectedBaseRecipeId(baseRecipes[0].id);
+    if (selectedBaseRecipeId && !baseRecipes.some((r) => r.id === selectedBaseRecipeId)) {
+      setSelectedBaseRecipeId('');
+      lastLoadedBaseRecipeIdRef.current = '';
+      setLocalBaseItems([]);
+      setHasUnsavedChanges(false);
     }
   }, [baseRecipes, selectedBaseRecipeId]);
 
@@ -862,10 +867,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
     if (trimmedTh && trimmedEn) {
       learnShopTranslation(trimmedTh, trimmedEn, { isManual });
     }
-    setSelectedBaseRecipeId(finalRecipe.id);
-    lastLoadedBaseRecipeIdRef.current = finalRecipe.id;
-    setLocalBaseItems(finalRecipe.items || []);
-    setHasUnsavedChanges(false);
+    if (!existing || selectedBaseRecipeId === finalRecipe.id) {
+      setSelectedBaseRecipeId(finalRecipe.id);
+      lastLoadedBaseRecipeIdRef.current = finalRecipe.id;
+      setLocalBaseItems(finalRecipe.items || []);
+      setHasUnsavedChanges(false);
+    }
     setBaseRecipeMetaError(null);
     setIsBaseRecipeMetaModalOpen(false);
   };
@@ -882,6 +889,13 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
   };
 
   const handleSelectBaseRecipeCard = (recipe: CentralBaseRecipe) => {
+    if (selectedBaseRecipeId === recipe.id) {
+      setSelectedBaseRecipeId('');
+      lastLoadedBaseRecipeIdRef.current = '';
+      setLocalBaseItems([]);
+      setHasUnsavedChanges(false);
+      return;
+    }
     setSelectedBaseRecipeId(recipe.id);
     lastLoadedBaseRecipeIdRef.current = recipe.id;
     setLocalBaseItems(
@@ -1428,7 +1442,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
       {activeTab === 'FOOD' && (
         <div className="space-y-4">
           {/* Toolbar & Action Header */}
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-3.5 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-2.5">
             <div>
               <h2 className="text-sm font-bold text-white">
                 {lang === 'en'
@@ -1437,8 +1451,8 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               </h2>
               <p className="text-[11px] text-white/55 mt-0.5">
                 {lang === 'en'
-                  ? 'Click any compact recipe card below to customize ingredients, sauces, side dishes & packaging, then assign it from the Food Cost menu dropdown.'
-                  : 'กดเลือกการ์ดสูตรอาหารแบบย่อด้านล่างเพื่อปรับวัตถุดิบ ซอส เครื่องเคียง และแพ็คเกจจิ้ง แล้วนำไปเลือกใช้ในหน้าเมนูอาหารหลัก'}
+                  ? 'Tap any compact card to open & edit ingredients, sauces, rice/noodles & packaging inside it.'
+                  : 'คลิกการ์ดสูตรแบบย่อเพื่อเปิดดูหรือปรับวัตถุดิบ ซอส ข้าวและเส้น และแพ็คเกจจิ้งภายในตัวการ์ด'}
               </p>
             </div>
 
@@ -1461,7 +1475,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               <button
                 type="button"
                 onClick={handleOpenCreateBaseRecipe}
-                className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5 text-[#F27D26]" />
                 <span>
@@ -1473,7 +1487,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                   type="button"
                   onClick={handleSaveBaseRecipe}
                   disabled={!hasUnsavedChanges}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                     hasUnsavedChanges
                       ? 'bg-[#F27D26] hover:bg-[#d96817] text-black shadow-lg shadow-[#F27D26]/20'
                       : 'bg-white/10 text-white/40 cursor-not-allowed'
@@ -1518,7 +1532,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
               {baseRecipes.map((recipe) => {
                 const isSelected = currentBaseRecipe?.id === recipe.id;
                 const displayItems = isSelected ? localBaseItems : (recipe.items || []);
@@ -1556,67 +1570,65 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                             }
                           }
                     }
-                    className={`rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
+                    className={`rounded-2xl border transition-all flex flex-col justify-between ${
                       isSelected
-                        ? 'col-span-1 sm:col-span-2 lg:col-span-3 xl:col-span-4 p-4 sm:p-5 bg-[#F27D26]/10 border-[#F27D26] shadow-lg shadow-[#F27D26]/10'
-                        : 'p-3.5 cursor-pointer bg-white/5 border-white/10 hover:border-white/25 hover:bg-white/[0.07]'
+                        ? 'col-span-1 sm:col-span-2 lg:col-span-3 xl:col-span-4 p-3 sm:p-3.5 gap-2.5 bg-[#F27D26]/10 border-[#F27D26] shadow-md shadow-[#F27D26]/10'
+                        : 'p-3 gap-2 cursor-pointer bg-white/5 border-white/10 hover:border-white/25 hover:bg-white/[0.07]'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
+                    {/* Compact Card Header */}
+                    <div
+                      onClick={isSelected ? () => handleSelectBaseRecipeCard(recipe) : undefined}
+                      className={`flex items-center justify-between gap-2 ${
+                        isSelected ? 'cursor-pointer' : ''
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span
                             className={`w-2 h-2 rounded-full shrink-0 ${
                               isSelected ? 'bg-[#F27D26]' : 'bg-white/30'
                             }`}
                           />
-                          <h3 className="font-bold text-white text-sm truncate">
+                          <h3 className="font-bold text-white text-xs sm:text-sm truncate">
                             {getLocalizedText(lang, recipe.thaiName || recipe.name, recipe.englishName)}
                           </h3>
+                          {(() => {
+                            const rnItems = displayItems.filter((it) => isRiceNoodleRecipeItem(it));
+                            if (rnItems.length === 0) return null;
+                            const firstPortion = rnItems[0].riceNoodlePortionId
+                              ? riceNoodlePortionsMap.get(rnItems[0].riceNoodlePortionId)
+                              : undefined;
+                            const label = firstPortion
+                              ? lang === 'en'
+                                ? firstPortion.nameEn || firstPortion.name
+                                : firstPortion.name
+                              : rnItems[0].name;
+                            return (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-[#FFC107]/15 border border-[#FFC107]/25 text-[10px] text-[#FFC107] font-semibold truncate max-w-[150px]">
+                                <Wheat className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate">{label}</span>
+                              </span>
+                            );
+                          })()}
                         </div>
-                        {recipe.description && (
-                          <p className="text-[11px] text-white/50 truncate mt-0.5 pl-3.5">
-                            {recipe.description}
-                          </p>
-                        )}
-                        {(() => {
-                          const rnItems = displayItems.filter((it) => isRiceNoodleRecipeItem(it));
-                          if (rnItems.length === 0) return null;
-                          const firstPortion = rnItems[0].riceNoodlePortionId
-                            ? riceNoodlePortionsMap.get(rnItems[0].riceNoodlePortionId)
-                            : undefined;
-                          const label = firstPortion
-                            ? lang === 'en'
-                              ? firstPortion.nameEn || firstPortion.name
-                              : firstPortion.name
-                            : rnItems[0].name;
-                          return (
-                            <div className="mt-1 pl-3.5 flex items-center gap-1 text-[10px] text-[#FFC107] font-semibold truncate">
-                              <Wheat className="w-3 h-3 shrink-0" />
-                              <span className="truncate">{label}</span>
-                            </div>
-                          );
-                        })()}
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                         {isSelected && hasUnsavedChanges && (
                           <button
                             type="button"
                             onClick={handleSaveBaseRecipe}
-                            className="px-3 py-1.5 rounded-xl bg-[#F27D26] hover:bg-[#d96817] text-black text-xs font-bold flex items-center gap-1 cursor-pointer shadow-sm"
+                            className="px-2.5 py-1 rounded-lg bg-[#F27D26] hover:bg-[#d96817] text-black text-[11px] font-bold flex items-center gap-1 cursor-pointer shadow-sm"
                           >
-                            <Save className="w-3.5 h-3.5" />
+                            <Save className="w-3 h-3" />
                             <span>{lang === 'en' ? 'Save' : 'บันทึก'}</span>
                           </button>
                         )}
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenEditBaseRecipeMeta(recipe);
-                          }}
-                          className="p-1.5 rounded-lg text-white/50 hover:text-white hover:bg-white/10 cursor-pointer"
+                          onClick={() => handleOpenEditBaseRecipeMeta(recipe)}
+                          className="p-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10 cursor-pointer"
                           title={lang === 'en' ? 'Edit recipe name' : 'แก้ไขชื่อสูตร'}
                           aria-label={lang === 'en' ? 'Edit recipe name' : 'แก้ไขชื่อสูตร'}
                         >
@@ -1624,33 +1636,68 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setBaseRecipeToDelete(recipe);
-                          }}
-                          className="p-1.5 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
+                          onClick={() => setBaseRecipeToDelete(recipe)}
+                          className="p-1 rounded-lg text-white/40 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer"
                           title={lang === 'en' ? 'Delete base recipe' : 'ลบสูตรอาหารกลาง'}
                           aria-label={lang === 'en' ? 'Delete base recipe' : 'ลบสูตรอาหารกลาง'}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectBaseRecipeCard(recipe)}
+                          className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                            isSelected
+                              ? 'text-[#F27D26] bg-[#F27D26]/15 hover:bg-[#F27D26]/25'
+                              : 'text-white/40 hover:text-white hover:bg-white/10'
+                          }`}
+                          title={
+                            isSelected
+                              ? lang === 'en'
+                                ? 'Collapse card'
+                                : 'ย่อการ์ด'
+                              : lang === 'en'
+                              ? 'Expand items'
+                              : 'เปิดดูรายการ'
+                          }
+                          aria-label={
+                            isSelected
+                              ? lang === 'en'
+                                ? 'Collapse card'
+                                : 'ย่อการ์ด'
+                              : lang === 'en'
+                              ? 'Expand items'
+                              : 'เปิดดูรายการ'
+                          }
+                        >
+                          {isSelected ? (
+                            <ChevronUp className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          )}
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/10 text-[11px]">
-                      <div className="flex items-center gap-2 text-white/60">
+                    {/* Compact Summary Footer */}
+                    <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/10 text-[11px]">
+                      <div className="flex items-center gap-1.5 text-white/60 truncate">
                         <span>
-                          {nonPkgCount} {lang === 'en' ? 'items' : 'วัตถุดิบ/ซอส'}
+                          {nonPkgCount} {lang === 'en' ? 'items' : 'ส่วนประกอบ'}
                         </span>
-                        <span>•</span>
-                        <span>
-                          {pkgSideCount} {lang === 'en' ? 'pkg/sides' : 'กล่อง/เคียง'}
-                        </span>
+                        {pkgSideCount > 0 && (
+                          <>
+                            <span>•</span>
+                            <span>
+                              {pkgSideCount} {lang === 'en' ? 'pkg' : 'กล่อง'}
+                            </span>
+                          </>
+                        )}
                         {linkedVariantsCount > 0 && (
                           <>
                             <span>•</span>
                             <span className="text-emerald-400 font-semibold">
-                              {linkedVariantsCount} {lang === 'en' ? 'linked' : 'เมนูใช้'}
+                              {linkedVariantsCount} {lang === 'en' ? 'used' : 'เมนูใช้'}
                             </span>
                           </>
                         )}
@@ -1661,69 +1708,66 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                     </div>
 
                     {isSelected && (
-                      <div className="pt-3 mt-1 border-t border-[#F27D26]/30 space-y-4">
-                        {/* Section 1: Central Recipe Ingredients, Sauces & Rice/Noodles inside the selected card */}
-                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
-                            <div>
-                              <h4 className="font-bold text-white text-sm sm:text-base">
-                                {lang === 'en'
-                                  ? `Base Recipe Items (${nonPackagingItems.length} items)`
-                                  : `รายการส่วนประกอบในสูตรกลาง (${nonPackagingItems.length} รายการ)`}
-                              </h4>
-                            </div>
+                      <div className="pt-2.5 border-t border-[#F27D26]/25 space-y-3">
+                        {/* Section 1: Compact Recipe Ingredients, Sauces & Rice/Noodles inside the card */}
+                        <div className="space-y-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span className="font-bold text-white text-xs">
+                              {lang === 'en'
+                                ? `Base Recipe Items (${nonPackagingItems.length})`
+                                : `รายการส่วนประกอบในสูตรกลาง (${nonPackagingItems.length} รายการ)`}
+                            </span>
 
-                            {/* 3 Add buttons: วัตถุดิบ, ซอสปรุง, ข้าวและเส้น */}
+                            {/* 3 Compact Add buttons: วัตถุดิบ, ซอสปรุง, ข้าวและเส้น */}
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 type="button"
                                 onClick={handleAddBaseIngredient}
-                                className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                                title={lang === 'en' ? 'Add base ingredient e.g. chili, garlic, holy basil, cooking oil' : 'เพิ่มวัตถุดิบกลาง เช่น พริก, กระเทียม, ใบกะเพรา, น้ำมัน'}
+                                className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                                title={lang === 'en' ? 'Add base ingredient' : 'เพิ่มวัตถุดิบกลาง เช่น พริก, กระเทียม, ใบกะเพรา, น้ำมัน'}
                               >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>{lang === 'en' ? '+ Base Ingredient' : '+ วัตถุดิบกลาง'}</span>
+                                <Plus className="w-3 h-3" />
+                                <span>{lang === 'en' ? '+ Ingredient' : '+ วัตถุดิบ'}</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={handleAddSauce}
-                                className="px-2.5 py-1.5 rounded-xl bg-[#F27D26]/20 hover:bg-[#F27D26]/30 text-[#F27D26] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#F27D26]/30 transition-colors"
-                                title={lang === 'en' ? 'Add batch-prepared sauce' : 'เพิ่มซอสปรุงรสที่เตรียมล่วงหน้าเป็น Batch'}
+                                className="px-2 py-1 rounded-lg bg-[#F27D26]/20 hover:bg-[#F27D26]/30 text-[#F27D26] text-[11px] font-bold flex items-center gap-1 cursor-pointer border border-[#F27D26]/30 transition-colors"
+                                title={lang === 'en' ? 'Add batch-prepared sauce' : 'เพิ่มซอสปรุงรส'}
                               >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>{lang === 'en' ? '+ Sauce' : '+ ซอสปรุง'}</span>
+                                <Plus className="w-3 h-3" />
+                                <span>{lang === 'en' ? '+ Sauce' : '+ ซอส'}</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={handleOpenAddRiceNoodleModal}
                                 disabled={portionRecipes.length === 0}
-                                className="px-2.5 py-1.5 rounded-xl bg-[#FFC107]/15 hover:bg-[#FFC107]/25 text-[#FFC107] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#FFC107]/30 transition-colors disabled:opacity-40"
-                                title={lang === 'en' ? 'Link Rice & Noodles (Yield & Portions)' : 'เพิ่มรายการจากหมวด ข้าวและเส้น (Yield & Portions)'}
+                                className="px-2 py-1 rounded-lg bg-[#FFC107]/15 hover:bg-[#FFC107]/25 text-[#FFC107] text-[11px] font-bold flex items-center gap-1 cursor-pointer border border-[#FFC107]/30 transition-colors disabled:opacity-40"
+                                title={lang === 'en' ? 'Link Rice & Noodles (Yield & Portions)' : 'เพิ่มรายการจากหมวด ข้าวและเส้น'}
                               >
-                                <Wheat className="w-3.5 h-3.5" />
-                                <span>{lang === 'en' ? '+ Rice & Noodles' : '+ ข้าวและเส้น'}</span>
+                                <Wheat className="w-3 h-3" />
+                                <span>{lang === 'en' ? '+ Rice/Noodles' : '+ ข้าวและเส้น'}</span>
                               </button>
                             </div>
                           </div>
 
-                          {/* Items Table */}
                           {nonPackagingItems.length === 0 ? (
-                            <div className="mt-4 p-5 text-center text-white/45 text-xs border border-dashed border-white/10 rounded-2xl">
+                            <p className="py-2 px-3 text-center text-white/45 text-[11px] border border-dashed border-white/10 rounded-xl">
                               {lang === 'en'
-                                ? 'No ingredients or sauces in this base recipe yet (click "+ Base Ingredient" or "+ Sauce" above)'
-                                : 'ยังไม่มีวัตถุดิบหรือซอสในสูตรกลางนี้ (กดปุ่ม "+ วัตถุดิบกลาง" หรือ "+ ซอสปรุง" ด้านบนเพื่อเพิ่ม)'}
-                            </div>
+                                ? 'No ingredients yet — use the buttons above to add.'
+                                : 'ยังไม่มีรายการส่วนประกอบ กดปุ่มด้านบนเพื่อเพิ่ม'}
+                            </p>
                           ) : (
-                            <div className="mt-4 overflow-x-auto">
+                            <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/15">
                               <table className="w-full text-left text-xs border-collapse">
                                 <thead>
                                   <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Recipe Item' : 'ชื่อรายการในสูตร'}</th>
-                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
-                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
-                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
-                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
-                                    <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
+                                    <th className="py-1.5 px-2.5">{lang === 'en' ? 'Recipe Item' : 'รายการ'}</th>
+                                    <th className="py-1.5 px-2 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
+                                    <th className="py-1.5 px-2">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
+                                    <th className="py-1.5 px-2 text-right">{lang === 'en' ? 'Unit Cost' : 'ทุน/หน่วย'}</th>
+                                    <th className="py-1.5 px-2.5 text-right">{lang === 'en' ? 'Total' : 'รวม (฿)'}</th>
+                                    <th className="py-1.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/5 font-mono">
@@ -1732,17 +1776,17 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
                                     return (
                                       <tr key={`${item.id || 'item'}-${index}`} className="hover:bg-white/5 transition-colors">
-                                        <td className="py-2.5 px-3 font-sans font-medium text-white">
+                                        <td className="py-1.5 px-2.5 font-sans font-medium text-white">
                                           {isRiceNoodleRecipeItem(item) ? (
                                             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
-                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFC107]/15 text-[#FFC107] border border-[#FFC107]/30 text-[10px] font-bold shrink-0">
-                                                <Wheat className="w-3 h-3" />
-                                                <span>{lang === 'en' ? 'Rice/Noodles' : 'ข้าวและเส้น'}</span>
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#FFC107]/15 text-[#FFC107] border border-[#FFC107]/30 text-[10px] font-bold shrink-0">
+                                                <Wheat className="w-2.5 h-2.5" />
+                                                <span>{lang === 'en' ? 'Rice/Noodles' : 'ข้าว/เส้น'}</span>
                                               </span>
                                               <select
                                                 value={item.riceNoodlePortionId || ''}
                                                 onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                                className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[240px] cursor-pointer"
+                                                className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[220px] cursor-pointer"
                                               >
                                                 {portionRecipes.map((p) => (
                                                   <option key={p.id} value={p.id} className="bg-[#1a1a1a]">
@@ -1776,7 +1820,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                             </select>
                                           ) : (
                                             <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
-                                              {/* Step 1: Select Category first */}
                                               <select
                                                 value={(item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL'}
                                                 onChange={(e) => {
@@ -1790,7 +1833,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                                     handleUpdateBaseItemSourceById(safeId, matching[0].id);
                                                   }
                                                 }}
-                                                className="bg-black/60 border border-white/20 rounded-lg px-2 py-1 text-[11px] text-[#F27D26] font-bold cursor-pointer shrink-0 max-w-[130px]"
+                                                className="bg-black/60 border border-white/20 rounded-lg px-2 py-1 text-[11px] text-[#F27D26] font-bold cursor-pointer shrink-0 max-w-[125px]"
                                                 title={lang === 'en' ? '1. Select ingredient category first' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}
                                               >
                                                 <option value="ALL">{lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวด'}</option>
@@ -1801,7 +1844,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                                 ))}
                                               </select>
 
-                                              {/* Step 2: Select Sub-ingredient */}
                                               {(() => {
                                                 const selectedCat = (item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL';
                                                 const categoryIngs = selectedCat === 'ALL'
@@ -1812,7 +1854,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                                   <select
                                                     value={item.ingredientId}
                                                     onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                                    className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[190px] cursor-pointer"
+                                                    className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[185px] cursor-pointer"
                                                     title={lang === 'en' ? '2. Select sub-ingredient' : '2. เลือกวัตถุดิบย่อย'}
                                                   >
                                                     {categoryIngs.map((ing) => (
@@ -1827,7 +1869,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                           )}
                                         </td>
 
-                                        <td className="py-2.5 px-3 text-right">
+                                        <td className="py-1.5 px-2 text-right">
                                           <NumericInput
                                             type="number"
                                             step="any"
@@ -1836,32 +1878,30 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                             onChange={(e) =>
                                               handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
                                             }
-                                            className="w-20 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#F27D26]"
+                                            className="w-16 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#F27D26]"
                                           />
                                         </td>
 
-                                        <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
+                                        <td className="py-1.5 px-2 font-sans text-white/50 text-[11px]">
                                           {localizeUnit(item.unit, lang)}
                                         </td>
 
-                                        <td className="py-2.5 px-3 text-right text-white/60">
+                                        <td className="py-1.5 px-2 text-right text-white/60">
                                           <div className="flex flex-col items-end">
                                             <span>฿{costInfo.unitCost.toFixed(costInfo.unitCost < 1 ? 4 : 2)}</span>
                                             {costInfo.missingPrice && (
-                                              <span className="mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
-                                                {lang === 'en'
-                                                  ? 'Missing ingredient price — cost may be understated'
-                                                  : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'}
+                                              <span className="mt-0.5 px-1.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                                                {lang === 'en' ? 'No price' : 'ไม่มีราคา'}
                                               </span>
                                             )}
                                           </div>
                                         </td>
 
-                                        <td className="py-2.5 px-3 text-right font-bold text-white">
+                                        <td className="py-1.5 px-2.5 text-right font-bold text-white">
                                           ฿{costInfo.lineCost.toFixed(2)}
                                         </td>
 
-                                        <td className="py-2.5 px-2 text-center">
+                                        <td className="py-1.5 px-2 text-center">
                                           <button
                                             type="button"
                                             onClick={() => handleRemoveBaseItemById(item.id || '')}
@@ -1880,59 +1920,56 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                           )}
                         </div>
 
-                        {/* Section 2: Dedicated Packaging & Side Dish Items inside the selected card */}
-                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 space-y-3">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
+                        {/* Section 2: Compact Packaging & Side Dish Items inside the card */}
+                        <div className="pt-2 border-t border-white/10 space-y-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-xl bg-[#00B1FF]/20 text-[#00B1FF] flex items-center justify-center border border-[#00B1FF]/30">
-                                <Package className="w-4 h-4" />
-                              </div>
-                              <h4 className="font-bold text-white text-sm sm:text-base">
+                              <Package className="w-3.5 h-3.5 text-[#00B1FF] shrink-0" />
+                              <span className="font-bold text-white text-xs">
                                 {lang === 'en'
-                                  ? `Box & Packaging Costs (${packagingAndSideItems.length} items)`
-                                  : `ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items) (${packagingAndSideItems.length} รายการ)`}
-                              </h4>
+                                  ? `Packaging & Sides (${packagingAndSideItems.length})`
+                                  : `กล่อง บรรจุภัณฑ์ & เครื่องเคียง (${packagingAndSideItems.length} รายการ)`}
+                              </span>
+                              {packagingAndSideItems.length > 0 && (
+                                <span className="font-mono text-[11px] font-bold text-[#00B1FF]">
+                                  · ฿{(totalPackagingCost + totalSideDishCost).toFixed(2)}
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex items-center gap-1.5 flex-wrap shrink-0">
                               <button
                                 type="button"
                                 onClick={handleAddSideDish}
-                                className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer border border-amber-500/30 transition-colors"
-                                title={lang === 'en' ? 'Add side dishes e.g. chili fish sauce, cucumber, rice, fried egg' : 'เพิ่มเครื่องเคียง เช่น พริกน้ำปลา, แตงกวาเคียง, ข้าวสวย, ไข่ดาว'}
+                                className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer border border-amber-500/30 transition-colors"
+                                title={lang === 'en' ? 'Add side dishes' : 'เพิ่มเครื่องเคียง'}
                               >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>{lang === 'en' ? '+ Side Dish' : '+ เครื่องเคียง'}</span>
+                                <Plus className="w-3 h-3" />
+                                <span>{lang === 'en' ? '+ Side' : '+ เครื่องเคียง'}</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={handleAddPackaging}
-                                className="px-3 py-1.5 rounded-xl bg-[#00B1FF]/20 hover:bg-[#00B1FF]/30 text-[#00B1FF] border border-[#00B1FF]/40 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
-                                title={lang === 'en' ? 'Add packaging e.g. kraft box, cutlery set, sauce cup, bag' : 'เพิ่มบรรจุภัณฑ์ เช่น กล่องกระดาษคราฟท์, ช้อนส้อม, ถ้วยน้ำจิ้ม, ถุงหูหิ้ว'}
+                                className="px-2 py-1 rounded-lg bg-[#00B1FF]/20 hover:bg-[#00B1FF]/30 text-[#00B1FF] border border-[#00B1FF]/40 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                                title={lang === 'en' ? 'Add packaging' : 'เพิ่มแพ็คเกจจิ้ง'}
                               >
-                                <Plus className="w-3.5 h-3.5" />
+                                <Plus className="w-3 h-3" />
                                 <span>{lang === 'en' ? '+ Packaging' : '+ แพ็คเกจจิ้ง'}</span>
                               </button>
                             </div>
                           </div>
 
-                          {packagingAndSideItems.length === 0 ? (
-                            <div className="p-4 text-center text-white/40 text-xs border border-dashed border-white/10 rounded-2xl">
-                              {lang === 'en'
-                                ? 'No packaging or side dish items for this base recipe yet (click "+ Side Dish" or "+ Packaging" above to add)'
-                                : 'ยังไม่มีรายการกล่องหรือเครื่องเคียงสำหรับสูตรกลางนี้ (กดปุ่ม "+ เครื่องเคียง" หรือ "+ แพ็คเกจจิ้ง" ด้านบนเพื่อเพิ่ม)'}
-                            </div>
-                          ) : (
-                            <div className="overflow-x-auto">
+                          {packagingAndSideItems.length > 0 && (
+                            <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/15">
                               <table className="w-full text-left text-xs border-collapse">
                                 <thead>
                                   <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Packaging / Side Dish Item' : 'รายการบรรจุภัณฑ์ / เครื่องเคียง'}</th>
-                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'จำนวน'}</th>
-                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
-                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
-                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
-                                    <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
+                                    <th className="py-1.5 px-2.5">{lang === 'en' ? 'Packaging / Side' : 'รายการกล่อง / เครื่องเคียง'}</th>
+                                    <th className="py-1.5 px-2 text-right">{lang === 'en' ? 'Qty' : 'จำนวน'}</th>
+                                    <th className="py-1.5 px-2">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
+                                    <th className="py-1.5 px-2 text-right">{lang === 'en' ? 'Unit Cost' : 'ทุน/หน่วย'}</th>
+                                    <th className="py-1.5 px-2.5 text-right">{lang === 'en' ? 'Total' : 'รวม (฿)'}</th>
+                                    <th className="py-1.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-white/5 font-mono">
@@ -1941,12 +1978,12 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
 
                                     return (
                                       <tr key={`${item.id || 'pkg'}-${index}`} className="hover:bg-white/5 transition-colors">
-                                        <td className="py-2.5 px-3 font-sans font-medium text-white">
+                                        <td className="py-1.5 px-2.5 font-sans font-medium text-white">
                                           {item.type === 'PREPARED_ITEM' ? (
                                             <select
                                               value={item.ingredientId}
                                               onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                              className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
+                                              className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[240px] cursor-pointer"
                                             >
                                               <optgroup label={lang === 'en' ? 'Standard Side Dishes (Presets)' : 'เครื่องเคียงมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
                                                 {SIDE_DISH_PRESETS.map((sd) => (
@@ -1967,7 +2004,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                             <select
                                               value={item.ingredientId}
                                               onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                              className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
+                                              className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[240px] cursor-pointer"
                                             >
                                               <optgroup label={lang === 'en' ? 'Standard Items (Presets)' : 'รายการมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
                                                 {PACKAGING_PRESETS.map((pkg) => (
@@ -1989,7 +2026,7 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                           )}
                                         </td>
 
-                                        <td className="py-2.5 px-3 text-right">
+                                        <td className="py-1.5 px-2 text-right">
                                           <NumericInput
                                             type="number"
                                             step="any"
@@ -1998,23 +2035,23 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                             onChange={(e) =>
                                               handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
                                             }
-                                            className="w-16 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#00B1FF]"
+                                            className="w-14 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#00B1FF]"
                                           />
                                         </td>
 
-                                        <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
+                                        <td className="py-1.5 px-2 font-sans text-white/50 text-[11px]">
                                           {localizeUnit(item.unit || 'ชิ้น', lang)}
                                         </td>
 
-                                        <td className="py-2.5 px-3 text-right text-white/60">
+                                        <td className="py-1.5 px-2 text-right text-white/60">
                                           ฿{costInfo.unitCost.toFixed(2)}
                                         </td>
 
-                                        <td className="py-2.5 px-3 text-right font-bold text-[#00B1FF]">
+                                        <td className="py-1.5 px-2.5 text-right font-bold text-[#00B1FF]">
                                           ฿{costInfo.lineCost.toFixed(2)}
                                         </td>
 
-                                        <td className="py-2.5 px-2 text-center">
+                                        <td className="py-1.5 px-2 text-center">
                                           <button
                                             type="button"
                                             onClick={() => handleRemoveBaseItemById(item.id || '')}
@@ -2029,20 +2066,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                                   })}
                                 </tbody>
                               </table>
-
-                              <div className="flex justify-between items-center px-4 py-2.5 bg-[#00B1FF]/10 border border-[#00B1FF]/20 rounded-xl text-xs font-mono mt-3">
-                                <span className="font-sans text-white/70 font-semibold flex items-center gap-1.5">
-                                  <Package className="w-3.5 h-3.5 text-[#00B1FF]" />
-                                  <span>
-                                    {lang === 'en'
-                                      ? 'Total Packaging & Side Dish Cost:'
-                                      : 'รวมต้นทุนกล่อง บรรจุภัณฑ์ และเครื่องเคียง:'}
-                                  </span>
-                                </span>
-                                <span className="font-bold text-[#00B1FF] text-sm">
-                                  ฿{(totalPackagingCost + totalSideDishCost).toFixed(2)}
-                                </span>
-                              </div>
                             </div>
                           )}
                         </div>
