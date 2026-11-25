@@ -694,7 +694,11 @@ export default function App() {
           <OptionGroupsPage settings={settings} lang={lang} />
         )}
         {currentPage === 'bills' && (
-          <BillsHistoryPage settings={settings} lang={lang} />
+          <BillsHistoryPage
+            settings={settings}
+            lang={lang}
+            onBack={() => setCurrentPage('pos')}
+          />
         )}
         {currentPage === 'online_orders' && (
           <Suspense
