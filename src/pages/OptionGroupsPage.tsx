@@ -746,11 +746,11 @@ export const OptionGroupsPage: React.FC<Props> = ({ settings, lang }) => {
                           title={
                             choice.hasQuantity
                               ? lang === 'th'
-                                ? 'เปิดใส่จำนวน (คลิกเพื่อปิด)'
-                                : 'Quantity enabled (click to disable)'
+                                ? 'เปิดให้ลูกค้าใส่จำนวนเองได้ (ค่าเริ่มต้น) — คลิกเพื่อปิด'
+                                : 'Customer quantity enabled (click to disable)'
                               : lang === 'th'
-                              ? 'ไม่ต้องใส่จำนวน (คลิกเพื่อเปิดช่องใส่จำนวน)'
-                              : 'No quantity (click to enable quantity input)'
+                              ? 'ไม่ต้องใส่จำนวน — คลิกเพื่อเปิดให้ลูกค้าใส่จำนวนได้'
+                              : 'No quantity — click to let customers enter quantity'
                           }
                         >
                           <span

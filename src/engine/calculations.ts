@@ -312,15 +312,113 @@ export function getOptionChoiceEffectiveQuantity(choice: {
 }
 
 /**
+ * Calculates line extra price for an option choice multiplied by the chosen quantity.
+ */
+export function calculateOptionChoiceLinePrice(
+  unitPrice: number,
+  chosenQuantity: number = 1
+): number {
+  const safePrice = Math.max(0, Number(unitPrice) || 0);
+  const safeQty = Math.max(1, Math.round(Number(chosenQuantity) || 1));
+  return roundTo2(safePrice * safeQty);
+}
+
+/**
+ * Formats an option choice display label with " ×N" suffix when chosenQuantity > 1.
+ */
+export function formatOptionChoiceDisplayName(
+  baseName: string,
+  chosenQuantity: number = 1
+): string {
+  const qty = Math.max(1, Math.round(Number(chosenQuantity) || 1));
+  return qty > 1 ? `${baseName} ×${qty}` : baseName;
+}
+
+/**
+ * Toggles an option choice inside a group's `{ [choiceId]: quantity }` selection map,
+ * enforcing single-select (`maxSelect <= 1`) and FIFO cap (`maxSelect > 1`).
+ */
+export function toggleOptionChoiceMap(
+  currentGroupMap: Record<string, number>,
+  choice: { id: string; hasQuantity?: boolean; quantity?: number },
+  maxSelect: number
+): Record<string, number> {
+  const curr = { ...(currentGroupMap || {}) };
+  if (curr[choice.id] && curr[choice.id] > 0) {
+    delete curr[choice.id];
+    return curr;
+  }
+
+  const initQty = getOptionChoiceEffectiveQuantity(choice);
+  const safeMax = Math.max(1, Math.round(Number(maxSelect) || 1));
+
+  if (safeMax <= 1) {
+    return { [choice.id]: initQty };
+  }
+
+  const keys = Object.keys(curr);
+  if (keys.length >= safeMax) {
+    delete curr[keys[0]];
+  }
+  curr[choice.id] = initQty;
+  return curr;
+}
+
+/**
+ * Sets a customer-chosen quantity (`1..99`, or `<= 0` to deselect) for a choice that allows quantity.
+ * Choices with `hasQuantity` disabled ignore custom quantity edits.
+ */
+export function updateOptionChoiceQuantityMap(
+  currentGroupMap: Record<string, number>,
+  choice: { id: string; hasQuantity?: boolean; quantity?: number },
+  nextQuantity: number,
+  maxSelect: number
+): Record<string, number> {
+  if (!isOptionChoiceQuantityEnabled(choice)) {
+    return currentGroupMap || {};
+  }
+
+  const curr = { ...(currentGroupMap || {}) };
+  const parsed = Math.round(Number(nextQuantity) || 0);
+  if (parsed <= 0) {
+    delete curr[choice.id];
+    return curr;
+  }
+
+  const clampedQty = Math.min(99, Math.max(1, parsed));
+  const safeMax = Math.max(1, Math.round(Number(maxSelect) || 1));
+
+  if (curr[choice.id] && curr[choice.id] > 0) {
+    curr[choice.id] = clampedQty;
+    return curr;
+  }
+
+  if (safeMax <= 1) {
+    return { [choice.id]: clampedQty };
+  }
+
+  const keys = Object.keys(curr);
+  if (keys.length >= safeMax) {
+    delete curr[keys[0]];
+  }
+  curr[choice.id] = clampedQty;
+  return curr;
+}
+
+/**
  * Calculates additional cost of an option choice from its ingredient lines.
  */
 export function calculateOptionChoiceCost(
   choice: OptionChoice,
-  ingredientsMap: Map<string, IngredientDoc>
+  ingredientsMap: Map<string, IngredientDoc>,
+  quantityOverride?: number
 ): { cost: number; hasMissing: boolean } {
   let cost = 0;
   let hasMissing = false;
-  const choiceQty = getOptionChoiceEffectiveQuantity(choice);
+  const choiceQty =
+    typeof quantityOverride === 'number' && quantityOverride > 0
+      ? Math.max(1, Math.round(quantityOverride))
+      : getOptionChoiceEffectiveQuantity(choice);
 
   if (Array.isArray(choice.ingredients)) {
     for (const line of choice.ingredients) {

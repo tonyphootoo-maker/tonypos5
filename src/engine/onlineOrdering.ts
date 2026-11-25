@@ -118,6 +118,7 @@ export function sanitizeMenuForPublicStore(params: {
           name: ch.name || '',
           ...(ch.nameTh ? { nameTh: ch.nameTh } : {}),
           price: Math.max(0, Number(ch.price) || 0),
+          ...(usesQty ? { hasQuantity: true } : {}),
           ...(usesQty && effQty > 1 ? { quantity: effQty } : {}),
         };
       }),
@@ -381,7 +382,10 @@ export function calculateOnlineOrderCostSnapshot(params: {
       const group = optionGroupsMap.get(opt.groupId);
       const choice = group?.choices?.find((c) => c.id === opt.choiceId);
       if (choice && Array.isArray(choice.ingredients)) {
-        const choiceQty = getOptionChoiceEffectiveQuantity(choice);
+        const choiceQty =
+          typeof opt.quantity === 'number' && opt.quantity > 0
+            ? Math.max(1, Math.round(opt.quantity))
+            : getOptionChoiceEffectiveQuantity(choice);
         for (const ingLine of choice.ingredients) {
           const ing = ingredientsMap.get(ingLine.ingredientId);
           if (ing) {

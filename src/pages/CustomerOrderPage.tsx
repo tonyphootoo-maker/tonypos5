@@ -30,6 +30,7 @@ import {
   OnlinePaymentMethod,
   PublicDish,
   PublicDishVariant,
+  PublicOptionChoice,
   PublicOptionGroup,
   PublicStoreDoc,
 } from '../types';
@@ -46,11 +47,20 @@ import {
   subscribeGuestOrdersByIds,
   subscribePublicStore,
 } from '../data/onlineDb';
-import { formatMoney, getOptionChoiceEffectiveQuantity } from '../engine/calculations';
+import {
+  formatMoney,
+  getOptionChoiceEffectiveQuantity,
+  isOptionChoiceQuantityEnabled,
+  calculateOptionChoiceLinePrice,
+  formatOptionChoiceDisplayName,
+  toggleOptionChoiceMap,
+  updateOptionChoiceQuantityMap,
+} from '../engine/calculations';
 import { toDateSafe } from '../engine/onlineOrdering';
 import { getLocalizedText } from '../utils/thaiToEnglish';
 import { useLanguage } from '../contexts/LanguageContext';
 import { LanguageToggle } from '../components/LanguageToggle';
+import { NumericInput } from '../costing/components/common/NumericInput';
 
 interface CartEntry {
   key: string;
@@ -103,7 +113,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   // Dish customization modal
   const [activeDish, setActiveDish] = useState<PublicDish | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<PublicDishVariant | null>(null);
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, string[]>>({});
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, Record<string, number>>>({});
   const [itemNote, setItemNote] = useState('');
   const [itemQty, setItemQty] = useState(1);
   const [optionValidationMsg, setOptionValidationMsg] = useState<string | null>(null);
@@ -313,11 +323,15 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
 
   const openDishModal = (dish: PublicDish) => {
     const defaultVariant = dish.variants[0] || null;
-    const initOpts: Record<string, string[]> = {};
+    const initOpts: Record<string, Record<string, number>> = {};
     for (const gId of dish.optionGroupIds || []) {
       const grp = optionGroupMap.get(gId);
       if (grp && grp.minSelect > 0 && grp.choices.length > 0) {
-        initOpts[gId] = grp.choices.slice(0, grp.minSelect).map((c) => c.id);
+        const grpMap: Record<string, number> = {};
+        grp.choices.slice(0, grp.minSelect).forEach((c) => {
+          grpMap[c.id] = getOptionChoiceEffectiveQuantity(c);
+        });
+        initOpts[gId] = grpMap;
       }
     }
     setActiveDish(dish);
@@ -328,26 +342,51 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     setOptionValidationMsg(null);
   };
 
-  const toggleOptionChoice = (group: PublicOptionGroup, choiceId: string) => {
+  const toggleOptionChoice = (group: PublicOptionGroup, choice: PublicOptionChoice) => {
     setOptionValidationMsg(null);
-    setSelectedOptions((prev) => {
-      const current = prev[group.id] || [];
-      const exists = current.includes(choiceId);
-      if (group.maxSelect <= 1) {
-        if (exists && group.minSelect === 0) {
-          return { ...prev, [group.id]: [] };
-        }
-        return { ...prev, [group.id]: [choiceId] };
-      }
-      if (exists) {
-        return { ...prev, [group.id]: current.filter((id) => id !== choiceId) };
-      }
-      if (current.length >= group.maxSelect) {
-        return { ...prev, [group.id]: [...current.slice(1), choiceId] };
-      }
-      return { ...prev, [group.id]: [...current, choiceId] };
-    });
+    setSelectedOptions((prev) => ({
+      ...prev,
+      [group.id]: toggleOptionChoiceMap(prev[group.id] || {}, choice, group.maxSelect),
+    }));
   };
+
+  const updateOptionChoiceQty = (
+    group: PublicOptionGroup,
+    choice: PublicOptionChoice,
+    nextQuantity: number
+  ) => {
+    setOptionValidationMsg(null);
+    setSelectedOptions((prev) => ({
+      ...prev,
+      [group.id]: updateOptionChoiceQuantityMap(
+        prev[group.id] || {},
+        choice,
+        nextQuantity,
+        group.maxSelect
+      ),
+    }));
+  };
+
+  const activeDishLiveUnitPrice = useMemo(() => {
+    if (!activeDish || !selectedVariant) return 0;
+    let extra = 0;
+    for (const gId of activeDish.optionGroupIds || []) {
+      const grp = optionGroupMap.get(gId);
+      if (!grp) continue;
+      const chosenMap = selectedOptions[gId] || {};
+      for (const [cId, rawQty] of Object.entries(chosenMap)) {
+        if (!rawQty || rawQty <= 0) continue;
+        const choice = grp.choices.find((c) => c.id === cId);
+        if (choice) {
+          const effQty = isOptionChoiceQuantityEnabled(choice)
+            ? Math.max(1, Math.round(rawQty))
+            : 1;
+          extra += calculateOptionChoiceLinePrice(choice.price, effQty);
+        }
+      }
+    }
+    return Math.max(0, selectedVariant.price + extra);
+  }, [activeDish, selectedVariant, selectedOptions, optionGroupMap]);
 
   const handleAddToCart = () => {
     if (!activeDish || !selectedVariant) return;
@@ -356,7 +395,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     for (const gId of activeDish.optionGroupIds || []) {
       const grp = optionGroupMap.get(gId);
       if (!grp) continue;
-      const count = (selectedOptions[gId] || []).length;
+      const count = Object.values(selectedOptions[gId] || {}).filter((q) => q > 0).length;
       if (count < grp.minSelect) {
         const gLabel = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
         setOptionValidationMsg(
@@ -374,19 +413,23 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     for (const gId of activeDish.optionGroupIds || []) {
       const grp = optionGroupMap.get(gId);
       if (!grp) continue;
-      const chosenIds = selectedOptions[gId] || [];
-      for (const cId of chosenIds) {
+      const chosenMap = selectedOptions[gId] || {};
+      for (const [cId, rawQty] of Object.entries(chosenMap)) {
+        if (!rawQty || rawQty <= 0) continue;
         const choice = grp.choices.find((c) => c.id === cId);
         if (choice) {
-          const effQty = getOptionChoiceEffectiveQuantity(choice);
+          const allowQty = isOptionChoiceQuantityEnabled(choice);
+          const effQty = allowQty ? Math.max(1, Math.round(rawQty)) : 1;
           const baseChoiceName = getLocalizedText(lang, choice.nameTh || choice.name, choice.name);
-          optionsExtra += choice.price;
+          const linePrice = calculateOptionChoiceLinePrice(choice.price, effQty);
+          optionsExtra += linePrice;
           flatOptions.push({
             groupId: grp.id,
             groupName: getLocalizedText(lang, grp.nameTh || grp.name, grp.name),
             choiceId: choice.id,
-            choiceName: effQty > 1 ? `${baseChoiceName} ×${effQty}` : baseChoiceName,
-            price: choice.price,
+            choiceName: formatOptionChoiceDisplayName(baseChoiceName, effQty),
+            price: linePrice,
+            ...(allowQty ? { quantity: effQty } : {}),
           });
         }
       }
@@ -395,7 +438,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     const unitPrice = Math.max(0, selectedVariant.price + optionsExtra);
     const dishLabel = getLocalizedText(lang, activeDish.nameTh || activeDish.name, activeDish.name);
     const varLabel = getLocalizedText(lang, selectedVariant.nameTh || selectedVariant.name, selectedVariant.name);
-    const optionSig = flatOptions.map((o) => o.choiceId).sort().join(',');
+    const optionSig = flatOptions
+      .map((o) => `${o.choiceId}:${o.quantity ?? 1}`)
+      .sort()
+      .join(',');
     const noteTrim = itemNote.trim();
     const key = `${activeDish.id}::${selectedVariant.id}::${optionSig}::${noteTrim}`;
 
@@ -859,7 +905,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               {(activeDish.optionGroupIds || []).map((gId) => {
                 const grp = optionGroupMap.get(gId);
                 if (!grp || grp.choices.length === 0) return null;
-                const selectedIds = selectedOptions[gId] || [];
+                const selectedMap = selectedOptions[gId] || {};
                 const grpTitle = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
 
                 return (
@@ -878,12 +924,121 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                     </div>
                     <div className="space-y-1.5">
                       {grp.choices.map((ch) => {
-                        const checked = selectedIds.includes(ch.id);
+                        const chosenQty = selectedMap[ch.id] || 0;
+                        const checked = chosenQty > 0;
+                        const allowQty = isOptionChoiceQuantityEnabled(ch);
+                        const unitPrice = Math.max(0, Number(ch.price) || 0);
+                        const linePrice = checked
+                          ? calculateOptionChoiceLinePrice(unitPrice, chosenQty)
+                          : unitPrice;
+                        const choiceLabel = getLocalizedText(lang, ch.nameTh || ch.name, ch.name);
+
+                        if (allowQty) {
+                          return (
+                            <div
+                              key={ch.id}
+                              className={`w-full min-h-[46px] px-3 py-2 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
+                                checked
+                                  ? 'bg-orange-50 border-orange-500 text-orange-950'
+                                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => toggleOptionChoice(grp, ch)}
+                                className="flex-1 min-w-0 flex items-center gap-2.5 text-left cursor-pointer py-0.5"
+                              >
+                                <span
+                                  className={`w-4 h-4 rounded-md border flex items-center justify-center text-[10px] shrink-0 ${
+                                    checked
+                                      ? 'bg-orange-600 border-orange-600 text-white'
+                                      : 'border-slate-300 bg-white'
+                                  }`}
+                                >
+                                  {checked ? '✓' : ''}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className={`text-xs truncate ${checked ? 'font-bold' : ''}`}>
+                                    {choiceLabel}
+                                  </div>
+                                  {unitPrice > 0 && checked && chosenQty > 1 && (
+                                    <div className="text-[10px] text-orange-700/80 font-medium tabular-nums">
+                                      +฿{formatMoney(unitPrice)} / {lang === 'th' ? 'หน่วย' : 'ea'}
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-xs font-bold text-slate-600 tabular-nums">
+                                  {linePrice > 0
+                                    ? `+฿${formatMoney(linePrice)}`
+                                    : lang === 'th'
+                                    ? 'ฟรี'
+                                    : 'Free'}
+                                </span>
+
+                                {checked ? (
+                                  <div className="flex items-center gap-1 bg-white border border-orange-300 rounded-lg p-0.5">
+                                    <button
+                                      type="button"
+                                      aria-label={
+                                        lang === 'th' ? 'ลดจำนวนตัวเลือก' : 'Decrease option quantity'
+                                      }
+                                      onClick={() => updateOptionChoiceQty(grp, ch, chosenQty - 1)}
+                                      className="w-7 h-7 rounded-md hover:bg-orange-50 text-slate-700 flex items-center justify-center cursor-pointer"
+                                    >
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </button>
+                                    <NumericInput
+                                      min={1}
+                                      max={99}
+                                      step={1}
+                                      inputMode="numeric"
+                                      fallbackValue={1}
+                                      aria-label={
+                                        lang === 'th' ? 'จำนวนตัวเลือก' : 'Option quantity'
+                                      }
+                                      value={chosenQty}
+                                      onValueChange={(val) => {
+                                        const next = Math.round(val);
+                                        if (next >= 1) {
+                                          updateOptionChoiceQty(grp, ch, next);
+                                        }
+                                      }}
+                                      className="w-9 py-0.5 text-center text-xs font-extrabold text-slate-900 bg-transparent focus:outline-none tabular-nums"
+                                    />
+                                    <button
+                                      type="button"
+                                      aria-label={
+                                        lang === 'th' ? 'เพิ่มจำนวนตัวเลือก' : 'Increase option quantity'
+                                      }
+                                      onClick={() => updateOptionChoiceQty(grp, ch, chosenQty + 1)}
+                                      className="w-7 h-7 rounded-md hover:bg-orange-50 text-orange-700 flex items-center justify-center cursor-pointer"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleOptionChoice(grp, ch)}
+                                    className="px-2.5 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-700 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>{lang === 'th' ? 'ใส่จำนวน' : 'Qty'}</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        }
+
                         return (
                           <button
                             key={ch.id}
                             type="button"
-                            onClick={() => toggleOptionChoice(grp, ch.id)}
+                            onClick={() => toggleOptionChoice(grp, ch)}
                             className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border flex items-center justify-between text-left cursor-pointer transition-colors ${
                               checked
                                 ? 'bg-orange-50 border-orange-500 text-orange-950 font-bold'
@@ -900,15 +1055,14 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                               >
                                 {checked ? '✓' : ''}
                               </span>
-                              <span className="text-xs">
-                                {getLocalizedText(lang, ch.nameTh || ch.name, ch.name)}
-                                {getOptionChoiceEffectiveQuantity(ch) > 1
-                                  ? ` ×${getOptionChoiceEffectiveQuantity(ch)}`
-                                  : ''}
-                              </span>
+                              <span className="text-xs">{choiceLabel}</span>
                             </div>
                             <span className="text-xs font-bold text-slate-600 tabular-nums">
-                              {ch.price > 0 ? `+฿${formatMoney(ch.price)}` : lang === 'th' ? 'ฟรี' : 'Free'}
+                              {unitPrice > 0
+                                ? `+฿${formatMoney(unitPrice)}`
+                                : lang === 'th'
+                                ? 'ฟรี'
+                                : 'Free'}
                             </span>
                           </button>
                         );
@@ -961,9 +1115,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               <button
                 type="button"
                 onClick={handleAddToCart}
-                className="flex-1 min-h-[46px] px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-xs sm:text-sm cursor-pointer"
+                className="flex-1 min-h-[46px] px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-xs sm:text-sm cursor-pointer tabular-nums"
               >
-                {lang === 'th' ? 'เพิ่มลงตะกร้า' : 'Add to Cart'}
+                {lang === 'th'
+                  ? `เพิ่มลงตะกร้า • ฿${formatMoney(activeDishLiveUnitPrice * itemQty)}`
+                  : `Add to Cart • ฿${formatMoney(activeDishLiveUnitPrice * itemQty)}`}
               </button>
             </div>
           </div>
@@ -1349,14 +1505,21 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
 
                       <div className="text-xs text-slate-700 space-y-1 border-t border-slate-100 pt-2">
                         {ord.items.map((it, i) => (
-                          <div key={i} className="flex justify-between gap-2">
-                            <span>
-                              {it.quantity}x {it.dishName}
-                              {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
-                            </span>
-                            <span className="font-semibold tabular-nums">
-                              ฿{formatMoney(it.unitPrice * it.quantity)}
-                            </span>
+                          <div key={i} className="space-y-0.5">
+                            <div className="flex justify-between gap-2">
+                              <span>
+                                {it.quantity}x {it.dishName}
+                                {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
+                              </span>
+                              <span className="font-semibold tabular-nums">
+                                ฿{formatMoney(it.unitPrice * it.quantity)}
+                              </span>
+                            </div>
+                            {it.options && it.options.length > 0 && (
+                              <div className="text-[11px] text-slate-500 pl-3">
+                                + {it.options.map((o) => o.choiceName).join(', ')}
+                              </div>
+                            )}
                           </div>
                         ))}
                         {ord.orderMode === 'delivery' && ord.deliveryFee > 0 && (

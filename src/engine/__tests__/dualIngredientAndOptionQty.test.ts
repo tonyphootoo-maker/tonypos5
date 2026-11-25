@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   calculateOptionChoiceCost,
+  calculateOptionChoiceLinePrice,
+  formatOptionChoiceDisplayName,
   isOptionChoiceQuantityEnabled,
   getOptionChoiceEffectiveQuantity,
+  toggleOptionChoiceMap,
+  updateOptionChoiceQuantityMap,
 } from '../calculations';
 import {
   sanitizeMenuForPublicStore,
@@ -285,20 +289,23 @@ describe('Dual-Ingredient Variant Costing & Option Choice Quantity', () => {
         price: 15,
       });
       expect('ingredients' in pubGroup.choices[0]).toBe(false);
+      expect('hasQuantity' in pubGroup.choices[0]).toBe(false);
       expect(pubGroup.choices[1]).toEqual({
         id: 'ch_triple_3',
         name: '3 Fried Eggs',
         price: 40,
+        hasQuantity: true,
         quantity: 3,
       });
       expect('ingredients' in pubGroup.choices[1]).toBe(false);
-      // Disabled choice with stale quantity: 4 omits quantity from public choice
+      // Disabled choice with stale quantity: 4 omits quantity & hasQuantity from public choice
       expect(pubGroup.choices[2]).toEqual({
         id: 'ch_disabled_stale',
         name: 'Extra Herb',
         price: 10,
       });
       expect('quantity' in pubGroup.choices[2]).toBe(false);
+      expect('hasQuantity' in pubGroup.choices[2]).toBe(false);
 
       const snapshot = calculateOnlineOrderCostSnapshot({
         items: [
@@ -350,6 +357,186 @@ describe('Dual-Ingredient Variant Costing & Option Choice Quantity', () => {
       // Base dish 12 + (1 egg * 5 * 3 = 15) + (1 egg * 5 * 1 = 5) = 32 per order item * 2 qty = 64
       expect(snapshot.foodCost).toBeCloseTo(64, 2);
       expect(snapshot.packagingCost).toBeCloseTo(8, 2);
+    });
+
+    it('lets customers select custom quantities (e.g. 3 fried eggs) on hasQuantity=true choices even when owner default quantity is 1, and updates price & COGS', () => {
+      const friedEggChoice: OptionChoice = {
+        id: 'ch_fried_egg',
+        name: 'Fried Egg',
+        nameTh: 'ไข่ดาว',
+        price: 15,
+        hasQuantity: true,
+        quantity: 1,
+        ingredients: [{ ingredientId: 'ing_egg', quantity: 1 }],
+      };
+      const lessSpicyChoice: OptionChoice = {
+        id: 'ch_less_spicy',
+        name: 'Less Spicy',
+        nameTh: 'เผ็ดน้อย',
+        price: 0,
+        hasQuantity: false,
+        quantity: 1,
+      };
+      const sausageChoice: OptionChoice = {
+        id: 'ch_sausage',
+        name: 'Chinese Sausage',
+        nameTh: 'กุนเชียง',
+        price: 20,
+        hasQuantity: true,
+        quantity: 1,
+      };
+
+      // Sanitizer preserves hasQuantity: true even when choice.quantity === 1
+      const settings: SettingsDoc = {
+        id: 'main',
+        shopName: "Tony's Kit",
+        shopAddress: '123 Sukhumvit',
+        shopPhone: '02-000-0000',
+        taxId: '0105558000000',
+        receiptHeader: 'Welcome',
+        receiptFooter: 'Thanks',
+        targetFoodCostPercent: 35,
+        vatPercent: 7,
+        serviceChargePercent: 0,
+        dailyClosingTime: '04:00',
+        pointsEarnUnitThb: 100,
+        pointsRedeemValueThb: 1,
+        pricesIncludeVat: false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        version: 1,
+      };
+      const { publicStore } = sanitizeMenuForPublicStore({
+        storeId: 'main',
+        settings,
+        categories: [{ id: 'cat_1', name: 'Mains', order: 1, createdAt: nowIso, updatedAt: nowIso, version: 1 }],
+        dishes: [],
+        optionGroups: [
+          {
+            id: 'grp_egg',
+            name: 'Toppings',
+            nameTh: 'ท็อปปิ้ง',
+            minSelect: 0,
+            maxSelect: 1,
+            order: 1,
+            choices: [friedEggChoice, lessSpicyChoice, sausageChoice],
+            createdAt: nowIso,
+            updatedAt: nowIso,
+            version: 1,
+          },
+        ],
+      });
+
+      expect(publicStore.optionGroups[0].choices[0]).toEqual({
+        id: 'ch_fried_egg',
+        name: 'Fried Egg',
+        nameTh: 'ไข่ดาว',
+        price: 15,
+        hasQuantity: true,
+      });
+      expect(isOptionChoiceQuantityEnabled(publicStore.optionGroups[0].choices[0])).toBe(true);
+      expect(isOptionChoiceQuantityEnabled(publicStore.optionGroups[0].choices[1])).toBe(false);
+
+      // Customer taps Fried Egg then sets quantity to 3 (works even with maxSelect = 1)
+      let sel = toggleOptionChoiceMap({}, friedEggChoice, 1);
+      expect(sel).toEqual({ ch_fried_egg: 1 });
+      sel = updateOptionChoiceQuantityMap(sel, friedEggChoice, 3, 1);
+      expect(sel).toEqual({ ch_fried_egg: 3 });
+
+      expect(calculateOptionChoiceLinePrice(friedEggChoice.price, sel.ch_fried_egg)).toBe(45);
+      expect(formatOptionChoiceDisplayName('ไข่ดาว', sel.ch_fried_egg)).toBe('ไข่ดาว ×3');
+
+      // Non-quantity option ignores quantity changes
+      const spiceSel = toggleOptionChoiceMap({}, lessSpicyChoice, 1);
+      expect(spiceSel).toEqual({ ch_less_spicy: 1 });
+      expect(updateOptionChoiceQuantityMap(spiceSel, lessSpicyChoice, 5, 1)).toEqual({
+        ch_less_spicy: 1,
+      });
+
+      // Multi-select (maxSelect = 2) with independent quantities & decrement to 0 deselecting
+      let multi = updateOptionChoiceQuantityMap({}, friedEggChoice, 3, 2);
+      multi = updateOptionChoiceQuantityMap(multi, sausageChoice, 2, 2);
+      expect(multi).toEqual({ ch_fried_egg: 3, ch_sausage: 2 });
+      multi = updateOptionChoiceQuantityMap(multi, sausageChoice, 0, 2);
+      expect(multi).toEqual({ ch_fried_egg: 3 });
+
+      // Cost calculation respects customer-chosen quantity override = 3
+      expect(calculateOptionChoiceCost(friedEggChoice, ingredientsMap, 3)).toEqual({
+        cost: 15, // 3 * 5 THB per egg
+        hasMissing: false,
+      });
+
+      // Online order COGS snapshot uses opt.quantity = 3 even though template choice.quantity === 1
+      const customOrderSnapshot = calculateOnlineOrderCostSnapshot({
+        items: [
+          {
+            dishId: 'dish_1',
+            dishName: 'Basil Stir Fry',
+            variantId: 'var_1',
+            variantName: 'Regular',
+            quantity: 2,
+            unitPrice: 124,
+            options: [
+              {
+                groupId: 'grp_egg',
+                groupName: 'ท็อปปิ้ง',
+                choiceId: 'ch_fried_egg',
+                choiceName: 'ไข่ดาว ×3',
+                price: 45,
+                quantity: 3,
+              },
+            ],
+          },
+        ],
+        dishesMap: new Map([
+          [
+            'dish_1',
+            {
+              id: 'dish_1',
+              name: 'Basil Stir Fry',
+              categoryId: 'cat_1',
+              order: 1,
+              optionGroupIds: ['grp_egg'],
+              variants: [
+                {
+                  id: 'var_1',
+                  name: 'Regular',
+                  price: 79,
+                  ingredients: [{ ingredientId: 'ing_cheese', quantity: 1 }], // 12 THB
+                  subRecipes: [],
+                  packaging: [],
+                },
+              ],
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              version: 1,
+            },
+          ],
+        ]),
+        optionGroupsMap: new Map([
+          [
+            'grp_egg',
+            {
+              id: 'grp_egg',
+              name: 'Toppings',
+              nameTh: 'ท็อปปิ้ง',
+              minSelect: 0,
+              maxSelect: 1,
+              order: 1,
+              choices: [friedEggChoice],
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              version: 1,
+            },
+          ],
+        ]),
+        ingredientsMap,
+        subRecipesMap: new Map<string, SubRecipeDoc>(),
+        packagingMap: new Map<string, PackagingDoc>(),
+      });
+
+      // Per dish: 12 THB base + (3 * 5 THB eggs = 15) = 27 THB * 2 qty = 54 THB
+      expect(customOrderSnapshot.foodCost).toBeCloseTo(54, 2);
     });
   });
 

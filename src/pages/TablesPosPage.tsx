@@ -20,7 +20,11 @@ import { translations } from '../i18n/translations';
 import {
   calculateDishVariantCost,
   calculateOptionChoiceCost,
-  getOptionChoiceEffectiveQuantity,
+  isOptionChoiceQuantityEnabled,
+  calculateOptionChoiceLinePrice,
+  formatOptionChoiceDisplayName,
+  toggleOptionChoiceMap,
+  updateOptionChoiceQuantityMap,
   calculateBillFinancials,
   calculateEffectiveChannelPrice,
   calculateExVatFoodCostPercent,
@@ -159,7 +163,7 @@ export const TablesPosPage: React.FC<Props> = ({
   // Dish Customization Dialog
   const [selectedDishForOptions, setSelectedDishForOptions] = useState<DishDoc | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState<string>('');
-  const [selectedOptionChoices, setSelectedOptionChoices] = useState<Map<string, string[]>>(new Map());
+  const [selectedOptionChoices, setSelectedOptionChoices] = useState<Record<string, Record<string, number>>>({});
   const [itemNotes, setItemNotes] = useState<string>('');
   const [itemQuantity, setItemQuantity] = useState<number>(1);
 
@@ -501,7 +505,7 @@ export const TablesPosPage: React.FC<Props> = ({
   const handleOpenDishOptions = (dish: DishDoc) => {
     setSelectedDishForOptions(dish);
     setSelectedVariantId(dish.variants[0]?.id || '');
-    setSelectedOptionChoices(new Map());
+    setSelectedOptionChoices({});
     setItemNotes('');
     setItemQuantity(1);
   };
@@ -526,25 +530,29 @@ export const TablesPosPage: React.FC<Props> = ({
     let optionsPrice = 0;
     let optionsCost = 0;
 
-    selectedOptionChoices.forEach((choiceIds, groupId) => {
+    Object.entries(selectedOptionChoices).forEach(([groupId, chosenMap]) => {
       const group = optionGroupsMap.get(groupId);
-      if (group) {
-        choiceIds.forEach((cId) => {
+      if (group && chosenMap) {
+        Object.entries(chosenMap).forEach(([cId, rawQty]) => {
+          if (!rawQty || rawQty <= 0) return;
           const choice = group.choices.find((c) => c.id === cId);
           if (choice) {
-            const optCostCalc = calculateOptionChoiceCost(choice, ingredientsMap);
-            optionsPrice += choice.price || 0;
+            const allowQty = isOptionChoiceQuantityEnabled(choice);
+            const effQty = allowQty ? Math.max(1, Math.round(rawQty)) : 1;
+            const optCostCalc = calculateOptionChoiceCost(choice, ingredientsMap, effQty);
+            const linePrice = calculateOptionChoiceLinePrice(choice.price || 0, effQty);
+            optionsPrice += linePrice;
             optionsCost += optCostCalc.cost;
 
-            const effQty = getOptionChoiceEffectiveQuantity(choice);
             const baseChoiceName = lang === 'th' && choice.nameTh ? choice.nameTh : choice.name;
             optionsSnapshot.push({
               groupId: group.id,
               groupName: lang === 'th' && group.nameTh ? group.nameTh : group.name,
               choiceId: choice.id,
-              choiceName: effQty > 1 ? `${baseChoiceName} ×${effQty}` : baseChoiceName,
-              price: choice.price || 0,
+              choiceName: formatOptionChoiceDisplayName(baseChoiceName, effQty),
+              price: linePrice,
               cost: optCostCalc.cost,
+              ...(allowQty ? { quantity: effQty } : {}),
             });
           }
         });
@@ -2779,7 +2787,7 @@ export const TablesPosPage: React.FC<Props> = ({
               {selectedDishForOptions.optionGroupIds?.map((groupId) => {
                 const group = optionGroupsMap.get(groupId);
                 if (!group) return null;
-                const selectedChoices = selectedOptionChoices.get(groupId) || [];
+                const chosenMap = selectedOptionChoices[groupId] || {};
 
                 return (
                   <div key={groupId} className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-2">
@@ -2792,42 +2800,161 @@ export const TablesPosPage: React.FC<Props> = ({
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-1.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                       {group.choices.map((choice) => {
-                        const isChosen = selectedChoices.includes(choice.id);
+                        const chosenQty = chosenMap[choice.id] || 0;
+                        const isChosen = chosenQty > 0;
+                        const allowQty = isOptionChoiceQuantityEnabled(choice);
+                        const unitPrice = Math.max(0, Number(choice.price) || 0);
+                        const linePrice = isChosen
+                          ? calculateOptionChoiceLinePrice(unitPrice, chosenQty)
+                          : unitPrice;
+                        const choiceLabel =
+                          lang === 'th' && choice.nameTh ? choice.nameTh : choice.name;
+
+                        if (allowQty) {
+                          return (
+                            <div
+                              key={choice.id}
+                              className={`p-2 rounded-xl border text-left text-xs font-semibold flex items-center justify-between gap-2 transition-all ${
+                                isChosen
+                                  ? 'bg-orange-500 text-white border-orange-600 shadow-2xs'
+                                  : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
+                              }`}
+                            >
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSelectedOptionChoices((prev) => ({
+                                    ...prev,
+                                    [groupId]: toggleOptionChoiceMap(
+                                      prev[groupId] || {},
+                                      choice,
+                                      group.maxSelect
+                                    ),
+                                  }))
+                                }
+                                className="flex-1 min-w-0 text-left cursor-pointer"
+                              >
+                                <div className="truncate">{choiceLabel}</div>
+                                {linePrice > 0 && (
+                                  <div
+                                    className={`text-[10px] font-bold tabular-nums ${
+                                      isChosen ? 'text-orange-100' : 'text-neutral-500'
+                                    }`}
+                                  >
+                                    +{formatMoney(linePrice)}
+                                  </div>
+                                )}
+                              </button>
+
+                              {isChosen ? (
+                                <div className="flex items-center gap-0.5 bg-white text-neutral-900 rounded-lg p-0.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    aria-label="Decrease option quantity"
+                                    onClick={() =>
+                                      setSelectedOptionChoices((prev) => ({
+                                        ...prev,
+                                        [groupId]: updateOptionChoiceQuantityMap(
+                                          prev[groupId] || {},
+                                          choice,
+                                          chosenQty - 1,
+                                          group.maxSelect
+                                        ),
+                                      }))
+                                    }
+                                    className="w-6 h-6 rounded-md hover:bg-neutral-100 font-black flex items-center justify-center cursor-pointer"
+                                  >
+                                    -
+                                  </button>
+                                  <NumericInput
+                                    min={1}
+                                    max={99}
+                                    step={1}
+                                    inputMode="numeric"
+                                    fallbackValue={1}
+                                    value={chosenQty}
+                                    onValueChange={(val) => {
+                                      const next = Math.round(val);
+                                      if (next >= 1) {
+                                        setSelectedOptionChoices((prev) => ({
+                                          ...prev,
+                                          [groupId]: updateOptionChoiceQuantityMap(
+                                            prev[groupId] || {},
+                                            choice,
+                                            next,
+                                            group.maxSelect
+                                          ),
+                                        }));
+                                      }
+                                    }}
+                                    className="w-8 text-center text-xs font-extrabold bg-transparent focus:outline-none tabular-nums"
+                                  />
+                                  <button
+                                    type="button"
+                                    aria-label="Increase option quantity"
+                                    onClick={() =>
+                                      setSelectedOptionChoices((prev) => ({
+                                        ...prev,
+                                        [groupId]: updateOptionChoiceQuantityMap(
+                                          prev[groupId] || {},
+                                          choice,
+                                          chosenQty + 1,
+                                          group.maxSelect
+                                        ),
+                                      }))
+                                    }
+                                    className="w-6 h-6 rounded-md hover:bg-neutral-100 font-black text-orange-600 flex items-center justify-center cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedOptionChoices((prev) => ({
+                                      ...prev,
+                                      [groupId]: toggleOptionChoiceMap(
+                                        prev[groupId] || {},
+                                        choice,
+                                        group.maxSelect
+                                      ),
+                                    }))
+                                  }
+                                  className="px-2 py-1 rounded-lg bg-orange-50 text-orange-700 border border-orange-200 text-[10px] font-bold shrink-0 cursor-pointer"
+                                >
+                                  + {lang === 'th' ? 'จำนวน' : 'Qty'}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        }
+
                         return (
                           <button
                             key={choice.id}
                             type="button"
-                            onClick={() => {
-                              const next = new Map(selectedOptionChoices);
-                              let curr = next.get(groupId) || [];
-                              if (isChosen) {
-                                curr = curr.filter((id) => id !== choice.id);
-                              } else {
-                                if (group.maxSelect === 1) {
-                                  curr = [choice.id];
-                                } else if (curr.length < group.maxSelect) {
-                                  curr = [...curr, choice.id];
-                                }
-                              }
-                              next.set(groupId, curr);
-                              setSelectedOptionChoices(next);
-                            }}
+                            onClick={() =>
+                              setSelectedOptionChoices((prev) => ({
+                                ...prev,
+                                [groupId]: toggleOptionChoiceMap(
+                                  prev[groupId] || {},
+                                  choice,
+                                  group.maxSelect
+                                ),
+                              }))
+                            }
                             className={`p-2 rounded-xl border text-left text-xs font-semibold flex justify-between items-center cursor-pointer transition-all ${
                               isChosen
                                 ? 'bg-orange-500 text-white border-orange-600 shadow-2xs'
                                 : 'bg-white text-neutral-800 border-neutral-300 hover:bg-neutral-100'
                             }`}
                           >
-                            <span>
-                              {lang === 'th' && choice.nameTh ? choice.nameTh : choice.name}
-                              {getOptionChoiceEffectiveQuantity(choice) > 1
-                                ? ` ×${getOptionChoiceEffectiveQuantity(choice)}`
-                                : ''}
-                            </span>
-                            {choice.price > 0 && (
-                              <span className="font-bold">+{formatMoney(choice.price)}</span>
+                            <span>{choiceLabel}</span>
+                            {unitPrice > 0 && (
+                              <span className="font-bold">+{formatMoney(unitPrice)}</span>
                             )}
                           </button>
                         );

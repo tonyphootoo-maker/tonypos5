@@ -199,8 +199,9 @@ export interface OrderItemOption {
   groupName: string;
   choiceId: string;
   choiceName: string;
-  price: number; // Price snapshot
-  cost: number; // Cost snapshot
+  price: number; // Price snapshot (total for chosen quantity)
+  cost: number; // Cost snapshot (total for chosen quantity)
+  quantity?: number; // Customer-selected quantity when option allows quantity
 }
 
 export interface OrderItem {
@@ -456,6 +457,7 @@ export interface OnlineOrderItemOption {
   choiceId: string;
   choiceName: string;
   price: number;
+  quantity?: number;
 }
 
 export interface OnlineOrderItem {
