@@ -672,3 +672,86 @@ export function buildExternalGoogleMapsUrl(
   return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${addr}`;
 }
 
+/**
+ * Extracts ?store= from URL search string or hash query fragment (safe across LINE/iOS redirects).
+ */
+export function extractStoreIdFromLocation(search: string = '', hash: string = ''): string | null {
+  const candidates: string[] = [];
+  if (search) candidates.push(search);
+  if (hash) {
+    const qIdx = hash.indexOf('?');
+    if (qIdx >= 0) {
+      candidates.push(hash.slice(qIdx));
+    } else if (hash.includes('store=')) {
+      candidates.push(hash.startsWith('#') ? hash.slice(1) : hash);
+    }
+  }
+
+  for (const raw of candidates) {
+    try {
+      const params = new URLSearchParams(raw);
+      const val = params.get('store')?.trim();
+      if (val) return val;
+    } catch {
+      // Ignore malformed query string
+    }
+  }
+  return null;
+}
+
+/**
+ * Converts a Firestore REST API Value JSON object into a plain JS value.
+ */
+export function decodeFirestoreRestValue(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const v = value as Record<string, unknown>;
+
+  if ('nullValue' in v) return null;
+  if ('booleanValue' in v) return Boolean(v.booleanValue);
+  if ('integerValue' in v) {
+    const n = Number(v.integerValue);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if ('doubleValue' in v) {
+    const n = Number(v.doubleValue);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if ('stringValue' in v) return String(v.stringValue ?? '');
+  if ('timestampValue' in v) return String(v.timestampValue ?? '');
+  if ('referenceValue' in v) return String(v.referenceValue ?? '');
+  if ('arrayValue' in v) {
+    const arrObj = v.arrayValue as { values?: unknown[] } | undefined;
+    const list = Array.isArray(arrObj?.values) ? arrObj.values : [];
+    return list.map((item) => decodeFirestoreRestValue(item));
+  }
+  if ('mapValue' in v) {
+    const mapObj = v.mapValue as { fields?: Record<string, unknown> } | undefined;
+    const fields = mapObj?.fields || {};
+    const out: Record<string, unknown> = {};
+    for (const [k, rawVal] of Object.entries(fields)) {
+      out[k] = decodeFirestoreRestValue(rawVal);
+    }
+    return out;
+  }
+  return undefined;
+}
+
+/**
+ * Converts a Firestore REST API Document response (`{ name, fields }`) into a plain JS document.
+ */
+export function parseFirestoreRestDocument(rawDoc: unknown): Record<string, unknown> | null {
+  if (!rawDoc || typeof rawDoc !== 'object') return null;
+  const docObj = rawDoc as { name?: string; fields?: Record<string, unknown> };
+  if (!docObj.fields || typeof docObj.fields !== 'object') return null;
+
+  const out: Record<string, unknown> = {};
+  for (const [k, val] of Object.entries(docObj.fields)) {
+    out[k] = decodeFirestoreRestValue(val);
+  }
+  if (!out.id && typeof docObj.name === 'string') {
+    const parts = docObj.name.split('/');
+    const last = parts[parts.length - 1];
+    if (last) out.id = last;
+  }
+  return out;
+}

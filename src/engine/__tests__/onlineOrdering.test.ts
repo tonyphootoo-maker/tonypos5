@@ -4,11 +4,13 @@ import {
   buildWebSyncDailySalesRecords,
   calculateOnlineOrderCostSnapshot,
   extractLatLngLiteral,
+  extractStoreIdFromLocation,
   formatNavDistance,
   formatNavDuration,
   getBangkokBusinessWorkDate,
   haversineMeters,
   isOnlineOrderInLocalPeriod,
+  parseFirestoreRestDocument,
   resolveAppMode,
   sanitizeMenuForPublicStore,
   stripHtmlInstructions,
@@ -619,6 +621,54 @@ describe('Online Ordering Engine', () => {
       price: 69,
     });
   });
+
+  it('extracts storeId from both query search and hash fragments', () => {
+    expect(extractStoreIdFromLocation('?mode=order&store=uid_ios_123', '')).toBe('uid_ios_123');
+    expect(extractStoreIdFromLocation('', '#/?mode=order&store=uid_hash_456')).toBe('uid_hash_456');
+    expect(extractStoreIdFromLocation('', '#store=uid_hash_789')).toBe('uid_hash_789');
+    expect(extractStoreIdFromLocation('?mode=order', '')).toBeNull();
+  });
+
+  it('decodes Firestore REST document payloads accurately for iOS fallback fetching', () => {
+    const parsed = parseFirestoreRestDocument({
+      name: 'projects/p/databases/(default)/documents/publicStores/store_abc',
+      fields: {
+        storeId: { stringValue: 'store_abc' },
+        shopName: { stringValue: "Tony's Kit" },
+        onlineOrderingEnabled: { booleanValue: true },
+        onlineDeliveryFee: { integerValue: '25' },
+        vatPercent: { doubleValue: 7.5 },
+        optionalNull: { nullValue: null },
+        categories: {
+          arrayValue: {
+            values: [
+              {
+                mapValue: {
+                  fields: {
+                    id: { stringValue: 'cat_1' },
+                    name: { stringValue: 'Main' },
+                    order: { integerValue: '1' },
+                  },
+                },
+              },
+            ],
+          },
+        },
+        dishes: { arrayValue: {} },
+      },
+    });
+
+    expect(parsed).toEqual({
+      id: 'store_abc',
+      storeId: 'store_abc',
+      shopName: "Tony's Kit",
+      onlineOrderingEnabled: true,
+      onlineDeliveryFee: 25,
+      vatPercent: 7.5,
+      optionalNull: null,
+      categories: [{ id: 'cat_1', name: 'Main', order: 1 }],
+      dishes: [],
+    });
+    expect(parseFirestoreRestDocument(null)).toBeNull();
+  });
 });
-
-

@@ -14,6 +14,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
+import firebaseConfig from '../../firebase-applet-config.json';
 import {
   auth,
   db,
@@ -44,7 +45,9 @@ import { COST_COLLECTIONS } from '../costing/services/firebaseSyncService';
 import { StorageService } from '../costing/services/storageService';
 import {
   buildWebSyncDailySalesRecords,
+  extractStoreIdFromLocation,
   getBangkokDateParts,
+  parseFirestoreRestDocument,
   sanitizeMenuForPublicStore,
   toDateSafe,
 } from '../engine/onlineOrdering';
@@ -56,6 +59,66 @@ const STORAGE_GUEST_UID_KEY = 'kinpos_guest_uid';
 const STORAGE_TRACKED_ORDER_IDS_KEY = 'kinpos_tracked_order_ids';
 const publicImageCache = new Map<string, string>();
 let cachedAnonProviderDisabled = false;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string = 'Request'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+async function fetchFirestoreDocumentRest(
+  docPath: string,
+  timeoutMs: number = 4500
+): Promise<Record<string, unknown> | null> {
+  if (typeof fetch !== 'function') return null;
+  const projectId = firebaseConfig.projectId;
+  const databaseId = firebaseConfig.firestoreDatabaseId || '(default)';
+  const apiKey = firebaseConfig.apiKey;
+  if (!projectId || !docPath) return null;
+
+  const encodedPath = docPath
+    .split('/')
+    .filter(Boolean)
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  const baseUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(databaseId)}/documents/${encodedPath}`;
+  const url = apiKey ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (res.status === 404) {
+      return null;
+    }
+    if (!res.ok) {
+      throw new Error(`Firestore REST HTTP ${res.status}`);
+    }
+    const json = await res.json();
+    return parseFirestoreRestDocument(json);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export interface CustomerOrRiderSession {
   uid: string;
@@ -206,10 +269,10 @@ export async function resolveCustomerOrRiderSession(): Promise<CustomerOrRiderSe
   try {
     const authWithReady = auth as unknown as { authStateReady?: () => Promise<void> };
     if (typeof authWithReady.authStateReady === 'function') {
-      await authWithReady.authStateReady();
+      await withTimeout(authWithReady.authStateReady(), 2500, 'authStateReady');
     }
   } catch {
-    // Ignore authStateReady errors
+    // Ignore authStateReady errors or timeouts on restricted iOS WebViews
   }
   if (auth.currentUser) {
     return { uid: auth.currentUser.uid, isAuthenticated: true };
@@ -218,7 +281,7 @@ export async function resolveCustomerOrRiderSession(): Promise<CustomerOrRiderSe
     return { uid: getOrCreateGuestUid(), isAuthenticated: false };
   }
   try {
-    const cred = await signInAnonymously(auth);
+    const cred = await withTimeout(signInAnonymously(auth), 3500, 'signInAnonymously');
     return { uid: cred.user.uid, isAuthenticated: true };
   } catch (err: any) {
     const code = err?.code || '';
@@ -231,7 +294,7 @@ export async function resolveCustomerOrRiderSession(): Promise<CustomerOrRiderSe
       console.warn('Anonymous Sign-In is disabled in Firebase Console; continuing in Guest mode.');
       return { uid: getOrCreateGuestUid(), isAuthenticated: false };
     }
-    console.warn('Anonymous auth unavailable, continuing in Guest mode:', err);
+    console.warn('Anonymous auth unavailable or timed out, continuing in Guest mode:', err);
     return { uid: getOrCreateGuestUid(), isAuthenticated: false };
   }
 }
@@ -267,10 +330,14 @@ export async function ensureAnonymousAuth(): Promise<User> {
 /**
  * Resolves storefront owner storeId from URL ?store=, /publicStoreIndex/default, or localStorage.
  */
-export async function resolvePublicStoreId(search: string = ''): Promise<string | null> {
+export async function resolvePublicStoreId(
+  search: string = '',
+  hash: string = ''
+): Promise<string | null> {
   try {
-    const params = new URLSearchParams(search || (typeof window !== 'undefined' ? window.location.search : ''));
-    const storeFromUrl = params.get('store')?.trim();
+    const effectiveSearch = search || (typeof window !== 'undefined' ? window.location.search : '');
+    const effectiveHash = hash || (typeof window !== 'undefined' ? window.location.hash : '');
+    const storeFromUrl = extractStoreIdFromLocation(effectiveSearch, effectiveHash);
     if (storeFromUrl) {
       try {
         localStorage.setItem(STORAGE_STORE_ID_KEY, storeFromUrl);
@@ -286,7 +353,7 @@ export async function resolvePublicStoreId(search: string = ''): Promise<string 
   if (db) {
     try {
       const indexRef = doc(db, 'publicStoreIndex', 'default');
-      const snap = await getDoc(indexRef);
+      const snap = await withTimeout(getDoc(indexRef), 4500, 'publicStoreIndex/default');
       if (snap.exists()) {
         const indexData = snap.data() as PublicStoreIndexDoc;
         if (indexData?.storeId) {
@@ -299,7 +366,23 @@ export async function resolvePublicStoreId(search: string = ''): Promise<string 
         }
       }
     } catch (err) {
-      console.warn('Could not read publicStoreIndex/default:', err);
+      console.warn('Could not read publicStoreIndex/default via SDK, trying REST fallback:', err);
+      try {
+        const restIndex = (await fetchFirestoreDocumentRest(
+          'publicStoreIndex/default',
+          4500
+        )) as PublicStoreIndexDoc | null;
+        if (restIndex?.storeId) {
+          try {
+            localStorage.setItem(STORAGE_STORE_ID_KEY, restIndex.storeId);
+          } catch {
+            // Ignore
+          }
+          return restIndex.storeId;
+        }
+      } catch (restErr) {
+        console.warn('Could not read publicStoreIndex/default via REST:', restErr);
+      }
     }
   }
 
@@ -308,6 +391,40 @@ export async function resolvePublicStoreId(search: string = ''): Promise<string 
   } catch {
     return null;
   }
+}
+
+/**
+ * Performs a bounded one-shot fetch of `publicStores/{storeId}` (SDK with timeout + REST fallback)
+ * so iOS Safari / in-app browsers never hang indefinitely waiting on WebChannel streaming.
+ */
+export async function fetchPublicStoreOnce(storeId: string): Promise<PublicStoreDoc | null> {
+  if (!storeId) return null;
+
+  if (db) {
+    try {
+      const snap = await withTimeout(
+        getDoc(doc(db, 'publicStores', storeId)),
+        4500,
+        `publicStores/${storeId}`
+      );
+      return snap.exists() ? ({ ...snap.data(), id: snap.id } as PublicStoreDoc) : null;
+    } catch (err) {
+      console.warn(`SDK fetchPublicStoreOnce failed for ${storeId}, trying REST fallback:`, err);
+    }
+  }
+
+  const restDoc = await fetchFirestoreDocumentRest(`publicStores/${storeId}`, 5000);
+  if (!restDoc) return null;
+  return {
+    ...(restDoc as unknown as PublicStoreDoc),
+    id: (restDoc.id as string) || storeId,
+    storeId: (restDoc.storeId as string) || storeId,
+    categories: Array.isArray(restDoc.categories) ? (restDoc.categories as PublicStoreDoc['categories']) : [],
+    dishes: Array.isArray(restDoc.dishes) ? (restDoc.dishes as PublicStoreDoc['dishes']) : [],
+    optionGroups: Array.isArray(restDoc.optionGroups)
+      ? (restDoc.optionGroups as PublicStoreDoc['optionGroups'])
+      : [],
+  };
 }
 
 export function subscribePublicStore(
@@ -333,22 +450,41 @@ export async function fetchPublicStoreImage(
   storeId: string,
   imageId: string
 ): Promise<string | null> {
-  if (!db || !storeId || !imageId) return null;
+  if (!storeId || !imageId) return null;
   const cacheKey = `${storeId}::${imageId}`;
   if (publicImageCache.has(cacheKey)) {
     return publicImageCache.get(cacheKey)!;
   }
-  const path = `publicStores/${storeId}/images/${imageId}`;
-  try {
-    const snap = await getDoc(doc(db, 'publicStores', storeId, 'images', imageId));
-    if (snap.exists()) {
-      const dataUrl = (snap.data() as { dataUrl?: string }).dataUrl || null;
-      if (dataUrl) publicImageCache.set(cacheKey, dataUrl);
-      return dataUrl;
+
+  if (db) {
+    try {
+      const snap = await withTimeout(
+        getDoc(doc(db, 'publicStores', storeId, 'images', imageId)),
+        5000,
+        `publicStores/${storeId}/images/${imageId}`
+      );
+      if (snap.exists()) {
+        const dataUrl = (snap.data() as { dataUrl?: string }).dataUrl || null;
+        if (dataUrl) publicImageCache.set(cacheKey, dataUrl);
+        return dataUrl;
+      }
+      return null;
+    } catch (err) {
+      console.warn(`SDK image fetch failed for ${imageId}, trying REST fallback:`, err);
     }
+  }
+
+  try {
+    const restImg = await fetchFirestoreDocumentRest(
+      `publicStores/${storeId}/images/${imageId}`,
+      5000
+    );
+    const dataUrl = typeof restImg?.dataUrl === 'string' ? restImg.dataUrl : null;
+    if (dataUrl) publicImageCache.set(cacheKey, dataUrl);
+    return dataUrl;
+  } catch (restErr) {
+    console.warn(`REST image fetch failed for ${imageId}:`, restErr);
     return null;
-  } catch (err) {
-    handleFirestoreError(err, OperationType.GET, path);
   }
 }
 

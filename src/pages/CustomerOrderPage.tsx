@@ -20,6 +20,7 @@ import {
   LocateFixed,
   Receipt,
   Ban,
+  RefreshCw,
 } from 'lucide-react';
 import {
   Language,
@@ -38,6 +39,7 @@ import {
   cancelOnlineOrderByCustomer,
   createOnlineOrder,
   fetchPublicStoreImage,
+  fetchPublicStoreOnce,
   loadSavedCustomerInfo,
   loadTrackedCustomerOrderIds,
   resolveCustomerOrRiderSession,
@@ -104,6 +106,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   const [localOrders, setLocalOrders] = useState<OnlineOrderDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -150,36 +153,73 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   useEffect(() => {
     let mounted = true;
     let unsubStore: (() => void) | null = null;
+    let resolvedStoreLoaded = false;
+
+    setLoading(true);
+    setAuthError(null);
+
+    const applyLoadedStore = (loadedStore: PublicStoreDoc | null) => {
+      if (!mounted) return;
+      resolvedStoreLoaded = true;
+      clearTimeout(bootTimeout);
+      setStore(loadedStore);
+      setAuthError(null);
+      setLoading(false);
+      if (loadedStore) {
+        if (loadedStore.onlinePickupEnabled === false && loadedStore.onlineDeliveryEnabled) {
+          setOrderMode('delivery');
+        } else if (loadedStore.onlineDeliveryEnabled === false && loadedStore.onlinePickupEnabled) {
+          setOrderMode('pickup');
+        }
+      }
+    };
+
+    const bootTimeout = setTimeout(() => {
+      if (!mounted || resolvedStoreLoaded) return;
+      setAuthError(
+        lang === 'th'
+          ? 'การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจสอบอินเทอร์เน็ตแล้วกดลองใหม่อีกครั้ง'
+          : 'Connection timed out while loading menu. Please check your internet and tap Retry.'
+      );
+      setLoading(false);
+    }, 10000);
 
     const boot = async () => {
       try {
-        const resolvedStoreId = await resolvePublicStoreId(window.location.search);
+        const resolvedStoreId = await resolvePublicStoreId(
+          window.location.search,
+          window.location.hash
+        );
         if (!mounted) return;
         setStoreId(resolvedStoreId);
         setTrackedOrderIds(loadTrackedCustomerOrderIds(resolvedStoreId));
 
         if (resolvedStoreId) {
+          // Run active one-shot fetch (SDK + REST fallback) concurrently with real-time subscription
+          fetchPublicStoreOnce(resolvedStoreId)
+            .then((fetchedStore) => {
+              if (!mounted || resolvedStoreLoaded) return;
+              applyLoadedStore(fetchedStore);
+            })
+            .catch((err) => {
+              console.warn('fetchPublicStoreOnce fallback warning:', err);
+            });
+
           unsubStore = subscribePublicStore(
             resolvedStoreId,
             (loadedStore) => {
-              if (!mounted) return;
-              setStore(loadedStore);
-              setLoading(false);
-              if (loadedStore) {
-                if (loadedStore.onlinePickupEnabled === false && loadedStore.onlineDeliveryEnabled) {
-                  setOrderMode('delivery');
-                } else if (loadedStore.onlineDeliveryEnabled === false && loadedStore.onlinePickupEnabled) {
-                  setOrderMode('pickup');
-                }
-              }
+              applyLoadedStore(loadedStore);
             },
             (err) => {
-              if (!mounted) return;
+              if (!mounted || resolvedStoreLoaded) return;
+              clearTimeout(bootTimeout);
               setAuthError(err.message);
               setLoading(false);
             }
           );
         } else {
+          resolvedStoreLoaded = true;
+          clearTimeout(bootTimeout);
           setLoading(false);
         }
 
@@ -188,7 +228,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         setCustomerUid(session.uid);
         setIsAuthCustomer(session.isAuthenticated);
       } catch (err) {
-        if (!mounted) return;
+        if (!mounted || resolvedStoreLoaded) return;
+        clearTimeout(bootTimeout);
         setAuthError(err instanceof Error ? err.message : String(err));
         setLoading(false);
       }
@@ -197,9 +238,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     boot();
     return () => {
       mounted = false;
+      clearTimeout(bootTimeout);
       unsubStore?.();
     };
-  }, []);
+  }, [retryNonce]);
 
   useEffect(() => {
     if (!isAuthCustomer || !customerUid) {
@@ -616,12 +658,22 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         <div className="absolute top-4 right-4">
           <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
         </div>
-        <div className="max-w-md w-full bg-white rounded-3xl border border-rose-200 p-6 text-center space-y-3 shadow-sm">
+        <div className="max-w-md w-full bg-white rounded-3xl border border-rose-200 p-6 text-center space-y-4 shadow-sm">
           <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
-          <h2 className="text-lg font-extrabold text-slate-900">
-            {lang === 'th' ? 'ไม่สามารถเชื่อมต่อระบบสั่งอาหารได้' : 'Storefront Connection Error'}
-          </h2>
-          <p className="text-xs text-slate-600 leading-relaxed">{authError}</p>
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-extrabold text-slate-900">
+              {lang === 'th' ? 'ไม่สามารถเชื่อมต่อระบบสั่งอาหารได้' : 'Storefront Connection Error'}
+            </h2>
+            <p className="text-xs text-slate-600 leading-relaxed">{authError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRetryNonce((n) => n + 1)}
+            className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>{lang === 'th' ? 'ลองโหลดใหม่อีกครั้ง' : 'Retry'}</span>
+          </button>
         </div>
       </div>
     );

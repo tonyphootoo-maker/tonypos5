@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
+  initializeAuth,
+  browserLocalPersistence,
+  inMemoryPersistence,
   GoogleAuthProvider,
   signInWithPopup,
   signOut as fbSignOut,
@@ -12,6 +15,7 @@ import {
   getFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
+  memoryLocalCache,
   collection,
   doc,
   getDoc,
@@ -53,6 +57,7 @@ import {
   PaymentMethod,
 } from '../types';
 import { getBusinessWorkDate, roundTo2 } from '../engine/calculations';
+import { resolveAppMode } from '../engine/onlineOrdering';
 
 // Guard against harmless IndexedDB multi-tab clock-skew diagnostics from @firebase/firestore
 // (e.g. when Date.now() lags another tab/process timestamp by a few milliseconds) without
@@ -74,6 +79,24 @@ if (typeof globalThis !== 'undefined' && !(globalThis as any).__kinposFirestoreL
   };
 }
 
+function isLightPublicEntryMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const mode = resolveAppMode(window.location.search, window.location.pathname);
+    return mode === 'customer' || mode === 'rider';
+  } catch {
+    return false;
+  }
+}
+
+function isIndexedDbAvailable(): boolean {
+  try {
+    return typeof indexedDB !== 'undefined' && indexedDB !== null;
+  } catch {
+    return false;
+  }
+}
+
 // Initialize Firebase App safely so it can never throw at import time
 let appInstance: any = null;
 let dbInstance: any = null;
@@ -88,31 +111,58 @@ try {
 }
 
 if (appInstance) {
+  const lightPublicMode = isLightPublicEntryMode();
+  const usePersistentPosCache = !lightPublicMode && isIndexedDbAvailable();
+
   try {
     dbInstance = initializeFirestore(
       appInstance,
       {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-        }),
+        localCache: usePersistentPosCache
+          ? persistentLocalCache({
+              tabManager: persistentMultipleTabManager(),
+            })
+          : memoryLocalCache(),
+        experimentalAutoDetectLongPolling: true,
       },
       firebaseConfig.firestoreDatabaseId
     );
   } catch (cacheErr) {
-    console.warn('Persistent cache unavailable, falling back to standard Firestore:', cacheErr);
+    console.warn('Firestore custom cache init failed, falling back to memory cache:', cacheErr);
     try {
-      dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
+      dbInstance = initializeFirestore(
+        appInstance,
+        {
+          localCache: memoryLocalCache(),
+          experimentalAutoDetectLongPolling: true,
+        },
+        firebaseConfig.firestoreDatabaseId
+      );
     } catch {
       try {
-        dbInstance = getFirestore(appInstance);
-      } catch (finalErr) {
-        firebaseInitError = finalErr instanceof Error ? finalErr.message : String(finalErr);
+        dbInstance = getFirestore(appInstance, firebaseConfig.firestoreDatabaseId);
+      } catch {
+        try {
+          dbInstance = getFirestore(appInstance);
+        } catch (finalErr) {
+          firebaseInitError = finalErr instanceof Error ? finalErr.message : String(finalErr);
+        }
       }
     }
   }
 
   try {
-    authInstance = getAuth(appInstance);
+    if (lightPublicMode) {
+      try {
+        authInstance = initializeAuth(appInstance, {
+          persistence: [browserLocalPersistence, inMemoryPersistence],
+        });
+      } catch {
+        authInstance = getAuth(appInstance);
+      }
+    } else {
+      authInstance = getAuth(appInstance);
+    }
   } catch (authErr) {
     firebaseInitError = authErr instanceof Error ? authErr.message : String(authErr);
     console.error('Failed to get Firebase Auth:', authErr);
@@ -132,7 +182,7 @@ async function testConnection() {
   } catch (error) {
     // Non-fatal warning if offline
     if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase client is currently offline. Operating from persistent local cache.');
+      console.warn('Firebase client is currently offline. Operating from local cache.');
     }
   }
 }

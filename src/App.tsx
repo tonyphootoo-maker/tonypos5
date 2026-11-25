@@ -49,12 +49,9 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
-const CustomerOrderPage = React.lazy(() =>
-  import('./pages/CustomerOrderPage').then((m) => ({ default: m.CustomerOrderPage }))
-);
-const RiderAppPage = React.lazy(() =>
-  import('./pages/RiderAppPage').then((m) => ({ default: m.RiderAppPage }))
-);
+import { CustomerOrderPage } from './pages/CustomerOrderPage';
+import { RiderAppPage } from './pages/RiderAppPage';
+
 const OnlineOrdersManagerPage = React.lazy(() =>
   import('./pages/OnlineOrdersManagerPage').then((m) => ({ default: m.OnlineOrdersManagerPage }))
 );
@@ -431,21 +428,7 @@ export default function App() {
 
   // 0. Role-Based Public Storefront & Rider Entry (No Google Sign-In, No POS Navigation)
   if (appMode === 'customer') {
-    return (
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-4 text-slate-700 text-xs font-bold relative">
-            <div className="absolute top-4 right-4">
-              <LanguageToggle lang={lang} onToggleLang={handleToggleLanguage} />
-            </div>
-            <Loader2 className="w-5 h-5 animate-spin text-orange-600 mr-2" />
-            <span>{lang === 'th' ? 'กำลังโหลดเมนูออนไลน์...' : 'Loading Online Menu...'}</span>
-          </div>
-        }
-      >
-        <CustomerOrderPage lang={lang} onToggleLang={handleToggleLanguage} />
-      </Suspense>
-    );
+    return <CustomerOrderPage lang={lang} onToggleLang={handleToggleLanguage} />;
   }
 
   if (appMode === 'rider') {
@@ -469,19 +452,7 @@ export default function App() {
             </span>
           </div>
         )}
-        <Suspense
-          fallback={
-            <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-slate-200 text-xs font-bold relative">
-              <div className="absolute top-4 right-4">
-                <LanguageToggle variant="dark" lang={lang} onToggleLang={handleToggleLanguage} />
-              </div>
-              <Loader2 className="w-5 h-5 animate-spin text-emerald-400 mr-2" />
-              <span>{lang === 'th' ? 'กำลังโหลดแอป Rider...' : 'Loading Rider App...'}</span>
-            </div>
-          }
-        >
-          <RiderAppPage lang={lang} />
-        </Suspense>
+        <RiderAppPage lang={lang} />
       </>
     );
   }

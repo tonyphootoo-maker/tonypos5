@@ -16,6 +16,7 @@ import {
 import { Language, OnlineOrderDoc, PublicStoreDoc } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
 import {
+  fetchPublicStoreOnce,
   loadSavedRiderName,
   resolveCustomerOrRiderSession,
   resolvePublicStoreId,
@@ -89,14 +90,35 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     let mounted = true;
     let unsubStore: (() => void) | null = null;
     let unsubOrders: (() => void) | null = null;
+    let resolvedInitial = false;
+
+    const bootTimeout = setTimeout(() => {
+      if (!mounted || resolvedInitial) return;
+      resolvedInitial = true;
+      setErrorMsg(
+        lang === 'th'
+          ? 'การเชื่อมต่อใช้เวลานานเกินไป กรุณาตรวจสอบอินเทอร์เน็ตและรีเฟรชหน้าเว็บ'
+          : 'Connection timed out while loading Rider jobs. Please refresh.'
+      );
+      setLoading(false);
+    }, 10000);
 
     const boot = async () => {
       try {
-        const resolvedStoreId = await resolvePublicStoreId(window.location.search);
+        const resolvedStoreId = await resolvePublicStoreId(
+          window.location.search,
+          window.location.hash
+        );
         if (!mounted) return;
         setStoreId(resolvedStoreId);
 
         if (resolvedStoreId) {
+          fetchPublicStoreOnce(resolvedStoreId)
+            .then((s) => {
+              if (mounted && s) setStore(s);
+            })
+            .catch(() => {});
+
           unsubStore = subscribePublicStore(resolvedStoreId, (s) => {
             if (mounted) setStore(s);
           });
@@ -104,16 +126,22 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
             resolvedStoreId,
             (list) => {
               if (!mounted) return;
+              resolvedInitial = true;
+              clearTimeout(bootTimeout);
               setOrders(list);
               setLoading(false);
             },
             (err) => {
               if (!mounted) return;
+              resolvedInitial = true;
+              clearTimeout(bootTimeout);
               setErrorMsg(err.message);
               setLoading(false);
             }
           );
         } else {
+          resolvedInitial = true;
+          clearTimeout(bootTimeout);
           setLoading(false);
         }
 
@@ -122,6 +150,8 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
         setRiderUid(session.uid);
       } catch (err) {
         if (!mounted) return;
+        resolvedInitial = true;
+        clearTimeout(bootTimeout);
         setErrorMsg(err instanceof Error ? err.message : String(err));
         setLoading(false);
       }
@@ -130,6 +160,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     boot();
     return () => {
       mounted = false;
+      clearTimeout(bootTimeout);
       unsubStore?.();
       unsubOrders?.();
     };
