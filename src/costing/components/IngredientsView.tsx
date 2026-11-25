@@ -168,11 +168,41 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     () => allCategories[0] || 'เนื้อสัตว์และอาหารทะเล'
   );
 
+  const categoryTabRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const hasMountedCategoryRef = useRef(false);
+
+  const scrollCategoryTabIntoCenter = (catName: string) => {
+    const el = categoryTabRefs.current.get(catName);
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  };
+
   React.useEffect(() => {
     if (allCategories.length > 0 && !allCategories.includes(selectedCategory)) {
       setSelectedCategory(allCategories[0]);
     }
   }, [allCategories, selectedCategory]);
+
+  React.useEffect(() => {
+    if (!hasMountedCategoryRef.current) {
+      hasMountedCategoryRef.current = true;
+      return;
+    }
+    if (!selectedCategory) return;
+    const rafId = requestAnimationFrame(() => {
+      scrollCategoryTabIntoCenter(selectedCategory);
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [selectedCategory]);
+
+  const handleSelectCategory = (catName: string) => {
+    if (selectedCategory === catName) {
+      scrollCategoryTabIntoCenter(catName);
+      return;
+    }
+    setSelectedCategory(catName);
+  };
 
   const [isEditingModalOpen, setIsEditingModalOpen] = useState(false);
   const [editingIngredient, setEditingIngredient] = useState<Partial<Ingredient> | null>(null);
@@ -799,16 +829,16 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     : null;
 
   return (
-    <div className="flex flex-col h-[calc(100vh-5.5rem)] min-h-[500px] overflow-hidden -mb-8">
+    <div className="flex flex-col h-[calc(100vh-5.5rem)] min-h-[500px] w-full min-w-0 max-w-full overflow-hidden -mb-8">
       {/* LOCKED TOP SECTION */}
-      <div className="shrink-0 z-20 space-y-3 pb-3 bg-stone-900/40 backdrop-blur-md pt-1">
+      <div className="shrink-0 z-20 space-y-3 pb-3 bg-stone-900/40 backdrop-blur-md pt-1 min-w-0 max-w-full">
         {/* Title & Actions */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 shadow-sm">
-          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+        <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4 shadow-sm min-w-0 max-w-full">
+          <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight min-w-0">
             {lang === 'th' ? 'ฐานข้อมูลวัตถุดิบและต้นทุน Yield' : 'Ingredients & Yield Database'}
           </h1>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 flex-wrap shrink-0 max-w-full">
             <button
               type="button"
               onClick={() => setIsAddCategoryModalOpen(true)}
@@ -830,7 +860,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
         </div>
 
         {/* Filters & Search */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-2.5 sm:p-3 rounded-2xl flex items-center gap-2.5 overflow-x-auto scrollbar-none shadow-sm">
+        <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-2.5 sm:p-3 rounded-2xl flex items-center gap-2.5 min-w-0 max-w-full shadow-sm">
         {/* Compact Search: Magnifying glass icon only to save screen space */}
         <div className="flex items-center gap-2 shrink-0">
           {isSearchExpanded ? (
@@ -877,7 +907,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
+        <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-nowrap overflow-x-auto scrollbar-none py-0.5">
           <Filter className="w-4 h-4 text-white/40 shrink-0 hidden sm:block mr-0.5" />
 
           {/* Reorderable Categories */}
@@ -888,16 +918,26 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
             const isFirst = index === 0;
             const isLast = index === allCategories.length - 1;
             const catLabel = getLocalizedText(lang, cat);
+            const controlsVisibilityClass = isSelected
+              ? 'inline-flex'
+              : 'hidden [@media(hover:hover)_and_(pointer:fine)]:group-hover:inline-flex';
 
             return (
               <div
                 key={cat}
+                ref={(el) => {
+                  if (el) {
+                    categoryTabRefs.current.set(cat, el);
+                  } else {
+                    categoryTabRefs.current.delete(cat);
+                  }
+                }}
                 draggable
                 onDragStart={(e) => handleCategoryDragStart(e, cat)}
                 onDragOver={(e) => handleCategoryDragOver(e, cat)}
                 onDrop={(e) => handleCategoryDrop(e, cat)}
                 onDragEnd={handleCategoryDragEnd}
-                className={`group relative inline-flex items-center rounded-xl text-xs font-semibold whitespace-nowrap transition-all select-none shrink-0 ${
+                className={`group relative inline-flex flex-none items-center rounded-xl text-xs font-semibold whitespace-nowrap transition-all select-none ${
                   isSelected
                     ? 'bg-[#F27D26] text-black font-bold shadow-md shadow-[#F27D26]/20'
                     : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-white/10'
@@ -914,7 +954,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     e.stopPropagation();
                     handleMoveCategory(cat, 'left');
                   }}
-                  className={`p-1 pl-1.5 transition-all rounded-l-xl ${
+                  className={`${controlsVisibilityClass} items-center justify-center p-1 pl-1.5 transition-all rounded-l-xl ${
                     isFirst
                       ? 'opacity-20 cursor-not-allowed'
                       : isSelected
@@ -928,11 +968,15 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
 
                 {/* Category Label with Drag Grip */}
                 <div
-                  onClick={() => setSelectedCategory(cat)}
-                  className="flex items-center gap-1.5 px-1 py-1.5 cursor-grab active:cursor-grabbing"
+                  onClick={() => handleSelectCategory(cat)}
+                  className={`flex items-center gap-1.5 py-1.5 cursor-pointer ${
+                    isSelected
+                      ? 'px-1 cursor-grab active:cursor-grabbing'
+                      : 'px-3 [@media(hover:hover)_and_(pointer:fine)]:group-hover:px-1 [@media(hover:hover)_and_(pointer:fine)]:group-hover:cursor-grab'
+                  }`}
                 >
                   <GripVertical
-                    className={`w-3 h-3 shrink-0 ${
+                    className={`${controlsVisibilityClass} w-3 h-3 shrink-0 ${
                       isSelected
                         ? 'text-black/50 group-hover:text-black'
                         : 'text-white/30 group-hover:text-white/70'
@@ -948,7 +992,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     e.stopPropagation();
                     handleOpenEditCategory(cat);
                   }}
-                  className={`p-1 transition-all cursor-pointer ${
+                  className={`${controlsVisibilityClass} items-center justify-center p-1 transition-all cursor-pointer ${
                     isSelected
                       ? 'hover:bg-black/15 text-black/70 hover:text-black'
                       : 'text-white/40 hover:text-[#F27D26] hover:bg-white/10'
@@ -966,7 +1010,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                       e.stopPropagation();
                       handleOpenDeleteCategory(cat);
                     }}
-                    className={`p-1 transition-all cursor-pointer ${
+                    className={`${controlsVisibilityClass} items-center justify-center p-1 transition-all cursor-pointer ${
                       isSelected
                         ? 'hover:bg-black/15 text-black/70 hover:text-rose-900'
                         : 'text-white/35 hover:text-rose-400 hover:bg-white/10'
@@ -985,7 +1029,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                     e.stopPropagation();
                     handleMoveCategory(cat, 'right');
                   }}
-                  className={`p-1 pr-1.5 transition-all rounded-r-xl ${
+                  className={`${controlsVisibilityClass} items-center justify-center p-1 pr-1.5 transition-all rounded-r-xl ${
                     isLast
                       ? 'opacity-20 cursor-not-allowed'
                       : isSelected
@@ -1004,8 +1048,8 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
       </div>
 
       {/* INGREDIENTS TABLE (Scrollable area) */}
-      <div className="flex-1 min-h-0 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-xl flex flex-col mb-4">
-        <div className="flex-1 overflow-x-auto overflow-y-auto">
+      <div className="flex-1 min-h-0 min-w-0 w-full max-w-full bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-xl flex flex-col mb-4">
+        <div className="flex-1 w-full max-w-full overflow-x-auto overflow-y-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead className="sticky top-0 z-20 bg-[#161618] border-b border-white/15 shadow-sm">
               <tr className="text-white/70 font-bold uppercase tracking-wider text-[10px]">

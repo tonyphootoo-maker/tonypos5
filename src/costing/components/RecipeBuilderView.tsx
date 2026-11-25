@@ -1543,19 +1543,23 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                 return (
                   <div
                     key={recipe.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => handleSelectBaseRecipeCard(recipe)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        handleSelectBaseRecipeCard(recipe);
-                      }
-                    }}
-                    className={`rounded-2xl p-3.5 border transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
+                    role={isSelected ? undefined : 'button'}
+                    tabIndex={isSelected ? undefined : 0}
+                    onClick={isSelected ? undefined : () => handleSelectBaseRecipeCard(recipe)}
+                    onKeyDown={
                       isSelected
-                        ? 'bg-[#F27D26]/15 border-[#F27D26] shadow-lg shadow-[#F27D26]/10'
-                        : 'bg-white/5 border-white/10 hover:border-white/25 hover:bg-white/[0.07]'
+                        ? undefined
+                        : (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              handleSelectBaseRecipeCard(recipe);
+                            }
+                          }
+                    }
+                    className={`rounded-2xl border transition-all flex flex-col justify-between gap-2.5 ${
+                      isSelected
+                        ? 'col-span-1 sm:col-span-2 lg:col-span-3 xl:col-span-4 p-4 sm:p-5 bg-[#F27D26]/10 border-[#F27D26] shadow-lg shadow-[#F27D26]/10'
+                        : 'p-3.5 cursor-pointer bg-white/5 border-white/10 hover:border-white/25 hover:bg-white/[0.07]'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -1596,6 +1600,16 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1 shrink-0">
+                        {isSelected && hasUnsavedChanges && (
+                          <button
+                            type="button"
+                            onClick={handleSaveBaseRecipe}
+                            className="px-3 py-1.5 rounded-xl bg-[#F27D26] hover:bg-[#d96817] text-black text-xs font-bold flex items-center gap-1 cursor-pointer shadow-sm"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>{lang === 'en' ? 'Save' : 'บันทึก'}</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -1645,406 +1659,398 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                         ฿{cardTotalCost.toFixed(2)}
                       </span>
                     </div>
+
+                    {isSelected && (
+                      <div className="pt-3 mt-1 border-t border-[#F27D26]/30 space-y-4">
+                        {/* Section 1: Central Recipe Ingredients, Sauces & Rice/Noodles inside the selected card */}
+                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
+                            <div>
+                              <h4 className="font-bold text-white text-sm sm:text-base">
+                                {lang === 'en'
+                                  ? `Base Recipe Items (${nonPackagingItems.length} items)`
+                                  : `รายการส่วนประกอบในสูตรกลาง (${nonPackagingItems.length} รายการ)`}
+                              </h4>
+                            </div>
+
+                            {/* 3 Add buttons: วัตถุดิบ, ซอสปรุง, ข้าวและเส้น */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={handleAddBaseIngredient}
+                                className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                                title={lang === 'en' ? 'Add base ingredient e.g. chili, garlic, holy basil, cooking oil' : 'เพิ่มวัตถุดิบกลาง เช่น พริก, กระเทียม, ใบกะเพรา, น้ำมัน'}
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>{lang === 'en' ? '+ Base Ingredient' : '+ วัตถุดิบกลาง'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleAddSauce}
+                                className="px-2.5 py-1.5 rounded-xl bg-[#F27D26]/20 hover:bg-[#F27D26]/30 text-[#F27D26] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#F27D26]/30 transition-colors"
+                                title={lang === 'en' ? 'Add batch-prepared sauce' : 'เพิ่มซอสปรุงรสที่เตรียมล่วงหน้าเป็น Batch'}
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>{lang === 'en' ? '+ Sauce' : '+ ซอสปรุง'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleOpenAddRiceNoodleModal}
+                                disabled={portionRecipes.length === 0}
+                                className="px-2.5 py-1.5 rounded-xl bg-[#FFC107]/15 hover:bg-[#FFC107]/25 text-[#FFC107] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#FFC107]/30 transition-colors disabled:opacity-40"
+                                title={lang === 'en' ? 'Link Rice & Noodles (Yield & Portions)' : 'เพิ่มรายการจากหมวด ข้าวและเส้น (Yield & Portions)'}
+                              >
+                                <Wheat className="w-3.5 h-3.5" />
+                                <span>{lang === 'en' ? '+ Rice & Noodles' : '+ ข้าวและเส้น'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Items Table */}
+                          {nonPackagingItems.length === 0 ? (
+                            <div className="mt-4 p-5 text-center text-white/45 text-xs border border-dashed border-white/10 rounded-2xl">
+                              {lang === 'en'
+                                ? 'No ingredients or sauces in this base recipe yet (click "+ Base Ingredient" or "+ Sauce" above)'
+                                : 'ยังไม่มีวัตถุดิบหรือซอสในสูตรกลางนี้ (กดปุ่ม "+ วัตถุดิบกลาง" หรือ "+ ซอสปรุง" ด้านบนเพื่อเพิ่ม)'}
+                            </div>
+                          ) : (
+                            <div className="mt-4 overflow-x-auto">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
+                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Recipe Item' : 'ชื่อรายการในสูตร'}</th>
+                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
+                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
+                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
+                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
+                                    <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5 font-mono">
+                                  {nonPackagingItems.map((item, index) => {
+                                    const costInfo = getItemCost(item);
+
+                                    return (
+                                      <tr key={`${item.id || 'item'}-${index}`} className="hover:bg-white/5 transition-colors">
+                                        <td className="py-2.5 px-3 font-sans font-medium text-white">
+                                          {isRiceNoodleRecipeItem(item) ? (
+                                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
+                                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFC107]/15 text-[#FFC107] border border-[#FFC107]/30 text-[10px] font-bold shrink-0">
+                                                <Wheat className="w-3 h-3" />
+                                                <span>{lang === 'en' ? 'Rice/Noodles' : 'ข้าวและเส้น'}</span>
+                                              </span>
+                                              <select
+                                                value={item.riceNoodlePortionId || ''}
+                                                onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                                className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[240px] cursor-pointer"
+                                              >
+                                                {portionRecipes.map((p) => (
+                                                  <option key={p.id} value={p.id} className="bg-[#1a1a1a]">
+                                                    {lang === 'en' ? p.nameEn || p.name : p.name} ({p.portionGram}g · ฿{Number(p.costPerPortion || 0).toFixed(2)})
+                                                  </option>
+                                                ))}
+                                              </select>
+                                              {(() => {
+                                                const linkedP = item.riceNoodlePortionId
+                                                  ? riceNoodlePortionsMap.get(item.riceNoodlePortionId)
+                                                  : undefined;
+                                                if (!linkedP) return null;
+                                                return (
+                                                  <span className="text-[10px] text-emerald-400 font-mono whitespace-nowrap">
+                                                    Yield: {lang === 'en' ? linkedP.cookingYieldEn || linkedP.cookingYield : linkedP.cookingYield}
+                                                  </span>
+                                                );
+                                              })()}
+                                            </div>
+                                          ) : item.type === 'SAUCE' ? (
+                                            <select
+                                              value={item.ingredientId || item.sauceId}
+                                              onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                              className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white cursor-pointer"
+                                            >
+                                              {sauces.map((s) => (
+                                                <option key={s.id} value={s.id} className="bg-[#1a1a1a]">
+                                                  {getLocalizedText(lang, s.thaiName || s.name, s.englishName)}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          ) : (
+                                            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
+                                              {/* Step 1: Select Category first */}
+                                              <select
+                                                value={(item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL'}
+                                                onChange={(e) => {
+                                                  const newCat = e.target.value;
+                                                  const safeId = item.id || '';
+                                                  if (safeId) {
+                                                    setBaseItemCategoryOverrides((prev) => ({ ...prev, [safeId]: newCat }));
+                                                  }
+                                                  const matching = newCat === 'ALL' ? ingredients : ingredients.filter((i) => i.category === newCat);
+                                                  if (matching.length > 0 && !matching.some((i) => i.id === item.ingredientId)) {
+                                                    handleUpdateBaseItemSourceById(safeId, matching[0].id);
+                                                  }
+                                                }}
+                                                className="bg-black/60 border border-white/20 rounded-lg px-2 py-1 text-[11px] text-[#F27D26] font-bold cursor-pointer shrink-0 max-w-[130px]"
+                                                title={lang === 'en' ? '1. Select ingredient category first' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}
+                                              >
+                                                <option value="ALL">{lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวด'}</option>
+                                                {uniqueCategories.map((cat) => (
+                                                  <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
+                                                    {getCategoryIcon(cat)} {getLocalizedText(lang, cat)}
+                                                  </option>
+                                                ))}
+                                              </select>
+
+                                              {/* Step 2: Select Sub-ingredient */}
+                                              {(() => {
+                                                const selectedCat = (item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL';
+                                                const categoryIngs = selectedCat === 'ALL'
+                                                  ? ingredients
+                                                  : ingredients.filter((i) => i.category === selectedCat);
+
+                                                return (
+                                                  <select
+                                                    value={item.ingredientId}
+                                                    onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                                    className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[190px] cursor-pointer"
+                                                    title={lang === 'en' ? '2. Select sub-ingredient' : '2. เลือกวัตถุดิบย่อย'}
+                                                  >
+                                                    {categoryIngs.map((ing) => (
+                                                      <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
+                                                        {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                );
+                                              })()}
+                                            </div>
+                                          )}
+                                        </td>
+
+                                        <td className="py-2.5 px-3 text-right">
+                                          <NumericInput
+                                            type="number"
+                                            step="any"
+                                            min="0"
+                                            value={item.quantity ?? 0}
+                                            onChange={(e) =>
+                                              handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
+                                            }
+                                            className="w-20 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#F27D26]"
+                                          />
+                                        </td>
+
+                                        <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
+                                          {localizeUnit(item.unit, lang)}
+                                        </td>
+
+                                        <td className="py-2.5 px-3 text-right text-white/60">
+                                          <div className="flex flex-col items-end">
+                                            <span>฿{costInfo.unitCost.toFixed(costInfo.unitCost < 1 ? 4 : 2)}</span>
+                                            {costInfo.missingPrice && (
+                                              <span className="mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                                                {lang === 'en'
+                                                  ? 'Missing ingredient price — cost may be understated'
+                                                  : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </td>
+
+                                        <td className="py-2.5 px-3 text-right font-bold text-white">
+                                          ฿{costInfo.lineCost.toFixed(2)}
+                                        </td>
+
+                                        <td className="py-2.5 px-2 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveBaseItemById(item.id || '')}
+                                            className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
+                                            title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Section 2: Dedicated Packaging & Side Dish Items inside the selected card */}
+                        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 space-y-3">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-xl bg-[#00B1FF]/20 text-[#00B1FF] flex items-center justify-center border border-[#00B1FF]/30">
+                                <Package className="w-4 h-4" />
+                              </div>
+                              <h4 className="font-bold text-white text-sm sm:text-base">
+                                {lang === 'en'
+                                  ? `Box & Packaging Costs (${packagingAndSideItems.length} items)`
+                                  : `ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items) (${packagingAndSideItems.length} รายการ)`}
+                              </h4>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                              <button
+                                type="button"
+                                onClick={handleAddSideDish}
+                                className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer border border-amber-500/30 transition-colors"
+                                title={lang === 'en' ? 'Add side dishes e.g. chili fish sauce, cucumber, rice, fried egg' : 'เพิ่มเครื่องเคียง เช่น พริกน้ำปลา, แตงกวาเคียง, ข้าวสวย, ไข่ดาว'}
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>{lang === 'en' ? '+ Side Dish' : '+ เครื่องเคียง'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleAddPackaging}
+                                className="px-3 py-1.5 rounded-xl bg-[#00B1FF]/20 hover:bg-[#00B1FF]/30 text-[#00B1FF] border border-[#00B1FF]/40 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
+                                title={lang === 'en' ? 'Add packaging e.g. kraft box, cutlery set, sauce cup, bag' : 'เพิ่มบรรจุภัณฑ์ เช่น กล่องกระดาษคราฟท์, ช้อนส้อม, ถ้วยน้ำจิ้ม, ถุงหูหิ้ว'}
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                                <span>{lang === 'en' ? '+ Packaging' : '+ แพ็คเกจจิ้ง'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {packagingAndSideItems.length === 0 ? (
+                            <div className="p-4 text-center text-white/40 text-xs border border-dashed border-white/10 rounded-2xl">
+                              {lang === 'en'
+                                ? 'No packaging or side dish items for this base recipe yet (click "+ Side Dish" or "+ Packaging" above to add)'
+                                : 'ยังไม่มีรายการกล่องหรือเครื่องเคียงสำหรับสูตรกลางนี้ (กดปุ่ม "+ เครื่องเคียง" หรือ "+ แพ็คเกจจิ้ง" ด้านบนเพื่อเพิ่ม)'}
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs border-collapse">
+                                <thead>
+                                  <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
+                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Packaging / Side Dish Item' : 'รายการบรรจุภัณฑ์ / เครื่องเคียง'}</th>
+                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'จำนวน'}</th>
+                                    <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
+                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
+                                    <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
+                                    <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-white/5 font-mono">
+                                  {packagingAndSideItems.map((item, index) => {
+                                    const costInfo = getItemCost(item);
+
+                                    return (
+                                      <tr key={`${item.id || 'pkg'}-${index}`} className="hover:bg-white/5 transition-colors">
+                                        <td className="py-2.5 px-3 font-sans font-medium text-white">
+                                          {item.type === 'PREPARED_ITEM' ? (
+                                            <select
+                                              value={item.ingredientId}
+                                              onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                              className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
+                                            >
+                                              <optgroup label={lang === 'en' ? 'Standard Side Dishes (Presets)' : 'เครื่องเคียงมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
+                                                {SIDE_DISH_PRESETS.map((sd) => (
+                                                  <option key={sd.id} value={sd.id}>
+                                                    {getLocalizedText(lang, sd.name)}
+                                                  </option>
+                                                ))}
+                                              </optgroup>
+                                              <optgroup label={lang === 'en' ? 'Additional Stock Ingredients' : 'วัตถุดิบเสริมในคลัง'} className="bg-[#1a1a1a]">
+                                                {ingredients.map((ing) => (
+                                                  <option key={ing.id} value={ing.id}>
+                                                    {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
+                                                  </option>
+                                                ))}
+                                              </optgroup>
+                                            </select>
+                                          ) : (
+                                            <select
+                                              value={item.ingredientId}
+                                              onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
+                                              className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
+                                            >
+                                              <optgroup label={lang === 'en' ? 'Standard Items (Presets)' : 'รายการมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
+                                                {PACKAGING_PRESETS.map((pkg) => (
+                                                  <option key={pkg.id} value={pkg.id}>
+                                                    {getLocalizedText(lang, pkg.name)}
+                                                  </option>
+                                                ))}
+                                              </optgroup>
+                                              <optgroup label={lang === 'en' ? 'Packaging Stock Items' : 'วัตถุดิบบรรจุภัณฑ์ในคลัง'} className="bg-[#1a1a1a]">
+                                                {ingredients
+                                                  .filter((i) => i.category === 'บรรจุภัณฑ์')
+                                                  .map((ing) => (
+                                                    <option key={ing.id} value={ing.id}>
+                                                      {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
+                                                    </option>
+                                                  ))}
+                                              </optgroup>
+                                            </select>
+                                          )}
+                                        </td>
+
+                                        <td className="py-2.5 px-3 text-right">
+                                          <NumericInput
+                                            type="number"
+                                            step="any"
+                                            min="0"
+                                            value={item.quantity ?? 1}
+                                            onChange={(e) =>
+                                              handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
+                                            }
+                                            className="w-16 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#00B1FF]"
+                                          />
+                                        </td>
+
+                                        <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
+                                          {localizeUnit(item.unit || 'ชิ้น', lang)}
+                                        </td>
+
+                                        <td className="py-2.5 px-3 text-right text-white/60">
+                                          ฿{costInfo.unitCost.toFixed(2)}
+                                        </td>
+
+                                        <td className="py-2.5 px-3 text-right font-bold text-[#00B1FF]">
+                                          ฿{costInfo.lineCost.toFixed(2)}
+                                        </td>
+
+                                        <td className="py-2.5 px-2 text-center">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveBaseItemById(item.id || '')}
+                                            className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
+                                            title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+
+                              <div className="flex justify-between items-center px-4 py-2.5 bg-[#00B1FF]/10 border border-[#00B1FF]/20 rounded-xl text-xs font-mono mt-3">
+                                <span className="font-sans text-white/70 font-semibold flex items-center gap-1.5">
+                                  <Package className="w-3.5 h-3.5 text-[#00B1FF]" />
+                                  <span>
+                                    {lang === 'en'
+                                      ? 'Total Packaging & Side Dish Cost:'
+                                      : 'รวมต้นทุนกล่อง บรรจุภัณฑ์ และเครื่องเคียง:'}
+                                  </span>
+                                </span>
+                                <span className="font-bold text-[#00B1FF] text-sm">
+                                  ฿{(totalPackagingCost + totalSideDishCost).toFixed(2)}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
-            </div>
-          )}
-
-          {/* Full-width Central Recipe Items Builder for selected card */}
-          {currentBaseRecipe && (
-            <div className="space-y-4">
-              {/* Card 1: Central Recipe Ingredients & Sauces */}
-              <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#F27D26] block">
-                      {getLocalizedText(
-                        lang,
-                        currentBaseRecipe.thaiName || currentBaseRecipe.name,
-                        currentBaseRecipe.englishName
-                      )}
-                    </span>
-                    <h3 className="font-bold text-white text-base">
-                      {lang === 'en'
-                        ? `Base Recipe Items (${nonPackagingItems.length} items)`
-                        : `รายการส่วนประกอบในสูตรกลาง (${nonPackagingItems.length} รายการ)`}
-                    </h3>
-                  </div>
-
-                  {/* 3 Add buttons: วัตถุดิบ, ซอสปรุง, ข้าวและเส้น */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={handleAddBaseIngredient}
-                      className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                      title={lang === 'en' ? 'Add base ingredient e.g. chili, garlic, holy basil, cooking oil' : 'เพิ่มวัตถุดิบกลาง เช่น พริก, กระเทียม, ใบกะเพรา, น้ำมัน'}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{lang === 'en' ? '+ Base Ingredient' : '+ วัตถุดิบกลาง'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleAddSauce}
-                      className="px-2.5 py-1.5 rounded-xl bg-[#F27D26]/20 hover:bg-[#F27D26]/30 text-[#F27D26] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#F27D26]/30 transition-colors"
-                      title={lang === 'en' ? 'Add batch-prepared sauce' : 'เพิ่มซอสปรุงรสที่เตรียมล่วงหน้าเป็น Batch'}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{lang === 'en' ? '+ Sauce' : '+ ซอสปรุง'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleOpenAddRiceNoodleModal}
-                      disabled={portionRecipes.length === 0}
-                      className="px-2.5 py-1.5 rounded-xl bg-[#FFC107]/15 hover:bg-[#FFC107]/25 text-[#FFC107] text-xs font-bold flex items-center gap-1 cursor-pointer border border-[#FFC107]/30 transition-colors disabled:opacity-40"
-                      title={lang === 'en' ? 'Link Rice & Noodles (Yield & Portions)' : 'เพิ่มรายการจากหมวด ข้าวและเส้น (Yield & Portions)'}
-                    >
-                      <Wheat className="w-3.5 h-3.5" />
-                      <span>{lang === 'en' ? '+ Rice & Noodles' : '+ ข้าวและเส้น'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Items Table */}
-                {nonPackagingItems.length === 0 ? (
-                  <div className="mt-4 p-5 text-center text-white/45 text-xs border border-dashed border-white/10 rounded-2xl">
-                    {lang === 'en'
-                      ? 'No ingredients or sauces in this base recipe yet (click "+ Base Ingredient" or "+ Sauce" above)'
-                      : 'ยังไม่มีวัตถุดิบหรือซอสในสูตรกลางนี้ (กดปุ่ม "+ วัตถุดิบกลาง" หรือ "+ ซอสปรุง" ด้านบนเพื่อเพิ่ม)'}
-                  </div>
-                ) : (
-                  <div className="mt-4 overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                          <th className="py-2.5 px-3">{lang === 'en' ? 'Recipe Item' : 'ชื่อรายการในสูตร'}</th>
-                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'ปริมาณ'}</th>
-                          <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
-                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
-                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
-                          <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5 font-mono">
-                        {nonPackagingItems.map((item, index) => {
-                          const costInfo = getItemCost(item);
-
-                          return (
-                            <tr key={`${item.id || 'item'}-${index}`} className="hover:bg-white/5 transition-colors">
-                              <td className="py-2.5 px-3 font-sans font-medium text-white">
-                                {isRiceNoodleRecipeItem(item) ? (
-                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#FFC107]/15 text-[#FFC107] border border-[#FFC107]/30 text-[10px] font-bold shrink-0">
-                                      <Wheat className="w-3 h-3" />
-                                      <span>{lang === 'en' ? 'Rice/Noodles' : 'ข้าวและเส้น'}</span>
-                                    </span>
-                                    <select
-                                      value={item.riceNoodlePortionId || ''}
-                                      onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                      className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[240px] cursor-pointer"
-                                    >
-                                      {portionRecipes.map((p) => (
-                                        <option key={p.id} value={p.id} className="bg-[#1a1a1a]">
-                                          {lang === 'en' ? p.nameEn || p.name : p.name} ({p.portionGram}g · ฿{Number(p.costPerPortion || 0).toFixed(2)})
-                                        </option>
-                                      ))}
-                                    </select>
-                                    {(() => {
-                                      const linkedP = item.riceNoodlePortionId
-                                        ? riceNoodlePortionsMap.get(item.riceNoodlePortionId)
-                                        : undefined;
-                                      if (!linkedP) return null;
-                                      return (
-                                        <span className="text-[10px] text-emerald-400 font-mono whitespace-nowrap">
-                                          Yield: {lang === 'en' ? linkedP.cookingYieldEn || linkedP.cookingYield : linkedP.cookingYield}
-                                        </span>
-                                      );
-                                    })()}
-                                  </div>
-                                ) : item.type === 'SAUCE' ? (
-                                  <select
-                                    value={item.ingredientId || item.sauceId}
-                                    onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                    className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white cursor-pointer"
-                                  >
-                                    {sauces.map((s) => (
-                                      <option key={s.id} value={s.id} className="bg-[#1a1a1a]">
-                                        {getLocalizedText(lang, s.thaiName || s.name, s.englishName)}
-                                      </option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
-                                    {/* Step 1: Select Category first */}
-                                    <select
-                                      value={(item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL'}
-                                      onChange={(e) => {
-                                        const newCat = e.target.value;
-                                        const safeId = item.id || '';
-                                        if (safeId) {
-                                          setBaseItemCategoryOverrides((prev) => ({ ...prev, [safeId]: newCat }));
-                                        }
-                                        const matching = newCat === 'ALL' ? ingredients : ingredients.filter((i) => i.category === newCat);
-                                        if (matching.length > 0 && !matching.some((i) => i.id === item.ingredientId)) {
-                                          handleUpdateBaseItemSourceById(safeId, matching[0].id);
-                                        }
-                                      }}
-                                      className="bg-black/60 border border-white/20 rounded-lg px-2 py-1 text-[11px] text-[#F27D26] font-bold cursor-pointer shrink-0 max-w-[130px]"
-                                      title={lang === 'en' ? '1. Select ingredient category first' : '1. เลือกหมวดหมู่วัตถุดิบก่อน'}
-                                    >
-                                      <option value="ALL">{lang === 'en' ? '📁 All Categories' : '📁 ทุกหมวด'}</option>
-                                      {uniqueCategories.map((cat) => (
-                                        <option key={cat} value={cat} className="bg-[#1a1a1a] text-white">
-                                          {getCategoryIcon(cat)} {getLocalizedText(lang, cat)}
-                                        </option>
-                                      ))}
-                                    </select>
-
-                                    {/* Step 2: Select Sub-ingredient */}
-                                    {(() => {
-                                      const selectedCat = (item.id && baseItemCategoryOverrides[item.id]) || ingredientsMap.get(item.ingredientId)?.category || 'ALL';
-                                      const categoryIngs = selectedCat === 'ALL'
-                                        ? ingredients
-                                        : ingredients.filter((i) => i.category === selectedCat);
-
-                                      return (
-                                        <select
-                                          value={item.ingredientId}
-                                          onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                          className="bg-black/50 border border-white/15 rounded-lg px-2 py-1 text-xs text-white max-w-[190px] cursor-pointer"
-                                          title={lang === 'en' ? '2. Select sub-ingredient' : '2. เลือกวัตถุดิบย่อย'}
-                                        >
-                                          {categoryIngs.map((ing) => (
-                                            <option key={ing.id} value={ing.id} className="bg-[#1a1a1a]">
-                                              {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      );
-                                    })()}
-                                  </div>
-                                )}
-                              </td>
-
-                              <td className="py-2.5 px-3 text-right">
-                                <NumericInput
-                                  type="number"
-                                  step="any"
-                                  min="0"
-                                  value={item.quantity ?? 0}
-                                  onChange={(e) =>
-                                    handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
-                                  }
-                                  className="w-20 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#F27D26]"
-                                />
-                              </td>
-
-                              <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
-                                {localizeUnit(item.unit, lang)}
-                              </td>
-
-                              <td className="py-2.5 px-3 text-right text-white/60">
-                                <div className="flex flex-col items-end">
-                                  <span>฿{costInfo.unitCost.toFixed(costInfo.unitCost < 1 ? 4 : 2)}</span>
-                                  {costInfo.missingPrice && (
-                                    <span className="mt-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 whitespace-nowrap">
-                                      {lang === 'en'
-                                        ? 'Missing ingredient price — cost may be understated'
-                                        : 'ยังไม่ได้ใส่ราคาวัตถุดิบ ต้นทุนอาจต่ำเกินจริง'}
-                                    </span>
-                                  )}
-                                </div>
-                              </td>
-
-                              <td className="py-2.5 px-3 text-right font-bold text-white">
-                                ฿{costInfo.lineCost.toFixed(2)}
-                              </td>
-
-                              <td className="py-2.5 px-2 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveBaseItemById(item.id || '')}
-                                  className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
-                                  title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Card 2: Dedicated Packaging & Side Dish Items Card (ต้นทุนกล่อง & บรรจุภัณฑ์) */}
-              <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-5 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-white/10 gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-[#00B1FF]/20 text-[#00B1FF] flex items-center justify-center border border-[#00B1FF]/30">
-                      <Package className="w-4 h-4" />
-                    </div>
-                    <h3 className="font-bold text-white text-base">
-                      {lang === 'en'
-                        ? `Box & Packaging Costs (${packagingAndSideItems.length} items)`
-                        : `ต้นทุนกล่อง & บรรจุภัณฑ์ (Packaging Items) (${packagingAndSideItems.length} รายการ)`}
-                    </h3>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
-                    <button
-                      type="button"
-                      onClick={handleAddSideDish}
-                      className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold flex items-center gap-1 cursor-pointer border border-amber-500/30 transition-colors"
-                      title={lang === 'en' ? 'Add side dishes e.g. chili fish sauce, cucumber, rice, fried egg' : 'เพิ่มเครื่องเคียง เช่น พริกน้ำปลา, แตงกวาเคียง, ข้าวสวย, ไข่ดาว'}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{lang === 'en' ? '+ Side Dish' : '+ เครื่องเคียง'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleAddPackaging}
-                      className="px-3 py-1.5 rounded-xl bg-[#00B1FF]/20 hover:bg-[#00B1FF]/30 text-[#00B1FF] border border-[#00B1FF]/40 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shrink-0"
-                      title={lang === 'en' ? 'Add packaging e.g. kraft box, cutlery set, sauce cup, bag' : 'เพิ่มบรรจุภัณฑ์ เช่น กล่องกระดาษคราฟท์, ช้อนส้อม, ถ้วยน้ำจิ้ม, ถุงหูหิ้ว'}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{lang === 'en' ? '+ Packaging' : '+ แพ็คเกจจิ้ง'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {packagingAndSideItems.length === 0 ? (
-                  <div className="p-4 text-center text-white/40 text-xs border border-dashed border-white/10 rounded-2xl">
-                    {lang === 'en'
-                      ? 'No packaging or side dish items for this base recipe yet (click "+ Side Dish" or "+ Packaging" above to add)'
-                      : 'ยังไม่มีรายการกล่องหรือเครื่องเคียงสำหรับสูตรกลางนี้ (กดปุ่ม "+ เครื่องเคียง" หรือ "+ แพ็คเกจจิ้ง" ด้านบนเพื่อเพิ่ม)'}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="border-b border-white/10 text-white/50 text-[10px] uppercase">
-                          <th className="py-2.5 px-3">{lang === 'en' ? 'Packaging / Side Dish Item' : 'รายการบรรจุภัณฑ์ / เครื่องเคียง'}</th>
-                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Qty' : 'จำนวน'}</th>
-                          <th className="py-2.5 px-3">{lang === 'en' ? 'Unit' : 'หน่วย'}</th>
-                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Cost/Unit' : 'ต้นทุน/หน่วย'}</th>
-                          <th className="py-2.5 px-3 text-right">{lang === 'en' ? 'Total (฿)' : 'รวมเงิน (฿)'}</th>
-                          <th className="py-2.5 px-2 text-center">{lang === 'en' ? 'Del' : 'ลบ'}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5 font-mono">
-                        {packagingAndSideItems.map((item, index) => {
-                          const costInfo = getItemCost(item);
-
-                          return (
-                            <tr key={`${item.id || 'pkg'}-${index}`} className="hover:bg-white/5 transition-colors">
-                              <td className="py-2.5 px-3 font-sans font-medium text-white">
-                                {item.type === 'PREPARED_ITEM' ? (
-                                  <select
-                                    value={item.ingredientId}
-                                    onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                    className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
-                                  >
-                                    <optgroup label={lang === 'en' ? 'Standard Side Dishes (Presets)' : 'เครื่องเคียงมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
-                                      {SIDE_DISH_PRESETS.map((sd) => (
-                                        <option key={sd.id} value={sd.id}>
-                                          {getLocalizedText(lang, sd.name)}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                    <optgroup label={lang === 'en' ? 'Additional Stock Ingredients' : 'วัตถุดิบเสริมในคลัง'} className="bg-[#1a1a1a]">
-                                      {ingredients.map((ing) => (
-                                        <option key={ing.id} value={ing.id}>
-                                          {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                  </select>
-                                ) : (
-                                  <select
-                                    value={item.ingredientId}
-                                    onChange={(e) => handleUpdateBaseItemSourceById(item.id || '', e.target.value)}
-                                    className="bg-black/50 border border-white/15 rounded-lg px-2.5 py-1 text-xs text-white max-w-[260px] cursor-pointer"
-                                  >
-                                    <optgroup label={lang === 'en' ? 'Standard Items (Presets)' : 'รายการมาตรฐาน (Presets)'} className="bg-[#1a1a1a]">
-                                      {PACKAGING_PRESETS.map((pkg) => (
-                                        <option key={pkg.id} value={pkg.id}>
-                                          {getLocalizedText(lang, pkg.name)}
-                                        </option>
-                                      ))}
-                                    </optgroup>
-                                    <optgroup label={lang === 'en' ? 'Packaging Stock Items' : 'วัตถุดิบบรรจุภัณฑ์ในคลัง'} className="bg-[#1a1a1a]">
-                                      {ingredients
-                                        .filter((i) => i.category === 'บรรจุภัณฑ์')
-                                        .map((ing) => (
-                                          <option key={ing.id} value={ing.id}>
-                                            {getLocalizedText(lang, ing.thaiName || ing.name, ing.englishName)}
-                                          </option>
-                                        ))}
-                                    </optgroup>
-                                  </select>
-                                )}
-                              </td>
-
-                              <td className="py-2.5 px-3 text-right">
-                                <NumericInput
-                                  type="number"
-                                  step="any"
-                                  min="0"
-                                  value={item.quantity ?? 1}
-                                  onChange={(e) =>
-                                    handleUpdateBaseItemQuantityById(item.id || '', parseFloat(e.target.value) || 0)
-                                  }
-                                  className="w-16 p-1 bg-black/40 border border-white/20 rounded-lg text-right text-white font-mono font-bold focus:border-[#00B1FF]"
-                                />
-                              </td>
-
-                              <td className="py-2.5 px-3 font-sans text-white/50 text-[11px]">
-                                {localizeUnit(item.unit || 'ชิ้น', lang)}
-                              </td>
-
-                              <td className="py-2.5 px-3 text-right text-white/60">
-                                ฿{costInfo.unitCost.toFixed(2)}
-                              </td>
-
-                              <td className="py-2.5 px-3 text-right font-bold text-[#00B1FF]">
-                                ฿{costInfo.lineCost.toFixed(2)}
-                              </td>
-
-                              <td className="py-2.5 px-2 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveBaseItemById(item.id || '')}
-                                  className="p-1 text-white/40 hover:text-rose-400 cursor-pointer transition-colors"
-                                  title={lang === 'en' ? 'Remove this item' : 'ลบรายการนี้'}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-
-                    <div className="flex justify-between items-center px-4 py-2.5 bg-[#00B1FF]/10 border border-[#00B1FF]/20 rounded-xl text-xs font-mono mt-3">
-                      <span className="font-sans text-white/70 font-semibold flex items-center gap-1.5">
-                        <Package className="w-3.5 h-3.5 text-[#00B1FF]" />
-                        <span>
-                          {lang === 'en'
-                            ? 'Total Packaging & Side Dish Cost:'
-                            : 'รวมต้นทุนกล่อง บรรจุภัณฑ์ และเครื่องเคียง:'}
-                        </span>
-                      </span>
-                      <span className="font-bold text-[#00B1FF] text-sm">
-                        ฿{(totalPackagingCost + totalSideDishCost).toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
             </div>
           )}
         </div>
@@ -2919,25 +2925,6 @@ export const RecipeBuilderView: React.FC<RecipeBuilderViewProps> = ({
                       });
                     }}
                     className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-amber-200 focus:outline-none focus:border-[#F27D26]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-white/80 font-bold mb-1">
-                    {lang === 'en' ? 'Short Description (Optional)' : 'คำอธิบายย่อ (ไม่บังคับ)'}
-                  </label>
-                  <input
-                    type="text"
-                    placeholder={
-                      lang === 'en'
-                        ? 'e.g. Shared across all stir-fried basil options'
-                        : 'เช่น ใช้ร่วมกับเมนูกะเพราทุกเนื้อสัตว์'
-                    }
-                    value={editingBaseRecipeMeta.description || ''}
-                    onChange={(e) =>
-                      setEditingBaseRecipeMeta({ ...editingBaseRecipeMeta, description: e.target.value })
-                    }
-                    className="w-full p-2.5 bg-black/50 border border-white/20 rounded-xl text-white focus:outline-none focus:border-[#F27D26]"
                   />
                 </div>
 
