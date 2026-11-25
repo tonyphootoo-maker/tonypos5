@@ -5,6 +5,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { formatMoney, getBusinessWorkDate } from '../engine/calculations';
 import { subscribeBillsWithFilter, voidBillAtomic } from '../data/db';
 import { ReceiptModal } from '../components/ReceiptModal';
+import { DeliveryAddressModal } from '../components/DeliveryAddressModal';
 import {
   Receipt,
   Printer,
@@ -13,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  MapPin,
 } from 'lucide-react';
 
 interface Props {
@@ -43,6 +45,7 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
   // Viewing / Reprinting / Voiding modal state
   const [selectedBillForDetails, setSelectedBillForDetails] = useState<BillDoc | null>(null);
   const [receiptBillToView, setReceiptBillToView] = useState<BillDoc | null>(null);
+  const [addressBillToPrint, setAddressBillToPrint] = useState<BillDoc | null>(null);
   const [isVoidModalOpen, setIsVoidModalOpen] = useState(false);
   const [billToVoid, setBillToVoid] = useState<BillDoc | null>(null);
   const [voidReason, setVoidReason] = useState('');
@@ -245,7 +248,17 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
                         </div>
                       </td>
                       <td className="p-3 font-bold text-neutral-800">
-                        {bill.tableName || bill.tableId || t.pos.takeaway}
+                        <div>
+                          {bill.tableName ||
+                            bill.tableId ||
+                            (bill.orderType === 'delivery' ? 'Delivery' : t.pos.takeaway)}
+                        </div>
+                        {bill.customerName && (
+                          <div className="text-[10px] font-medium text-orange-700 truncate max-w-[160px]">
+                            {bill.customerName}
+                            {bill.customerPhone ? ` (${bill.customerPhone})` : ''}
+                          </div>
+                        )}
                       </td>
                       <td className="p-3 text-neutral-600">{bill.channelName}</td>
                       <td className="p-3">
@@ -285,6 +298,15 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
                         >
                           <Printer className="w-4 h-4" />
                         </button>
+                        {(bill.deliveryAddress || bill.customerName || bill.customerPhone) && (
+                          <button
+                            onClick={() => setAddressBillToPrint(bill)}
+                            className="p-1.5 text-orange-600 hover:text-orange-700 rounded-lg hover:bg-orange-50 cursor-pointer"
+                            title={lang === 'th' ? 'พิมพ์ที่อยู่ลูกค้า' : 'Print Customer Address'}
+                          >
+                            <MapPin className="w-4 h-4" />
+                          </button>
+                        )}
                         {!isVoided && (
                           <button
                             onClick={() => {
@@ -369,6 +391,30 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
                 </div>
               )}
 
+              {(selectedBillForDetails.customerName ||
+                selectedBillForDetails.customerPhone ||
+                selectedBillForDetails.deliveryAddress) && (
+                <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-xs space-y-1">
+                  <div className="font-extrabold text-orange-900 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-orange-600" />
+                    <span>{lang === 'th' ? 'ข้อมูลจัดส่งลูกค้า (Delivery)' : 'Delivery Customer Info'}</span>
+                  </div>
+                  {selectedBillForDetails.customerName && (
+                    <div className="font-bold text-neutral-900">
+                      {selectedBillForDetails.customerName}
+                      {selectedBillForDetails.customerPhone
+                        ? ` • ${selectedBillForDetails.customerPhone}`
+                        : ''}
+                    </div>
+                  )}
+                  {selectedBillForDetails.deliveryAddress && (
+                    <div className="text-neutral-700 whitespace-pre-wrap break-words">
+                      {selectedBillForDetails.deliveryAddress}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Items */}
               <div className="space-y-1.5">
                 <span className="text-xs font-bold text-neutral-700">
@@ -425,7 +471,20 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
               </div>
             </div>
 
-            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex justify-end gap-2">
+            <div className="modal-footer bg-neutral-100 border-t border-neutral-200 flex flex-wrap justify-end gap-2">
+              {(selectedBillForDetails.deliveryAddress ||
+                selectedBillForDetails.customerName ||
+                selectedBillForDetails.customerPhone) && (
+                <button
+                  onClick={() => {
+                    setAddressBillToPrint(selectedBillForDetails);
+                  }}
+                  className="px-4 py-2 bg-orange-50 text-orange-800 border border-orange-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer hover:bg-orange-100"
+                >
+                  <MapPin className="w-4 h-4 text-orange-600" />
+                  <span>{lang === 'th' ? 'พิมพ์ที่อยู่ลูกค้า' : 'Print Address'}</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setReceiptBillToView(selectedBillForDetails);
@@ -529,6 +588,23 @@ export const BillsHistoryPage: React.FC<Props> = ({ settings, lang: propLang }) 
           settings={settings}
           lang={lang}
           onClose={() => setReceiptBillToView(null)}
+        />
+      )}
+
+      {/* Print Delivery Customer Address Label Modal */}
+      {addressBillToPrint && (
+        <DeliveryAddressModal
+          customerName={addressBillToPrint.customerName || ''}
+          customerPhone={addressBillToPrint.customerPhone || ''}
+          deliveryAddress={addressBillToPrint.deliveryAddress || ''}
+          billNumber={addressBillToPrint.billNumber}
+          workDate={addressBillToPrint.workDate}
+          items={addressBillToPrint.items}
+          grandTotal={addressBillToPrint.grandTotal}
+          status={addressBillToPrint.status}
+          settings={settings}
+          lang={lang}
+          onClose={() => setAddressBillToPrint(null)}
         />
       )}
     </div>

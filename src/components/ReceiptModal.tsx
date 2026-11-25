@@ -142,7 +142,13 @@ export const ReceiptModal: React.FC<Props> = ({
               <div className="flex justify-between">
                 <span>{lang === 'th' ? 'โต๊ะ:' : 'Table:'}</span>
                 <span className="font-bold">
-                  {bill.tableName || bill.tableId || (lang === 'th' ? 'สั่งกลับบ้าน/ออนไลน์' : 'Takeaway/Online')}
+                  {bill.tableName ||
+                    bill.tableId ||
+                    (bill.orderType === 'delivery'
+                      ? 'Delivery'
+                      : lang === 'th'
+                      ? 'สั่งกลับบ้าน'
+                      : 'Takeaway')}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -283,6 +289,36 @@ export const ReceiptModal: React.FC<Props> = ({
                 {lang === 'th'
                   ? `ได้รับคะแนนสะสม +${bill.pointsEarned} แต้ม!`
                   : `Earned +${bill.pointsEarned} loyalty points!`}
+              </div>
+            )}
+
+            {/* Delivery Customer Info */}
+            {(bill.orderType === 'delivery' ||
+              bill.customerName ||
+              bill.customerPhone ||
+              bill.deliveryAddress) && (
+              <div className="py-2.5 border-b border-dashed border-neutral-400 text-[11px] space-y-1">
+                <div className="font-bold text-neutral-900">
+                  {lang === 'th' ? '*** ข้อมูลจัดส่ง (Delivery) ***' : '*** DELIVERY INFO ***'}
+                </div>
+                {bill.customerName && (
+                  <div>
+                    <span className="font-bold">{lang === 'th' ? 'ลูกค้า:' : 'Customer:'}</span>{' '}
+                    {bill.customerName}
+                  </div>
+                )}
+                {bill.customerPhone && (
+                  <div>
+                    <span className="font-bold">{lang === 'th' ? 'โทร:' : 'Tel:'}</span>{' '}
+                    {bill.customerPhone}
+                  </div>
+                )}
+                {bill.deliveryAddress && (
+                  <div className="whitespace-pre-wrap break-words">
+                    <span className="font-bold">{lang === 'th' ? 'ที่อยู่:' : 'Address:'}</span>{' '}
+                    {bill.deliveryAddress}
+                  </div>
+                )}
               </div>
             )}
 

@@ -512,7 +512,9 @@ export const PaymentModal: React.FC<Props> = ({
     }
   };
 
-  const billDisplayName = [bill.channelName, bill.tableName].filter(Boolean).join(' - ') || bill.billNumber;
+  const billDisplayName =
+    [bill.channelName, bill.tableName || bill.customerName].filter(Boolean).join(' - ') ||
+    bill.billNumber;
   const headerTitle =
     lang === 'th'
       ? `ชำระเงิน ${billDisplayName} - ฿${formatMoney(effectiveGrandTotal)}`

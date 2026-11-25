@@ -15,6 +15,7 @@ import {
   PackagingDoc,
   SettingsDoc,
   Language,
+  CustomerDoc,
 } from '../types';
 import { translations } from '../i18n/translations';
 import {
@@ -84,7 +85,16 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { SaveOrderModal } from '../components/SaveOrderModal';
 import { PaymentModal } from '../components/PaymentModal';
 import { ReceiptModal } from '../components/ReceiptModal';
+import { CustomerManagerModal } from '../components/CustomerManagerModal';
+import { DeliveryAddressModal } from '../components/DeliveryAddressModal';
 import { TableVisual } from '../components/TableVisual';
+import {
+  resolvePosOrderChannels,
+  getPosChannelOptionLabel,
+  normalizePosChannelId,
+  searchCustomers,
+  extractHouseNumber,
+} from '../engine/customers';
 import {
   FLOOR_CANVAS_MIN_WIDTH,
   FLOOR_CANVAS_MIN_HEIGHT,
@@ -114,6 +124,11 @@ import {
   Sliders,
   AlertTriangle,
   BookOpen,
+  Users,
+  UserPlus,
+  Phone,
+  MapPin,
+  Home,
 } from 'lucide-react';
 import { CENTRAL_RECIPE_BUTTON_LABELS } from '../costing/utils/centralRecipeNav';
 
@@ -159,6 +174,32 @@ export const TablesPosPage: React.FC<Props> = ({
   const [cartItems, setCartItems] = useState<OrderItem[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string>('dine_in');
   const [orderDiscount, setOrderDiscount] = useState<number>(0);
+
+  // Customers Directory & Delivery Customer Attachment
+  const [customers, setCustomers] = useState<CustomerDoc[]>([]);
+  const [attachedCustomer, setAttachedCustomer] = useState<{
+    customerId?: string | null;
+    customerName: string;
+    customerPhone: string;
+    deliveryAddress: string;
+  } | null>(null);
+  const [customerQuickSearch, setCustomerQuickSearch] = useState<string>('');
+  const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState<boolean>(false);
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState<boolean>(false);
+  const [customerModalInitialOpenForm, setCustomerModalInitialOpenForm] = useState<boolean>(false);
+  const [customerModalInitialQuery, setCustomerModalInitialQuery] = useState<string>('');
+  const [customerModalEditTarget, setCustomerModalEditTarget] = useState<CustomerDoc | null>(null);
+  const [customerSelectionCallbackMode, setCustomerSelectionCallbackMode] = useState<boolean>(false);
+  const [deliveryPrintTarget, setDeliveryPrintTarget] = useState<{
+    customerName: string;
+    customerPhone: string;
+    deliveryAddress: string;
+    billNumber?: string;
+    workDate?: string;
+    items?: OrderItem[];
+    grandTotal?: number;
+    status?: 'saved' | 'paid' | 'voided';
+  } | null>(null);
 
   // Dish Customization Dialog
   const [selectedDishForOptions, setSelectedDishForOptions] = useState<DishDoc | null>(null);
@@ -385,9 +426,11 @@ export const TablesPosPage: React.FC<Props> = ({
       ),
       subscribeCollection<ChannelDoc>('channels', (ch) => {
         setChannels(ch);
-        if (ch.length > 0) {
-          setSelectedChannelId((prev) => (ch.some((c) => c.id === prev) ? prev : ch[0].id));
-        }
+        const resolved = resolvePosOrderChannels(ch);
+        setSelectedChannelId((prev) => normalizePosChannelId(prev, resolved));
+      }),
+      subscribeCollection<CustomerDoc>('customers', (custs) => {
+        setCustomers(custs);
       }),
       subscribeCollection<DishDoc>('dishes', (d) => {
         setDishes([...d].sort((a, b) => (a.order || 0) - (b.order || 0)));
@@ -451,6 +494,24 @@ export const TablesPosPage: React.FC<Props> = ({
     };
   }, []);
 
+  // Strictly 3 POS channels for Current Bill selector (Dine-in, Takeaway, Delivery)
+  const posChannels = useMemo(() => resolvePosOrderChannels(channels), [channels]);
+
+  const applyCustomerFromBill = (bill?: Partial<BillDoc> | null) => {
+    if (bill && (bill.customerName || bill.customerPhone || bill.deliveryAddress)) {
+      setAttachedCustomer({
+        customerId: bill.customerId || null,
+        customerName: bill.customerName || '',
+        customerPhone: bill.customerPhone || '',
+        deliveryAddress: bill.deliveryAddress || '',
+      });
+    } else {
+      setAttachedCustomer(null);
+    }
+    setCustomerQuickSearch('');
+    setIsCustomerSearchOpen(false);
+  };
+
   // When a table is tapped, load existing bill or prepare fresh order and enter food ordering immediately
   const handleSelectTable = (table: TableDoc) => {
     setOrderSavedNotice(null);
@@ -459,8 +520,9 @@ export const TablesPosPage: React.FC<Props> = ({
       if (existing) {
         setActiveBill(existing);
         setCartItems(existing.items);
-        setSelectedChannelId(existing.channelId || 'dine_in');
+        setSelectedChannelId(normalizePosChannelId(existing.channelId, posChannels));
         setOrderDiscount(existing.discountAmount || 0);
+        applyCustomerFromBill(existing);
         setSelectedCategoryId((prev) => prev || categories[0]?.id || 'all');
         return;
       }
@@ -468,6 +530,7 @@ export const TablesPosPage: React.FC<Props> = ({
 
     // Fresh bill for this table
     const workDate = getBusinessWorkDate(new Date(), settings.dailyClosingTime);
+    const activeCh = posChannels.find((c) => c.id === selectedChannelId) || posChannels[0];
     const newBill: BillDoc = {
       id: `bill_${Date.now()}`,
       billNumber: '',
@@ -475,9 +538,9 @@ export const TablesPosPage: React.FC<Props> = ({
       workDate,
       tableId: table.id,
       tableName: table.name,
-      channelId: selectedChannelId,
-      channelName: channels.find((c) => c.id === selectedChannelId)?.name || 'Dine-In',
-      orderType: 'dine_in',
+      channelId: activeCh?.id || 'dine_in',
+      channelName: activeCh?.name || 'Dine-In',
+      orderType: activeCh?.type || 'dine_in',
       items: [],
       subtotal: 0,
       discountAmount: 0,
@@ -498,6 +561,7 @@ export const TablesPosPage: React.FC<Props> = ({
     setActiveBill(newBill);
     setCartItems([]);
     setOrderDiscount(0);
+    applyCustomerFromBill(null);
     setSelectedCategoryId((prev) => prev || categories[0]?.id || 'all');
   };
 
@@ -559,7 +623,7 @@ export const TablesPosPage: React.FC<Props> = ({
       }
     });
 
-    const currentChannel = channels.find((c) => c.id === selectedChannelId) || channels[0];
+    const currentChannel = posChannels.find((c) => c.id === selectedChannelId) || posChannels[0];
     const isDineIn = currentChannel?.type === 'dine_in';
     const effectiveVariantPrice = calculateEffectiveChannelPrice(variant.price || 0, currentChannel);
     const unitPrice = effectiveVariantPrice + optionsPrice;
@@ -610,7 +674,13 @@ export const TablesPosPage: React.FC<Props> = ({
   };
 
   // Compute live cart financials with USALI standards
-  const currentChannel = channels.find((c) => c.id === selectedChannelId) || channels[0];
+  const currentChannel = posChannels.find((c) => c.id === selectedChannelId) || posChannels[0];
+  const isDeliveryChannel = currentChannel?.type === 'delivery';
+  const filteredQuickCustomers = useMemo(
+    () => searchCustomers(customers, customerQuickSearch).slice(0, 8),
+    [customers, customerQuickSearch]
+  );
+
   const financials = calculateBillFinancials(
     cartItems,
     orderDiscount,
@@ -626,28 +696,37 @@ export const TablesPosPage: React.FC<Props> = ({
     }
   );
 
-  // Save order directly to a specific table atomically
+  // Save order directly to a specific table (or null for Takeaway/Delivery) atomically
   const saveOrderToTable = async (
-    tableId: string,
+    tableId: string | null,
     returnToCurrentBills: boolean = false
   ): Promise<BillDoc | null> => {
-    if (!tableId || cartItems.length === 0 || isSavingOrder) return null;
+    if (cartItems.length === 0 || isSavingOrder) return null;
+    if (!tableId && currentChannel?.type === 'dine_in') return null;
+
     setIsSavingOrder(true);
-    const targetTable = tables.find((t) => t.id === tableId);
+    const targetTable = tableId ? tables.find((t) => t.id === tableId) : undefined;
 
     const workDate = getBusinessWorkDate(new Date(), settings.dailyClosingTime);
     const latestServerBill = activeBill?.id ? openBills.find((b) => b.id === activeBill.id) : undefined;
     const resolvedVersion = latestServerBill?.version ?? activeBill?.version ?? 1;
     const resolvedBillNumber = latestServerBill?.billNumber || activeBill?.billNumber || '';
 
+    const hasCustomerSnapshot = Boolean(
+      attachedCustomer &&
+        (attachedCustomer.customerName.trim() ||
+          attachedCustomer.customerPhone.trim() ||
+          attachedCustomer.deliveryAddress.trim())
+    );
+
     const completeBill: BillDoc = {
       id: activeBill?.id || `bill_${Date.now()}`,
       billNumber: resolvedBillNumber,
       status: 'saved',
       workDate,
-      tableId,
-      tableName: targetTable?.name || activeBill?.tableName,
-      channelId: selectedChannelId,
+      tableId: tableId || null,
+      tableName: tableId ? targetTable?.name || activeBill?.tableName : undefined,
+      channelId: currentChannel?.id || selectedChannelId,
       channelName: currentChannel?.name || 'Dine-In',
       orderType: currentChannel?.type || 'dine_in',
       items: cartItems,
@@ -663,6 +742,14 @@ export const TablesPosPage: React.FC<Props> = ({
       packagingCost: financials.packagingCost,
       platformFee: financials.platformFee,
       payments: [],
+      ...(hasCustomerSnapshot && attachedCustomer
+        ? {
+            customerId: attachedCustomer.customerId || null,
+            customerName: attachedCustomer.customerName.trim(),
+            customerPhone: attachedCustomer.customerPhone.trim(),
+            deliveryAddress: attachedCustomer.deliveryAddress.trim(),
+          }
+        : {}),
       createdAt: activeBill?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       version: resolvedVersion,
@@ -677,13 +764,24 @@ export const TablesPosPage: React.FC<Props> = ({
         setCartItems([]);
         setOrderDiscount(0);
         setTargetTableIdForSave(null);
+        applyCustomerFromBill(null);
+        setSelectedChannelId('dine_in');
         setSelectedCategoryId(null);
         setTopViewMode('bills');
       } else {
         setActiveBill(saved);
       }
       if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
-      const tblLabel = saved.tableName || targetTable?.name || '';
+      const tblLabel =
+        saved.tableName ||
+        targetTable?.name ||
+        (saved.orderType === 'delivery'
+          ? saved.customerName
+            ? `Delivery (${saved.customerName})`
+            : 'Delivery'
+          : lang === 'th'
+          ? 'สั่งกลับบ้าน'
+          : 'Takeaway');
       setOrderSavedNotice(
         lang === 'th'
           ? `บันทึกออเดอร์ ${tblLabel} เรียบร้อยแล้ว`
@@ -701,11 +799,15 @@ export const TablesPosPage: React.FC<Props> = ({
     }
   };
 
-  // Confirm Order -> Save directly if table already selected and return to Current Bills; otherwise open Save Order Modal
+  // Confirm Order -> Save directly if table selected or Takeaway/Delivery; otherwise open Save Order Modal
   const handleInitiateConfirmOrder = async () => {
     if (cartItems.length === 0 || isSavingOrder) return;
     if (activeBill?.tableId) {
       await saveOrderToTable(activeBill.tableId, true);
+      return;
+    }
+    if (currentChannel?.type === 'takeaway' || currentChannel?.type === 'delivery') {
+      await saveOrderToTable(null, true);
       return;
     }
     setTargetTableIdForSave(null);
@@ -718,10 +820,18 @@ export const TablesPosPage: React.FC<Props> = ({
     await saveOrderToTable(targetTableIdForSave, true);
   };
 
-  // Proceed to payment (save automatically if table already selected, otherwise prompt table picker)
+  // Proceed to payment (save automatically if table selected or Takeaway/Delivery, otherwise prompt table picker)
   const handleProceedToPayment = async () => {
     if (cartItems.length === 0 || isSavingOrder) return;
     if (!activeBill?.tableId) {
+      if (currentChannel?.type === 'takeaway' || currentChannel?.type === 'delivery') {
+        if (!activeBill?.billNumber) {
+          const saved = await saveOrderToTable(null, false);
+          if (!saved) return;
+        }
+        setIsPaymentModalOpen(true);
+        return;
+      }
       setTargetTableIdForSave(null);
       setIsSaveOrderModalOpen(true);
       return;
@@ -738,6 +848,20 @@ export const TablesPosPage: React.FC<Props> = ({
     if (!activeBill) return;
     const currentSnapshot: BillDoc = {
       ...activeBill,
+      channelId: currentChannel?.id || selectedChannelId,
+      channelName: currentChannel?.name || activeBill.channelName,
+      orderType: currentChannel?.type || activeBill.orderType,
+      ...(attachedCustomer &&
+      (attachedCustomer.customerName ||
+        attachedCustomer.customerPhone ||
+        attachedCustomer.deliveryAddress)
+        ? {
+            customerId: attachedCustomer.customerId || null,
+            customerName: attachedCustomer.customerName,
+            customerPhone: attachedCustomer.customerPhone,
+            deliveryAddress: attachedCustomer.deliveryAddress,
+          }
+        : {}),
       items: cartItems,
       subtotal: financials.subtotal,
       discountAmount: financials.discountAmount,
@@ -1883,8 +2007,9 @@ export const TablesPosPage: React.FC<Props> = ({
     setOrderSavedNotice(null);
     setActiveBill(bill);
     setCartItems(bill.items || []);
-    setSelectedChannelId(bill.channelId || 'dine_in');
+    setSelectedChannelId(normalizePosChannelId(bill.channelId, posChannels));
     setOrderDiscount(bill.discountAmount || 0);
+    applyCustomerFromBill(bill);
     setSelectedCategoryId((prev) => prev || categories[0]?.id || 'all');
   };
 
@@ -1892,8 +2017,9 @@ export const TablesPosPage: React.FC<Props> = ({
     setOrderSavedNotice(null);
     setActiveBill(bill);
     setCartItems(bill.items || []);
-    setSelectedChannelId(bill.channelId || 'dine_in');
+    setSelectedChannelId(normalizePosChannelId(bill.channelId, posChannels));
     setOrderDiscount(bill.discountAmount || 0);
+    applyCustomerFromBill(bill);
     setIsPaymentModalOpen(true);
   };
 
@@ -1932,8 +2058,27 @@ export const TablesPosPage: React.FC<Props> = ({
             })}
           </div>
 
-          {/* Link to Floor Plan Studio (+Add Zone / +Add Table live there now) */}
+          {/* Customer Directory & Floor Plan Studio quick buttons */}
           <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setCustomerModalInitialOpenForm(false);
+                setCustomerModalInitialQuery('');
+                setCustomerModalEditTarget(null);
+                setCustomerSelectionCallbackMode(false);
+                setIsCustomerModalOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-extrabold bg-orange-50 text-orange-800 border border-orange-200 hover:bg-orange-100 shadow-[0_2px_0_#fed7aa] cursor-pointer flex items-center gap-1.5 active:translate-y-[1px]"
+            >
+              <Users className="w-3.5 h-3.5 text-orange-600" />
+              <span>{lang === 'th' ? 'ฐานข้อมูลลูกค้า' : 'Customers'}</span>
+              {customers.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-md bg-white text-orange-700 border border-orange-200 text-[10px] leading-none font-black tabular-nums">
+                  {customers.length}
+                </span>
+              )}
+            </button>
             {onOpenFloorPlan && (
               <button
                 type="button"
@@ -2241,13 +2386,55 @@ export const TablesPosPage: React.FC<Props> = ({
                             : 'border-slate-200 hover:border-orange-300'
                         }`}
                       >
-                        {/* Table Name */}
-                        <div className="flex items-center gap-1 min-w-0">
-                          <GripVertical className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                          <div className="font-black text-xs text-slate-900 truncate">
-                            {bill.tableName || (lang === 'th' ? 'ไม่ระบุโต๊ะ' : 'Walk-In')}
+                        {/* Table / Order Type Name */}
+                        <div className="flex items-center justify-between gap-1 min-w-0">
+                          <div className="flex items-center gap-1 min-w-0">
+                            <GripVertical className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                            <div className="font-black text-xs text-slate-900 truncate">
+                              {bill.tableName ||
+                                (bill.orderType === 'delivery'
+                                  ? bill.customerName
+                                    ? `Delivery • ${bill.customerName}`
+                                    : 'Delivery'
+                                  : bill.orderType === 'takeaway'
+                                  ? lang === 'th'
+                                    ? 'สั่งกลับบ้าน'
+                                    : 'Takeaway'
+                                  : lang === 'th'
+                                  ? 'ไม่ระบุโต๊ะ'
+                                  : 'Walk-In')}
+                            </div>
                           </div>
+                          {(bill.deliveryAddress || bill.customerName || bill.customerPhone) && (
+                            <button
+                              type="button"
+                              data-bill-pay-btn="true"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeliveryPrintTarget({
+                                  customerName: bill.customerName || '',
+                                  customerPhone: bill.customerPhone || '',
+                                  deliveryAddress: bill.deliveryAddress || '',
+                                  billNumber: bill.billNumber,
+                                  workDate: bill.workDate,
+                                  items: bill.items,
+                                  grandTotal: bill.grandTotal,
+                                  status: bill.status,
+                                });
+                              }}
+                              title={lang === 'th' ? 'พิมพ์ที่อยู่ลูกค้า' : 'Print Customer Address'}
+                              className="p-1 rounded-md bg-orange-50 hover:bg-orange-100 text-orange-600 border border-orange-200 shrink-0 cursor-pointer"
+                            >
+                              <MapPin className="w-3 h-3" />
+                            </button>
+                          )}
                         </div>
+
+                        {bill.orderType === 'delivery' && bill.deliveryAddress && (
+                          <div className="text-[10px] text-slate-500 truncate pl-4">
+                            {bill.deliveryAddress}
+                          </div>
+                        )}
 
                         {/* Grand Total + Pay Button */}
                         <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-100">
@@ -2334,30 +2521,255 @@ export const TablesPosPage: React.FC<Props> = ({
         <div className="w-full md:w-80 lg:w-96 max-h-[42dvh] md:max-h-none bg-white border-t md:border-t-0 md:border-l border-slate-200 flex flex-col shadow-[0_-6px_24px_-10px_rgba(15,23,42,0.12)] md:shadow-[-8px_0_28px_-12px_rgba(15,23,42,0.12)] z-10 shrink-0">
           {/* Order Header */}
           <div className="p-3.5 bg-slate-50/90 border-b border-slate-200 space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="font-black text-sm text-neutral-900 flex items-center gap-1.5">
-                  <Receipt className="w-4 h-4 text-orange-600" />
-                  <span>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h4 className="font-black text-sm text-neutral-900 flex items-center gap-1.5 truncate">
+                  <Receipt className="w-4 h-4 text-orange-600 shrink-0" />
+                  <span className="truncate">
                     {activeBill?.tableName ? `${activeBill.tableName}` : lang === 'th' ? 'บิลปัจจุบัน' : 'Current Bill'}
                   </span>
                 </h4>
               </div>
 
-              {/* Channel Selector */}
+              {/* Strictly 3-Channel Selector */}
               <select
-                value={selectedChannelId}
-                onChange={(e) => setSelectedChannelId(e.target.value)}
-                className="px-2 py-1 text-xs font-bold bg-white border border-neutral-300 rounded-lg text-neutral-800 focus:ring-1 focus:ring-orange-500"
+                value={currentChannel?.id || selectedChannelId}
+                onChange={(e) => {
+                  const nextId = e.target.value;
+                  setSelectedChannelId(nextId);
+                  const nextCh = posChannels.find((c) => c.id === nextId);
+                  if (activeBill && nextCh) {
+                    setActiveBill({
+                      ...activeBill,
+                      channelId: nextCh.id,
+                      channelName: nextCh.name,
+                      orderType: nextCh.type,
+                    });
+                  }
+                }}
+                className="px-2 py-1 text-xs font-bold bg-white border border-neutral-300 rounded-lg text-neutral-800 focus:ring-1 focus:ring-orange-500 max-w-[195px] shrink-0"
               >
-                {channels.map((ch) => (
+                {posChannels.map((ch) => (
                   <option key={ch.id} value={ch.id}>
-                    {lang === 'th' && ch.nameTh ? ch.nameTh : ch.name}
+                    {getPosChannelOptionLabel(ch, lang)}
                   </option>
                 ))}
               </select>
             </div>
           </div>
+
+          {/* Delivery Customer Lookup & Address Label Section */}
+          {isDeliveryChannel && (
+            <div className="px-3 py-2 bg-orange-50/80 border-b border-orange-200 space-y-2 shrink-0">
+              {/* Quick Search by House No. / Phone + Customer Directory button */}
+              <div className="flex items-center gap-1.5">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="w-3.5 h-3.5 text-orange-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={customerQuickSearch}
+                    onFocus={() => setIsCustomerSearchOpen(true)}
+                    onChange={(e) => {
+                      setCustomerQuickSearch(e.target.value);
+                      setIsCustomerSearchOpen(true);
+                    }}
+                    placeholder={
+                      lang === 'th'
+                        ? 'ค้นหาบ้านเลขที่ / เบอร์โทร...'
+                        : 'Search house no. / phone...'
+                    }
+                    className="w-full pl-8 pr-6 py-1.5 text-xs bg-white border border-orange-300 rounded-lg text-neutral-900 placeholder:text-neutral-400 focus:outline-hidden focus:ring-1 focus:ring-orange-500"
+                  />
+                  {(customerQuickSearch || isCustomerSearchOpen) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomerQuickSearch('');
+                        setIsCustomerSearchOpen(false);
+                      }}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
+                  {/* Quick Match Dropdown */}
+                  {isCustomerSearchOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-orange-200 rounded-xl shadow-xl max-h-48 overflow-y-auto divide-y divide-neutral-100">
+                      {filteredQuickCustomers.map((cust) => {
+                        const houseNo = cust.houseNumber || extractHouseNumber(cust.address);
+                        return (
+                          <button
+                            key={cust.id}
+                            type="button"
+                            onClick={() => {
+                              setAttachedCustomer({
+                                customerId: cust.id,
+                                customerName: cust.name,
+                                customerPhone: cust.phone,
+                                deliveryAddress: cust.address,
+                              });
+                              setCustomerQuickSearch('');
+                              setIsCustomerSearchOpen(false);
+                            }}
+                            className="w-full text-left px-2.5 py-2 hover:bg-orange-50 transition-colors cursor-pointer space-y-0.5"
+                          >
+                            <div className="flex items-center justify-between gap-1.5 text-xs">
+                              <span className="font-bold text-neutral-900 truncate">{cust.name}</span>
+                              {houseNo && (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-black shrink-0 inline-flex items-center gap-0.5">
+                                  <Home className="w-2.5 h-2.5" />
+                                  {houseNo}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-neutral-600 flex items-center gap-2 truncate">
+                              {cust.phone && <span className="font-semibold">{cust.phone}</span>}
+                              {cust.address && <span className="truncate">{cust.address}</span>}
+                            </div>
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomerSearchOpen(false);
+                          setCustomerModalEditTarget(null);
+                          setCustomerModalInitialQuery(customerQuickSearch.trim());
+                          setCustomerModalInitialOpenForm(true);
+                          setCustomerSelectionCallbackMode(true);
+                          setIsCustomerModalOpen(true);
+                        }}
+                        className="w-full px-2.5 py-2 text-left text-xs font-bold text-orange-700 bg-orange-50/70 hover:bg-orange-100 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">
+                          {customerQuickSearch.trim()
+                            ? lang === 'th'
+                              ? `+ เพิ่มลูกค้าใหม่ "${customerQuickSearch.trim()}"`
+                              : `+ Add "${customerQuickSearch.trim()}"`
+                            : lang === 'th'
+                            ? '+ บันทึกลูกค้าใหม่'
+                            : '+ Add New Customer'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCustomerSearchOpen(false);
+                    setCustomerModalEditTarget(null);
+                    setCustomerModalInitialQuery(customerQuickSearch.trim());
+                    setCustomerModalInitialOpenForm(customers.length === 0);
+                    setCustomerSelectionCallbackMode(true);
+                    setIsCustomerModalOpen(true);
+                  }}
+                  title={lang === 'th' ? 'เลือก / เพิ่มข้อมูลลูกค้า' : 'Select / Add Customer'}
+                  className="px-2 py-1.5 bg-white hover:bg-orange-100 text-orange-800 border border-orange-300 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-orange-600" />
+                  <span>{lang === 'th' ? 'ลูกค้า' : 'Add'}</span>
+                </button>
+              </div>
+
+              {/* Attached Delivery Customer Summary & Print Address Button */}
+              {attachedCustomer &&
+              (attachedCustomer.customerName ||
+                attachedCustomer.customerPhone ||
+                attachedCustomer.deliveryAddress) ? (
+                <div className="p-2 bg-white rounded-xl border border-orange-200 space-y-1.5">
+                  <div className="flex items-start justify-between gap-1.5">
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="text-xs font-extrabold text-neutral-900 flex items-center gap-1.5 flex-wrap">
+                        <span>{attachedCustomer.customerName}</span>
+                        {attachedCustomer.customerPhone && (
+                          <span className="text-[11px] font-bold text-orange-700 inline-flex items-center gap-0.5 tabular-nums">
+                            <Phone className="w-3 h-3" />
+                            {attachedCustomer.customerPhone}
+                          </span>
+                        )}
+                      </div>
+                      {attachedCustomer.deliveryAddress && (
+                        <div className="text-[11px] text-neutral-600 flex items-start gap-1 leading-snug">
+                          <MapPin className="w-3 h-3 text-rose-500 shrink-0 mt-0.5" />
+                          <span className="line-clamp-2 break-words">
+                            {attachedCustomer.deliveryAddress}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const existingCust = attachedCustomer.customerId
+                            ? customers.find((c) => c.id === attachedCustomer.customerId) || null
+                            : null;
+                          setCustomerModalEditTarget(
+                            existingCust || {
+                              id: `cust_${Date.now()}`,
+                              name: attachedCustomer.customerName,
+                              phone: attachedCustomer.customerPhone,
+                              address: attachedCustomer.deliveryAddress,
+                              houseNumber: extractHouseNumber(attachedCustomer.deliveryAddress),
+                              createdAt: new Date().toISOString(),
+                              updatedAt: new Date().toISOString(),
+                              version: 1,
+                            }
+                          );
+                          setCustomerModalInitialOpenForm(true);
+                          setCustomerModalInitialQuery('');
+                          setCustomerSelectionCallbackMode(true);
+                          setIsCustomerModalOpen(true);
+                        }}
+                        title={lang === 'th' ? 'แก้ไขข้อมูลลูกค้า' : 'Edit Customer'}
+                        className="p-1 text-neutral-400 hover:text-orange-600 rounded cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAttachedCustomer(null)}
+                        title={lang === 'th' ? 'นำออก' : 'Clear'}
+                        className="p-1 text-neutral-400 hover:text-rose-600 rounded cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDeliveryPrintTarget({
+                        customerName: attachedCustomer.customerName,
+                        customerPhone: attachedCustomer.customerPhone,
+                        deliveryAddress: attachedCustomer.deliveryAddress,
+                        billNumber: activeBill?.billNumber || undefined,
+                        workDate: activeBill?.workDate,
+                        items: cartItems,
+                        grandTotal: financials.grandTotal,
+                        status: activeBill?.status || 'saved',
+                      })
+                    }
+                    className="w-full py-1.5 px-2.5 bg-orange-100 hover:bg-orange-200 text-orange-900 border border-orange-300 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-orange-700" />
+                    <span>{lang === 'th' ? 'พิมพ์ที่อยู่ลูกค้า' : 'Print Customer Address'}</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="text-[10px] text-orange-800/80 font-medium">
+                  {lang === 'th'
+                    ? 'เลือกหรือเพิ่มข้อมูลลูกค้าเพื่อติดหน้าถุงและพิมพ์ท้ายใบเสร็จ'
+                    : 'Select or add a delivery customer for bag label & receipt'}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Cart Items List */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -3041,10 +3453,26 @@ export const TablesPosPage: React.FC<Props> = ({
       {/* Payment Settlement Modal */}
       {isPaymentModalOpen && activeBill && (() => {
         const latestServerBill = openBills.find((b) => b.id === activeBill.id);
+        const customerPayload =
+          attachedCustomer &&
+          (attachedCustomer.customerName ||
+            attachedCustomer.customerPhone ||
+            attachedCustomer.deliveryAddress)
+            ? {
+                customerId: attachedCustomer.customerId || null,
+                customerName: attachedCustomer.customerName,
+                customerPhone: attachedCustomer.customerPhone,
+                deliveryAddress: attachedCustomer.deliveryAddress,
+              }
+            : {};
         return (
           <PaymentModal
             bill={{
               ...activeBill,
+              channelId: currentChannel?.id || selectedChannelId,
+              channelName: currentChannel?.name || activeBill.channelName,
+              orderType: currentChannel?.type || activeBill.orderType,
+              ...customerPayload,
               version: latestServerBill?.version ?? activeBill.version,
               items: cartItems,
               subtotal: financials.subtotal,
@@ -3069,6 +3497,8 @@ export const TablesPosPage: React.FC<Props> = ({
               setCartItems([]);
               setOrderDiscount(0);
               setTargetTableIdForSave(null);
+              applyCustomerFromBill(null);
+              setSelectedChannelId('dine_in');
               setSelectedCategoryId(null);
               setTopViewMode('bills');
             }}
@@ -4287,6 +4717,52 @@ export const TablesPosPage: React.FC<Props> = ({
           }
         }}
       />
+
+      {/* Customer Directory & Add/Edit Modal */}
+      {isCustomerModalOpen && (
+        <CustomerManagerModal
+          customers={customers}
+          lang={lang}
+          initialQuery={customerModalInitialQuery}
+          initialOpenForm={customerModalInitialOpenForm}
+          initialEditCustomer={customerModalEditTarget}
+          onSelectCustomer={
+            customerSelectionCallbackMode
+              ? (cust) => {
+                  setAttachedCustomer({
+                    customerId: cust.id,
+                    customerName: cust.name,
+                    customerPhone: cust.phone,
+                    deliveryAddress: cust.address,
+                  });
+                  setCustomerQuickSearch('');
+                }
+              : undefined
+          }
+          onClose={() => {
+            setIsCustomerModalOpen(false);
+            setCustomerModalEditTarget(null);
+            setCustomerModalInitialOpenForm(false);
+          }}
+        />
+      )}
+
+      {/* Printable Delivery Customer Address Label Modal */}
+      {deliveryPrintTarget && (
+        <DeliveryAddressModal
+          customerName={deliveryPrintTarget.customerName}
+          customerPhone={deliveryPrintTarget.customerPhone}
+          deliveryAddress={deliveryPrintTarget.deliveryAddress}
+          billNumber={deliveryPrintTarget.billNumber}
+          workDate={deliveryPrintTarget.workDate}
+          items={deliveryPrintTarget.items}
+          grandTotal={deliveryPrintTarget.grandTotal}
+          status={deliveryPrintTarget.status}
+          settings={settings}
+          lang={lang}
+          onClose={() => setDeliveryPrintTarget(null)}
+        />
+      )}
     </div>
   );
 };

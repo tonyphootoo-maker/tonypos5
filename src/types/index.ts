@@ -262,6 +262,12 @@ export interface BillDoc extends BaseDoc {
   voidReason?: string;
   voidedAt?: string;
   order?: number;
+
+  // Delivery / Customer snapshot
+  customerId?: string | null;
+  customerName?: string;
+  customerPhone?: string;
+  deliveryAddress?: string;
 }
 
 export interface ExpenseDoc extends BaseDoc {
@@ -309,6 +315,14 @@ export interface MemberDoc extends BaseDoc {
   points: number;
   totalSpent: number;
   visitCount: number;
+}
+
+export interface CustomerDoc extends BaseDoc {
+  name: string;
+  phone: string;
+  address: string;
+  houseNumber?: string;
+  notes?: string;
 }
 
 export interface ImageDoc extends BaseDoc {

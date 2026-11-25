@@ -206,6 +206,20 @@
         "version": { "type": "number" }
       }
     },
+    "Customer": {
+      "title": "Customer",
+      "description": "Saved customer profile with name, phone number, house number, and delivery address",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "houseNumber": { "type": "string" },
+        "notes": { "type": "string" },
+        "version": { "type": "number" }
+      }
+    },
     "ImageDoc": {
       "title": "ImageDoc",
       "description": "Compressed photo stored in its own document",
@@ -526,6 +540,7 @@
     "/users/{uid}/employees/{employeeId}": { "schema": "Employee", "description": "Employee wages" },
     "/users/{uid}/shifts/{shiftId}": { "schema": "Shift", "description": "POS cash shifts" },
     "/users/{uid}/members/{memberId}": { "schema": "Member", "description": "Customer membership" },
+    "/users/{uid}/customers/{customerId}": { "schema": "Customer", "description": "Saved delivery customer directory" },
     "/users/{uid}/images/{imageId}": { "schema": "ImageDoc", "description": "Compressed images" },
     "/users/{uid}/dailySummaries/{summaryDate}": { "schema": "DailySummary", "description": "Daily P&L aggregates" },
     "/users/{uid}/counters/{counterId}": { "schema": "Counter", "description": "Atomic number counters" },

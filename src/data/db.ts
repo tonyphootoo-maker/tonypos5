@@ -307,7 +307,7 @@ export async function initializeDefaultsIfEmpty(): Promise<void> {
   };
   batch.set(settingsDocRef, defaultSettings);
 
-  // Channels
+  // Channels (POS 3 core channels: Dine-In, Takeaway, Delivery)
   const channels: ChannelDoc[] = [
     {
       id: 'dine_in',
@@ -332,22 +332,11 @@ export async function initializeDefaultsIfEmpty(): Promise<void> {
       version: 1,
     },
     {
-      id: 'lineman',
-      name: 'LINE MAN',
-      nameTh: 'ไลน์แมน',
+      id: 'delivery',
+      name: 'Delivery',
+      nameTh: 'Delivery',
       type: 'delivery',
-      commissionPercent: 30,
-      packagingCost: 10,
-      createdAt: now,
-      updatedAt: now,
-      version: 1,
-    },
-    {
-      id: 'grab',
-      name: 'GrabFood',
-      nameTh: 'แกร็บฟู้ด',
-      type: 'delivery',
-      commissionPercent: 30,
+      commissionPercent: 0,
       packagingCost: 10,
       createdAt: now,
       updatedAt: now,
@@ -1334,6 +1323,13 @@ export async function payBillAtomic(
           paidAt: nowIso,
           updatedAt: nowIso,
           version: (currentBillData.version || 0) + 1,
+          channelId: bill.channelId,
+          channelName: bill.channelName,
+          orderType: bill.orderType,
+          customerId: bill.customerId ?? null,
+          ...(bill.customerName ? { customerName: bill.customerName } : {}),
+          ...(bill.customerPhone ? { customerPhone: bill.customerPhone } : {}),
+          ...(bill.deliveryAddress ? { deliveryAddress: bill.deliveryAddress } : {}),
         })
       );
 
@@ -1711,6 +1707,7 @@ export async function exportFullDatabase(): Promise<Record<string, unknown>> {
     'employees',
     'shifts',
     'members',
+    'customers',
     'images',
     'dailySummaries',
     'counters',
@@ -1747,6 +1744,7 @@ export async function importFullDatabase(backupData: Record<string, unknown>): P
     'employees',
     'shifts',
     'members',
+    'customers',
     'images',
     'dailySummaries',
     'counters',
