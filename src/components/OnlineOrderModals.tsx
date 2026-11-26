@@ -97,7 +97,24 @@ export const OnlineOrderDetailModal: React.FC<DetailModalProps> = ({
   onPrint,
   onDelete,
 }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const statusMeta = ONLINE_STATUS_META[order.status] || ONLINE_STATUS_META.pending;
+
+  const triggerStatus = async (
+    nextStatus: OnlineOrderStatus,
+    closeAfter: boolean = false
+  ) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await onStatusChange(order, nextStatus);
+      if (closeAfter) {
+        onClose();
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div
@@ -286,8 +303,9 @@ export const OnlineOrderDetailModal: React.FC<DetailModalProps> = ({
             {order.status === 'pending' && (
               <button
                 type="button"
-                onClick={() => onStatusChange(order, 'accepted')}
-                className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold cursor-pointer"
+                disabled={isSubmitting}
+                onClick={() => triggerStatus('accepted')}
+                className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
               >
                 {lang === 'th' ? 'รับออเดอร์' : 'Accept Order'}
               </button>
@@ -295,10 +313,11 @@ export const OnlineOrderDetailModal: React.FC<DetailModalProps> = ({
             {(order.status === 'accepted' || order.status === 'preparing') && (
               <button
                 type="button"
+                disabled={isSubmitting}
                 onClick={() =>
-                  onStatusChange(order, resolveNextReadyActionStatus(order.orderMode))
+                  triggerStatus(resolveNextReadyActionStatus(order.orderMode), true)
                 }
-                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
               >
                 {completeLabel
                   ? completeLabel[lang]
@@ -307,21 +326,32 @@ export const OnlineOrderDetailModal: React.FC<DetailModalProps> = ({
                   : 'Done / Ready'}
               </button>
             )}
-            {order.orderMode === 'delivery' &&
-              (order.status === 'ready_for_pickup' || order.status === 'out_for_delivery') && (
-                <button
-                  type="button"
-                  onClick={() => onStatusChange(order, 'completed')}
-                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
-                >
-                  {lang === 'th' ? 'ส่งสำเร็จ (เข้า P&L)' : 'Delivered (Sync P&L)'}
-                </button>
-              )}
+            {order.orderMode === 'delivery' && order.status === 'ready_for_pickup' && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => triggerStatus('out_for_delivery')}
+                className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {lang === 'th' ? 'กำลังไปส่ง (On The Way)' : 'กำลังไปส่ง (On The Way)'}
+              </button>
+            )}
+            {order.orderMode === 'delivery' && order.status === 'out_for_delivery' && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => triggerStatus('completed', true)}
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+              >
+                {lang === 'th' ? 'ส่งสำเร็จ (เข้า P&L)' : 'Delivered (Sync P&L)'}
+              </button>
+            )}
             {order.status !== 'completed' && order.status !== 'cancelled' && (
               <button
                 type="button"
-                onClick={() => onStatusChange(order, 'cancelled')}
-                className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+                disabled={isSubmitting}
+                onClick={() => triggerStatus('cancelled', true)}
+                className="px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
               >
                 <XCircle className="w-3.5 h-3.5" />
                 <span>{lang === 'th' ? 'ยกเลิก' : 'Cancel'}</span>

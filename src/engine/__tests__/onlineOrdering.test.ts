@@ -19,6 +19,7 @@ import {
   isOnlineOrderInLocalPeriod,
   isOnlineOrderInRiderZone,
   isOnlineOrderPendingAlert,
+  matchesOnlineManagerStatusFilter,
   matchesOnlineOrderSearch,
   ONLINE_CUSTOMER_CANCEL_WINDOW_MS,
   parseFirestoreRestDocument,
@@ -901,6 +902,24 @@ describe('Online Ordering Engine', () => {
     expect(getActiveOnlineZoneOrders(afterAllDone)).toHaveLength(0);
     expect(getActiveRiderZoneOrders(afterAllDone)).toHaveLength(0);
     expect(getPendingOnlineOrders(afterAllDone)).toHaveLength(0);
+
+    // OnlineOrdersManager status filter tabs separate kitchen ('active') vs delivery ('delivering')
+    expect(orders.filter((o) => matchesOnlineManagerStatusFilter(o, 'active')).map((o) => o.id)).toEqual([
+      'ord_pending_new',
+      'ord_pending_old',
+      'ord_prep',
+      'ord_accepted',
+    ]);
+    expect(orders.filter((o) => matchesOnlineManagerStatusFilter(o, 'delivering')).map((o) => o.id)).toEqual([
+      'ord_ready',
+      'ord_transit',
+    ]);
+    expect(orders.filter((o) => matchesOnlineManagerStatusFilter(o, 'completed')).map((o) => o.id)).toEqual([
+      'ord_done',
+    ]);
+    expect(orders.filter((o) => matchesOnlineManagerStatusFilter(o, 'cancelled')).map((o) => o.id)).toEqual([
+      'ord_cancel',
+    ]);
   });
 
   it('enforces 2-minute customer cancellation window across pending, accepted, and preparing states', () => {

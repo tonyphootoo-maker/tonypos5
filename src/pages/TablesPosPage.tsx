@@ -445,7 +445,11 @@ export const TablesPosPage: React.FC<Props> = ({
     nextStatus: OnlineOrderStatus
   ) => {
     setOnlineZoneError(null);
-    if (nextStatus === 'completed' || nextStatus === 'ready_for_pickup') {
+    if (
+      nextStatus === 'completed' ||
+      nextStatus === 'ready_for_pickup' ||
+      nextStatus === 'out_for_delivery'
+    ) {
       setCompletingOnlineOrderId(order.id);
     }
     try {
@@ -2842,32 +2846,6 @@ export const TablesPosPage: React.FC<Props> = ({
                                 : 'Self-Pickup at Store'}
                             </span>
                           </div>
-
-                          <div className="bg-slate-50 rounded-lg border border-slate-100 px-2.5 py-1.5 space-y-0.5">
-                            {order.items.slice(0, 3).map((item, idx) => (
-                              <div
-                                key={`${order.id}-item-${idx}`}
-                                className="flex items-baseline justify-between gap-2 text-[11px] text-slate-800"
-                              >
-                                <span className="truncate font-semibold">
-                                  <span className="font-black text-orange-700 tabular-nums">
-                                    {item.quantity}x
-                                  </span>{' '}
-                                  {item.dishName}
-                                  {item.variantName ? ` (${item.variantName})` : ''}
-                                </span>
-                                <span className="font-bold text-slate-600 tabular-nums shrink-0">
-                                  ฿{formatMoney(item.unitPrice * item.quantity)}
-                                </span>
-                              </div>
-                            ))}
-                            {order.items.length > 3 && (
-                              <div className="text-[10px] font-bold text-slate-500">
-                                +{order.items.length - 3}{' '}
-                                {lang === 'th' ? 'รายการเพิ่มเติม...' : 'more items...'}
-                              </div>
-                            )}
-                          </div>
                         </div>
 
                         {/* Footer: Total + Print/Done Controls */}
@@ -3088,38 +3066,14 @@ export const TablesPosPage: React.FC<Props> = ({
                                 (lang === 'th' ? 'ไม่ระบุที่อยู่' : 'No address provided')}
                             </span>
                           </div>
-
-                          <div className="bg-slate-50 rounded-lg border border-slate-100 px-2.5 py-1.5 space-y-0.5">
-                            {order.items.slice(0, 3).map((item, idx) => (
-                              <div
-                                key={`${order.id}-rider-item-${idx}`}
-                                className="flex items-baseline justify-between gap-2 text-[11px] text-slate-800"
-                              >
-                                <span className="truncate font-semibold">
-                                  <span className="font-black text-orange-700 tabular-nums">
-                                    {item.quantity}x
-                                  </span>{' '}
-                                  {item.dishName}
-                                  {item.variantName ? ` (${item.variantName})` : ''}
-                                </span>
-                                <span className="font-bold text-slate-600 tabular-nums shrink-0">
-                                  ฿{formatMoney(item.unitPrice * item.quantity)}
-                                </span>
-                              </div>
-                            ))}
-                            {order.items.length > 3 && (
-                              <div className="text-[10px] font-bold text-slate-500">
-                                +{order.items.length - 3}{' '}
-                                {lang === 'th' ? 'รายการเพิ่มเติม...' : 'more items...'}
-                              </div>
-                            )}
-                          </div>
                         </div>
 
-                        {/* Footer: Total + Print/Complete Delivery Controls */}
+                        {/* Footer: Total + Print/Delivery Controls */}
                         <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                           <div>
                             <div className="text-[10px] font-semibold text-slate-500">
+                              {order.items.reduce((s, i) => s + i.quantity, 0)}{' '}
+                              {lang === 'th' ? 'รายการ' : 'items'} •{' '}
                               {order.paymentMethod === 'cash'
                                 ? lang === 'th'
                                   ? 'เก็บเงินสด'
@@ -3145,23 +3099,45 @@ export const TablesPosPage: React.FC<Props> = ({
                             >
                               <Printer className="w-3.5 h-3.5" />
                             </button>
-                            <button
-                              type="button"
-                              disabled={isCompleting}
-                              onClick={() => handleOnlineZoneStatusChange(order, 'completed')}
-                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                              <span>
-                                {isCompleting
-                                  ? lang === 'th'
-                                    ? 'กำลังบันทึก...'
-                                    : 'Saving...'
-                                  : lang === 'th'
-                                  ? 'ส่งสำเร็จ'
-                                  : 'Delivered'}
-                              </span>
-                            </button>
+                            {order.status === 'ready_for_pickup' ? (
+                              <button
+                                type="button"
+                                disabled={isCompleting}
+                                onClick={() =>
+                                  handleOnlineZoneStatusChange(order, 'out_for_delivery')
+                                }
+                                className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                <Bike className="w-3.5 h-3.5 shrink-0" />
+                                <span>
+                                  {isCompleting
+                                    ? lang === 'th'
+                                      ? 'กำลังบันทึก...'
+                                      : 'Saving...'
+                                    : lang === 'th'
+                                    ? 'กำลังไปส่ง'
+                                    : 'On The Way'}
+                                </span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                disabled={isCompleting}
+                                onClick={() => handleOnlineZoneStatusChange(order, 'completed')}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                <span>
+                                  {isCompleting
+                                    ? lang === 'th'
+                                      ? 'กำลังบันทึก...'
+                                      : 'Saving...'
+                                    : lang === 'th'
+                                    ? 'ส่งสำเร็จ'
+                                    : 'Delivered'}
+                                </span>
+                              </button>
+                            )}
                           </div>
                         </div>
                       </article>

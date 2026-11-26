@@ -46,11 +46,14 @@ import { formatMoney } from '../engine/calculations';
 import {
   buildOnlineOrderNumberingMap,
   isOnlineOrderInLocalPeriod,
+  matchesOnlineManagerStatusFilter,
   matchesOnlineOrderSearch,
+  OnlineManagerStatusFilter,
   OnlinePeriodFilter,
   playIncomingOrderChime,
 } from '../engine/onlineOrdering';
 import {
+  ONLINE_STATUS_META,
   OnlineOrderDetailModal,
   OnlineOrderReceiptModal,
 } from '../components/OnlineOrderModals';
@@ -89,7 +92,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
 
   const [periodFilter, setPeriodFilter] = useState<OnlinePeriodFilter>('today');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('active');
+  const [statusFilter, setStatusFilter] = useState<OnlineManagerStatusFilter>('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [localSoundEnabled, setLocalSoundEnabled] = useState(true);
   const soundEnabled = propSoundEnabled ?? localSoundEnabled;
@@ -344,6 +347,14 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
             }
           : o
       );
+      if (
+        selectedOrderId === order.id &&
+        (nextStatus === 'ready_for_pickup' ||
+          nextStatus === 'completed' ||
+          nextStatus === 'cancelled')
+      ) {
+        setSelectedOrderId(null);
+      }
       if (nextStatus === 'completed' || order.status === 'completed') {
         await syncCompletedOnlineOrdersToPnl({
           uid: user.uid,
@@ -393,12 +404,8 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
 
   const filteredOrders = useMemo(() => {
     return periodOrders.filter((o) => {
-      if (statusFilter === 'active') {
-        if (o.status === 'completed' || o.status === 'cancelled') return false;
-      } else if (statusFilter === 'completed') {
-        if (o.status !== 'completed') return false;
-      } else if (statusFilter === 'cancelled') {
-        if (o.status !== 'cancelled') return false;
+      if (!matchesOnlineManagerStatusFilter(o, statusFilter)) {
+        return false;
       }
       if (searchQuery.trim()) {
         return matchesOnlineOrderSearch(o, orderNumberingMap.get(o.id), searchQuery);
@@ -763,6 +770,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                   [
                     { id: 'all', th: 'ทั้งหมด', en: 'All' },
                     { id: 'active', th: 'กำลังทำ', en: 'Active' },
+                    { id: 'delivering', th: 'กำลังจัดส่ง', en: 'Delivering' },
                     { id: 'completed', th: 'สำเร็จ', en: 'Done' },
                     { id: 'cancelled', th: 'ยกเลิก', en: 'Cancelled' },
                   ] as const
@@ -835,6 +843,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filteredOrders.map((order) => {
               const displayIds = orderNumberingMap.get(order.id);
+              const statusMeta = ONLINE_STATUS_META[order.status] || ONLINE_STATUS_META.pending;
 
               return (
                 <div
@@ -851,8 +860,16 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                   className="bg-white rounded-2xl border border-slate-200 hover:border-orange-300 p-3.5 transition-colors cursor-pointer flex items-center justify-between gap-3 text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-orange-500"
                 >
                   <div className="min-w-0 space-y-1">
-                    <div className="text-xl font-black tracking-tight text-slate-900 uppercase tabular-nums leading-none">
-                      {displayIds?.displayNumber || order.orderNumber}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xl font-black tracking-tight text-slate-900 uppercase tabular-nums leading-none">
+                        {displayIds?.displayNumber || order.orderNumber}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-bold ${statusMeta.surfaceCls}`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dotCls}`} />
+                        <span>{statusMeta[lang]}</span>
+                      </span>
                     </div>
                     <div className="text-[11px] font-mono font-medium text-slate-500 tabular-nums">
                       {lang === 'th' ? 'เลขอ้างอิง:' : 'Ref:'}{' '}

@@ -28,6 +28,7 @@ import {
 } from './calculations';
 
 export type OnlinePeriodFilter = 'today' | 'week' | 'month' | 'year' | 'all';
+export type OnlineManagerStatusFilter = 'all' | 'active' | 'delivering' | 'completed' | 'cancelled';
 
 export const ONLINE_CHANNEL_PICKUP_ID = 'web_pickup';
 export const ONLINE_CHANNEL_DELIVERY_ID = 'web_delivery';
@@ -905,6 +906,35 @@ export function resolveNextReadyActionStatus(
   orderMode: OnlineOrderMode
 ): 'ready_for_pickup' | 'completed' {
   return orderMode === 'delivery' ? 'ready_for_pickup' : 'completed';
+}
+
+/**
+ * Matches an online order against the OnlineOrdersManagerPage status filter tabs:
+ * - 'active' (กำลังทำ): pending, accepted, preparing (and legacy non-delivery ready_for_pickup)
+ * - 'delivering' (กำลังจัดส่ง): delivery orders marked ready_for_pickup (waiting rider) or out_for_delivery
+ * - 'completed' (สำเร็จ): completed
+ * - 'cancelled' (ยกเลิก): cancelled
+ */
+export function matchesOnlineManagerStatusFilter(
+  order: Pick<OnlineOrderDoc, 'status' | 'orderMode'>,
+  filter: OnlineManagerStatusFilter
+): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'completed') return order.status === 'completed';
+  if (filter === 'cancelled') return order.status === 'cancelled';
+  if (filter === 'delivering') {
+    return (
+      order.status === 'out_for_delivery' ||
+      (order.orderMode === 'delivery' && order.status === 'ready_for_pickup')
+    );
+  }
+  // 'active' (กำลังทำ)
+  return (
+    order.status === 'pending' ||
+    order.status === 'accepted' ||
+    order.status === 'preparing' ||
+    (order.orderMode !== 'delivery' && order.status === 'ready_for_pickup')
+  );
 }
 
 /**
