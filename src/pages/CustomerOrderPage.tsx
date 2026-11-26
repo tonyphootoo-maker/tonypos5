@@ -689,7 +689,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
           <button
             type="button"
             onClick={() => setRetryNonce((n) => n + 1)}
-            className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-orange-600 bg-gradient-to-r from-orange-500 to-red-600 text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer"
           >
             <RefreshCw className="w-4 h-4" />
             <span>{lang === 'th' ? 'ลองโหลดใหม่อีกครั้ง' : 'Retry'}</span>
@@ -728,7 +728,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div className="min-w-0 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-orange-500 to-red-600 text-white font-black text-lg flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-2xl bg-orange-600 bg-gradient-to-br from-orange-500 to-red-600 text-white font-black text-lg flex items-center justify-center shrink-0">
               {store.shopName.slice(0, 1).toUpperCase()}
             </div>
             <div className="min-w-0">
@@ -912,7 +912,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
             <button
               type="button"
               onClick={() => setIsCheckoutOpen(true)}
-              className="w-full min-h-[54px] px-5 py-3 rounded-2xl bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-sm flex items-center justify-between shadow-lg shadow-orange-600/25 cursor-pointer"
+              className="w-full min-h-[54px] px-5 py-3 rounded-2xl bg-orange-600 bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-sm flex items-center justify-between shadow-lg shadow-orange-600/25 cursor-pointer"
             >
               <div className="flex items-center gap-2.5">
                 <span className="px-2.5 py-0.5 rounded-lg bg-white/20 text-xs font-black tabular-nums">
@@ -1202,7 +1202,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               <button
                 type="button"
                 onClick={handleAddToCart}
-                className="flex-1 min-h-[46px] px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-xs sm:text-sm cursor-pointer tabular-nums"
+                className="flex-1 min-h-[46px] px-4 py-2.5 rounded-xl bg-orange-600 bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-xs sm:text-sm cursor-pointer tabular-nums"
               >
                 {lang === 'th'
                   ? `เพิ่มลงตะกร้า • ฿${formatMoney(activeDishLiveUnitPrice * itemQty)}`
@@ -1520,7 +1520,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               <button
                 type="submit"
                 disabled={isSubmitting || isStoreClosed || cart.length === 0}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-sm cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
+                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-orange-600 bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-sm cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
               >
                 {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 <span>

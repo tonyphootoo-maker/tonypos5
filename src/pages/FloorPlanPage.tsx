@@ -150,7 +150,13 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
     });
 
     const unsubZones = subscribeCollection<ZoneDoc>('zones', (zList) => {
-      const sorted = [...zList].sort((a, b) => (a.order || 0) - (b.order || 0));
+      const seen = new Set<string>();
+      const deduped = zList.filter((z) => {
+        if (!z.id || seen.has(z.id)) return false;
+        seen.add(z.id);
+        return true;
+      });
+      const sorted = deduped.sort((a, b) => (a.order || 0) - (b.order || 0));
       setZones(sorted);
       setActiveZoneId((prev) => {
         if (prev && sorted.some((z) => z.id === prev)) return prev;
@@ -268,7 +274,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       version: 1,
     };
 
-    setTables((prev) => [...prev, newItem]);
+    setTables((prev) =>
+      prev.some((t) => t.id === newItem.id)
+        ? prev.map((t) => (t.id === newItem.id ? newItem : t))
+        : [...prev, newItem]
+    );
     setSelectedTableId(newItem.id);
     await persistTableToCloud(newItem, true);
   };
@@ -592,7 +602,11 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
       version: 1,
     };
 
-    setTables((prev) => [...prev, cloned]);
+    setTables((prev) =>
+      prev.some((t) => t.id === cloned.id)
+        ? prev.map((t) => (t.id === cloned.id ? cloned : t))
+        : [...prev, cloned]
+    );
     setSelectedTableId(cloned.id);
     await persistTableToCloud(cloned, true);
   };
@@ -683,21 +697,26 @@ export const FloorPlanPage: React.FC<Props> = ({ lang, onNavigateToPos }) => {
 
   // Zone CRUD
   const handleCreateZone = async () => {
-    if (!newZoneName.trim()) return;
+    const trimmed = newZoneName.trim();
+    if (!trimmed) return;
     const newZone: ZoneDoc = {
-      id: `zone_${Date.now()}`,
-      name: newZoneName.trim(),
-      nameTh: newZoneName.trim(),
+      id: `zone_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: trimmed,
+      nameTh: trimmed,
       order: zones.length + 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       version: 1,
     };
-    await saveDocument('zones', newZone, true);
-    setZones((prev) => [...prev, newZone]);
+    setZones((prev) =>
+      prev.some((z) => z.id === newZone.id)
+        ? prev.map((z) => (z.id === newZone.id ? newZone : z))
+        : [...prev, newZone]
+    );
     setActiveZoneId(newZone.id);
     setNewZoneName('');
     setIsAddingZone(false);
+    await saveDocument('zones', newZone, true);
   };
 
   const handleRenameZone = async () => {

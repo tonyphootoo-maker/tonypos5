@@ -490,3 +490,14 @@
   color: #FFFFFF !important;
 }
 
+/* iOS Safari < 16.2 compatibility: strip 'in oklab' from Tailwind v4 gradients when unsupported */
+@supports not (background-image: linear-gradient(to right in oklab, #000, #fff)) {
+  .bg-gradient-to-r { --tw-gradient-position: to right !important; }
+  .bg-gradient-to-l { --tw-gradient-position: to left !important; }
+  .bg-gradient-to-t { --tw-gradient-position: to top !important; }
+  .bg-gradient-to-b { --tw-gradient-position: to bottom !important; }
+  .bg-gradient-to-tr { --tw-gradient-position: to top right !important; }
+  .bg-gradient-to-tl { --tw-gradient-position: to top left !important; }
+  .bg-gradient-to-br { --tw-gradient-position: to bottom right !important; }
+  .bg-gradient-to-bl { --tw-gradient-position: to bottom left !important; }
+}
