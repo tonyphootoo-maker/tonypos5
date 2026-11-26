@@ -82,7 +82,7 @@ if (typeof globalThis !== 'undefined' && !(globalThis as any).__kinposFirestoreL
 function isLightPublicEntryMode(): boolean {
   if (typeof window === 'undefined') return false;
   try {
-    const mode = resolveAppMode(window.location.search, window.location.pathname);
+    const mode = resolveAppMode(window.location.search, window.location.pathname, window.location.hash);
     return mode === 'customer' || mode === 'rider';
   } catch {
     return false;

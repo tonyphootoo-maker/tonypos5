@@ -31,7 +31,7 @@ const LazyRiderAppPage = lazyWithRetry(() =>
 
 const entryMode =
   typeof window !== 'undefined'
-    ? resolveAppMode(window.location.search, window.location.pathname)
+    ? resolveAppMode(window.location.search, window.location.pathname, window.location.hash)
     : 'owner';
 
 // Register Tier 1 Google Maps Platform Demo Key quota & auth failure guard before render

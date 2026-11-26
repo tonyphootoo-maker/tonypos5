@@ -43,7 +43,11 @@ export const ONLINE_CHANNEL_NAMES: Record<string, string> = {
  * - ?mode=rider or /rider -> 'rider'
  * - Default -> 'owner'
  */
-export function resolveAppMode(search: string = '', pathname: string = ''): AppEntryMode {
+export function resolveAppMode(
+  search: string = '',
+  pathname: string = '',
+  hash: string = ''
+): AppEntryMode {
   try {
     const params = new URLSearchParams(search || '');
     const modeParam = (params.get('mode') || '').trim().toLowerCase();
@@ -51,6 +55,19 @@ export function resolveAppMode(search: string = '', pathname: string = ''): AppE
     if (modeParam === 'rider') return 'rider';
   } catch {
     // Ignore malformed query strings
+  }
+
+  if (hash) {
+    try {
+      const qIdx = hash.indexOf('?');
+      const hashQuery = qIdx >= 0 ? hash.slice(qIdx + 1) : hash.replace(/^#\/?/, '');
+      const hashParams = new URLSearchParams(hashQuery);
+      const hashMode = (hashParams.get('mode') || '').trim().toLowerCase();
+      if (hashMode === 'order' || hashMode === 'customer') return 'customer';
+      if (hashMode === 'rider') return 'rider';
+    } catch {
+      // Ignore malformed hash strings
+    }
   }
 
   const normalizedPath = (pathname || '').trim().toLowerCase().replace(/\/+$/, '');

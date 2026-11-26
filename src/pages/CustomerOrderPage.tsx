@@ -155,6 +155,19 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   };
 
   useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('link[rel="manifest"]').forEach((el) => el.remove());
+    const shopTitle = (store?.shopName || '').trim();
+    const fallbackTitle = lang === 'th' ? 'สั่งอาหารออนไลน์' : 'Online Order';
+    const resolvedTitle = shopTitle || fallbackTitle;
+    document.title = shopTitle ? `${shopTitle} | ${fallbackTitle}` : fallbackTitle;
+    const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (appleTitle) {
+      appleTitle.setAttribute('content', resolvedTitle.slice(0, 32));
+    }
+  }, [store?.shopName, lang]);
+
+  useEffect(() => {
     let mounted = true;
     let unsubStore: (() => void) | null = null;
     let resolvedStoreLoaded = false;

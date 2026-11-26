@@ -108,6 +108,16 @@ export default defineConfig(({mode}) => {
           type: 'module',
         },
       }),
+      {
+        name: 'conditional-pwa-manifest-link',
+        enforce: 'post' as const,
+        transformIndexHtml: {
+          order: 'post' as const,
+          handler(html: string) {
+            return html.replace(/<link\s+rel=["']manifest["'][^>]*>\s*/gi, '');
+          },
+        },
+      },
     ],
     resolve: {
       alias: {

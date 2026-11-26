@@ -204,7 +204,7 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
 export default function App() {
   const [appMode] = useState(() =>
     typeof window !== 'undefined'
-      ? resolveAppMode(window.location.search, window.location.pathname)
+      ? resolveAppMode(window.location.search, window.location.pathname, window.location.hash)
       : 'owner'
   );
   const [user, setUser] = useState<User | null>(null);

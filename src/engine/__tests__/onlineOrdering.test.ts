@@ -180,6 +180,8 @@ describe('Online Ordering Engine', () => {
     expect(resolveAppMode('', '/tonypos5/order/')).toBe('customer');
     expect(resolveAppMode('?mode=rider&store=abc', '/')).toBe('rider');
     expect(resolveAppMode('', '/rider')).toBe('rider');
+    expect(resolveAppMode('', '/', '#/?mode=order&store=abc')).toBe('customer');
+    expect(resolveAppMode('', '/', '#mode=rider')).toBe('rider');
     expect(resolveAppMode('', '/')).toBe('owner');
     expect(resolveAppMode('?tab=pos', '/')).toBe('owner');
   });
