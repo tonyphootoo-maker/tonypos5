@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { User } from 'firebase/auth';
 import {
   CategoryDoc,
   DishDoc,
+  OnlineOrderDoc,
   OptionGroupDoc,
   SettingsDoc,
   ShiftDoc,
@@ -22,9 +23,19 @@ import {
   mergeShopTranslationGlossary,
   subscribeShopTranslationGlossary,
 } from './utils/thaiToEnglish';
-import { publishMenuToPublicStore } from './data/onlineDb';
-import { resolveAppMode } from './engine/onlineOrdering';
+import {
+  publishMenuToPublicStore,
+  subscribeOwnerOnlineOrders,
+  updateOnlineOrderByOwner,
+} from './data/onlineDb';
+import {
+  buildOnlineOrderNumberingMap,
+  getPendingOnlineOrders,
+  playIncomingOrderChime,
+  resolveAppMode,
+} from './engine/onlineOrdering';
 import { Navigation, AppPage } from './components/Navigation';
+import { OnlineOrderFloatingAlert } from './components/OnlineOrderFloatingAlert';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { LanguageToggle } from './components/LanguageToggle';
 import { ShiftModal } from './components/ShiftModal';
@@ -225,6 +236,34 @@ export default function App() {
   const [navResetNonce, setNavResetNonce] = useState<number>(0);
   const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
 
+  // Global Owner Real-Time Online Orders + Persistent Floating Alert State
+  const [onlineOrders, setOnlineOrders] = useState<OnlineOrderDoc[]>([]);
+  const [onlineSoundEnabled, setOnlineSoundEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('kinpos_online_sound_enabled') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const [acceptingOnlineOrderId, setAcceptingOnlineOrderId] = useState<string | null>(null);
+  const [floatingAlertError, setFloatingAlertError] = useState<string | null>(null);
+  const onlineSoundEnabledRef = useRef(onlineSoundEnabled);
+  onlineSoundEnabledRef.current = onlineSoundEnabled;
+  const initialOnlineOrdersLoadedRef = useRef(false);
+  const knownOnlineOrderIdsRef = useRef<Set<string>>(new Set());
+
+  const handleToggleOnlineSound = () => {
+    setOnlineSoundEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('kinpos_online_sound_enabled', String(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     const handleQuota = () => setMapsQuotaExceeded(true);
     window.addEventListener('gmp-quota-exceeded', handleQuota);
@@ -241,6 +280,7 @@ export default function App() {
     let isMounted = true;
     let unsubSettings: (() => void) | null = null;
     let unsubShifts: (() => void) | null = null;
+    let unsubOnlineOrders: (() => void) | null = null;
     let unsubGlossaryCloud: (() => void) | null = null;
     let unsubGlossaryLocal: (() => void) | null = null;
     let glossarySaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -268,6 +308,12 @@ export default function App() {
         unsubShifts();
         unsubShifts = null;
       }
+      if (unsubOnlineOrders) {
+        unsubOnlineOrders();
+        unsubOnlineOrders = null;
+      }
+      initialOnlineOrdersLoadedRef.current = false;
+      knownOnlineOrderIdsRef.current.clear();
       hasMergedInitialCloudGlossary = false;
     };
 
@@ -335,6 +381,32 @@ export default function App() {
           }
         );
 
+        unsubOnlineOrders = subscribeOwnerOnlineOrders(
+          ownerUser.uid,
+          (list) => {
+            if (!isMounted) return;
+            if (!initialOnlineOrdersLoadedRef.current) {
+              initialOnlineOrdersLoadedRef.current = true;
+              list.forEach((o) => knownOnlineOrderIdsRef.current.add(o.id));
+            } else {
+              let hasNewPending = false;
+              for (const o of list) {
+                if (!knownOnlineOrderIdsRef.current.has(o.id)) {
+                  knownOnlineOrderIdsRef.current.add(o.id);
+                  if (o.status === 'pending') hasNewPending = true;
+                }
+              }
+              if (hasNewPending && onlineSoundEnabledRef.current) {
+                playIncomingOrderChime();
+              }
+            }
+            setOnlineOrders(list);
+          },
+          (err) => {
+            console.warn('Error subscribing owner onlineOrders:', err);
+          }
+        );
+
         unsubGlossaryLocal = subscribeShopTranslationGlossary((nextEntries) => {
           if (!isMounted || isApplyingCloudGlossary) return;
           if (glossarySaveTimer) clearTimeout(glossarySaveTimer);
@@ -389,6 +461,7 @@ export default function App() {
       } else {
         setSettings(null);
         setActiveShift(null);
+        setOnlineOrders([]);
         clearTimeout(timer);
         setAuthLoading(false);
       }
@@ -401,6 +474,27 @@ export default function App() {
       unsubscribe();
     };
   }, [appMode]);
+
+  const onlineOrderNumberingMap = useMemo(
+    () => buildOnlineOrderNumberingMap(onlineOrders),
+    [onlineOrders]
+  );
+  const pendingOnlineOrders = useMemo(
+    () => getPendingOnlineOrders(onlineOrders),
+    [onlineOrders]
+  );
+
+  const handleAcceptPendingOnlineOrder = async (order: OnlineOrderDoc) => {
+    setAcceptingOnlineOrderId(order.id);
+    setFloatingAlertError(null);
+    try {
+      await updateOnlineOrderByOwner(order.id, 'accepted');
+    } catch (err) {
+      setFloatingAlertError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAcceptingOnlineOrderId(null);
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     setLoginError(null);
@@ -619,6 +713,8 @@ export default function App() {
           <TablesPosPage
             settings={settings}
             lang={lang}
+            onlineOrders={onlineOrders}
+            onOpenOnlineOrdersPage={() => setCurrentPage('online_orders')}
             onOpenFloorPlan={() => setCurrentPage('floor_plan')}
             onEditDish={(dish, categoryId) => {
               setPendingEditDish({
@@ -685,6 +781,9 @@ export default function App() {
               user={user}
               settings={settings}
               lang={lang}
+              externalOrders={onlineOrders}
+              soundEnabled={onlineSoundEnabled}
+              onToggleSound={handleToggleOnlineSound}
               onSettingsUpdated={(newSet) => setSettings(newSet)}
             />
           </Suspense>
@@ -728,6 +827,18 @@ export default function App() {
 
       {/* Auto-sync POS Categories, Dishes & Sort Order to Customer Online Storefront */}
       <OwnerPublicMenuAutoSync user={user} settings={settings} />
+
+      {/* Persistent Floating Incoming Online Order Alert across POS and all other Owner pages */}
+      <OnlineOrderFloatingAlert
+        pendingOrders={pendingOnlineOrders}
+        orderNumberingMap={onlineOrderNumberingMap}
+        lang={lang}
+        isOnOnlineOrdersPage={currentPage === 'online_orders'}
+        acceptingOrderId={acceptingOnlineOrderId}
+        errorMsg={floatingAlertError}
+        onAcceptOrder={handleAcceptPendingOnlineOrder}
+        onOpenOnlineOrdersPage={() => setCurrentPage('online_orders')}
+      />
 
       {/* Cash Shift Modal */}
       {isShiftModalOpen && (

@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildExternalGoogleMapsUrl,
+  buildOnlineOrderNumberingMap,
   buildWebSyncDailySalesRecords,
   calculateOnlineOrderCostSnapshot,
   extractLatLngLiteral,
   extractStoreIdFromLocation,
   formatNavDistance,
   formatNavDuration,
+  getActiveOnlineZoneOrders,
   getBangkokBusinessWorkDate,
+  getPendingOnlineOrders,
   haversineMeters,
+  isOnlineOrderInActiveZone,
   isOnlineOrderInLocalPeriod,
+  isOnlineOrderPendingAlert,
+  matchesOnlineOrderSearch,
   parseFirestoreRestDocument,
   resolveAppMode,
   sanitizeMenuForPublicStore,
@@ -733,4 +739,140 @@ describe('Online Ordering Engine', () => {
       descriptionTh: '',
     });
   });
+
+  it('assigns daily sequential TK-001 order numbers and DDMMYY-001 AD reference codes and supports searching both', () => {
+    const baseOrder = {
+      storeId: 'store_1',
+      customerUid: 'cust_1',
+      orderMode: 'delivery' as const,
+      paymentMethod: 'cash' as const,
+      items: [],
+      subtotal: 100,
+      deliveryFee: 20,
+      totalAmount: 120,
+      status: 'pending' as const,
+    };
+
+    // Passed newest-first (as Firestore listener delivers them)
+    const sampleOrders = [
+      {
+        ...baseOrder,
+        id: 'ord_day2_first',
+        orderNumber: 'ON-261127-9001',
+        customerName: 'Somchai',
+        customerPhone: '0811112222',
+        deliveryAddress: '99 Sukhumvit',
+        createdAt: '2026-11-27T02:00:00.000Z', // 09:00 BKK on 27/11/26
+      },
+      {
+        ...baseOrder,
+        id: 'ord_day1_second',
+        orderNumber: 'ON-261126-0022',
+        customerName: 'Malee',
+        customerPhone: '0898765432',
+        deliveryAddress: '45 Rama 9',
+        createdAt: '2026-11-26T05:30:00.000Z', // 12:30 BKK on 26/11/26
+      },
+      {
+        ...baseOrder,
+        id: 'ord_day1_first',
+        orderNumber: 'ON-261126-0011',
+        customerName: 'Niran',
+        customerPhone: '0812345678',
+        deliveryAddress: '12 Silom',
+        createdAt: '2026-11-26T01:15:00.000Z', // 08:15 BKK on 26/11/26
+      },
+    ];
+
+    const map = buildOnlineOrderNumberingMap(sampleOrders);
+
+    expect(map.get('ord_day1_first')).toEqual({
+      sequenceNumber: 1,
+      displayNumber: 'TK-001',
+      referenceNumber: '261126-001',
+      dateKey: '2026-11-26',
+    });
+    expect(map.get('ord_day1_second')).toEqual({
+      sequenceNumber: 2,
+      displayNumber: 'TK-002',
+      referenceNumber: '261126-002',
+      dateKey: '2026-11-26',
+    });
+    expect(map.get('ord_day2_first')).toEqual({
+      sequenceNumber: 1,
+      displayNumber: 'TK-001',
+      referenceNumber: '271126-001',
+      dateKey: '2026-11-27',
+    });
+
+    expect(
+      matchesOnlineOrderSearch(sampleOrders[1], map.get('ord_day1_second'), 'tk-002')
+    ).toBe(true);
+    expect(
+      matchesOnlineOrderSearch(sampleOrders[1], map.get('ord_day1_second'), '261126-002')
+    ).toBe(true);
+    expect(
+      matchesOnlineOrderSearch(sampleOrders[1], map.get('ord_day1_second'), '0898765432')
+    ).toBe(true);
+    expect(
+      matchesOnlineOrderSearch(sampleOrders[1], map.get('ord_day1_second'), '261126-001')
+    ).toBe(false);
+  });
+
+  it('routes pending orders to floating alert FIFO and accepted/in-progress orders to POS ONLINE zone until completed', () => {
+    const baseOrder = {
+      storeId: 'store_1',
+      customerUid: 'cust_1',
+      customerName: 'Guest',
+      customerPhone: '0800000000',
+      orderMode: 'delivery' as const,
+      paymentMethod: 'cash' as const,
+      items: [],
+      subtotal: 100,
+      deliveryFee: 20,
+      totalAmount: 120,
+    };
+
+    const orders: OnlineOrderDoc[] = [
+      { ...baseOrder, id: 'ord_done', orderNumber: 'ON-1', status: 'completed', createdAt: '2026-11-26T01:00:00.000Z' },
+      { ...baseOrder, id: 'ord_cancel', orderNumber: 'ON-2', status: 'cancelled', createdAt: '2026-11-26T01:05:00.000Z' },
+      { ...baseOrder, id: 'ord_pending_new', orderNumber: 'ON-3', status: 'pending', createdAt: '2026-11-26T02:30:00.000Z' },
+      { ...baseOrder, id: 'ord_pending_old', orderNumber: 'ON-4', status: 'pending', createdAt: '2026-11-26T02:10:00.000Z' },
+      { ...baseOrder, id: 'ord_prep', orderNumber: 'ON-5', status: 'preparing', createdAt: '2026-11-26T01:40:00.000Z' },
+      { ...baseOrder, id: 'ord_accepted', orderNumber: 'ON-6', status: 'accepted', createdAt: '2026-11-26T01:55:00.000Z' },
+      { ...baseOrder, id: 'ord_ready', orderNumber: 'ON-7', status: 'ready_for_pickup', createdAt: '2026-11-26T01:30:00.000Z' },
+      { ...baseOrder, id: 'ord_transit', orderNumber: 'ON-8', status: 'out_for_delivery', createdAt: '2026-11-26T01:20:00.000Z' },
+    ];
+
+    expect(isOnlineOrderPendingAlert({ status: 'pending' })).toBe(true);
+    expect(isOnlineOrderPendingAlert({ status: 'accepted' })).toBe(false);
+
+    expect(isOnlineOrderInActiveZone({ status: 'accepted' })).toBe(true);
+    expect(isOnlineOrderInActiveZone({ status: 'preparing' })).toBe(true);
+    expect(isOnlineOrderInActiveZone({ status: 'ready_for_pickup' })).toBe(true);
+    expect(isOnlineOrderInActiveZone({ status: 'out_for_delivery' })).toBe(true);
+    expect(isOnlineOrderInActiveZone({ status: 'pending' })).toBe(false);
+    expect(isOnlineOrderInActiveZone({ status: 'completed' })).toBe(false);
+    expect(isOnlineOrderInActiveZone({ status: 'cancelled' })).toBe(false);
+
+    // Floating alert queue orders oldest pending order first (FIFO)
+    expect(getPendingOnlineOrders(orders).map((o) => o.id)).toEqual([
+      'ord_pending_old',
+      'ord_pending_new',
+    ]);
+
+    // POS ONLINE zone holds accepted + in-progress orders in chronological order, drops completed/cancelled/pending
+    expect(getActiveOnlineZoneOrders(orders).map((o) => o.id)).toEqual([
+      'ord_transit',
+      'ord_ready',
+      'ord_prep',
+      'ord_accepted',
+    ]);
+
+    // When remaining orders are marked completed, zone becomes empty (white indicator state)
+    const afterAllDone = orders.map((o) => ({ ...o, status: 'completed' as const }));
+    expect(getActiveOnlineZoneOrders(afterAllDone)).toHaveLength(0);
+    expect(getPendingOnlineOrders(afterAllDone)).toHaveLength(0);
+  });
 });
+

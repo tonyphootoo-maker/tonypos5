@@ -775,3 +775,148 @@ export function parseFirestoreRestDocument(rawDoc: unknown): Record<string, unkn
   }
   return out;
 }
+
+export interface OnlineOrderDisplayIds {
+  sequenceNumber: number;
+  displayNumber: string;
+  referenceNumber: string;
+  dateKey: string;
+}
+
+/**
+ * Assigns each online order a deterministic daily queue number (`TK-001`, `TK-002`, ...)
+ * and a searchable AD date reference (`DDMMYY-001`, e.g., `261126-001`) based on Asia/Bangkok date.
+ */
+export function buildOnlineOrderNumberingMap(
+  orders: OnlineOrderDoc[]
+): Map<string, OnlineOrderDisplayIds> {
+  const result = new Map<string, OnlineOrderDisplayIds>();
+  if (!Array.isArray(orders) || orders.length === 0) return result;
+
+  const groupedByDate = new Map<
+    string,
+    Array<{ order: OnlineOrderDoc; ts: number; dd: string; mm: string; yy: string }>
+  >();
+
+  for (const order of orders) {
+    if (!order?.id) continue;
+    const created = toDateSafe(order.createdAt) || new Date(0);
+    const bkk = getBangkokDateParts(created);
+    const dd = String(bkk.day).padStart(2, '0');
+    const mm = String(bkk.month).padStart(2, '0');
+    const yy = String(bkk.year).slice(-2);
+    const list = groupedByDate.get(bkk.dateStr) || [];
+    list.push({ order, ts: created.getTime(), dd, mm, yy });
+    groupedByDate.set(bkk.dateStr, list);
+  }
+
+  for (const [dateKey, entries] of groupedByDate.entries()) {
+    entries.sort((a, b) => a.ts - b.ts || a.order.id.localeCompare(b.order.id));
+    entries.forEach((entry, idx) => {
+      const seq = idx + 1;
+      const padded = String(seq).padStart(3, '0');
+      result.set(entry.order.id, {
+        sequenceNumber: seq,
+        displayNumber: `TK-${padded}`,
+        referenceNumber: `${entry.dd}${entry.mm}${entry.yy}-${padded}`,
+        dateKey,
+      });
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Case-insensitive search across TK sequence number, reference code (DDMMYY-001),
+ * raw orderNumber, customer name, phone, and delivery address.
+ */
+export function matchesOnlineOrderSearch(
+  order: OnlineOrderDoc,
+  displayIds: OnlineOrderDisplayIds | undefined,
+  rawQuery: string
+): boolean {
+  const q = rawQuery.trim().toLowerCase();
+  if (!q) return true;
+
+  const haystacks = [
+    displayIds?.displayNumber || '',
+    displayIds?.referenceNumber || '',
+    order.orderNumber || '',
+    order.customerName || '',
+    order.customerPhone || '',
+    order.deliveryAddress || '',
+  ];
+
+  return haystacks.some((val) => val.toLowerCase().includes(q));
+}
+
+export function isOnlineOrderPendingAlert(order: Pick<OnlineOrderDoc, 'status'>): boolean {
+  return order.status === 'pending';
+}
+
+export function isOnlineOrderInActiveZone(order: Pick<OnlineOrderDoc, 'status'>): boolean {
+  return (
+    order.status === 'accepted' ||
+    order.status === 'preparing' ||
+    order.status === 'ready_for_pickup' ||
+    order.status === 'out_for_delivery'
+  );
+}
+
+/**
+ * Returns pending online orders awaiting acceptance, sorted oldest-first (FIFO queue).
+ */
+export function getPendingOnlineOrders(orders: OnlineOrderDoc[]): OnlineOrderDoc[] {
+  if (!Array.isArray(orders) || orders.length === 0) return [];
+  return [...orders]
+    .filter((o) => o && isOnlineOrderPendingAlert(o))
+    .sort((a, b) => {
+      const ta = toDateSafe(a.createdAt)?.getTime() ?? 0;
+      const tb = toDateSafe(b.createdAt)?.getTime() ?? 0;
+      return ta - tb || a.id.localeCompare(b.id);
+    });
+}
+
+/**
+ * Returns accepted/in-progress online orders currently active in the POS ONLINE zone,
+ * ordered chronologically (oldest first) so kitchen/POS handles queue in sequence.
+ */
+export function getActiveOnlineZoneOrders(orders: OnlineOrderDoc[]): OnlineOrderDoc[] {
+  if (!Array.isArray(orders) || orders.length === 0) return [];
+  return [...orders]
+    .filter((o) => o && isOnlineOrderInActiveZone(o))
+    .sort((a, b) => {
+      const ta = toDateSafe(a.createdAt)?.getTime() ?? 0;
+      const tb = toDateSafe(b.createdAt)?.getTime() ?? 0;
+      return ta - tb || a.id.localeCompare(b.id);
+    });
+}
+
+export function playIncomingOrderChime(): void {
+  try {
+    if (typeof window === 'undefined') return;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(660, now);
+    osc1.frequency.setValueAtTime(880, now + 0.14);
+    gain1.gain.setValueAtTime(0.18, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.46);
+  } catch {
+    // Audio playback blocked by browser autoplay policy before user gesture
+  }
+}
+
+
