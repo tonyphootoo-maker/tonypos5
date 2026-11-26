@@ -4,23 +4,37 @@ import {
   buildOnlineOrderNumberingMap,
   buildWebSyncDailySalesRecords,
   calculateOnlineOrderCostSnapshot,
+  canCustomerCancelOrder,
   extractLatLngLiteral,
   extractStoreIdFromLocation,
+  formatCountdownMMSS,
   formatNavDistance,
   formatNavDuration,
   getActiveOnlineZoneOrders,
+  getActiveRiderZoneOrders,
   getBangkokBusinessWorkDate,
   getPendingOnlineOrders,
   haversineMeters,
   isOnlineOrderInActiveZone,
   isOnlineOrderInLocalPeriod,
+  isOnlineOrderInRiderZone,
   isOnlineOrderPendingAlert,
   matchesOnlineOrderSearch,
+  ONLINE_CUSTOMER_CANCEL_WINDOW_MS,
   parseFirestoreRestDocument,
   resolveAppMode,
+  resolveNextReadyActionStatus,
   sanitizeMenuForPublicStore,
   stripHtmlInstructions,
 } from '../onlineOrdering';
+import {
+  deleteSavedCustomerAddress,
+  loadCustomerFavoriteDishIds,
+  loadSavedCustomerAddresses,
+  setDefaultCustomerAddress,
+  toggleCustomerFavoriteDishId,
+  upsertSavedCustomerAddress,
+} from '../../data/onlineDb';
 import { buildPeriodPnl } from '../calculations';
 import { convertDailySummariesToSalesRecords } from '../../costing/services/firebaseSyncService';
 import {
@@ -849,11 +863,20 @@ describe('Online Ordering Engine', () => {
 
     expect(isOnlineOrderInActiveZone({ status: 'accepted' })).toBe(true);
     expect(isOnlineOrderInActiveZone({ status: 'preparing' })).toBe(true);
-    expect(isOnlineOrderInActiveZone({ status: 'ready_for_pickup' })).toBe(true);
-    expect(isOnlineOrderInActiveZone({ status: 'out_for_delivery' })).toBe(true);
+    expect(isOnlineOrderInActiveZone({ status: 'ready_for_pickup' })).toBe(false);
+    expect(isOnlineOrderInActiveZone({ status: 'out_for_delivery' })).toBe(false);
     expect(isOnlineOrderInActiveZone({ status: 'pending' })).toBe(false);
     expect(isOnlineOrderInActiveZone({ status: 'completed' })).toBe(false);
     expect(isOnlineOrderInActiveZone({ status: 'cancelled' })).toBe(false);
+
+    // Delivery orders move into RIDER zone & Rider App once marked Ready / Out for delivery
+    expect(isOnlineOrderInRiderZone({ status: 'ready_for_pickup', orderMode: 'delivery' })).toBe(true);
+    expect(isOnlineOrderInRiderZone({ status: 'out_for_delivery', orderMode: 'delivery' })).toBe(true);
+    expect(isOnlineOrderInRiderZone({ status: 'accepted', orderMode: 'delivery' })).toBe(false);
+    expect(isOnlineOrderInRiderZone({ status: 'ready_for_pickup', orderMode: 'pickup' })).toBe(false);
+
+    expect(resolveNextReadyActionStatus('pickup')).toBe('completed');
+    expect(resolveNextReadyActionStatus('delivery')).toBe('ready_for_pickup');
 
     // Floating alert queue orders oldest pending order first (FIFO)
     expect(getPendingOnlineOrders(orders).map((o) => o.id)).toEqual([
@@ -861,18 +884,154 @@ describe('Online Ordering Engine', () => {
       'ord_pending_new',
     ]);
 
-    // POS ONLINE zone holds accepted + in-progress orders in chronological order, drops completed/cancelled/pending
+    // POS ONLINE zone holds kitchen queue (accepted + preparing) chronologically
     expect(getActiveOnlineZoneOrders(orders).map((o) => o.id)).toEqual([
-      'ord_transit',
-      'ord_ready',
       'ord_prep',
       'ord_accepted',
     ]);
 
-    // When remaining orders are marked completed, zone becomes empty (white indicator state)
+    // POS RIDER zone holds delivery orders awaiting Rider or out for delivery chronologically
+    expect(getActiveRiderZoneOrders(orders).map((o) => o.id)).toEqual([
+      'ord_transit',
+      'ord_ready',
+    ]);
+
+    // When remaining orders are marked completed, both ONLINE and RIDER zones become empty (white badge)
     const afterAllDone = orders.map((o) => ({ ...o, status: 'completed' as const }));
     expect(getActiveOnlineZoneOrders(afterAllDone)).toHaveLength(0);
+    expect(getActiveRiderZoneOrders(afterAllDone)).toHaveLength(0);
     expect(getPendingOnlineOrders(afterAllDone)).toHaveLength(0);
+  });
+
+  it('enforces 2-minute customer cancellation window across pending, accepted, and preparing states', () => {
+    const createdIso = '2026-11-26T04:00:00.000Z';
+    const createdMs = new Date(createdIso).getTime();
+
+    expect(canCustomerCancelOrder({ status: 'pending', createdAt: createdIso }, createdMs + 10_000)).toEqual({
+      canCancel: true,
+      remainingSeconds: 110,
+    });
+    expect(canCustomerCancelOrder({ status: 'accepted', createdAt: createdIso }, createdMs + 95_000)).toEqual({
+      canCancel: true,
+      remainingSeconds: 25,
+    });
+    expect(canCustomerCancelOrder({ status: 'preparing', createdAt: createdIso }, createdMs + 119_500)).toEqual({
+      canCancel: true,
+      remainingSeconds: 1,
+    });
+
+    // Expired at/after 120 seconds
+    expect(
+      canCustomerCancelOrder(
+        { status: 'accepted', createdAt: createdIso },
+        createdMs + ONLINE_CUSTOMER_CANCEL_WINDOW_MS
+      )
+    ).toEqual({
+      canCancel: false,
+      remainingSeconds: 0,
+    });
+
+    // Disallowed once order reaches Ready, Out for Delivery, Completed, or Cancelled
+    expect(
+      canCustomerCancelOrder({ status: 'ready_for_pickup', createdAt: createdIso }, createdMs + 5_000)
+    ).toEqual({
+      canCancel: false,
+      remainingSeconds: 0,
+    });
+    expect(
+      canCustomerCancelOrder({ status: 'completed', createdAt: createdIso }, createdMs + 5_000)
+    ).toEqual({
+      canCancel: false,
+      remainingSeconds: 0,
+    });
+
+    expect(formatCountdownMMSS(120)).toBe('02:00');
+    expect(formatCountdownMMSS(65)).toBe('01:05');
+    expect(formatCountdownMMSS(0)).toBe('00:00');
+  });
+
+  it('persists saved customer delivery addresses with GPS coordinates and per-store favorites', () => {
+    const memStorage = new Map<string, string>();
+    const prevStorage = (globalThis as unknown as { localStorage?: Storage }).localStorage;
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => memStorage.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          memStorage.set(k, v);
+        },
+        removeItem: (k: string) => {
+          memStorage.delete(k);
+        },
+        clear: () => {
+          memStorage.clear();
+        },
+      },
+    });
+
+    try {
+      expect(loadSavedCustomerAddresses()).toEqual([]);
+
+      const afterAdd1 = upsertSavedCustomerAddress({
+        label: 'บ้าน',
+        customerName: 'Nok',
+        customerPhone: '0811111111',
+        address: '88/9 Sukhumvit 55',
+        lat: 13.736717,
+        lng: 100.58312,
+        isDefault: true,
+      });
+      expect(afterAdd1).toHaveLength(1);
+      expect(afterAdd1[0].isDefault).toBe(true);
+      expect(afterAdd1[0].lat).toBeCloseTo(13.736717, 6);
+
+      const afterAdd2 = upsertSavedCustomerAddress({
+        label: 'ออฟฟิศ',
+        customerName: 'Nok',
+        customerPhone: '0811111111',
+        address: '101 Silom',
+        lat: 13.7265,
+        lng: 100.5289,
+        isDefault: false,
+      });
+      expect(afterAdd2).toHaveLength(2);
+      const officeId = afterAdd2[0].id;
+
+      const afterEdit = upsertSavedCustomerAddress({
+        id: officeId,
+        label: 'ออฟฟิศใหม่',
+        customerName: 'Nok',
+        customerPhone: '0899999999',
+        address: '102 Silom Complex',
+        lat: 13.728,
+        lng: 100.535,
+        isDefault: false,
+      });
+      expect(afterEdit.find((a) => a.id === officeId)?.address).toBe('102 Silom Complex');
+
+      const afterDefault = setDefaultCustomerAddress(officeId);
+      expect(afterDefault.find((a) => a.id === officeId)?.isDefault).toBe(true);
+
+      const afterDelete = deleteSavedCustomerAddress(officeId);
+      expect(afterDelete).toHaveLength(1);
+      expect(afterDelete[0].isDefault).toBe(true);
+
+      // Favorites per store
+      expect(loadCustomerFavoriteDishIds('store_a')).toEqual([]);
+      expect(toggleCustomerFavoriteDishId('dish_1', 'store_a')).toEqual(['dish_1']);
+      expect(toggleCustomerFavoriteDishId('dish_2', 'store_a')).toEqual(['dish_2', 'dish_1']);
+      expect(loadCustomerFavoriteDishIds('store_b')).toEqual([]);
+      expect(toggleCustomerFavoriteDishId('dish_1', 'store_a')).toEqual(['dish_2']);
+    } finally {
+      if (prevStorage === undefined) {
+        delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
+      } else {
+        Object.defineProperty(globalThis, 'localStorage', {
+          configurable: true,
+          value: prevStorage,
+        });
+      }
+    }
   });
 });
 

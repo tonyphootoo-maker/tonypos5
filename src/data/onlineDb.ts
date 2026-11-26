@@ -55,6 +55,8 @@ import {
 const STORAGE_STORE_ID_KEY = 'kinpos_public_store_id';
 const STORAGE_RIDER_NAME_KEY = 'kinpos_rider_name';
 const STORAGE_CUSTOMER_INFO_KEY = 'kinpos_online_customer_profile';
+const STORAGE_CUSTOMER_ADDRESSES_KEY = 'kinpos_online_customer_addresses';
+const STORAGE_CUSTOMER_FAVORITES_KEY = 'kinpos_online_customer_favorites';
 const STORAGE_GUEST_UID_KEY = 'kinpos_guest_uid';
 const STORAGE_TRACKED_ORDER_IDS_KEY = 'kinpos_tracked_order_ids';
 const publicImageCache = new Map<string, string>();
@@ -239,6 +241,166 @@ export function saveCustomerInfo(info: SavedCustomerCheckoutInfo): void {
   } catch {
     // Ignore quota errors
   }
+}
+
+export interface SavedCustomerAddress {
+  id: string;
+  label: string;
+  customerName: string;
+  customerPhone: string;
+  address: string;
+  lat: number | null;
+  lng: number | null;
+  isDefault?: boolean;
+  updatedAt: string;
+}
+
+function persistSavedCustomerAddresses(list: SavedCustomerAddress[]): void {
+  try {
+    localStorage.setItem(STORAGE_CUSTOMER_ADDRESSES_KEY, JSON.stringify(list.slice(0, 20)));
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+export function loadSavedCustomerAddresses(): SavedCustomerAddress[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_CUSTOMER_ADDRESSES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((a) => a && typeof a.id === 'string' && typeof a.address === 'string')
+          .map((a) => ({
+            id: a.id,
+            label: typeof a.label === 'string' && a.label.trim() ? a.label : 'ที่อยู่หลัก',
+            customerName: typeof a.customerName === 'string' ? a.customerName : '',
+            customerPhone: typeof a.customerPhone === 'string' ? a.customerPhone : '',
+            address: a.address,
+            lat: typeof a.lat === 'number' && Number.isFinite(a.lat) ? a.lat : null,
+            lng: typeof a.lng === 'number' && Number.isFinite(a.lng) ? a.lng : null,
+            isDefault: Boolean(a.isDefault),
+            updatedAt: typeof a.updatedAt === 'string' ? a.updatedAt : new Date().toISOString(),
+          }));
+      }
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+
+  // Bootstrap once from legacy saved profile if present
+  const legacy = loadSavedCustomerInfo();
+  if (legacy.deliveryAddress.trim() || (legacy.deliveryLat != null && legacy.deliveryLng != null)) {
+    const seeded: SavedCustomerAddress[] = [
+      {
+        id: `addr_seed_${Date.now()}`,
+        label: 'ที่อยู่หลัก',
+        customerName: legacy.customerName,
+        customerPhone: legacy.customerPhone,
+        address: legacy.deliveryAddress,
+        lat: legacy.deliveryLat ?? null,
+        lng: legacy.deliveryLng ?? null,
+        isDefault: true,
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    persistSavedCustomerAddresses(seeded);
+    return seeded;
+  }
+
+  return [];
+}
+
+export function upsertSavedCustomerAddress(
+  input: Omit<SavedCustomerAddress, 'id' | 'updatedAt'> & { id?: string }
+): SavedCustomerAddress[] {
+  const existing = loadSavedCustomerAddresses();
+  const targetId = input.id?.trim() || `addr_${Date.now()}_${generateRandomAlphaNum(6)}`;
+  const shouldBeDefault = input.isDefault || existing.length === 0;
+  const entry: SavedCustomerAddress = {
+    id: targetId,
+    label: input.label.trim() || 'ที่อยู่จัดส่ง',
+    customerName: input.customerName.trim(),
+    customerPhone: input.customerPhone.trim(),
+    address: input.address.trim(),
+    lat: typeof input.lat === 'number' && Number.isFinite(input.lat) ? input.lat : null,
+    lng: typeof input.lng === 'number' && Number.isFinite(input.lng) ? input.lng : null,
+    isDefault: shouldBeDefault,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const existsIdx = existing.findIndex((a) => a.id === targetId);
+  let next: SavedCustomerAddress[];
+  if (existsIdx >= 0) {
+    next = existing.map((a, idx) =>
+      idx === existsIdx
+        ? entry
+        : shouldBeDefault
+        ? { ...a, isDefault: false }
+        : a
+    );
+  } else {
+    next = [
+      entry,
+      ...existing.map((a) => (shouldBeDefault ? { ...a, isDefault: false } : a)),
+    ];
+  }
+
+  persistSavedCustomerAddresses(next);
+  return next;
+}
+
+export function deleteSavedCustomerAddress(id: string): SavedCustomerAddress[] {
+  const existing = loadSavedCustomerAddresses();
+  const remaining = existing.filter((a) => a.id !== id);
+  if (remaining.length > 0 && !remaining.some((a) => a.isDefault)) {
+    remaining[0] = { ...remaining[0], isDefault: true };
+  }
+  persistSavedCustomerAddresses(remaining);
+  return remaining;
+}
+
+export function setDefaultCustomerAddress(id: string): SavedCustomerAddress[] {
+  const existing = loadSavedCustomerAddresses();
+  const updated = existing.map((a) => ({
+    ...a,
+    isDefault: a.id === id,
+  }));
+  persistSavedCustomerAddresses(updated);
+  return updated;
+}
+
+function getFavoriteStorageKey(storeId?: string | null): string {
+  return storeId ? `${STORAGE_CUSTOMER_FAVORITES_KEY}::${storeId}` : STORAGE_CUSTOMER_FAVORITES_KEY;
+}
+
+export function loadCustomerFavoriteDishIds(storeId?: string | null): string[] {
+  try {
+    const raw = localStorage.getItem(getFavoriteStorageKey(storeId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return [];
+}
+
+export function toggleCustomerFavoriteDishId(
+  dishId: string,
+  storeId?: string | null
+): string[] {
+  const existing = loadCustomerFavoriteDishIds(storeId);
+  const exists = existing.includes(dishId);
+  const updated = exists ? existing.filter((id) => id !== dishId) : [dishId, ...existing];
+  try {
+    localStorage.setItem(getFavoriteStorageKey(storeId), JSON.stringify(updated));
+  } catch {
+    // Ignore storage errors
+  }
+  return updated;
 }
 
 export function loadSavedRiderName(): string {
@@ -708,7 +870,13 @@ export async function cancelOnlineOrderByCustomer(
       cancelledAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
-  } catch (err) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('insufficient')) {
+      throw new Error(
+        'เลยเวลายกเลิกออเดอร์ (2 นาที) หรือร้านเตรียมอาหารเสร็จแล้ว / Cancellation window (2 mins) expired or order is already prepared.'
+      );
+    }
     handleFirestoreError(err, OperationType.UPDATE, path);
   }
 }

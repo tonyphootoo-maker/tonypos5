@@ -4,6 +4,7 @@ import {
   CategoryDoc,
   DishDoc,
   OnlineOrderDoc,
+  OnlineOrderStatus,
   OptionGroupDoc,
   SettingsDoc,
   ShiftDoc,
@@ -36,6 +37,7 @@ import {
 } from './engine/onlineOrdering';
 import { Navigation, AppPage } from './components/Navigation';
 import { OnlineOrderFloatingAlert } from './components/OnlineOrderFloatingAlert';
+import { OnlineOrderCancelledAlert } from './components/OnlineOrderCancelledAlert';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { LanguageToggle } from './components/LanguageToggle';
 import { ShiftModal } from './components/ShiftModal';
@@ -247,10 +249,12 @@ export default function App() {
   });
   const [acceptingOnlineOrderId, setAcceptingOnlineOrderId] = useState<string | null>(null);
   const [floatingAlertError, setFloatingAlertError] = useState<string | null>(null);
+  const [cancelledOrderAlerts, setCancelledOrderAlerts] = useState<OnlineOrderDoc[]>([]);
   const onlineSoundEnabledRef = useRef(onlineSoundEnabled);
   onlineSoundEnabledRef.current = onlineSoundEnabled;
   const initialOnlineOrdersLoadedRef = useRef(false);
   const knownOnlineOrderIdsRef = useRef<Set<string>>(new Set());
+  const prevOnlineOrderStatusMapRef = useRef<Map<string, OnlineOrderStatus>>(new Map());
 
   const handleToggleOnlineSound = () => {
     setOnlineSoundEnabled((prev) => {
@@ -314,6 +318,7 @@ export default function App() {
       }
       initialOnlineOrdersLoadedRef.current = false;
       knownOnlineOrderIdsRef.current.clear();
+      prevOnlineOrderStatusMapRef.current.clear();
       hasMergedInitialCloudGlossary = false;
     };
 
@@ -387,17 +392,37 @@ export default function App() {
             if (!isMounted) return;
             if (!initialOnlineOrdersLoadedRef.current) {
               initialOnlineOrdersLoadedRef.current = true;
-              list.forEach((o) => knownOnlineOrderIdsRef.current.add(o.id));
+              list.forEach((o) => {
+                knownOnlineOrderIdsRef.current.add(o.id);
+                prevOnlineOrderStatusMapRef.current.set(o.id, o.status);
+              });
             } else {
               let hasNewPending = false;
+              const newlyCancelled: OnlineOrderDoc[] = [];
               for (const o of list) {
                 if (!knownOnlineOrderIdsRef.current.has(o.id)) {
                   knownOnlineOrderIdsRef.current.add(o.id);
                   if (o.status === 'pending') hasNewPending = true;
                 }
+                const prevStatus = prevOnlineOrderStatusMapRef.current.get(o.id);
+                if (
+                  o.status === 'cancelled' &&
+                  prevStatus !== 'cancelled' &&
+                  o.cancelReason !== 'ร้านค้ายกเลิกออเดอร์'
+                ) {
+                  newlyCancelled.push(o);
+                }
+                prevOnlineOrderStatusMapRef.current.set(o.id, o.status);
               }
-              if (hasNewPending && onlineSoundEnabledRef.current) {
+              if ((hasNewPending || newlyCancelled.length > 0) && onlineSoundEnabledRef.current) {
                 playIncomingOrderChime();
+              }
+              if (newlyCancelled.length > 0) {
+                setCancelledOrderAlerts((prev) => {
+                  const existingIds = new Set(prev.map((p) => p.id));
+                  const added = newlyCancelled.filter((n) => !existingIds.has(n.id));
+                  return added.length > 0 ? [...added, ...prev] : prev;
+                });
               }
             }
             setOnlineOrders(list);
@@ -462,6 +487,7 @@ export default function App() {
         setSettings(null);
         setActiveShift(null);
         setOnlineOrders([]);
+        setCancelledOrderAlerts([]);
         clearTimeout(timer);
         setAuthLoading(false);
       }
@@ -838,6 +864,17 @@ export default function App() {
         errorMsg={floatingAlertError}
         onAcceptOrder={handleAcceptPendingOnlineOrder}
         onOpenOnlineOrdersPage={() => setCurrentPage('online_orders')}
+      />
+
+      {/* Immediate Floating Customer Cancellation Alert across POS and all Owner pages */}
+      <OnlineOrderCancelledAlert
+        cancelledOrders={cancelledOrderAlerts}
+        orderNumberingMap={onlineOrderNumberingMap}
+        lang={lang}
+        onDismissOne={(orderId) =>
+          setCancelledOrderAlerts((prev) => prev.filter((o) => o.id !== orderId))
+        }
+        onDismissAll={() => setCancelledOrderAlerts([])}
       />
 
       {/* Cash Shift Modal */}

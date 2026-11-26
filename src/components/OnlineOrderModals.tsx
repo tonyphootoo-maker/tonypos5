@@ -15,7 +15,11 @@ import {
 } from 'lucide-react';
 import { Language, OnlineOrderDoc, OnlineOrderStatus, SettingsDoc } from '../types';
 import { formatMoney } from '../engine/calculations';
-import { OnlineOrderDisplayIds, toDateSafe } from '../engine/onlineOrdering';
+import {
+  OnlineOrderDisplayIds,
+  resolveNextReadyActionStatus,
+  toDateSafe,
+} from '../engine/onlineOrdering';
 
 export const ONLINE_STATUS_META: Record<
   OnlineOrderStatus,
@@ -285,56 +289,34 @@ export const OnlineOrderDetailModal: React.FC<DetailModalProps> = ({
                 onClick={() => onStatusChange(order, 'accepted')}
                 className="px-3.5 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold cursor-pointer"
               >
-                {lang === 'th' ? 'รับออเดอร์' : 'Accept'}
-              </button>
-            )}
-            {(order.status === 'pending' || order.status === 'accepted') && (
-              <button
-                type="button"
-                onClick={() => onStatusChange(order, 'preparing')}
-                className="px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
-              >
-                {lang === 'th' ? 'กำลังปรุง' : 'Preparing'}
+                {lang === 'th' ? 'รับออเดอร์' : 'Accept Order'}
               </button>
             )}
             {(order.status === 'accepted' || order.status === 'preparing') && (
               <button
                 type="button"
-                onClick={() => onStatusChange(order, 'ready_for_pickup')}
-                className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold cursor-pointer"
-              >
-                {order.orderMode === 'delivery'
-                  ? lang === 'th'
-                    ? 'พร้อมให้ไรเดอร์รับ'
-                    : 'Ready for Rider'
-                  : lang === 'th'
-                  ? 'พร้อมรับหน้าร้าน'
-                  : 'Ready for Pickup'}
-              </button>
-            )}
-            {order.orderMode === 'delivery' &&
-              (order.status === 'preparing' || order.status === 'ready_for_pickup') && (
-                <button
-                  type="button"
-                  onClick={() => onStatusChange(order, 'out_for_delivery')}
-                  className="px-3 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold cursor-pointer"
-                >
-                  {lang === 'th' ? 'กำลังจัดส่ง' : 'Out for Delivery'}
-                </button>
-              )}
-            {order.status !== 'completed' && order.status !== 'cancelled' && (
-              <button
-                type="button"
-                onClick={() => onStatusChange(order, 'completed')}
-                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                onClick={() =>
+                  onStatusChange(order, resolveNextReadyActionStatus(order.orderMode))
+                }
+                className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
               >
                 {completeLabel
                   ? completeLabel[lang]
                   : lang === 'th'
-                  ? 'ทำเสร็จแล้ว (เข้า P&L)'
-                  : 'Complete (Sync P&L)'}
+                  ? 'เสร็จแล้ว / พร้อมส่ง'
+                  : 'Done / Ready'}
               </button>
             )}
+            {order.orderMode === 'delivery' &&
+              (order.status === 'ready_for_pickup' || order.status === 'out_for_delivery') && (
+                <button
+                  type="button"
+                  onClick={() => onStatusChange(order, 'completed')}
+                  className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+                >
+                  {lang === 'th' ? 'ส่งสำเร็จ (เข้า P&L)' : 'Delivered (Sync P&L)'}
+                </button>
+              )}
             {order.status !== 'completed' && order.status !== 'cancelled' && (
               <button
                 type="button"

@@ -13,8 +13,6 @@ import {
   Loader2,
   ShieldCheck,
   Bike,
-  MapPin,
-  Phone,
   X,
   Menu,
   Search,
@@ -53,7 +51,6 @@ import {
   playIncomingOrderChime,
 } from '../engine/onlineOrdering';
 import {
-  ONLINE_STATUS_META,
   OnlineOrderDetailModal,
   OnlineOrderReceiptModal,
 } from '../components/OnlineOrderModals';
@@ -92,7 +89,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   const [costMenus, setCostMenus] = useState<CostMenuItem[]>(() => StorageService.getMenus());
 
   const [periodFilter, setPeriodFilter] = useState<OnlinePeriodFilter>('today');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [localSoundEnabled, setLocalSoundEnabled] = useState(true);
   const soundEnabled = propSoundEnabled ?? localSoundEnabled;
@@ -333,7 +330,11 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   const handleStatusChange = async (order: OnlineOrderDoc, nextStatus: OnlineOrderStatus) => {
     setErrorMsg(null);
     try {
-      await updateOnlineOrderByOwner(order.id, nextStatus);
+      await updateOnlineOrderByOwner(
+        order.id,
+        nextStatus,
+        nextStatus === 'cancelled' ? { cancelReason: 'ร้านค้ายกเลิกออเดอร์' } : undefined
+      );
       const updatedOrders = orders.map((o) =>
         o.id === order.id
           ? {
@@ -428,94 +429,6 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
       deliveryFeeTotal,
     };
   }, [periodOrders]);
-
-  const renderPrimaryCardAction = (order: OnlineOrderDoc) => {
-    if (order.status === 'pending') {
-      return (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleStatusChange(order, 'accepted');
-          }}
-          className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          {lang === 'th' ? 'รับออเดอร์' : 'Accept Order'}
-        </button>
-      );
-    }
-    if (order.status === 'accepted') {
-      return (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleStatusChange(order, 'preparing');
-          }}
-          className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          {lang === 'th' ? 'เริ่มทำอาหาร' : 'Start Preparing'}
-        </button>
-      );
-    }
-    if (order.status === 'preparing') {
-      return (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleStatusChange(order, 'ready_for_pickup');
-          }}
-          className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          {order.orderMode === 'delivery'
-            ? lang === 'th'
-              ? 'พร้อมให้ไรเดอร์รับ'
-              : 'Ready for Rider'
-            : lang === 'th'
-            ? 'พร้อมรับหน้าร้าน'
-            : 'Ready for Pickup'}
-        </button>
-      );
-    }
-    if (order.status === 'ready_for_pickup') {
-      const nextSt: OnlineOrderStatus =
-        order.orderMode === 'delivery' ? 'out_for_delivery' : 'completed';
-      return (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleStatusChange(order, nextSt);
-          }}
-          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          {order.orderMode === 'delivery'
-            ? lang === 'th'
-              ? 'กำลังจัดส่ง'
-              : 'Out for Delivery'
-            : lang === 'th'
-            ? 'เสร็จสมบูรณ์'
-            : 'Complete'}
-        </button>
-      );
-    }
-    if (order.status === 'out_for_delivery') {
-      return (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleStatusChange(order, 'completed');
-          }}
-          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        >
-          {lang === 'th' ? 'ปิดงานสำเร็จ' : 'Mark Completed'}
-        </button>
-      );
-    }
-    return null;
-  };
 
   const selectedOrderIds = selectedOrder ? orderNumberingMap.get(selectedOrder.id) : undefined;
   const printingOrderIds = printingOrder ? orderNumberingMap.get(printingOrder.id) : undefined;
@@ -848,6 +761,30 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
               <div className="inline-flex items-center p-1 bg-slate-100 rounded-xl">
                 {(
                   [
+                    { id: 'all', th: 'ทั้งหมด', en: 'All' },
+                    { id: 'active', th: 'กำลังทำ', en: 'Active' },
+                    { id: 'completed', th: 'สำเร็จ', en: 'Done' },
+                    { id: 'cancelled', th: 'ยกเลิก', en: 'Cancelled' },
+                  ] as const
+                ).map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setStatusFilter(s.id)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors ${
+                      statusFilter === s.id
+                        ? 'bg-white text-slate-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {s[lang]}
+                  </button>
+                ))}
+              </div>
+
+              <div className="inline-flex items-center p-1 bg-slate-100 rounded-xl">
+                {(
+                  [
                     { id: 'today', th: 'วันนี้', en: 'Today' },
                     { id: 'week', th: 'อาทิตย์นี้', en: 'Week' },
                     { id: 'month', th: 'เดือนนี้', en: 'Month' },
@@ -869,36 +806,12 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                   </button>
                 ))}
               </div>
-
-              <div className="inline-flex items-center p-1 bg-slate-100 rounded-xl">
-                {(
-                  [
-                    { id: 'all', th: 'ทั้งหมด', en: 'All' },
-                    { id: 'active', th: 'กำลังทำ', en: 'Active' },
-                    { id: 'completed', th: 'สำเร็จ', en: 'Done' },
-                    { id: 'cancelled', th: 'ยกเลิก', en: 'Cancelled' },
-                  ] as const
-                ).map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setStatusFilter(s.id)}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer transition-colors ${
-                      statusFilter === s.id
-                        ? 'bg-white text-slate-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {s[lang]}
-                  </button>
-                ))}
-              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Streamlined Incoming Order Cards */}
+      {/* Streamlined Compact Order Cards (Card #, Ref #, Customer Name, View Items CTA Only) */}
       <section>
         {filteredOrders.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center space-y-2">
@@ -919,18 +832,9 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filteredOrders.map((order) => {
-              const meta = ONLINE_STATUS_META[order.status] || ONLINE_STATUS_META.pending;
               const displayIds = orderNumberingMap.get(order.id);
-              const primaryAction = renderPrimaryCardAction(order);
-              const addressDisplay =
-                order.deliveryAddress?.trim() ||
-                (order.orderMode === 'pickup'
-                  ? lang === 'th'
-                    ? 'รับเองที่ร้าน'
-                    : 'Self-Pickup at Store'
-                  : '-');
 
               return (
                 <div
@@ -944,73 +848,35 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                       setSelectedOrderId(order.id);
                     }
                   }}
-                  className="bg-white rounded-2xl border border-slate-200 hover:border-orange-300 p-4 sm:p-5 transition-colors cursor-pointer flex flex-col justify-between gap-4 text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-orange-500"
+                  className="bg-white rounded-2xl border border-slate-200 hover:border-orange-300 p-3.5 transition-colors cursor-pointer flex items-center justify-between gap-3 text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-orange-500"
                 >
-                  {/* Top Row: Two-Part Order Number + Clean Status Text */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-2xl font-black tracking-tight text-slate-900 uppercase tabular-nums leading-none">
-                        {displayIds?.displayNumber || order.orderNumber}
-                      </div>
-                      <div className="text-xs font-mono font-medium text-slate-500 tabular-nums mt-1.5">
-                        {lang === 'th' ? 'เลขอ้างอิง:' : 'Ref:'}{' '}
-                        <span className="text-slate-700 font-semibold">
-                          {displayIds?.referenceNumber || order.orderNumber}
-                        </span>
-                      </div>
+                  <div className="min-w-0 space-y-1">
+                    <div className="text-xl font-black tracking-tight text-slate-900 uppercase tabular-nums leading-none">
+                      {displayIds?.displayNumber || order.orderNumber}
                     </div>
-
-                    <div className="text-right shrink-0 space-y-1">
-                      <div className={`text-xs font-bold inline-flex items-center gap-1.5 ${meta.textCls}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${meta.dotCls}`} aria-hidden="true" />
-                        <span>{meta[lang]}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        {order.orderMode === 'delivery'
-                          ? lang === 'th'
-                            ? 'เดลิเวอรี'
-                            : 'Delivery'
-                          : lang === 'th'
-                          ? 'รับที่ร้าน'
-                          : 'Pickup'}
-                      </div>
+                    <div className="text-[11px] font-mono font-medium text-slate-500 tabular-nums">
+                      {lang === 'th' ? 'เลขอ้างอิง:' : 'Ref:'}{' '}
+                      <span className="text-slate-700 font-semibold">
+                        {displayIds?.referenceNumber || order.orderNumber}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 pt-0.5 min-w-0">
+                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{order.customerName}</span>
                     </div>
                   </div>
 
-                  {/* Customer Info Only: Name, Phone, Address */}
-                  <div className="space-y-2 text-xs border-t border-slate-100 pt-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="font-bold text-sm text-slate-900 truncate">
-                          {order.customerName}
-                        </span>
-                      </div>
-                      <a
-                        href={`tel:${order.customerPhone}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-orange-600 hover:text-orange-700 font-semibold inline-flex items-center gap-1 shrink-0 tabular-nums"
-                      >
-                        <Phone className="w-3.5 h-3.5" />
-                        <span>{order.customerPhone}</span>
-                      </a>
-                    </div>
-
-                    <div className="flex items-start gap-2 text-slate-600 leading-relaxed">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                      <span className="line-clamp-2">{addressDisplay}</span>
-                    </div>
-                  </div>
-
-                  {/* Card Footer: Tap Cue + Primary Accept Button */}
-                  <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-100">
-                    <span className="text-xs font-medium text-slate-500 inline-flex items-center gap-1">
-                      <span>{lang === 'th' ? 'กดดูรายการอาหาร' : 'View order items'}</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </span>
-
-                    {primaryAction}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedOrderId(order.id);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-700 text-xs font-extrabold whitespace-nowrap shrink-0 inline-flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <span>{lang === 'th' ? 'ดูรายการอาหาร' : 'View Items'}</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               );
             })}
@@ -1140,7 +1006,6 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
           order={selectedOrder}
           displayIds={selectedOrderIds}
           lang={lang}
-          completeLabel={{ th: 'เสร็จสมบูรณ์ (เข้า P&L)', en: 'Complete (Sync P&L)' }}
           onClose={() => setSelectedOrderId(null)}
           onStatusChange={handleStatusChange}
           onPrint={(ord) => setPrintingOrder(ord)}

@@ -26,7 +26,7 @@ import {
   updateOnlineOrderByRider,
 } from '../data/onlineDb';
 import { formatMoney } from '../engine/calculations';
-import { toDateSafe } from '../engine/onlineOrdering';
+import { buildOnlineOrderNumberingMap, toDateSafe } from '../engine/onlineOrdering';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { RiderNavigationOverlay } from '../components/RiderNavigationOverlay';
 import { LanguageToggle } from '../components/LanguageToggle';
@@ -166,12 +166,15 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     };
   }, []);
 
+  const orderNumberingMap = useMemo(
+    () => buildOnlineOrderNumberingMap(orders),
+    [orders]
+  );
+
   const activeJobs = useMemo(
     () =>
       orders.filter(
         (o) =>
-          o.status === 'accepted' ||
-          o.status === 'preparing' ||
           o.status === 'ready_for_pickup' ||
           o.status === 'out_for_delivery'
       ),
@@ -342,7 +345,8 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
           </div>
         ) : (
           visibleJobs.map((order) => {
-            const st = RIDER_STATUS_LABELS[order.status] || RIDER_STATUS_LABELS.accepted;
+            const st = RIDER_STATUS_LABELS[order.status] || RIDER_STATUS_LABELS.ready_for_pickup;
+            const displayIds = orderNumberingMap.get(order.id);
             const created = toDateSafe(order.createdAt);
             const isBusy = busyOrderId === order.id;
 
@@ -353,8 +357,15 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-black text-base text-white">{order.orderNumber}</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-black text-base text-white tabular-nums">
+                        {displayIds?.displayNumber || order.orderNumber}
+                      </span>
+                      {displayIds?.referenceNumber && (
+                        <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                          {displayIds.referenceNumber}
+                        </span>
+                      )}
                       <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-md ${st.cls}`}>
                         {st[lang]}
                       </span>

@@ -800,7 +800,7 @@ export function buildOnlineOrderNumberingMap(
 
   for (const order of orders) {
     if (!order?.id) continue;
-    const created = toDateSafe(order.createdAt) || new Date(0);
+    const created = toDateSafe(order.createdAt) || new Date();
     const bkk = getBangkokDateParts(created);
     const dd = String(bkk.day).padStart(2, '0');
     const mm = String(bkk.month).padStart(2, '0');
@@ -851,17 +851,60 @@ export function matchesOnlineOrderSearch(
   return haystacks.some((val) => val.toLowerCase().includes(q));
 }
 
+export const ONLINE_CUSTOMER_CANCEL_WINDOW_MS = 120_000;
+
+export function canCustomerCancelOrder(
+  order: Pick<OnlineOrderDoc, 'status' | 'createdAt'>,
+  nowMs: number = Date.now()
+): { canCancel: boolean; remainingSeconds: number } {
+  const eligibleStatus =
+    order.status === 'pending' ||
+    order.status === 'accepted' ||
+    order.status === 'preparing';
+  if (!eligibleStatus) {
+    return { canCancel: false, remainingSeconds: 0 };
+  }
+
+  const createdDate = toDateSafe(order.createdAt);
+  const createdMs = createdDate ? createdDate.getTime() : nowMs;
+  const elapsedMs = Math.max(0, nowMs - createdMs);
+  const remainingMs = Math.max(0, ONLINE_CUSTOMER_CANCEL_WINDOW_MS - elapsedMs);
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+
+  return {
+    canCancel: remainingMs > 0,
+    remainingSeconds,
+  };
+}
+
+export function formatCountdownMMSS(totalSeconds: number): string {
+  const safe = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 export function isOnlineOrderPendingAlert(order: Pick<OnlineOrderDoc, 'status'>): boolean {
   return order.status === 'pending';
 }
 
 export function isOnlineOrderInActiveZone(order: Pick<OnlineOrderDoc, 'status'>): boolean {
+  return order.status === 'accepted' || order.status === 'preparing';
+}
+
+export function isOnlineOrderInRiderZone(
+  order: Pick<OnlineOrderDoc, 'status' | 'orderMode'>
+): boolean {
   return (
-    order.status === 'accepted' ||
-    order.status === 'preparing' ||
-    order.status === 'ready_for_pickup' ||
-    order.status === 'out_for_delivery'
+    order.orderMode === 'delivery' &&
+    (order.status === 'ready_for_pickup' || order.status === 'out_for_delivery')
   );
+}
+
+export function resolveNextReadyActionStatus(
+  orderMode: OnlineOrderMode
+): 'ready_for_pickup' | 'completed' {
+  return orderMode === 'delivery' ? 'ready_for_pickup' : 'completed';
 }
 
 /**
@@ -879,13 +922,28 @@ export function getPendingOnlineOrders(orders: OnlineOrderDoc[]): OnlineOrderDoc
 }
 
 /**
- * Returns accepted/in-progress online orders currently active in the POS ONLINE zone,
+ * Returns accepted/in-progress online orders currently active in the POS ONLINE kitchen zone,
  * ordered chronologically (oldest first) so kitchen/POS handles queue in sequence.
  */
 export function getActiveOnlineZoneOrders(orders: OnlineOrderDoc[]): OnlineOrderDoc[] {
   if (!Array.isArray(orders) || orders.length === 0) return [];
   return [...orders]
     .filter((o) => o && isOnlineOrderInActiveZone(o))
+    .sort((a, b) => {
+      const ta = toDateSafe(a.createdAt)?.getTime() ?? 0;
+      const tb = toDateSafe(b.createdAt)?.getTime() ?? 0;
+      return ta - tb || a.id.localeCompare(b.id);
+    });
+}
+
+/**
+ * Returns active delivery orders ready for pickup or out for delivery,
+ * synchronized across POS RIDER zone and the Rider App.
+ */
+export function getActiveRiderZoneOrders(orders: OnlineOrderDoc[]): OnlineOrderDoc[] {
+  if (!Array.isArray(orders) || orders.length === 0) return [];
+  return [...orders]
+    .filter((o) => o && isOnlineOrderInRiderZone(o))
     .sort((a, b) => {
       const ta = toDateSafe(a.createdAt)?.getTime() ?? 0;
       const tb = toDateSafe(b.createdAt)?.getTime() ?? 0;

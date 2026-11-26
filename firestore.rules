@@ -165,7 +165,9 @@ service cloud.firestore {
       let changed = d.diff(o).affectedKeys();
       return ((isSignedIn() && o.customerUid == request.auth.uid)
           || (!isSignedIn() && isValidGuestUid(o.customerUid) && orderId.size() >= 16))
-        && o.status == 'pending'
+        && o.status in ['pending', 'accepted', 'preparing']
+        && (o.createdAt is timestamp)
+        && request.time <= o.createdAt + duration.value(150, 's')
         && d.status == 'cancelled'
         && orderImmutableFieldsUnchanged()
         && changed.hasOnly(['status', 'cancelReason', 'cancelledAt', 'updatedAt'])
