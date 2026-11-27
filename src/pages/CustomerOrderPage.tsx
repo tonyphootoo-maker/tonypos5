@@ -14,6 +14,7 @@ import {
   X,
   Search,
   ChevronRight,
+  ChevronDown,
   AlertCircle,
   Loader2,
   Phone,
@@ -179,6 +180,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   const [cancelOrderError, setCancelOrderError] = useState<string | null>(null);
   const [cancelTickNowMs, setCancelTickNowMs] = useState<number>(() => Date.now());
+  const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
 
   const [favoriteDishIds, setFavoriteDishIds] = useState<string[]>([]);
   const [savedFavoriteItems, setSavedFavoriteItems] = useState<SavedCustomerFavoriteItem[]>([]);
@@ -2538,14 +2540,42 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                   const created = toDateSafe(ord.createdAt);
                   const cancelWindow = canCustomerCancelOrder(ord, cancelTickNowMs);
                   const isCancelling = cancellingOrderId === ord.id;
+                  const isCompleted = ord.status === 'completed';
+                  const isCancelled = ord.status === 'cancelled';
+                  const isUnfinished = !isCompleted && !isCancelled;
+                  const isExpanded = Boolean(expandedOrderIds[ord.id]);
+                  const totalItemCount = ord.items.reduce((sum, it) => sum + (it.quantity || 1), 0);
+                  const storePhoneRaw = (store?.shopPhone || '').trim();
+                  const storePhoneDigits = storePhoneRaw.replace(/[^\d+]/g, '');
+                  const storePhoneHref = storePhoneRaw
+                    ? `tel:${storePhoneDigits || storePhoneRaw}`
+                    : null;
+
                   return (
                     <div
                       key={ord.id}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 space-y-2.5"
+                      className="bg-white rounded-2xl border border-slate-200 p-3.5 sm:p-4 space-y-2.5 shadow-2xs"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <div className="font-extrabold text-sm text-slate-900">{ord.orderNumber}</div>
+                      <button
+                        type="button"
+                        aria-expanded={isExpanded}
+                        onClick={() =>
+                          setExpandedOrderIds((prev) => ({
+                            ...prev,
+                            [ord.id]: !prev[ord.id],
+                          }))
+                        }
+                        className="w-full text-left flex items-start justify-between gap-2.5 cursor-pointer group"
+                      >
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-extrabold text-sm text-slate-900">
+                              {ord.orderNumber}
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md tabular-nums">
+                              {lang === 'th' ? `${totalItemCount} รายการ` : `${totalItemCount} items`}
+                            </span>
+                          </div>
                           <div className="text-[11px] text-slate-500">
                             {created
                               ? created.toLocaleString(lang === 'th' ? 'th-TH' : 'en-US', {
@@ -2555,46 +2585,90 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                                   month: 'short',
                                 })
                               : ''}{' '}
-                            • {ord.orderMode === 'delivery' ? (lang === 'th' ? 'เดลิเวอรี' : 'Delivery') : (lang === 'th' ? 'รับที่ร้าน' : 'Pickup')}
+                            •{' '}
+                            {ord.orderMode === 'delivery'
+                              ? lang === 'th'
+                                ? 'เดลิเวอรี'
+                                : 'Delivery'
+                              : lang === 'th'
+                              ? 'รับที่ร้าน'
+                              : 'Pickup'}
                           </div>
                         </div>
-                        <span
-                          className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${badge.color}`}
-                        >
-                          {badge[lang]}
-                        </span>
-                      </div>
 
-                      <div className="text-xs text-slate-700 space-y-1 border-t border-slate-100 pt-2">
-                        {ord.items.map((it, i) => (
-                          <div key={i} className="space-y-0.5">
-                            <div className="flex justify-between gap-2">
-                              <span>
-                                {it.quantity}x {it.dishName}
-                                {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
-                              </span>
-                              <span className="font-semibold tabular-nums">
-                                ฿{formatMoney(it.unitPrice * it.quantity)}
-                              </span>
-                            </div>
-                            {it.options && it.options.length > 0 && (
-                              <div className="text-[11px] text-slate-500 pl-3">
-                                + {it.options.map((o) => o.choiceName).join(', ')}
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
+                          <span
+                            className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${badge.color}`}
+                          >
+                            {badge[lang]}
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-500 group-hover:text-orange-600 inline-flex items-center gap-0.5 transition-colors">
+                            <span>
+                              {isExpanded
+                                ? lang === 'th'
+                                  ? 'ซ่อนรายการ'
+                                  : 'Hide details'
+                                : lang === 'th'
+                                ? 'ดูรายการที่สั่ง'
+                                : 'View items'}
+                            </span>
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 transition-transform duration-150 ${
+                                isExpanded ? 'rotate-180' : ''
+                              }`}
+                            />
+                          </span>
+                        </div>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="text-xs text-slate-700 space-y-1.5 border-t border-slate-100 pt-2.5">
+                          {ord.items.map((it, i) => (
+                            <div key={i} className="space-y-0.5">
+                              <div className="flex justify-between gap-2">
+                                <span>
+                                  {it.quantity}x {it.dishName}
+                                  {it.variantName && it.variantName !== 'Standard'
+                                    ? ` (${it.variantName})`
+                                    : ''}
+                                </span>
+                                <span className="font-semibold tabular-nums">
+                                  ฿{formatMoney(it.unitPrice * it.quantity)}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        ))}
-                        {ord.orderMode === 'delivery' && ord.deliveryFee > 0 && (
-                          <div className="flex justify-between text-slate-500">
-                            <span>{lang === 'th' ? 'ค่าจัดส่ง' : 'Delivery Fee'}</span>
-                            <span className="tabular-nums">฿{formatMoney(ord.deliveryFee)}</span>
-                          </div>
-                        )}
-                      </div>
+                              {it.options && it.options.length > 0 && (
+                                <div className="text-[11px] text-slate-500 pl-3">
+                                  + {it.options.map((o) => o.choiceName).join(', ')}
+                                </div>
+                              )}
+                              {it.notes && (
+                                <div className="text-[11px] text-amber-700 pl-3">* {it.notes}</div>
+                              )}
+                            </div>
+                          ))}
+                          {ord.orderMode === 'delivery' && ord.deliveryFee > 0 && (
+                            <div className="flex justify-between text-slate-500 pt-1">
+                              <span>{lang === 'th' ? 'ค่าจัดส่ง' : 'Delivery Fee'}</span>
+                              <span className="tabular-nums">฿{formatMoney(ord.deliveryFee)}</span>
+                            </div>
+                          )}
+                          {ord.orderMode === 'delivery' && ord.deliveryAddress && (
+                            <div className="text-[11px] text-slate-500 pt-1 flex items-start gap-1">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                              <span>{ord.deliveryAddress}</span>
+                            </div>
+                          )}
+                          {ord.customerNote && (
+                            <div className="text-[11px] text-amber-700 font-medium">
+                              * {ord.customerNote}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {ord.riderName && ord.status === 'out_for_delivery' && (
                         <div className="p-2.5 rounded-xl bg-teal-50 border border-teal-200 text-xs font-bold text-teal-900 flex items-center gap-2">
-                          <Truck className="w-4 h-4 text-teal-600" />
+                          <Truck className="w-4 h-4 text-teal-600 shrink-0" />
                           <span>
                             {lang === 'th'
                               ? `ไรเดอร์ ${ord.riderName} กำลังนำอาหารไปส่ง`
@@ -2608,14 +2682,26 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                           {lang === 'th' ? 'รวม ' : 'Total '}฿{formatMoney(ord.totalAmount)}
                         </div>
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleReorderOrder(ord)}
-                            className="px-2.5 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            <span>{lang === 'th' ? 'สั่งซื้ออีกครั้ง' : 'Order Again'}</span>
-                          </button>
+                          {isUnfinished && storePhoneHref && (
+                            <a
+                              href={storePhoneHref}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                              <span>{lang === 'th' ? 'ติดต่อร้าน' : 'Call Store'}</span>
+                            </a>
+                          )}
+
+                          {isCompleted && (
+                            <button
+                              type="button"
+                              onClick={() => handleReorderOrder(ord)}
+                              className="px-2.5 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>{lang === 'th' ? 'สั่งซื้ออีกครั้ง' : 'Order Again'}</span>
+                            </button>
+                          )}
 
                           {cancelWindow.canCancel && (
                             cancelConfirmOrderId === ord.id ? (
