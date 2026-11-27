@@ -80,11 +80,13 @@
           riderManifest.href = './manifest-rider.webmanifest';
           document.head.appendChild(riderManifest);
         } else if (isOrder) {
-          // Do NOT attach manifest.webmanifest in Customer mode so iOS Safari Add to Home Screen
-          // bookmarks the exact ?mode=order&store=... URL instead of start_url "./" (Owner Login).
           document.title = "สั่งอาหารออนไลน์ | Online Order";
           var orderTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
           if (orderTitle) orderTitle.setAttribute('content', 'สั่งอาหาร');
+          var orderManifest = document.createElement('link');
+          orderManifest.rel = 'manifest';
+          orderManifest.href = './manifest-order.webmanifest';
+          document.head.appendChild(orderManifest);
         } else {
           var ownerManifest = document.createElement('link');
           ownerManifest.rel = 'manifest';

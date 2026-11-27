@@ -27,6 +27,7 @@ import { SavedCustomerAddress } from '../data/onlineDb';
 import {
   LatLngLiteralSimple,
   extractLatLngLiteral,
+  getCurrentPositionWithIosFallback,
   latLngToMercatorPixel,
   mercatorPixelToLatLng,
 } from '../engine/onlineOrdering';
@@ -96,10 +97,11 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
   onPinChange,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const pinRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 420, height: 256 });
   const dragStateRef = useRef<{
     mode: 'map' | 'pin';
-    pointerId: number;
+    inputType: 'mouse' | 'touch';
     startX: number;
     startY: number;
     moved: boolean;
@@ -139,6 +141,132 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     [centerPx.x, centerPx.y, size.width, size.height]
   );
 
+  const latestRef = useRef({
+    center,
+    zoom,
+    pinPos,
+    centerPx,
+    topLeftPx,
+    onCenterChange,
+    onPinChange,
+  });
+  latestRef.current = {
+    center,
+    zoom,
+    pinPos,
+    centerPx,
+    topLeftPx,
+    onCenterChange,
+    onPinChange,
+  };
+
+  // Native non-passive touch listeners so iOS Safari does NOT hijack map/pin dragging to scroll modal
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const getClientPoint = (ev: TouchEvent): { x: number; y: number } | null => {
+      const t = ev.touches[0] || ev.changedTouches[0];
+      return t ? { x: t.clientX, y: t.clientY } : null;
+    };
+
+    const isInsideControls = (target: EventTarget | null): boolean => {
+      return target instanceof Element && Boolean(target.closest('[data-map-controls="true"]'));
+    };
+
+    const isInsidePin = (target: EventTarget | null): boolean => {
+      return target instanceof Element && Boolean(target.closest('[data-map-pin="true"]'));
+    };
+
+    const onTouchStart = (ev: TouchEvent) => {
+      if (isInsideControls(ev.target) || ev.touches.length !== 1) return;
+      const pt = getClientPoint(ev);
+      if (!pt) return;
+      ev.preventDefault();
+      const { centerPx: cPx, center: curCenter, pinPos: curPin, zoom: curZoom } = latestRef.current;
+      if (isInsidePin(ev.target)) {
+        const pinTarget = curPin || curCenter;
+        const pPx = latLngToMercatorPixel(pinTarget.lat, pinTarget.lng, curZoom, TILE_SIZE);
+        dragStateRef.current = {
+          mode: 'pin',
+          inputType: 'touch',
+          startX: pt.x,
+          startY: pt.y,
+          moved: false,
+          startWorldX: pPx.x,
+          startWorldY: pPx.y,
+        };
+      } else {
+        dragStateRef.current = {
+          mode: 'map',
+          inputType: 'touch',
+          startX: pt.x,
+          startY: pt.y,
+          moved: false,
+          startWorldX: cPx.x,
+          startWorldY: cPx.y,
+        };
+      }
+    };
+
+    const onTouchMove = (ev: TouchEvent) => {
+      const st = dragStateRef.current;
+      if (!st || st.inputType !== 'touch' || ev.touches.length !== 1) return;
+      const pt = getClientPoint(ev);
+      if (!pt) return;
+      ev.preventDefault();
+      const dx = pt.x - st.startX;
+      const dy = pt.y - st.startY;
+      if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+        st.moved = true;
+      }
+      if (!st.moved) return;
+
+      const { zoom: curZoom, onCenterChange: emitCenter, onPinChange: emitPin } = latestRef.current;
+      if (st.mode === 'map') {
+        emitCenter(
+          mercatorPixelToLatLng(st.startWorldX - dx, st.startWorldY - dy, curZoom, TILE_SIZE)
+        );
+      } else {
+        emitPin(
+          mercatorPixelToLatLng(st.startWorldX + dx, st.startWorldY + dy, curZoom, TILE_SIZE)
+        );
+      }
+    };
+
+    const onTouchEnd = (ev: TouchEvent) => {
+      const st = dragStateRef.current;
+      if (!st || st.inputType !== 'touch') return;
+      dragStateRef.current = null;
+      if (!st.moved && st.mode === 'map') {
+        const pt = getClientPoint(ev);
+        if (!pt) return;
+        const rect = el.getBoundingClientRect();
+        const localX = pt.x - rect.left;
+        const localY = pt.y - rect.top;
+        const { topLeftPx: tlPx, zoom: curZoom, onPinChange: emitPin } = latestRef.current;
+        emitPin(
+          mercatorPixelToLatLng(tlPx.x + localX, tlPx.y + localY, curZoom, TILE_SIZE)
+        );
+      }
+    };
+
+    const onTouchCancel = () => {
+      dragStateRef.current = null;
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    el.addEventListener('touchcancel', onTouchCancel);
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchCancel);
+    };
+  }, []);
+
   const tiles = useMemo(() => {
     const maxTileIdx = Math.pow(2, zoom);
     const minTx = Math.floor(topLeftPx.x / TILE_SIZE);
@@ -177,12 +305,13 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     };
   }, [pinPos, zoom, topLeftPx.x, topLeftPx.y]);
 
-  const handleMapPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+  // Desktop mouse drag/click fallback (touch devices handled via native non-passive listeners above)
+  const handleMapMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    if ((e.target as Element)?.closest('[data-map-controls="true"]')) return;
     dragStateRef.current = {
       mode: 'map',
-      pointerId: e.pointerId,
+      inputType: 'mouse',
       startX: e.clientX,
       startY: e.clientY,
       moved: false,
@@ -191,15 +320,14 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     };
   };
 
-  const handlePinPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handlePinMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    if (e.button !== 0) return;
     const curPin = pinPos || center;
     const pinWorld = latLngToMercatorPixel(curPin.lat, curPin.lng, zoom, TILE_SIZE);
     dragStateRef.current = {
       mode: 'pin',
-      pointerId: e.pointerId,
+      inputType: 'mouse',
       startX: e.clientX,
       startY: e.clientY,
       moved: false,
@@ -208,9 +336,9 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     };
   };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const st = dragStateRef.current;
-    if (!st || st.pointerId !== e.pointerId) return;
+    if (!st || st.inputType !== 'mouse') return;
     const dx = e.clientX - st.startX;
     const dy = e.clientY - st.startY;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
@@ -219,57 +347,38 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     if (!st.moved) return;
 
     if (st.mode === 'map') {
-      const nextCenter = mercatorPixelToLatLng(
-        st.startWorldX - dx,
-        st.startWorldY - dy,
-        zoom,
-        TILE_SIZE
-      );
-      onCenterChange(nextCenter);
+      onCenterChange(mercatorPixelToLatLng(st.startWorldX - dx, st.startWorldY - dy, zoom, TILE_SIZE));
     } else if (st.mode === 'pin') {
-      const nextPin = mercatorPixelToLatLng(
-        st.startWorldX + dx,
-        st.startWorldY + dy,
-        zoom,
-        TILE_SIZE
-      );
-      onPinChange(nextPin);
+      onPinChange(mercatorPixelToLatLng(st.startWorldX + dx, st.startWorldY + dy, zoom, TILE_SIZE));
     }
   };
 
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
     const st = dragStateRef.current;
-    if (!st || st.pointerId !== e.pointerId) return;
+    if (!st || st.inputType !== 'mouse') return;
     dragStateRef.current = null;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      // Ignore if capture was already released
-    }
-
     if (!st.moved && st.mode === 'map' && containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       const localX = e.clientX - rect.left;
       const localY = e.clientY - rect.top;
-      const clickedCoords = mercatorPixelToLatLng(
-        topLeftPx.x + localX,
-        topLeftPx.y + localY,
-        zoom,
-        TILE_SIZE
+      onPinChange(
+        mercatorPixelToLatLng(topLeftPx.x + localX, topLeftPx.y + localY, zoom, TILE_SIZE)
       );
-      onPinChange(clickedCoords);
     }
   };
 
   return (
     <div
       ref={containerRef}
-      onPointerDown={handleMapPointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={() => {
-        dragStateRef.current = null;
+      onMouseDown={handleMapMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={() => {
+        if (dragStateRef.current?.inputType === 'mouse') {
+          dragStateRef.current = null;
+        }
       }}
+      style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
       className="relative w-full h-60 sm:h-64 overflow-hidden select-none touch-none bg-slate-200 cursor-grab active:cursor-grabbing"
     >
       {/* OSM XYZ Map Tiles */}
@@ -303,19 +412,17 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
       {/* Draggable Delivery Pin */}
       {pinScreenPos && (
         <div
+          ref={pinRef}
+          data-map-pin="true"
           role="slider"
           aria-label={lang === 'th' ? 'หมุดจัดส่งอาหาร (ลากเพื่อย้ายตำแหน่ง)' : 'Delivery pin (drag to move)'}
           aria-valuenow={Math.round(pinPos!.lat * 1000)}
           tabIndex={0}
-          onPointerDown={handlePinPointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={() => {
-            dragStateRef.current = null;
-          }}
+          onMouseDown={handlePinMouseDown}
           style={{
             left: `${pinScreenPos.x}px`,
             top: `${pinScreenPos.y}px`,
+            touchAction: 'none',
           }}
           className="absolute -translate-x-1/2 -translate-y-full z-20 cursor-move touch-none group"
         >
@@ -331,10 +438,11 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
         </div>
       )}
 
-      {/* Map Controls: Zoom + Pin Center */}
+      {/* Map Controls: Zoom */}
       <div
+        data-map-controls="true"
         className="absolute right-2.5 top-2.5 z-30 flex flex-col gap-1.5"
-        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <button
           type="button"
@@ -448,45 +556,34 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
-  const handleUseCurrentGps = () => {
-    if (!navigator.geolocation) {
-      setErrorMsg(
-        lang === 'th' ? 'อุปกรณ์นี้ไม่รองรับการจับตำแหน่ง GPS' : 'Geolocation is not supported'
-      );
-      return;
-    }
+  const handleUseCurrentGps = async () => {
     setLocating(true);
     setErrorMsg(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords = {
-          lat: Number(pos.coords.latitude.toFixed(6)),
-          lng: Number(pos.coords.longitude.toFixed(6)),
-        };
-        setPinPos(coords);
-        setPanTarget(coords);
-        setMapCenter(coords);
-        setFallbackZoom(17);
-        setLocating(false);
-      },
-      (err) => {
-        setLocating(false);
-        if (err.code === 1) {
-          setErrorMsg(
-            lang === 'th'
-              ? 'กรุณาอนุญาตการเข้าถึงตำแหน่งที่ตั้งในการตั้งค่า Safari/iPhone หรือแตะบนแผนที่เพื่อปักหมุดเอง'
-              : 'Location permission denied. Tap anywhere on the map to drop your delivery pin manually.'
-          );
-        } else {
-          setErrorMsg(
-            lang === 'th'
-              ? 'ไม่สามารถจับตำแหน่ง GPS ปัจจุบันได้ กรุณาแตะหรือเลื่อนแผนที่เพื่อปักหมุดเอง'
-              : 'Unable to lock current GPS. Please tap or pan the map to place your delivery pin.'
-          );
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-    );
+    try {
+      const coords = await getCurrentPositionWithIosFallback();
+      const nextPin = { lat: coords.lat, lng: coords.lng };
+      setPinPos(nextPin);
+      setPanTarget(nextPin);
+      setMapCenter(nextPin);
+      setFallbackZoom(17);
+    } catch (err: unknown) {
+      const code = (err as { code?: number })?.code ?? 2;
+      if (code === 1) {
+        setErrorMsg(
+          lang === 'th'
+            ? 'กรุณาอนุญาตการเข้าถึงตำแหน่งที่ตั้งในการตั้งค่า iPhone (Safari > ตำแหน่งที่ตั้ง) หรือแตะ/ลากหมุดบนแผนที่ได้ทันที'
+            : 'Location permission denied. Enable Safari Location in iOS Settings, or tap/drag the pin directly on the map.'
+        );
+      } else {
+        setErrorMsg(
+          lang === 'th'
+            ? 'ไม่สามารถจับตำแหน่ง GPS ปัจจุบันได้ กรุณาแตะหรือเลื่อนแผนที่แล้วกด "ปักหมุดตรงกลาง"'
+            : 'Unable to lock current GPS. Tap the map or pan and press "Pin Center".'
+        );
+      }
+    } finally {
+      setLocating(false);
+    }
   };
 
   const handlePinMapCenter = () => {

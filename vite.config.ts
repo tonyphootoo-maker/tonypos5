@@ -33,6 +33,8 @@ export default defineConfig(({mode}) => {
           'rider-maskable-512x512.png',
           'rider-apple-touch-icon.png',
           'manifest-rider.webmanifest',
+          'manifest-order.webmanifest',
+          'assets/aistudio/Logo-Ex_a8e2a318.png',
         ],
         manifest: {
           id: './',
@@ -78,6 +80,7 @@ export default defineConfig(({mode}) => {
             /^\/__/,
             /^\/api/,
             /manifest-rider\.webmanifest$/,
+            /manifest-order\.webmanifest$/,
             /manifest\.webmanifest$/,
           ],
           runtimeCaching: [

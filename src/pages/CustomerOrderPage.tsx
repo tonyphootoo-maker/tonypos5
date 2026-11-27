@@ -80,6 +80,7 @@ import {
 import {
   canCustomerCancelOrder,
   formatCountdownMMSS,
+  getCurrentPositionWithIosFallback,
   toDateSafe,
 } from '../engine/onlineOrdering';
 import {
@@ -90,6 +91,7 @@ import {
 import { useLanguage } from '../contexts/LanguageContext';
 import { LanguageToggle } from '../components/LanguageToggle';
 import { CustomerAddressMapModal } from '../components/CustomerAddressMapModal';
+import { PWAInstallButton } from '../components/PWAInstallButton';
 import { NumericInput } from '../costing/components/common/NumericInput';
 
 interface CartEntry {
@@ -109,7 +111,15 @@ interface Props {
   onToggleLang?: () => void;
 }
 
-const STORE_LOGO_SRC = '/assets/aistudio/Logo-Ex_a8e2a318.png';
+const STORE_LOGO_SRC = './assets/aistudio/Logo-Ex_a8e2a318.png';
+const STORE_LOGO_FALLBACK_SRC = '/assets/aistudio/Logo-Ex_a8e2a318.png';
+
+function handleStoreLogoError(e: React.SyntheticEvent<HTMLImageElement>) {
+  const img = e.currentTarget;
+  if (img.dataset.fallbackApplied === '1') return;
+  img.dataset.fallbackApplied = '1';
+  img.src = STORE_LOGO_FALLBACK_SRC;
+}
 
 const STATUS_BADGE: Record<
   OnlineOrderDoc['status'],
@@ -153,11 +163,10 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   const [editingFavoriteId, setEditingFavoriteId] = useState<string | null>(null);
   const [favoriteSavedNotice, setFavoriteSavedNotice] = useState<string | null>(null);
 
-  // Cart, Checkout & 2-Minute Order Review Confirmation Window
+  // Cart, Checkout & Order Review Confirmation
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isOrderReviewOpen, setIsOrderReviewOpen] = useState(false);
-  const [reviewSecondsLeft, setReviewSecondsLeft] = useState(120);
   const [isOrdersOpen, setIsOrdersOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isCustomerProfileModalOpen, setIsCustomerProfileModalOpen] = useState(false);
@@ -221,7 +230,6 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    document.querySelectorAll('link[rel="manifest"]').forEach((el) => el.remove());
     const shopTitle = (store?.shopName || '').trim();
     const fallbackTitle = lang === 'th' ? 'สั่งอาหารออนไลน์' : 'Online Order';
     const resolvedTitle = shopTitle || fallbackTitle;
@@ -381,14 +389,6 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     }, 1000);
     return () => clearInterval(timer);
   }, [isOrdersOpen, customerOrders]);
-
-  useEffect(() => {
-    if (!isOrderReviewOpen || reviewSecondsLeft <= 0) return;
-    const timer = window.setInterval(() => {
-      setReviewSecondsLeft((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [isOrderReviewOpen, reviewSecondsLeft]);
 
   // Load dish photos + store PromptPay QR photo lazily from publicStores/{storeId}/images
   useEffect(() => {
@@ -847,29 +847,34 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     [customerOrders]
   );
 
-  const handleUseCurrentGps = () => {
-    if (!navigator.geolocation) {
-      setSubmitError(lang === 'th' ? 'เบราว์เซอร์ไม่รองรับ GPS' : 'Geolocation not supported');
-      return;
-    }
+  const handleUseCurrentGps = async () => {
     setLocatingGps(true);
     setSubmitError(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setDeliveryLat(Number(pos.coords.latitude.toFixed(6)));
-        setDeliveryLng(Number(pos.coords.longitude.toFixed(6)));
-        setLocatingGps(false);
-      },
-      () => {
+    try {
+      const pos = await getCurrentPositionWithIosFallback();
+      setDeliveryLat(pos.lat);
+      setDeliveryLng(pos.lng);
+    } catch (err: unknown) {
+      const geoCode =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? Number((err as { code?: unknown }).code)
+          : 2;
+      if (geoCode === 1) {
         setSubmitError(
           lang === 'th'
-            ? 'ไม่สามารถดึงตำแหน่ง GPS ได้ กรุณาระบุที่อยู่จัดส่งให้ชัดเจน'
-            : 'Unable to fetch GPS location. Please enter full address.'
+            ? 'กรุณาอนุญาตการเข้าถึงตำแหน่ง (Location) ใน Safari / การตั้งค่าเครื่อง แล้วลองกดอีกครั้ง หรือกดปักหมุดบนแผนที่'
+            : 'Location permission denied. Please allow Location access in browser/iOS Settings or pin your spot on the map.'
         );
-        setLocatingGps(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+      } else {
+        setSubmitError(
+          lang === 'th'
+            ? 'ไม่สามารถดึงตำแหน่ง GPS อัตโนมัติได้ กรุณากด "เพิ่มที่อยู่ / ปักหมุดแผนที่" เพื่อเลือกตำแหน่งบนแผนที่ด้วยตนเอง'
+            : 'Unable to fetch GPS location. Please use "Add / Pin Map" to select your spot on the map.'
+        );
+      }
+    } finally {
+      setLocatingGps(false);
+    }
   };
 
   const handleProceedToOrderReview = (e: React.FormEvent) => {
@@ -905,12 +910,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       deliveryLng,
     });
 
-    setReviewSecondsLeft(120);
     setIsOrderReviewOpen(true);
   };
 
   const handleConfirmAndSendOrder = async () => {
-    if (!store || !storeId || cart.length === 0 || reviewSecondsLeft <= 0) return;
+    if (!store || !storeId || cart.length === 0) return;
 
     const trimmedName = customerName.trim();
     const trimmedPhone = customerPhone.trim();
@@ -1188,60 +1192,30 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
           <div className="min-w-0 flex items-center gap-2.5 sm:gap-3">
             <img
               src={STORE_LOGO_SRC}
+              onError={handleStoreLogoError}
               alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
               className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-contain bg-white border border-orange-200 shadow-2xs shrink-0"
             />
-            <div className="min-w-0 flex flex-col gap-1">
-              <div className="flex items-center gap-1.5">
-                <span
-                  className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
-                    isStoreClosed
-                      ? 'bg-rose-100 text-rose-700'
-                      : 'bg-emerald-100 text-emerald-700'
-                  }`}
-                >
-                  {isStoreClosed
-                    ? lang === 'th'
-                      ? 'ปิดชั่วคราว'
-                      : 'Closed'
-                    : lang === 'th'
-                    ? 'เปิดรับออเดอร์'
-                    : 'Open'}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 flex items-center gap-2 truncate">
-                <span className="inline-flex items-center gap-1 shrink-0">
-                  <Clock className="w-3 h-3 text-orange-500" />
-                  ~{store.onlineEstimatedPrepMinutes || 20}{' '}
-                  {lang === 'th' ? 'นาที' : 'mins'}
-                </span>
-                {store.shopPhone && (
-                  <span className="hidden xs:inline-flex sm:inline-flex items-center gap-1 truncate">
-                    <Phone className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span className="truncate">{store.shopPhone}</span>
-                  </span>
-                )}
-              </p>
+            <div className="min-w-0 flex items-center">
+              <span
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-md shrink-0 ${
+                  isStoreClosed
+                    ? 'bg-rose-100 text-rose-700'
+                    : 'bg-emerald-100 text-emerald-700'
+                }`}
+              >
+                {isStoreClosed
+                  ? lang === 'th'
+                    ? 'ปิดชั่วคราว'
+                    : 'Closed'
+                  : lang === 'th'
+                  ? 'เปิดรับออเดอร์'
+                  : 'Open'}
+              </span>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsOrdersOpen(true)}
-              aria-label={lang === 'th' ? 'ติดตามออเดอร์ / ประวัติการซื้อ' : 'Track orders'}
-              className="min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-            >
-              <Receipt className="w-4 h-4 text-orange-600" />
-              <span className="hidden sm:inline">
-                {lang === 'th' ? 'ติดตามออเดอร์' : 'My Orders'}
-              </span>
-              {activeOrderCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-md bg-orange-600 text-white text-[11px] font-extrabold tabular-nums">
-                  {activeOrderCount}
-                </span>
-              )}
-            </button>
             <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
             <button
               type="button"
@@ -1250,6 +1224,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               className="min-h-[38px] w-[38px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center cursor-pointer relative shrink-0"
             >
               <Menu className="w-5 h-5" />
+              {activeOrderCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-orange-600 text-white text-[10px] font-black flex items-center justify-center tabular-nums shadow-xs">
+                  {activeOrderCount}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -2348,7 +2327,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         </div>
       )}
 
-      {/* Order Review & 2-Minute Countdown Confirmation Modal */}
+      {/* Order Review Confirmation Modal */}
       {isOrderReviewOpen && (
         <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-xs p-0 sm:p-4">
           <div className="modal-panel bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl border border-slate-200 shadow-2xl">
@@ -2363,50 +2342,16 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                     : 'Not sent to store yet. Review all items before confirming.'}
                 </p>
               </div>
-              <div
-                className={`px-3 py-1.5 rounded-xl border-2 text-xs font-black tabular-nums inline-flex items-center gap-1.5 shrink-0 ${
-                  reviewSecondsLeft > 0
-                    ? 'bg-amber-100 border-amber-400 text-amber-950'
-                    : 'bg-rose-100 border-rose-400 text-rose-900'
-                }`}
+              <button
+                type="button"
+                onClick={() => setIsOrderReviewOpen(false)}
+                className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center shrink-0 cursor-pointer"
               >
-                <Clock className="w-3.5 h-3.5" />
-                <span>{formatCountdownMMSS(reviewSecondsLeft)}</span>
-              </div>
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
             <div className="modal-body space-y-4">
-              {/* 2-Minute Decision Banner */}
-              <div
-                className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 ${
-                  reviewSecondsLeft > 0
-                    ? 'bg-amber-50 border-amber-200 text-amber-900'
-                    : 'bg-rose-50 border-rose-200 text-rose-900'
-                }`}
-              >
-                <span>
-                  {reviewSecondsLeft > 0
-                    ? lang === 'th'
-                      ? `กรุณาตรวจสอบรายการและกดปุ่ม "ยืนยันออเดอร์" ภายใน ${formatCountdownMMSS(
-                          reviewSecondsLeft
-                        )} นาที เพื่อส่งเข้าครัวทันที`
-                      : `Review and tap "Confirm Order" within ${formatCountdownMMSS(
-                          reviewSecondsLeft
-                        )} to send immediately to the kitchen.`
-                    : lang === 'th'
-                    ? 'หมดเวลา 2 นาทีแล้ว กรุณากด "เริ่มนับใหม่" หรือ "ย้อนกลับ" เพื่อตรวจสอบอีกครั้ง'
-                    : 'The 2-minute review window expired. Restart timer or go Back.'}
-                </span>
-                {reviewSecondsLeft === 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setReviewSecondsLeft(120)}
-                    className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold shrink-0 cursor-pointer"
-                  >
-                    {lang === 'th' ? 'เริ่มนับใหม่' : 'Restart'}
-                  </button>
-                )}
-              </div>
 
               {/* Customer & Delivery Overview */}
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
@@ -2530,7 +2475,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               </button>
               <button
                 type="button"
-                disabled={isSubmitting || isStoreClosed || cart.length === 0 || reviewSecondsLeft <= 0}
+                disabled={isSubmitting || isStoreClosed || cart.length === 0}
                 onClick={handleConfirmAndSendOrder}
                 className="flex-1 min-h-[48px] px-4 py-3 rounded-xl bg-orange-600 bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-xs sm:text-sm cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2 tabular-nums"
               >
@@ -2740,6 +2685,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 <div className="flex items-center gap-2.5 min-w-0">
                   <img
                     src={STORE_LOGO_SRC}
+                    onError={handleStoreLogoError}
                     alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
                     className="w-11 h-11 rounded-full object-contain bg-white border border-orange-200 shrink-0"
                   />
@@ -2770,6 +2716,41 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               </div>
 
               <nav className="p-3 space-y-2 overflow-y-auto flex-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setIsOrdersOpen(true);
+                  }}
+                  className="w-full p-3.5 rounded-2xl border border-slate-200 hover:border-orange-300 bg-slate-50/70 hover:bg-orange-50/50 flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 text-orange-600 flex items-center justify-center shrink-0">
+                      <Receipt className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                        <span>{lang === 'th' ? 'ติดตามออเดอร์' : 'Track Order'}</span>
+                        {activeOrderCount > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-orange-600 text-white text-[10px] font-extrabold tabular-nums">
+                            {activeOrderCount}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {activeOrderCount > 0
+                          ? lang === 'th'
+                            ? `กำลังดำเนินการ ${activeOrderCount} รายการ`
+                            : `${activeOrderCount} active orders`
+                          : lang === 'th'
+                          ? 'เช็กสถานะออเดอร์ล่าสุดแบบเรียลไทม์'
+                          : 'Check real-time order status'}
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -2823,11 +2804,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                         )}
                       </div>
                       <div className="text-[11px] text-slate-500 truncate">
-                        {activeOrderCount > 0
-                          ? lang === 'th'
-                            ? `มี ${activeOrderCount} ออเดอร์กำลังดำเนินการ`
-                            : `${activeOrderCount} active orders in progress`
-                          : lang === 'th'
+                        {lang === 'th'
                           ? 'ดูคำสั่งซื้อที่ผ่านมาและสั่งซ้ำ'
                           : 'View past orders & reorder'}
                       </div>
@@ -2864,11 +2841,16 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               </nav>
             </div>
 
-            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
-              <span className="text-xs font-bold text-slate-600">
-                {lang === 'th' ? 'ภาษา / Language' : 'Language / ภาษา'}
-              </span>
-              <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <PWAInstallButton
+                  lang={lang}
+                  variant="button"
+                  appName={lang === 'th' ? 'สั่งอาหาร' : 'Online Order'}
+                  onActionTaken={() => setIsMenuOpen(false)}
+                />
+                <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
+              </div>
             </div>
           </aside>
         </div>
@@ -3106,6 +3088,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               <div className="flex flex-col items-center text-center gap-2.5 py-2">
                 <img
                   src={STORE_LOGO_SRC}
+                  onError={handleStoreLogoError}
                   alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
                   className="w-24 h-24 rounded-full object-contain bg-white border-2 border-orange-200 shadow-xs"
                 />

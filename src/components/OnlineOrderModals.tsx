@@ -392,6 +392,7 @@ interface ReceiptModalProps {
   settings: SettingsDoc;
   lang: Language;
   autoPrint?: boolean;
+  silentAutoPrint?: boolean;
   onClose: () => void;
 }
 
@@ -401,21 +402,156 @@ export const OnlineOrderReceiptModal: React.FC<ReceiptModalProps> = ({
   settings,
   lang,
   autoPrint = false,
+  silentAutoPrint = false,
   onClose,
 }) => {
   const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>('80mm');
 
   useEffect(() => {
-    if (!autoPrint) return;
+    if (!autoPrint && !silentAutoPrint) return;
+
+    let cleanedUp = false;
+    const handleAfterPrint = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (silentAutoPrint) onClose();
+    };
+
+    if (silentAutoPrint) {
+      window.addEventListener('afterprint', handleAfterPrint);
+    }
+
     const timer = window.setTimeout(() => {
       try {
         window.print();
       } catch {
         // Ignore print failures in restricted embedded environments
       }
-    }, 200);
-    return () => window.clearTimeout(timer);
-  }, [autoPrint, order.id]);
+      if (silentAutoPrint) {
+        // Fallback cleanup if afterprint event doesn't fire in embedded WebViews
+        window.setTimeout(handleAfterPrint, 1200);
+      }
+    }, 150);
+
+    return () => {
+      window.clearTimeout(timer);
+      if (silentAutoPrint) {
+        window.removeEventListener('afterprint', handleAfterPrint);
+      }
+    };
+  }, [autoPrint, silentAutoPrint, order.id, onClose]);
+
+  const printableReceiptMarkup = (
+    <div
+      id="printable-thermal-receipt"
+      className={`bg-white p-4 text-neutral-900 font-mono text-xs border border-neutral-300 rounded-lg leading-relaxed ${
+        paperWidth === '80mm' ? 'w-[320px]' : 'w-[250px]'
+      }`}
+    >
+      <div className="text-center pb-3 border-b border-dashed border-neutral-400">
+        <h2 className="text-sm font-bold">{settings.shopName}</h2>
+        {settings.shopAddress && <p className="text-[10px]">{settings.shopAddress}</p>}
+        {settings.shopPhone && <p className="text-[10px]">Tel: {settings.shopPhone}</p>}
+        <p className="text-[10px] font-bold mt-1">
+          *** ONLINE {order.orderMode === 'delivery' ? 'DELIVERY' : 'PICKUP'} ***
+        </p>
+      </div>
+
+      <div className="py-2 border-b border-dashed border-neutral-400 text-[11px] space-y-0.5">
+        <div className="flex justify-between">
+          <span>Order #:</span>
+          <span className="font-bold text-sm">
+            {displayIds?.displayNumber || order.orderNumber}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span>Ref #:</span>
+          <span className="font-bold">
+            {displayIds?.referenceNumber || order.orderNumber}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span>Customer:</span>
+          <span className="font-bold">{order.customerName}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Phone:</span>
+          <span>{order.customerPhone}</span>
+        </div>
+        {order.deliveryAddress && (
+          <div className="text-[10px] pt-0.5">
+            <span>Address: {order.deliveryAddress}</span>
+          </div>
+        )}
+        {order.customerNote && (
+          <div className="text-[10px] pt-0.5 font-bold">
+            <span>Note: {order.customerNote}</span>
+          </div>
+        )}
+        <div className="flex justify-between">
+          <span>Payment:</span>
+          <span>{order.paymentMethod === 'qr_payment' ? 'QR PromptPay' : 'Cash'}</span>
+        </div>
+      </div>
+
+      <div className="py-2.5 border-b border-dashed border-neutral-400 space-y-1.5 text-[11px]">
+        {order.items.map((item, idx) => (
+          <div key={idx}>
+            <div className="flex justify-between font-medium">
+              <span className="pr-2">
+                {item.quantity}x {item.dishName}
+                {item.variantName && item.variantName !== 'Standard'
+                  ? ` (${item.variantName})`
+                  : ''}
+              </span>
+              <span className="font-bold tabular-nums">
+                {formatMoney(item.unitPrice * item.quantity)}
+              </span>
+            </div>
+            {item.options?.map((opt, oi) => (
+              <div key={oi} className="pl-3 text-[10px] text-neutral-600">
+                + {opt.choiceName}
+                {opt.quantity && opt.quantity > 1 ? ` x${opt.quantity}` : ''}
+              </div>
+            ))}
+            {item.notes && <div className="pl-3 text-[10px] italic">* {item.notes}</div>}
+          </div>
+        ))}
+      </div>
+
+      <div className="py-2 text-[11px] space-y-1">
+        <div className="flex justify-between">
+          <span>Subtotal:</span>
+          <span>{formatMoney(order.subtotal)}</span>
+        </div>
+        {order.deliveryFee > 0 && (
+          <div className="flex justify-between">
+            <span>Delivery Fee:</span>
+            <span>{formatMoney(order.deliveryFee)}</span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm font-bold pt-1 border-t border-neutral-400">
+          <span>TOTAL:</span>
+          <span>฿{formatMoney(order.totalAmount)}</span>
+        </div>
+      </div>
+
+      <div className="pt-2 text-center text-[10px] text-neutral-500">
+        {settings.receiptFooter || 'Thank you!'}
+      </div>
+    </div>
+  );
+
+  if (silentAutoPrint) {
+    return (
+      <div
+        className="fixed -left-[9999px] top-0 pointer-events-none print:static print:left-0 print:top-0"
+        aria-hidden="true"
+      >
+        {printableReceiptMarkup}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -475,99 +611,7 @@ export const OnlineOrderReceiptModal: React.FC<ReceiptModalProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 bg-slate-200/70 flex justify-center">
-          <div
-            id="printable-thermal-receipt"
-            className={`bg-white p-4 text-neutral-900 font-mono text-xs border border-neutral-300 rounded-lg leading-relaxed ${
-              paperWidth === '80mm' ? 'w-[320px]' : 'w-[250px]'
-            }`}
-          >
-            <div className="text-center pb-3 border-b border-dashed border-neutral-400">
-              <h2 className="text-sm font-bold">{settings.shopName}</h2>
-              {settings.shopAddress && <p className="text-[10px]">{settings.shopAddress}</p>}
-              {settings.shopPhone && <p className="text-[10px]">Tel: {settings.shopPhone}</p>}
-              <p className="text-[10px] font-bold mt-1">
-                *** ONLINE {order.orderMode === 'delivery' ? 'DELIVERY' : 'PICKUP'} ***
-              </p>
-            </div>
-
-            <div className="py-2 border-b border-dashed border-neutral-400 text-[11px] space-y-0.5">
-              <div className="flex justify-between">
-                <span>Order #:</span>
-                <span className="font-bold text-sm">
-                  {displayIds?.displayNumber || order.orderNumber}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Ref #:</span>
-                <span className="font-bold">
-                  {displayIds?.referenceNumber || order.orderNumber}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Customer:</span>
-                <span className="font-bold">{order.customerName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Phone:</span>
-                <span>{order.customerPhone}</span>
-              </div>
-              {order.deliveryAddress && (
-                <div className="text-[10px] pt-0.5">
-                  <span>Address: {order.deliveryAddress}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span>Payment:</span>
-                <span>{order.paymentMethod === 'qr_payment' ? 'QR PromptPay' : 'Cash'}</span>
-              </div>
-            </div>
-
-            <div className="py-2.5 border-b border-dashed border-neutral-400 space-y-1.5 text-[11px]">
-              {order.items.map((item, idx) => (
-                <div key={idx}>
-                  <div className="flex justify-between font-medium">
-                    <span className="pr-2">
-                      {item.quantity}x {item.dishName}
-                      {item.variantName && item.variantName !== 'Standard'
-                        ? ` (${item.variantName})`
-                        : ''}
-                    </span>
-                    <span className="font-bold tabular-nums">
-                      {formatMoney(item.unitPrice * item.quantity)}
-                    </span>
-                  </div>
-                  {item.options?.map((opt, oi) => (
-                    <div key={oi} className="pl-3 text-[10px] text-neutral-600">
-                      + {opt.choiceName}
-                      {opt.quantity && opt.quantity > 1 ? ` x${opt.quantity}` : ''}
-                    </div>
-                  ))}
-                  {item.notes && <div className="pl-3 text-[10px] italic">* {item.notes}</div>}
-                </div>
-              ))}
-            </div>
-
-            <div className="py-2 text-[11px] space-y-1">
-              <div className="flex justify-between">
-                <span>Subtotal:</span>
-                <span>{formatMoney(order.subtotal)}</span>
-              </div>
-              {order.deliveryFee > 0 && (
-                <div className="flex justify-between">
-                  <span>Delivery Fee:</span>
-                  <span>{formatMoney(order.deliveryFee)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm font-bold pt-1 border-t border-neutral-400">
-                <span>TOTAL:</span>
-                <span>฿{formatMoney(order.totalAmount)}</span>
-              </div>
-            </div>
-
-            <div className="pt-2 text-center text-[10px] text-neutral-500">
-              {settings.receiptFooter || 'Thank you!'}
-            </div>
-          </div>
+          {printableReceiptMarkup}
         </div>
       </div>
     </div>

@@ -13,6 +13,7 @@ import {
   getActiveOnlineZoneOrders,
   getActiveRiderZoneOrders,
   getBangkokBusinessWorkDate,
+  getCurrentPositionWithIosFallback,
   getPendingOnlineOrders,
   haversineMeters,
   isOnlineOrderInActiveZone,
@@ -1152,6 +1153,61 @@ describe('Online Ordering Engine', () => {
     const eastSouth = mercatorPixelToLatLng(centerPx.x + 120, centerPx.y + 80, 17);
     expect(eastSouth.lng).toBeGreaterThan(bangkokLng);
     expect(eastSouth.lat).toBeLessThan(bangkokLat);
+  });
+
+  it('fetches GPS with automatic low-accuracy fallback for iOS CoreLocation errors (codes 2 & 3) without retrying permission denial (code 1)', async () => {
+    const calls: PositionOptions[] = [];
+
+    // 1) High-accuracy succeeds directly and rounds coordinates to 6 decimal places
+    const directRes = await getCurrentPositionWithIosFallback({
+      getCurrentPosition: (success, _error, options) => {
+        if (options) calls.push(options);
+        success({
+          coords: {
+            latitude: 13.75633149,
+            longitude: 100.50176249,
+            accuracy: 12,
+          },
+        } as GeolocationPosition);
+      },
+    });
+    expect(directRes).toEqual({ lat: 13.756331, lng: 100.501762, accuracy: 12 });
+    expect(calls[0]?.enableHighAccuracy).toBe(true);
+
+    // 2) High-accuracy fails on iOS indoors with POSITION_UNAVAILABLE (2) -> falls back to enableHighAccuracy: false
+    const fallbackCalls: PositionOptions[] = [];
+    const fallbackRes = await getCurrentPositionWithIosFallback({
+      getCurrentPosition: (success, error, options) => {
+        if (options) fallbackCalls.push(options);
+        if (options?.enableHighAccuracy) {
+          error?.({ code: 2, message: 'CoreLocationProvider: kCLErrorLocationUnknown' } as GeolocationPositionError);
+          return;
+        }
+        success({
+          coords: {
+            latitude: 13.7462,
+            longitude: 100.5347,
+            accuracy: 65,
+          },
+        } as GeolocationPosition);
+      },
+    });
+    expect(fallbackCalls).toHaveLength(2);
+    expect(fallbackCalls[0]?.enableHighAccuracy).toBe(true);
+    expect(fallbackCalls[1]?.enableHighAccuracy).toBe(false);
+    expect(fallbackRes).toEqual({ lat: 13.7462, lng: 100.5347, accuracy: 65 });
+
+    // 3) Permission denied (1) must reject immediately without spurious second prompt
+    const deniedCalls: PositionOptions[] = [];
+    await expect(
+      getCurrentPositionWithIosFallback({
+        getCurrentPosition: (_success, error, options) => {
+          if (options) deniedCalls.push(options);
+          error?.({ code: 1, message: 'User denied Geolocation' } as GeolocationPositionError);
+        },
+      })
+    ).rejects.toMatchObject({ code: 1 });
+    expect(deniedCalls).toHaveLength(1);
   });
 });
 

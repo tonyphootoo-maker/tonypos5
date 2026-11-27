@@ -1046,6 +1046,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
           settings={settings}
           lang={lang}
           autoPrint={printingOrderAutoPrint}
+          silentAutoPrint={printingOrderAutoPrint}
           onClose={() => {
             setPrintingOrder(null);
             setPrintingOrderAutoPrint(false);

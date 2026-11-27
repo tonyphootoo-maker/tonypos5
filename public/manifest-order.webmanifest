@@ -1,0 +1,32 @@
+{
+  "id": "./?mode=order",
+  "name": "Tony's Kitchen Express - สั่งอาหารออนไลน์",
+  "short_name": "สั่งอาหาร",
+  "description": "สั่งอาหารออนไลน์ เดลิเวอรีและรับเองที่ร้าน พร้อมติดตามสถานะเรียลไทม์",
+  "start_url": "./?mode=order",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#ea580c",
+  "background_color": "#faf8f5",
+  "icons": [
+    {
+      "src": "pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

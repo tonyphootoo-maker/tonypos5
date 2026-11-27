@@ -5,8 +5,27 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
+// Capture early beforeinstallprompt / appinstalled globally so lazy drawers or modals
+// mounted after initial boot still retain access to the native install prompt.
+let globalDeferredPrompt: BeforeInstallPromptEvent | null = null;
+const promptSubscribers = new Set<(prompt: BeforeInstallPromptEvent | null) => void>();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e: Event) => {
+    e.preventDefault();
+    globalDeferredPrompt = e as BeforeInstallPromptEvent;
+    promptSubscribers.forEach((cb) => cb(globalDeferredPrompt));
+  });
+  window.addEventListener('appinstalled', () => {
+    globalDeferredPrompt = null;
+    promptSubscribers.forEach((cb) => cb(null));
+  });
+}
+
 export function usePWAInstall() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(
+    () => globalDeferredPrompt
+  );
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isAndroid, setIsAndroid] = useState(false);
@@ -34,17 +53,18 @@ export function usePWAInstall() {
     setIsIOS(isIOSDevice);
     setIsAndroid(isAndroidDevice);
 
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
+    const handlePromptUpdate = (prompt: BeforeInstallPromptEvent | null) => {
+      setDeferredPrompt(prompt);
     };
+    promptSubscribers.add(handlePromptUpdate);
+    setDeferredPrompt(globalDeferredPrompt);
 
     const handleAppInstalled = () => {
       setIsInstalled(true);
+      globalDeferredPrompt = null;
       setDeferredPrompt(null);
     };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
     const mediaQuery =
@@ -56,7 +76,7 @@ export function usePWAInstall() {
     }
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      promptSubscribers.delete(handlePromptUpdate);
       window.removeEventListener('appinstalled', handleAppInstalled);
       if (mediaQuery && typeof mediaQuery.removeEventListener === 'function') {
         mediaQuery.removeEventListener('change', checkStandalone);
@@ -65,19 +85,22 @@ export function usePWAInstall() {
   }, []);
 
   const install = async () => {
-    if (!deferredPrompt) return false;
-    await deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
+    const activePrompt = deferredPrompt || globalDeferredPrompt;
+    if (!activePrompt) return false;
+    await activePrompt.prompt();
+    const { outcome } = await activePrompt.userChoice;
     if (outcome === 'accepted') {
       setIsInstalled(true);
+      globalDeferredPrompt = null;
       setDeferredPrompt(null);
+      promptSubscribers.forEach((cb) => cb(null));
       return true;
     }
     return false;
   };
 
   return {
-    isInstallable: !!deferredPrompt,
+    isInstallable: !!(deferredPrompt || globalDeferredPrompt),
     isInstalled,
     isIOS,
     isAndroid,

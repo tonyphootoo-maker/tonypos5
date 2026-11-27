@@ -35,10 +35,9 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Register PWA Service Worker for Owner POS & Rider offline support in both dev and production
-// (skip in Customer link mode to avoid iOS Safari/WebView bookmark & cache interference)
+// Register PWA Service Worker across Owner POS, Rider, and Customer Ordering modes
+// so mobile Chrome / Safari / Edge treat the storefront as an installable standalone app.
 if (
-  entryMode !== 'customer' &&
   typeof window !== 'undefined' &&
   typeof navigator !== 'undefined' &&
   'serviceWorker' in navigator

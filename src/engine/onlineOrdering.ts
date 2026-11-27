@@ -1050,3 +1050,79 @@ export function mercatorPixelToLatLng(
   };
 }
 
+export interface GeolocationResult {
+  lat: number;
+  lng: number;
+  accuracy?: number;
+}
+
+export interface GeolocationErrorLike {
+  code: number;
+  message: string;
+}
+
+/**
+ * Fetches current GPS coordinates with iOS Safari resilience:
+ * 1) Checks secure context and navigator.geolocation availability.
+ * 2) Attempts high-accuracy GPS lock first (8s timeout).
+ * 3) If iOS CoreLocation fails with POSITION_UNAVAILABLE (2) or TIMEOUT (3),
+ *    automatically retries using Wi-Fi/cellular fallback (enableHighAccuracy: false).
+ */
+export function getCurrentPositionWithIosFallback(
+  geoArg?: Pick<Geolocation, 'getCurrentPosition'> | null
+): Promise<GeolocationResult> {
+  const geo =
+    geoArg ??
+    (typeof navigator !== 'undefined' && navigator.geolocation ? navigator.geolocation : null);
+
+  if (!geo || typeof geo.getCurrentPosition !== 'function') {
+    return Promise.reject({
+      code: 2,
+      message: 'Geolocation is not supported on this device/browser.',
+    } satisfies GeolocationErrorLike);
+  }
+
+  const requestOnce = (options: PositionOptions) =>
+    new Promise<GeolocationResult>((resolve, reject) => {
+      geo.getCurrentPosition(
+        (pos) => {
+          const lat = Number(pos.coords.latitude.toFixed(6));
+          const lng = Number(pos.coords.longitude.toFixed(6));
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            reject({ code: 2, message: 'Invalid coordinates' } satisfies GeolocationErrorLike);
+            return;
+          }
+          resolve({
+            lat,
+            lng,
+            accuracy: typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : undefined,
+          });
+        },
+        (err) => {
+          reject({
+            code: typeof err?.code === 'number' ? err.code : 2,
+            message: err?.message || 'Geolocation failed',
+          } satisfies GeolocationErrorLike);
+        },
+        options
+      );
+    });
+
+  return requestOnce({
+    enableHighAccuracy: true,
+    timeout: 8000,
+    maximumAge: 0,
+  }).catch((err: GeolocationErrorLike) => {
+    // On iOS Safari indoors, high-accuracy GPS frequently throws code 2 or 3; fall back cleanly.
+    if (err && (err.code === 2 || err.code === 3)) {
+      return requestOnce({
+        enableHighAccuracy: false,
+        timeout: 15000,
+        maximumAge: 60000,
+      });
+    }
+    throw err;
+  });
+}
+
+

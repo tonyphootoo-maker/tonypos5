@@ -5574,6 +5574,7 @@ export const TablesPosPage: React.FC<Props> = ({
           settings={settings}
           lang={lang}
           autoPrint={printingOnlineOrderAutoPrint}
+          silentAutoPrint={printingOnlineOrderAutoPrint}
           onClose={() => {
             setPrintingOnlineOrder(null);
             setPrintingOnlineOrderAutoPrint(false);

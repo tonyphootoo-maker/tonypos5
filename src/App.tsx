@@ -883,7 +883,7 @@ export default function App() {
         onDismissAll={() => setCancelledOrderAlerts([])}
       />
 
-      {/* Immediate Thermal Receipt Print Modal upon Accepting Online Order */}
+      {/* Immediate Silent Thermal Receipt Print upon Accepting Online Order */}
       {autoPrintOnlineOrder && settings && (
         <OnlineOrderReceiptModal
           order={autoPrintOnlineOrder}
@@ -891,6 +891,7 @@ export default function App() {
           settings={settings}
           lang={lang}
           autoPrint={true}
+          silentAutoPrint={true}
           onClose={() => setAutoPrintOnlineOrder(null)}
         />
       )}
