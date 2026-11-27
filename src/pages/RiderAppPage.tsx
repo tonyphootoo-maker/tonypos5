@@ -279,9 +279,12 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
         <div className="max-w-3xl mx-auto px-4 py-3 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center shrink-0">
-                <Bike className="w-6 h-6" />
-              </div>
+              <img
+                src="./rider-192x192.png"
+                alt="Tony's Kit Rider"
+                referrerPolicy="no-referrer"
+                className="w-11 h-11 rounded-xl object-cover border border-emerald-400/40 shadow-sm shrink-0 bg-slate-950"
+              />
               <div className="min-w-0">
                 <h1 className="font-extrabold text-base text-white truncate">Tony&apos;s Kit Rider</h1>
                 <p className="text-xs text-slate-400 truncate">

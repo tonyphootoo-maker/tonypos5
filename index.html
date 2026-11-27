@@ -105,7 +105,10 @@
           var appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
           if (appleIcon) appleIcon.setAttribute('href', './rider-apple-touch-icon.png');
           var svgIcon = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
-          if (svgIcon) svgIcon.setAttribute('href', './rider-icon.svg');
+          if (svgIcon) {
+            svgIcon.setAttribute('type', 'image/png');
+            svgIcon.setAttribute('href', './rider-192x192.png');
+          }
           var riderManifest = document.createElement('link');
           riderManifest.rel = 'manifest';
           riderManifest.href = './manifest-rider.webmanifest';
