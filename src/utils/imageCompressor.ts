@@ -33,6 +33,10 @@ export async function compressImage(file: File | Blob): Promise<{ dataUrl: strin
           return;
         }
 
+        // Fill white background so transparent PNG logos never turn black in JPEG encoding
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+
         // Draw image with smooth scaling
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';

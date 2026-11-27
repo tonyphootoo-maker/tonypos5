@@ -54,6 +54,9 @@ import {
   ChevronUp,
   Languages,
   X,
+  RotateCcw,
+  Image as ImageIcon,
+  Loader2,
 } from 'lucide-react';
 import { NumericInput } from '../costing/components/common/NumericInput';
 import { ConfirmModal } from '../components/ConfirmModal';
@@ -82,6 +85,9 @@ export const SettingsPage: React.FC<Props> = ({
   const [form, setForm] = useState<SettingsDoc>({ ...settings });
   const [showFormulaGuide, setShowFormulaGuide] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const [isUpdatingLogo, setIsUpdatingLogo] = useState(false);
+  const [logoStatusMsg, setLogoStatusMsg] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -108,6 +114,7 @@ export const SettingsPage: React.FC<Props> = ({
     () => Object.keys(getShopTranslationGlossary()).length
   );
   const builtInDictCount = getBuiltInFoodDictionary().length;
+  const lastAutoSyncedLogoVersionRef = useRef<number | null>(null);
   const loadedDatasetRef = useRef<{
     dishes: DishDoc[];
     optionGroups: OptionGroupDoc[];
@@ -122,12 +129,43 @@ export const SettingsPage: React.FC<Props> = ({
   } | null>(null);
 
   useEffect(() => {
-    setForm({ ...settings });
+    let cancelled = false;
+    if (
+      lastAutoSyncedLogoVersionRef.current !== null &&
+      settings.version === lastAutoSyncedLogoVersionRef.current
+    ) {
+      setForm((prev) => ({
+        ...prev,
+        logoImageId: settings.logoImageId,
+        version: settings.version,
+        updatedAt: settings.updatedAt,
+      }));
+    } else {
+      lastAutoSyncedLogoVersionRef.current = null;
+      setForm({ ...settings });
+    }
+
     if (settings.qrImageId) {
       getImageDoc(settings.qrImageId).then((img) => {
-        if (img?.dataUrl) setQrDataUrl(img.dataUrl);
+        if (!cancelled && img?.dataUrl) setQrDataUrl(img.dataUrl);
       });
+    } else {
+      setQrDataUrl(null);
     }
+
+    if (settings.logoImageId) {
+      getImageDoc(settings.logoImageId).then((img) => {
+        if (!cancelled) {
+          setLogoDataUrl(img?.dataUrl || null);
+        }
+      });
+    } else {
+      setLogoDataUrl(null);
+    }
+
+    return () => {
+      cancelled = true;
+    };
   }, [settings]);
 
   useEffect(() => {
@@ -149,6 +187,100 @@ export const SettingsPage: React.FC<Props> = ({
       setForm((prev) => ({ ...prev, qrImageId: imgId }));
     } catch (err) {
       console.error('QR upload error:', err);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setIsUpdatingLogo(true);
+    setLogoStatusMsg(null);
+    setErrorMsg(null);
+    try {
+      const { dataUrl, sizeBytes } = await compressImage(file);
+      const imgId = `logo_${Date.now()}`;
+      await saveImageDoc(imgId, dataUrl, sizeBytes);
+
+      const nextVersion = settings.version + 1;
+      const nowIso = new Date().toISOString();
+      lastAutoSyncedLogoVersionRef.current = nextVersion;
+
+      await updateSettings({ logoImageId: imgId }, settings.version);
+      setLogoDataUrl(dataUrl);
+      setForm((prev) => ({
+        ...prev,
+        logoImageId: imgId,
+        version: nextVersion,
+        updatedAt: nowIso,
+      }));
+      onSettingsUpdated({
+        ...settings,
+        logoImageId: imgId,
+        version: nextVersion,
+        updatedAt: nowIso,
+      });
+      setLogoStatusMsg(
+        lang === 'th'
+          ? 'อัปโหลดและเปลี่ยนโลโก้ร้านเรียบร้อยแล้ว (ซิงค์ขึ้นหน้าลูกค้าอัตโนมัติ)'
+          : 'Store logo updated and synced to customer storefront.'
+      );
+    } catch (err: unknown) {
+      lastAutoSyncedLogoVersionRef.current = null;
+      console.error('Logo upload error:', err);
+      setErrorMsg(
+        err instanceof Error && err.message === 'VERSION_CONFLICT'
+          ? t.common.versionConflict
+          : lang === 'th'
+          ? 'อัปโหลดโลโก้ร้านไม่สำเร็จ'
+          : 'Failed to upload store logo'
+      );
+    } finally {
+      setIsUpdatingLogo(false);
+    }
+  };
+
+  const handleResetLogo = async () => {
+    setIsUpdatingLogo(true);
+    setLogoStatusMsg(null);
+    setErrorMsg(null);
+    try {
+      const nextVersion = settings.version + 1;
+      const nowIso = new Date().toISOString();
+      lastAutoSyncedLogoVersionRef.current = nextVersion;
+
+      await updateSettings({ logoImageId: '' }, settings.version);
+      setLogoDataUrl(null);
+      setForm((prev) => ({
+        ...prev,
+        logoImageId: '',
+        version: nextVersion,
+        updatedAt: nowIso,
+      }));
+      onSettingsUpdated({
+        ...settings,
+        logoImageId: '',
+        version: nextVersion,
+        updatedAt: nowIso,
+      });
+      setLogoStatusMsg(
+        lang === 'th'
+          ? 'เปลี่ยนกลับเป็นโลโก้เริ่มต้นเรียบร้อยแล้ว'
+          : 'Reverted to default store logo.'
+      );
+    } catch (err: unknown) {
+      lastAutoSyncedLogoVersionRef.current = null;
+      console.error('Logo reset error:', err);
+      setErrorMsg(
+        err instanceof Error && err.message === 'VERSION_CONFLICT'
+          ? t.common.versionConflict
+          : lang === 'th'
+          ? 'รีเซ็ตโลโก้ร้านไม่สำเร็จ'
+          : 'Failed to reset store logo'
+      );
+    } finally {
+      setIsUpdatingLogo(false);
     }
   };
 
@@ -662,6 +794,82 @@ export const SettingsPage: React.FC<Props> = ({
                 onChange={(e) => setForm({ ...form, receiptFooter: e.target.value })}
                 className="w-full px-3 py-1.5 text-xs bg-neutral-50 border border-neutral-300 rounded-xl"
               />
+            </div>
+          </div>
+
+          {/* Storefront Logo Upload / Change / Reset */}
+          <div className="pt-3 border-t border-neutral-100 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-800">
+                <ImageIcon className="w-4 h-4 text-orange-600" />
+                <span>{t.settings.storeLogo}</span>
+              </div>
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-600">
+                {form.logoImageId
+                  ? lang === 'th'
+                    ? 'โลโก้ที่อัปโหลดเอง'
+                    : 'Custom Logo'
+                  : lang === 'th'
+                  ? 'โลโก้เริ่มต้น'
+                  : 'Default Logo'}
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="w-20 h-20 rounded-full bg-white border-2 border-orange-200 shadow-xs overflow-hidden flex items-center justify-center shrink-0">
+                <img
+                  src={logoDataUrl || './assets/aistudio/Logo-Ex_a8e2a318.png'}
+                  alt={lang === 'th' ? 'ตัวอย่างโลโก้ร้าน' : 'Store Logo Preview'}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+
+              <div className="space-y-2 flex-1 min-w-0">
+                <p className="text-[11px] text-neutral-500 leading-relaxed">
+                  {t.settings.storeLogoDesc}
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label
+                    className={`px-3.5 py-2 bg-orange-50 hover:bg-orange-100 text-orange-800 rounded-xl text-xs font-bold border border-orange-200 inline-flex items-center gap-1.5 transition-colors ${
+                      isUpdatingLogo ? 'opacity-60 pointer-events-none' : 'cursor-pointer'
+                    }`}
+                  >
+                    {isUpdatingLogo ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
+                    ) : (
+                      <Upload className="w-4 h-4 text-orange-600" />
+                    )}
+                    <span>
+                      {form.logoImageId ? t.settings.changeLogoBtn : t.settings.uploadLogoBtn}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={isUpdatingLogo}
+                      onChange={handleLogoUpload}
+                      className="hidden"
+                    />
+                  </label>
+
+                  {form.logoImageId && (
+                    <button
+                      type="button"
+                      disabled={isUpdatingLogo}
+                      onClick={handleResetLogo}
+                      className="px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-xs font-bold border border-neutral-300 inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>{t.settings.resetLogoBtn}</span>
+                    </button>
+                  )}
+                </div>
+                {logoStatusMsg && (
+                  <p className="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>{logoStatusMsg}</span>
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>

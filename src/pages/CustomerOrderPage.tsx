@@ -117,6 +117,11 @@ const STORE_LOGO_FALLBACK_SRC = '/assets/aistudio/Logo-Ex_a8e2a318.png';
 
 function handleStoreLogoError(e: React.SyntheticEvent<HTMLImageElement>) {
   const img = e.currentTarget;
+  if (img.src.startsWith('data:') && img.dataset.customFallbackApplied !== '1') {
+    img.dataset.customFallbackApplied = '1';
+    img.src = STORE_LOGO_SRC;
+    return;
+  }
   if (img.dataset.fallbackApplied === '1') return;
   img.dataset.fallbackApplied = '1';
   img.src = STORE_LOGO_FALLBACK_SRC;
@@ -153,6 +158,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   const [searchQuery, setSearchQuery] = useState('');
   const [dishImages, setDishImages] = useState<Record<string, string>>({});
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [storeLogoDataUrl, setStoreLogoDataUrl] = useState<string | null>(null);
 
   // Dish customization modal & Favorite editing
   const [activeDish, setActiveDish] = useState<PublicDish | null>(null);
@@ -423,6 +429,30 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       cancelled = true;
     };
   }, [storeId, store]);
+
+  // Load owner-uploaded store logo (or clear back to default when unset)
+  useEffect(() => {
+    const logoImageId = store?.logoImageId;
+    if (!storeId || !logoImageId) {
+      setStoreLogoDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    fetchPublicStoreImage(storeId, logoImageId)
+      .then((url) => {
+        if (!cancelled) {
+          setStoreLogoDataUrl(url || null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStoreLogoDataUrl(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [storeId, store?.logoImageId]);
 
   const optionGroupMap = useMemo(() => {
     const map = new Map<string, PublicOptionGroup>();
@@ -1185,6 +1215,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   }
 
   const isStoreClosed = store.onlineOrderingEnabled === false;
+  const activeStoreLogoSrc = storeLogoDataUrl || STORE_LOGO_SRC;
+  const activeStoreLogoKey = store.logoImageId || 'default-logo';
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-slate-900 pb-24">
@@ -1193,7 +1225,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         <div className="max-w-5xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2.5">
           <div className="min-w-0 flex items-center gap-2.5 sm:gap-3">
             <img
-              src={STORE_LOGO_SRC}
+              key={`header-${activeStoreLogoKey}`}
+              src={activeStoreLogoSrc}
               onError={handleStoreLogoError}
               alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
               className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-contain bg-white border border-orange-200 shadow-2xs shrink-0"
@@ -2770,7 +2803,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               <div className="px-4 py-3.5 border-b border-slate-200 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <img
-                    src={STORE_LOGO_SRC}
+                    key={`drawer-${activeStoreLogoKey}`}
+                    src={activeStoreLogoSrc}
                     onError={handleStoreLogoError}
                     alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
                     className="w-11 h-11 rounded-full object-contain bg-white border border-orange-200 shrink-0"
@@ -3173,7 +3207,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
             <div className="modal-body space-y-4">
               <div className="flex flex-col items-center text-center gap-2.5 py-2">
                 <img
-                  src={STORE_LOGO_SRC}
+                  key={`about-${activeStoreLogoKey}`}
+                  src={activeStoreLogoSrc}
                   onError={handleStoreLogoError}
                   alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
                   className="w-24 h-24 rounded-full object-contain bg-white border-2 border-orange-200 shadow-xs"

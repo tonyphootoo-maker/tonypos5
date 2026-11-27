@@ -29,6 +29,7 @@ export interface SettingsDoc extends BaseDoc {
   serviceChargePercent: number; // e.g. 10
   dailyClosingTime: string; // "04:00" or "00:00"
   qrImageId?: string;
+  logoImageId?: string;
   pointsEarnUnitThb: number; // e.g. spend 100 THB get 1 point
   pointsRedeemValueThb: number; // e.g. 1 point = 1 THB discount
   // USALI-style Accounting & Costing Standards
@@ -441,6 +442,7 @@ export interface PublicStoreDoc {
   shopAddress?: string;
   shopPhone?: string;
   qrImageId?: string;
+  logoImageId?: string;
   onlineOrderingEnabled: boolean;
   onlineDeliveryFee: number;
   onlinePickupEnabled: boolean;

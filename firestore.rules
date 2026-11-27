@@ -46,7 +46,7 @@ service cloud.firestore {
           'categories', 'dishes', 'optionGroups', 'publishedAt'
         ])
         && data.keys().hasOnly([
-          'id', 'storeId', 'shopName', 'shopAddress', 'shopPhone', 'qrImageId',
+          'id', 'storeId', 'shopName', 'shopAddress', 'shopPhone', 'qrImageId', 'logoImageId',
           'onlineOrderingEnabled', 'onlineDeliveryFee',
           'onlinePickupEnabled', 'onlineDeliveryEnabled',
           'onlineEstimatedPrepMinutes', 'pricesIncludeVat', 'vatPercent',
@@ -55,6 +55,7 @@ service cloud.firestore {
         && data.id == storeId
         && data.storeId == storeId
         && data.shopName is string && data.shopName.size() > 0 && data.shopName.size() <= 160
+        && isOptionalString(data.get('logoImageId', null), 128)
         && data.onlineOrderingEnabled is bool
         && data.onlineDeliveryFee is number && data.onlineDeliveryFee >= 0 && data.onlineDeliveryFee <= 10000
         && data.onlinePickupEnabled is bool

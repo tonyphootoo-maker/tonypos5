@@ -213,10 +213,10 @@ describe('Online Ordering Engine', () => {
     expect(resolveAppMode('?tab=pos', '/')).toBe('owner');
   });
 
-  it('sanitizes public storefront menu with zero cost/recipe leakage', () => {
+  it('sanitizes public storefront menu with zero cost/recipe leakage and propagates optional logoImageId', () => {
     const { publicStore, referencedImageIds } = sanitizeMenuForPublicStore({
       storeId: 'owner_uid_123',
-      settings: mockSettings,
+      settings: { ...mockSettings, logoImageId: 'logo_custom_1' },
       categories: mockCategories,
       dishes: mockDishes,
       optionGroups: mockOptionGroups,
@@ -232,8 +232,22 @@ describe('Online Ordering Engine', () => {
     expect(json).not.toContain('costPerBaseUnit');
     expect(publicStore.dishes[0].variants[0].price).toBe(80);
     expect(publicStore.optionGroups[0].choices[0].price).toBe(15);
+    expect(publicStore.logoImageId).toBe('logo_custom_1');
     expect(referencedImageIds).toContain('img_kaprao');
     expect(referencedImageIds).toContain('qr_promptpay_1');
+    expect(referencedImageIds).toContain('logo_custom_1');
+
+    const { publicStore: defaultLogoStore, referencedImageIds: defaultImgIds } =
+      sanitizeMenuForPublicStore({
+        storeId: 'owner_uid_123',
+        settings: { ...mockSettings, logoImageId: '' },
+        categories: mockCategories,
+        dishes: mockDishes,
+        optionGroups: mockOptionGroups,
+        publishedAt: nowIso,
+      });
+    expect(defaultLogoStore.logoImageId).toBeUndefined();
+    expect(defaultImgIds).not.toContain('');
   });
 
   it('computes business workDate strictly in Asia/Bangkok respecting dailyClosingTime', () => {

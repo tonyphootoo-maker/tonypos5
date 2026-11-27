@@ -21,6 +21,9 @@ import {
   SlidersHorizontal,
   User,
   Store,
+  Upload,
+  RotateCcw,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   CategoryDoc,
@@ -34,7 +37,8 @@ import {
   SettingsDoc,
   SubRecipeDoc,
 } from '../types';
-import { subscribeCollection, updateSettings } from '../data/db';
+import { getImageDoc, saveImageDoc, subscribeCollection, updateSettings } from '../data/db';
+import { compressImage } from '../utils/imageCompressor';
 import {
   deleteOnlineOrderByOwner,
   publishMenuToPublicStore,
@@ -110,6 +114,8 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   const [publishDefaultIndex, setPublishDefaultIndex] = useState(
     settings.onlinePublishDefaultIndex !== false
   );
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const [isUpdatingLogo, setIsUpdatingLogo] = useState(false);
 
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishMessage, setPublishMessage] = useState<string | null>(null);
@@ -133,6 +139,20 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
     setDeliveryFee(settings.onlineDeliveryFee ?? 30);
     setPrepMinutes(settings.onlineEstimatedPrepMinutes ?? 20);
     setPublishDefaultIndex(settings.onlinePublishDefaultIndex !== false);
+
+    let cancelled = false;
+    if (settings.logoImageId) {
+      getImageDoc(settings.logoImageId)
+        .then((img) => {
+          if (!cancelled) setLogoDataUrl(img?.dataUrl || null);
+        })
+        .catch(() => {});
+    } else {
+      setLogoDataUrl(null);
+    }
+    return () => {
+      cancelled = true;
+    };
   }, [settings]);
 
   useEffect(() => {
@@ -247,6 +267,68 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
       setTimeout(() => setCopiedKey(null), 2000);
     } catch {
       // Fallback ignored
+    }
+  };
+
+  const handleStoreLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setIsUpdatingLogo(true);
+    setErrorMsg(null);
+    setPublishMessage(null);
+    try {
+      const { dataUrl, sizeBytes } = await compressImage(file);
+      const imgId = `logo_${Date.now()}`;
+      await saveImageDoc(imgId, dataUrl, sizeBytes);
+
+      const nextVersion = settings.version + 1;
+      const nowIso = new Date().toISOString();
+      await updateSettings({ logoImageId: imgId }, settings.version);
+      setLogoDataUrl(dataUrl);
+      onSettingsUpdated({
+        ...settings,
+        logoImageId: imgId,
+        version: nextVersion,
+        updatedAt: nowIso,
+      });
+      setPublishMessage(
+        lang === 'th'
+          ? 'อัปโหลดและเปลี่ยนโลโก้หน้าร้านเรียบร้อยแล้ว'
+          : 'Storefront logo updated successfully.'
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsUpdatingLogo(false);
+    }
+  };
+
+  const handleResetStoreLogo = async () => {
+    setIsUpdatingLogo(true);
+    setErrorMsg(null);
+    setPublishMessage(null);
+    try {
+      const nextVersion = settings.version + 1;
+      const nowIso = new Date().toISOString();
+      await updateSettings({ logoImageId: '' }, settings.version);
+      setLogoDataUrl(null);
+      onSettingsUpdated({
+        ...settings,
+        logoImageId: '',
+        version: nextVersion,
+        updatedAt: nowIso,
+      });
+      setPublishMessage(
+        lang === 'th'
+          ? 'เปลี่ยนกลับเป็นโลโก้เริ่มต้นเรียบร้อยแล้ว'
+          : 'Reverted to default storefront logo.'
+      );
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsUpdatingLogo(false);
     }
   };
 
@@ -688,6 +770,76 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                     ? 'เฉพาะลิงก์ที่มี ?store='
                     : 'Store ID Link Only'}
                 </button>
+              </div>
+            </div>
+
+            {/* Storefront Logo Control */}
+            <div className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-12 rounded-full bg-white border border-orange-200 overflow-hidden flex items-center justify-center shrink-0">
+                  <img
+                    src={logoDataUrl || './assets/aistudio/Logo-Ex_a8e2a318.png'}
+                    alt={lang === 'th' ? 'โลโก้หน้าร้าน' : 'Store Logo'}
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <ImageIcon className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                    <span>{lang === 'th' ? 'โลโก้หน้าร้านออนไลน์' : 'Storefront Logo'}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {settings.logoImageId
+                      ? lang === 'th'
+                        ? 'กำลังใช้โลโก้ที่อัปโหลดเอง'
+                        : 'Using custom uploaded logo'
+                      : lang === 'th'
+                      ? 'กำลังใช้โลโก้เริ่มต้นของร้าน'
+                      : 'Using default store logo'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <label
+                  className={`px-3 py-1.5 rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-800 text-xs font-bold inline-flex items-center gap-1.5 ${
+                    isUpdatingLogo ? 'opacity-60 pointer-events-none' : 'cursor-pointer'
+                  }`}
+                >
+                  {isUpdatingLogo ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {settings.logoImageId
+                      ? lang === 'th'
+                        ? 'เปลี่ยนโลโก้'
+                        : 'Change Logo'
+                      : lang === 'th'
+                      ? 'อัปโหลดโลโก้'
+                      : 'Upload Logo'}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    disabled={isUpdatingLogo}
+                    onChange={handleStoreLogoUpload}
+                    className="hidden"
+                  />
+                </label>
+
+                {settings.logoImageId && (
+                  <button
+                    type="button"
+                    disabled={isUpdatingLogo}
+                    onClick={handleResetStoreLogo}
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>{lang === 'th' ? 'ใช้โลโก้เริ่มต้น' : 'Reset'}</span>
+                  </button>
+                )}
               </div>
             </div>
 

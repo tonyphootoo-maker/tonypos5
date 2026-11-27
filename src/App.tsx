@@ -150,6 +150,7 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
       shopAddress: settings.shopAddress || '',
       shopPhone: settings.shopPhone || '',
       qrImageId: settings.qrImageId || '',
+      logoImageId: settings.logoImageId || '',
       onlineOrderingEnabled: settings.onlineOrderingEnabled !== false,
       onlineDeliveryFee: settings.onlineDeliveryFee ?? 0,
       onlinePickupEnabled: settings.onlinePickupEnabled !== false,

@@ -147,6 +147,9 @@ export function sanitizeMenuForPublicStore(params: {
   if (settings.qrImageId) {
     imageIdSet.add(settings.qrImageId);
   }
+  if (settings.logoImageId) {
+    imageIdSet.add(settings.logoImageId);
+  }
 
   const publicDishes: PublicDish[] = [...dishes]
     .sort((a, b) => {
@@ -189,6 +192,7 @@ export function sanitizeMenuForPublicStore(params: {
     ...(settings.shopAddress ? { shopAddress: settings.shopAddress } : {}),
     ...(settings.shopPhone ? { shopPhone: settings.shopPhone } : {}),
     ...(settings.qrImageId ? { qrImageId: settings.qrImageId } : {}),
+    ...(settings.logoImageId ? { logoImageId: settings.logoImageId } : {}),
     onlineOrderingEnabled: settings.onlineOrderingEnabled !== false,
     onlineDeliveryFee: Math.max(0, Number(settings.onlineDeliveryFee ?? 0) || 0),
     onlinePickupEnabled: settings.onlinePickupEnabled !== false,
