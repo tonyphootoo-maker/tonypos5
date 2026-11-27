@@ -81,11 +81,15 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     if (themeMeta) themeMeta.setAttribute('content', '#0f172a');
 
     const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-    if (appleIcon) appleIcon.setAttribute('href', './rider-apple-touch-icon.png');
+    if (appleIcon && appleIcon.getAttribute('href') !== './rider-apple-touch-icon.png') {
+      appleIcon.setAttribute('href', './rider-apple-touch-icon.png');
+    }
 
     const manifestLink = document.querySelector('link[rel="manifest"]');
     if (manifestLink) {
-      manifestLink.setAttribute('href', './manifest-rider.webmanifest');
+      if (manifestLink.getAttribute('href') !== './manifest-rider.webmanifest') {
+        manifestLink.setAttribute('href', './manifest-rider.webmanifest');
+      }
     } else {
       const ml = document.createElement('link');
       ml.rel = 'manifest';

@@ -247,7 +247,10 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
 
   const baseUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
-    return `${window.location.origin}${window.location.pathname.replace(/\/+$/, '') || ''}`;
+    const cleanPath = window.location.pathname
+      .replace(/\/(index|rider)\.html$/i, '')
+      .replace(/\/+$/, '');
+    return `${window.location.origin}${cleanPath}`;
   }, []);
 
   const customerUrl = `${baseUrl}/?mode=order&store=${user.uid}`;

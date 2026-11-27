@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#0f172a" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="TK Rider" />
     <link rel="apple-touch-icon" sizes="180x180" href="./rider-apple-touch-icon.png" />
     <link rel="icon" href="./rider-192x192.png" sizes="192x192" type="image/png" />
@@ -22,6 +22,14 @@
     <meta property="og:description" content="ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ Tony's Kit Rider" />
     <meta property="og:type" content="website" />
     <script>
+      window.__pwaDeferredPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.__pwaDeferredPrompt = e;
+      });
+      window.addEventListener('appinstalled', function() {
+        window.__pwaDeferredPrompt = null;
+      });
       window.addEventListener('error', function(e) {
         var msgEl = document.getElementById('boot-status');
         if (msgEl) {

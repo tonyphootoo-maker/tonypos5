@@ -5,66 +5,97 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
+declare global {
+  interface Window {
+    __pwaDeferredPrompt?: BeforeInstallPromptEvent | null;
+  }
+}
+
+function readWindowDeferredPrompt(): BeforeInstallPromptEvent | null {
+  if (typeof window === 'undefined') return null;
+  return window.__pwaDeferredPrompt ?? null;
+}
+
+function detectStandalone(): boolean {
+  if (typeof window === 'undefined') return false;
+  const isStandaloneMedia =
+    typeof window.matchMedia === 'function' &&
+    (window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches);
+  const isIOSStandalone =
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+  return isStandaloneMedia || isIOSStandalone;
+}
+
+function detectPlatformFlags() {
+  if (typeof window === 'undefined') {
+    return { isIOS: false, isAndroid: false, isInAppBrowser: false };
+  }
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  const isIOSDevice =
+    /iphone|ipad|ipod/.test(userAgent) ||
+    (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
+  const isAndroidDevice = /android/.test(userAgent);
+  const inApp = /\bline\/|fban|fbav|instagram|micromessenger/.test(userAgent);
+  return { isIOS: isIOSDevice, isAndroid: isAndroidDevice, isInAppBrowser: inApp };
+}
+
 // Capture early beforeinstallprompt / appinstalled globally so lazy drawers or modals
 // mounted after initial boot still retain access to the native install prompt.
-let globalDeferredPrompt: BeforeInstallPromptEvent | null = null;
+let globalDeferredPrompt: BeforeInstallPromptEvent | null = readWindowDeferredPrompt();
 const promptSubscribers = new Set<(prompt: BeforeInstallPromptEvent | null) => void>();
 
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeinstallprompt', (e: Event) => {
     e.preventDefault();
     globalDeferredPrompt = e as BeforeInstallPromptEvent;
+    window.__pwaDeferredPrompt = globalDeferredPrompt;
     promptSubscribers.forEach((cb) => cb(globalDeferredPrompt));
   });
   window.addEventListener('appinstalled', () => {
     globalDeferredPrompt = null;
+    window.__pwaDeferredPrompt = null;
     promptSubscribers.forEach((cb) => cb(null));
   });
 }
 
 export function usePWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(
-    () => globalDeferredPrompt
+    () => globalDeferredPrompt || readWindowDeferredPrompt()
   );
-  const [isInstalled, setIsInstalled] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
-  const [isAndroid, setIsAndroid] = useState(false);
-  const [isInAppBrowser, setIsInAppBrowser] = useState(false);
+  const [isInstalled, setIsInstalled] = useState<boolean>(() => detectStandalone());
+  const [isIOS, setIsIOS] = useState<boolean>(() => detectPlatformFlags().isIOS);
+  const [isAndroid, setIsAndroid] = useState<boolean>(() => detectPlatformFlags().isAndroid);
+  const [isInAppBrowser, setIsInAppBrowser] = useState<boolean>(
+    () => detectPlatformFlags().isInAppBrowser
+  );
 
   useEffect(() => {
     const checkStandalone = () => {
-      const isStandaloneMedia =
-        typeof window.matchMedia === 'function' &&
-        (window.matchMedia('(display-mode: standalone)').matches ||
-          window.matchMedia('(display-mode: fullscreen)').matches);
-      const isIOSStandalone =
-        (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-      setIsInstalled(isStandaloneMedia || isIOSStandalone);
+      setIsInstalled(detectStandalone());
     };
 
     checkStandalone();
+    const flags = detectPlatformFlags();
+    setIsIOS(flags.isIOS);
+    setIsAndroid(flags.isAndroid);
+    setIsInAppBrowser(flags.isInAppBrowser);
 
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    // Includes iPhone, iPod, iPad, and modern iPadOS (reports Macintosh with touch points > 1)
-    const isIOSDevice =
-      /iphone|ipad|ipod/.test(userAgent) ||
-      (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
-    const isAndroidDevice = /android/.test(userAgent);
-    const inApp = /\bline\/|fban|fbav|instagram|micromessenger/.test(userAgent);
-
-    setIsIOS(isIOSDevice);
-    setIsAndroid(isAndroidDevice);
-    setIsInAppBrowser(inApp);
+    const earlyPrompt = globalDeferredPrompt || readWindowDeferredPrompt();
+    if (earlyPrompt) {
+      globalDeferredPrompt = earlyPrompt;
+      setDeferredPrompt(earlyPrompt);
+    }
 
     const handlePromptUpdate = (prompt: BeforeInstallPromptEvent | null) => {
       setDeferredPrompt(prompt);
     };
     promptSubscribers.add(handlePromptUpdate);
-    setDeferredPrompt(globalDeferredPrompt);
 
     const handleAppInstalled = () => {
       setIsInstalled(true);
       globalDeferredPrompt = null;
+      window.__pwaDeferredPrompt = null;
       setDeferredPrompt(null);
     };
 
@@ -88,13 +119,14 @@ export function usePWAInstall() {
   }, []);
 
   const install = async () => {
-    const activePrompt = deferredPrompt || globalDeferredPrompt;
+    const activePrompt = deferredPrompt || globalDeferredPrompt || readWindowDeferredPrompt();
     if (!activePrompt) return false;
     await activePrompt.prompt();
     const { outcome } = await activePrompt.userChoice;
     if (outcome === 'accepted') {
       setIsInstalled(true);
       globalDeferredPrompt = null;
+      window.__pwaDeferredPrompt = null;
       setDeferredPrompt(null);
       promptSubscribers.forEach((cb) => cb(null));
       return true;
@@ -103,7 +135,7 @@ export function usePWAInstall() {
   };
 
   return {
-    isInstallable: !!(deferredPrompt || globalDeferredPrompt),
+    isInstallable: !!(deferredPrompt || globalDeferredPrompt || readWindowDeferredPrompt()),
     isInstalled,
     isIOS,
     isAndroid,

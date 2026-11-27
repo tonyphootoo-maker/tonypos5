@@ -422,52 +422,74 @@ export const PWAInstallButton: React.FC<Props> = ({
   if (variant === 'rider-banner') {
     return (
       <>
-        <div className="p-3.5 rounded-2xl bg-slate-900 border border-emerald-500/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
-              <Smartphone className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xs font-extrabold text-white truncate">
-                {lang === 'th'
-                  ? `ติดตั้งแอป ${appName} บนมือถือ (Android / iOS)`
-                  : `Install ${appName} Mobile App (Android / iOS)`}
+        <div className="p-3.5 rounded-2xl bg-slate-900 border border-emerald-500/35 space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                <Smartphone className="w-5 h-5" />
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                {lang === 'th'
-                  ? 'เปิดใช้งานรับงานและนำทางเต็มหน้าจอได้ทันทีจากหน้าจอหลัก'
-                  : 'Launch full-screen delivery dispatch & navigation from your home screen'}
-              </p>
+              <div className="min-w-0">
+                <div className="text-xs font-extrabold text-white truncate">
+                  {lang === 'th'
+                    ? `ติดตั้งแอป ${appName} บนมือถือ (Android / iOS)`
+                    : `Install ${appName} Mobile App (Android / iOS)`}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  {lang === 'th'
+                    ? isInstallable
+                      ? 'พร้อมติดตั้งเป็นแอปบนมือถือแล้ว แตะปุ่มด้านขวาเพื่อติดตั้งทันที'
+                      : isIOS
+                        ? 'เปิดใน Safari แล้วแตะ แชร์ > เพิ่มไปยังหน้าจอโฮม'
+                        : 'เปิดใช้งานรับงานและนำทางเต็มหน้าจอได้ทันทีจากหน้าจอหลัก'
+                    : isInstallable
+                      ? 'Ready to install as a standalone app. Tap Install Now.'
+                      : isIOS
+                        ? 'Open in Safari, tap Share > Add to Home Screen'
+                        : 'Launch full-screen delivery dispatch & navigation from your home screen'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleClick}
+                className="flex-1 sm:flex-initial min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>
+                  {lang === 'th'
+                    ? isInstallable
+                      ? 'ติดตั้งแอปทันที'
+                      : isIOS
+                        ? 'วิธีติดตั้งบน iOS (Safari)'
+                        : 'ติดตั้งแอป Android / iOS'
+                    : isInstallable
+                      ? 'Install App Now'
+                      : isIOS
+                        ? 'Install on iOS (Safari)'
+                        : 'Install Rider App'}
+                </span>
+              </button>
+              {isInstallable && (
+                <button
+                  type="button"
+                  onClick={() => openGuideFor('ios')}
+                  className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
+                >
+                  iOS
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handleClick}
-              className="flex-1 sm:flex-initial min-h-[40px] px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
-            >
-              <Download className="w-4 h-4" />
-              <span>
-                {lang === 'th'
-                  ? isInstallable
-                    ? 'ติดตั้ง Android ทันที'
-                    : 'ติดตั้งแอป Android / iOS'
-                  : isRiderApp
-                    ? 'Install Rider App'
-                    : 'Install App'}
-              </span>
-            </button>
-            {isInstallable && (
-              <button
-                type="button"
-                onClick={() => openGuideFor('ios')}
-                className="min-h-[40px] px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer"
-              >
-                iOS
-              </button>
-            )}
-          </div>
+          {isInAppBrowser && (
+            <div className="px-3 py-2 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[11px] font-bold leading-relaxed">
+              {lang === 'th'
+                ? 'กำลังเปิดผ่านเบราว์เซอร์ในแอป (เช่น LINE) — กรุณากด ⋮ หรือ แชร์ แล้วเลือก "เปิดใน Safari" (iOS) หรือ "เปิดในเบราว์เซอร์อื่น / Chrome" (Android) ก่อนติดตั้งแอป'
+                : 'Opened inside an in-app browser (e.g. LINE). Open this link in Safari (iOS) or Chrome (Android) first to install the app.'}
+            </div>
+          )}
         </div>
         {guideModal}
       </>
