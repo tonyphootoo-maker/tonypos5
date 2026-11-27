@@ -24,7 +24,9 @@ export const PWAInstallButton: React.FC<Props> = ({
   const lang = propLang ?? ctxLang;
   const { isInstallable, isInstalled, isIOS, isAndroid, install } = usePWAInstall();
   const [showGuideModal, setShowGuideModal] = useState(false);
-  const [guideTab, setGuideTab] = useState<'ios' | 'android'>(() => (isIOS ? 'ios' : 'android'));
+  const [guideTab, setGuideTab] = useState<'android' | 'ios' | 'desktop'>(() =>
+    isIOS ? 'ios' : isAndroid ? 'android' : 'desktop'
+  );
 
   const isRiderTheme = theme === 'emerald' || variant === 'rider-banner';
 
@@ -52,8 +54,8 @@ export const PWAInstallButton: React.FC<Props> = ({
     return null;
   }
 
-  const openGuideFor = (tab?: 'ios' | 'android') => {
-    setGuideTab(tab ?? (isIOS ? 'ios' : 'android'));
+  const openGuideFor = (tab?: 'ios' | 'android' | 'desktop') => {
+    setGuideTab(tab ?? (isIOS ? 'ios' : isAndroid ? 'android' : 'desktop'));
     setShowGuideModal(true);
   };
 
@@ -140,12 +142,12 @@ export const PWAInstallButton: React.FC<Props> = ({
               </div>
 
               <div className="modal-body space-y-4 text-xs">
-                {/* Switch between Android & iOS guides */}
-                <div className="grid grid-cols-2 gap-1.5 p-1 bg-neutral-100 rounded-xl">
+                {/* Switch between Android, iOS & Desktop guides */}
+                <div className="grid grid-cols-3 gap-1 p-1 bg-neutral-100 rounded-xl">
                   <button
                     type="button"
                     onClick={() => setGuideTab('android')}
-                    className={`py-2 px-3 rounded-lg font-extrabold cursor-pointer transition-colors ${
+                    className={`py-2 px-2 rounded-lg font-extrabold cursor-pointer transition-colors ${
                       guideTab === 'android'
                         ? isRiderTheme
                           ? 'bg-emerald-600 text-white'
@@ -153,12 +155,12 @@ export const PWAInstallButton: React.FC<Props> = ({
                         : 'text-neutral-600 hover:text-neutral-900'
                     }`}
                   >
-                    Android (Chrome)
+                    Android
                   </button>
                   <button
                     type="button"
                     onClick={() => setGuideTab('ios')}
-                    className={`py-2 px-3 rounded-lg font-extrabold cursor-pointer transition-colors ${
+                    className={`py-2 px-2 rounded-lg font-extrabold cursor-pointer transition-colors ${
                       guideTab === 'ios'
                         ? isRiderTheme
                           ? 'bg-emerald-600 text-white'
@@ -166,7 +168,20 @@ export const PWAInstallButton: React.FC<Props> = ({
                         : 'text-neutral-600 hover:text-neutral-900'
                     }`}
                   >
-                    iOS / iPhone (Safari)
+                    iOS / iPad
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGuideTab('desktop')}
+                    className={`py-2 px-2 rounded-lg font-extrabold cursor-pointer transition-colors ${
+                      guideTab === 'desktop'
+                        ? isRiderTheme
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-orange-500 text-white'
+                        : 'text-neutral-600 hover:text-neutral-900'
+                    }`}
+                  >
+                    {lang === 'th' ? 'คอม / Mac' : 'Desktop'}
                   </button>
                 </div>
 
@@ -251,6 +266,67 @@ export const PWAInstallButton: React.FC<Props> = ({
                           {lang === 'th'
                             ? `แตะ "เพิ่ม (Add)" มุมขวาบน จากนั้นเปิดใช้งานจากไอคอน ${appName} บนหน้าจอหลักได้แบบเต็มจอทันที`
                             : `Tap "Add" in the top-right corner, then launch ${appName} directly from your Home Screen.`}
+                        </span>
+                      </li>
+                    </ol>
+                  </div>
+                ) : guideTab === 'desktop' ? (
+                  <div className="space-y-3">
+                    <div className={`p-3 border rounded-2xl font-bold flex items-center gap-2 ${infoBg}`}>
+                      <Tablet className={`w-4 h-4 shrink-0 ${iconAccent}`} />
+                      <span>
+                        {lang === 'th'
+                          ? `วิธีติดตั้ง ${appName} บนคอมพิวเตอร์ (Chrome / Edge)`
+                          : `Desktop Installation Steps (Chrome / Edge)`}
+                      </span>
+                    </div>
+                    {isInstallable && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const ok = await install();
+                          if (ok) setShowGuideModal(false);
+                          onActionTaken?.();
+                        }}
+                        className={`w-full py-3 rounded-xl text-white font-black text-xs flex items-center justify-center gap-2 cursor-pointer ${
+                          isRiderTheme ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-orange-500 hover:bg-orange-600'
+                        }`}
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>
+                          {lang === 'th' ? `ติดตั้ง ${appName} ทันที` : `Install ${appName} Now`}
+                        </span>
+                      </button>
+                    )}
+                    <ol className="space-y-2.5 text-neutral-700 leading-relaxed">
+                      <li className="flex items-start gap-2.5">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
+                          1
+                        </span>
+                        <span>
+                          {lang === 'th'
+                            ? 'เปิดเว็บไซต์นี้ในแท็บเต็ม (นอกกรอบพรีวิว) ด้วย Google Chrome หรือ Microsoft Edge'
+                            : 'Open this app directly in a full Google Chrome or Microsoft Edge tab.'}
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
+                          2
+                        </span>
+                        <span>
+                          {lang === 'th'
+                            ? 'คลิกไอคอนติดตั้งแอป (⊕) ทางด้านขวาของแถบที่อยู่เว็บ (Address bar) หรือเข้าเมนู ⋮ > บันทึกและแชร์ > ติดตั้งแอป'
+                            : 'Click the Install icon on the right side of the address bar, or open ⋮ Menu > Save and share > Install app.'}
+                        </span>
+                      </li>
+                      <li className="flex items-start gap-2.5">
+                        <span className={`w-5 h-5 rounded-full ${badgeBg} text-white font-black flex items-center justify-center shrink-0 text-[11px]`}>
+                          3
+                        </span>
+                        <span>
+                          {lang === 'th'
+                            ? `ยืนยัน "ติดตั้ง (Install)" แอป ${appName} จะเปิดเป็นหน้าต่างแยกเหมือนโปรแกรมบนเครื่องและแคชออฟไลน์ให้อัตโนมัติ`
+                            : `Click "Install" to launch ${appName} in its own standalone app window with offline caching.`}
                         </span>
                       </li>
                     </ol>
@@ -427,10 +503,10 @@ export const PWAInstallButton: React.FC<Props> = ({
           className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer backdrop-blur-md ${
             isRiderTheme
               ? 'bg-emerald-500 hover:bg-emerald-400 border-emerald-400 text-slate-950 font-extrabold'
-              : 'bg-orange-500/20 hover:bg-orange-500/30 border-orange-400/40 text-orange-200'
+              : 'bg-orange-50 hover:bg-orange-100 border-orange-300 text-orange-700 shadow-xs'
           }`}
         >
-          <Download className={`w-3.5 h-3.5 ${isRiderTheme ? 'text-slate-950' : 'text-orange-300'}`} />
+          <Download className={`w-3.5 h-3.5 ${isRiderTheme ? 'text-slate-950' : 'text-orange-600'}`} />
           <span>{labelText}</span>
         </button>
         {guideModal}

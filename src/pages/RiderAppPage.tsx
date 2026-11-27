@@ -28,6 +28,7 @@ import {
 import { formatMoney } from '../engine/calculations';
 import { buildOnlineOrderNumberingMap, toDateSafe } from '../engine/onlineOrdering';
 import { PWAInstallButton } from '../components/PWAInstallButton';
+import { OfflineIndicator } from '../components/OfflineIndicator';
 import { RiderNavigationOverlay } from '../components/RiderNavigationOverlay';
 import { LanguageToggle } from '../components/LanguageToggle';
 
@@ -519,6 +520,8 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
           onCompleteDelivery={handleCompleteDelivery}
         />
       )}
+
+      <OfflineIndicator lang={lang} />
     </div>
   );
 };

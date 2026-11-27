@@ -4,22 +4,8 @@ import { registerSW } from 'virtual:pwa-register';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext.tsx';
 import { resolveAppMode } from './engine/onlineOrdering.ts';
+import { lazyWithRetry } from './utils/lazyWithRetry.ts';
 import './index.css';
-
-function lazyWithRetry<T extends React.ComponentType<any>>(
-  importer: () => Promise<{ default: T }>
-): React.LazyExoticComponent<T> {
-  return React.lazy(() =>
-    importer().catch(
-      () =>
-        new Promise<{ default: T }>((resolve, reject) => {
-          setTimeout(() => {
-            importer().then(resolve, reject);
-          }, 600);
-        })
-    )
-  );
-}
 
 const LazyOwnerApp = lazyWithRetry(() => import('./App.tsx'));
 const LazyCustomerOrderPage = lazyWithRetry(() =>
@@ -49,7 +35,8 @@ if (typeof window !== 'undefined') {
   };
 }
 
-// Register Service Worker for Owner POS & Rider offline support (skip in Customer link mode to avoid iOS Safari/WebView SW cache/reload stalls)
+// Register PWA Service Worker for Owner POS & Rider offline support in both dev and production
+// (skip in Customer link mode to avoid iOS Safari/WebView bookmark & cache interference)
 if (
   entryMode !== 'customer' &&
   typeof window !== 'undefined' &&

@@ -70,8 +70,16 @@ export default defineConfig(({mode}) => {
         workbox: {
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,webmanifest}'],
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/__/, /^\/api/, /manifest-rider\.webmanifest$/],
+          navigateFallbackDenylist: [
+            /^\/__/,
+            /^\/api/,
+            /manifest-rider\.webmanifest$/,
+            /manifest\.webmanifest$/,
+          ],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -104,8 +112,9 @@ export default defineConfig(({mode}) => {
           ],
         },
         devOptions: {
-          enabled: false,
+          enabled: true,
           type: 'module',
+          navigateFallback: 'index.html',
         },
       }),
       {
@@ -119,6 +128,19 @@ export default defineConfig(({mode}) => {
         },
       },
     ],
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'lucide-react',
+        'firebase/app',
+        'firebase/auth',
+        'firebase/firestore',
+        '@vis.gl/react-google-maps',
+        'xlsx',
+      ],
+    },
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),

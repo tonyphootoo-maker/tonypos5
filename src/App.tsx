@@ -39,6 +39,7 @@ import { Navigation, AppPage } from './components/Navigation';
 import { OnlineOrderFloatingAlert } from './components/OnlineOrderFloatingAlert';
 import { OnlineOrderCancelledAlert } from './components/OnlineOrderCancelledAlert';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { LanguageToggle } from './components/LanguageToggle';
 import { ShiftModal } from './components/ShiftModal';
 import { TablesPosPage } from './pages/TablesPosPage';
@@ -64,8 +65,9 @@ import {
 
 import { CustomerOrderPage } from './pages/CustomerOrderPage';
 import { RiderAppPage } from './pages/RiderAppPage';
+import { lazyWithRetry } from './utils/lazyWithRetry';
 
-const OnlineOrdersManagerPage = React.lazy(() =>
+const OnlineOrdersManagerPage = lazyWithRetry(() =>
   import('./pages/OnlineOrdersManagerPage').then((m) => ({ default: m.OnlineOrdersManagerPage }))
 );
 
@@ -683,6 +685,7 @@ export default function App() {
             ? "Tony's Kit • ระบบซิงค์ข้อมูลออฟไลน์และเรียลไทม์หลายหน้าจอ"
             : "Tony's Kit • Multi-Tab Offline & Real-Time Sync Engine"}
         </div>
+        <OfflineIndicator lang={lang} />
       </div>
     );
   }
@@ -887,6 +890,8 @@ export default function App() {
           onShiftUpdated={(shift) => setActiveShift(shift)}
         />
       )}
+
+      <OfflineIndicator lang={lang} />
     </div>
   );
 }

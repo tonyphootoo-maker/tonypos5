@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { LanguageContext, readStoredLanguage } from '../contexts/LanguageContext';
+import { isDynamicImportError, unregisterStaleServiceWorkers } from '../utils/lazyWithRetry';
 
 interface Props {
   children: ReactNode;
@@ -25,11 +26,16 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('Uncaught error in component tree:', error, errorInfo);
   }
 
-  private handleReload = () => {
+  private handleReload = async () => {
+    await unregisterStaleServiceWorkers();
     window.location.reload();
   };
 
   private handleReset = () => {
+    if (isDynamicImportError(this.state.error)) {
+      void this.handleReload();
+      return;
+    }
     this.setState({ hasError: false, error: null });
   };
 
