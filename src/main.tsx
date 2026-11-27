@@ -67,7 +67,7 @@ function BootFallback({ mode }: { mode: 'customer' | 'rider' | 'owner' }) {
 
   return (
     <div
-      className={`min-h-screen flex flex-col items-center justify-center p-6 text-xs font-bold ${
+      className={`min-h-screen min-h-[100dvh] w-full flex flex-col items-center justify-center p-6 text-xs font-bold ${
         isDark ? 'bg-slate-950 text-slate-200' : 'bg-[#FAF8F5] text-slate-700'
       }`}
     >

@@ -86,6 +86,7 @@ export default defineConfig(({mode}) => {
           navigateFallbackDenylist: [
             /^\/__/,
             /^\/api/,
+            /\/rider\.html$/i,
             /manifest-rider\.webmanifest$/,
             /manifest-order\.webmanifest$/,
             /manifest\.webmanifest$/,
@@ -125,7 +126,7 @@ export default defineConfig(({mode}) => {
           enabled: true,
           type: 'module',
           navigateFallback: 'index.html',
-          navigateFallbackAllowlist: [/^\/$/, /^\/rider\.html$/],
+          navigateFallbackAllowlist: [/^\/$/],
         },
       }),
       {

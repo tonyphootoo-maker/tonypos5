@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildExternalGoogleMapsUrl,
@@ -1228,6 +1230,69 @@ describe('Online Ordering Engine', () => {
       })
     ).rejects.toMatchObject({ code: 1 });
     expect(deniedCalls).toHaveLength(1);
+  });
+
+  it('verifies Rider PWA manifest, icon dimensions, iOS/Android HTML metadata, and SW routing safety', () => {
+    const rootDir = path.resolve(__dirname, '../../..');
+    const manifestPath = path.join(rootDir, 'public/manifest-rider.webmanifest');
+    const riderHtmlPath = path.join(rootDir, 'rider.html');
+    const viteConfigPath = path.join(rootDir, 'vite.config.ts');
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as {
+      id?: string;
+      name?: string;
+      short_name?: string;
+      start_url?: string;
+      scope?: string;
+      display?: string;
+      theme_color?: string;
+      background_color?: string;
+      icons?: Array<{ src: string; sizes: string; type: string; purpose?: string }>;
+    };
+
+    expect(manifest.id).toBe('./rider.html');
+    expect(manifest.start_url).toBe('./rider.html');
+    expect(manifest.scope).toBe('./');
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.name && manifest.name.length > 0).toBe(true);
+    expect(manifest.short_name && manifest.short_name.length <= 12).toBe(true);
+    expect(manifest.theme_color).toBe('#0f172a');
+    expect(manifest.background_color).toBe('#0f172a');
+
+    const icons = manifest.icons || [];
+    const any192 = icons.find((i) => i.sizes === '192x192' && i.purpose === 'any');
+    const any512 = icons.find((i) => i.sizes === '512x512' && i.purpose === 'any');
+    const maskable512 = icons.find((i) => i.sizes === '512x512' && i.purpose === 'maskable');
+    expect(any192).toBeDefined();
+    expect(any512).toBeDefined();
+    expect(maskable512).toBeDefined();
+
+    // Verify real PNG binary signatures and pixel dimensions
+    const readPngDimensions = (relPublicPath: string) => {
+      const buf = fs.readFileSync(path.join(rootDir, 'public', relPublicPath));
+      expect(buf.slice(1, 4).toString('ascii')).toBe('PNG');
+      return {
+        width: buf.readUInt32BE(16),
+        height: buf.readUInt32BE(20),
+      };
+    };
+    expect(readPngDimensions(any192!.src)).toEqual({ width: 192, height: 192 });
+    expect(readPngDimensions(any512!.src)).toEqual({ width: 512, height: 512 });
+    expect(readPngDimensions(maskable512!.src)).toEqual({ width: 512, height: 512 });
+    expect(readPngDimensions('rider-apple-touch-icon.png')).toEqual({ width: 180, height: 180 });
+
+    const riderHtml = fs.readFileSync(riderHtmlPath, 'utf-8');
+    expect(riderHtml).toContain('viewport-fit=cover');
+    expect(riderHtml).toContain('href="./manifest-rider.webmanifest"');
+    expect(riderHtml).toContain('href="./rider-apple-touch-icon.png"');
+    expect(riderHtml).toContain('name="apple-mobile-web-app-capable" content="yes"');
+    expect(riderHtml).toContain('name="mobile-web-app-capable" content="yes"');
+    expect(riderHtml).toContain('name="apple-mobile-web-app-status-bar-style" content="black-translucent"');
+    expect(riderHtml).not.toContain('href="./manifest.webmanifest"');
+
+    const viteConfig = fs.readFileSync(viteConfigPath, 'utf-8');
+    expect(viteConfig).toContain('/\\/rider\\.html$/i');
+    expect(viteConfig).toContain('navigateFallbackAllowlist: [/^\\/$/]');
   });
 });
 

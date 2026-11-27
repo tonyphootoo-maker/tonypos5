@@ -491,7 +491,7 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[60] w-screen h-[100dvh] bg-slate-950 text-slate-100 flex flex-col overflow-hidden"
+      className="fixed inset-0 z-[60] w-full h-[100dvh] bg-slate-950 text-slate-100 flex flex-col overflow-hidden"
       role="dialog"
       aria-modal="true"
       aria-label={lang === 'th' ? 'ระบบนำทางจัดส่งเต็มหน้าจอ' : 'Full-Screen Delivery Navigation'}

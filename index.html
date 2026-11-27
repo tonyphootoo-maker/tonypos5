@@ -99,7 +99,9 @@
           }
           document.title = "Tony's Kit Rider - งานจัดส่ง";
           var appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-          if (appleTitle) appleTitle.setAttribute('content', "Tony's Kit Rider");
+          if (appleTitle) appleTitle.setAttribute('content', 'TK Rider');
+          var appleStatus = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+          if (appleStatus) appleStatus.setAttribute('content', 'black-translucent');
           var themeMeta = document.querySelector('meta[name="theme-color"]');
           if (themeMeta) themeMeta.setAttribute('content', '#0f172a');
           var appleIcon = document.querySelector('link[rel="apple-touch-icon"]');

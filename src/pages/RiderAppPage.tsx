@@ -77,6 +77,16 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
     if (appleTitle) appleTitle.setAttribute('content', 'TK Rider');
 
+    const appleStatus = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+    if (appleStatus) {
+      appleStatus.setAttribute('content', 'black-translucent');
+    } else {
+      const asMeta = document.createElement('meta');
+      asMeta.name = 'apple-mobile-web-app-status-bar-style';
+      asMeta.content = 'black-translucent';
+      document.head.appendChild(asMeta);
+    }
+
     const themeMeta = document.querySelector('meta[name="theme-color"]');
     if (themeMeta) themeMeta.setAttribute('content', '#0f172a');
 
@@ -97,6 +107,24 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
       document.head.appendChild(ml);
     }
 
+    const rootStyle = document.documentElement.style;
+    rootStyle.width = '100%';
+    rootStyle.maxWidth = '100%';
+    rootStyle.overflowX = 'hidden';
+    rootStyle.backgroundColor = '#020617';
+    rootStyle.setProperty('-webkit-text-size-adjust', '100%');
+    rootStyle.setProperty('text-size-adjust', '100%');
+    document.body.style.width = '100%';
+    document.body.style.maxWidth = '100%';
+    document.body.style.overflowX = 'hidden';
+    document.body.style.background = '#020617';
+
+    const rootContainer = document.getElementById('root');
+    if (rootContainer) {
+      rootContainer.style.width = '100%';
+      rootContainer.style.minHeight = '100dvh';
+    }
+
     if (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '')) {
       const vp = document.querySelector('meta[name="viewport"]');
       if (vp) {
@@ -105,15 +133,6 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
           'width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
         );
       }
-      const rootStyle = document.documentElement.style;
-      rootStyle.width = '100%';
-      rootStyle.maxWidth = '100%';
-      rootStyle.overflowX = 'hidden';
-      rootStyle.setProperty('-webkit-text-size-adjust', '100%');
-      rootStyle.setProperty('text-size-adjust', '100%');
-      document.body.style.width = '100%';
-      document.body.style.maxWidth = '100%';
-      document.body.style.overflowX = 'hidden';
     }
   }, [lang]);
 
@@ -260,8 +279,8 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative">
-        <div className="absolute top-4 right-4">
+      <div className="min-h-screen min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-slate-950 text-white flex flex-col items-center justify-center p-6 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] relative">
+        <div className="absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))]">
           <LanguageToggle variant="dark" lang={lang} onToggleLang={toggleLang} />
         </div>
         <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-3" />
@@ -273,19 +292,19 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
   }
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 pb-10">
+    <div className="min-h-screen min-h-[100dvh] w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 flex flex-col pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       {/* Rider Header with PWA Install */}
-      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800">
-        <div className="max-w-3xl mx-auto px-4 py-3 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
+      <header className="sticky top-0 z-30 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-800 pt-[env(safe-area-inset-top)]">
+        <div className="w-full max-w-3xl mx-auto pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4 py-3 space-y-3">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <img
                 src="./rider-192x192.png"
                 alt="Tony's Kit Rider"
                 referrerPolicy="no-referrer"
                 className="w-11 h-11 rounded-xl object-cover border border-emerald-400/40 shadow-sm shrink-0 bg-slate-950"
               />
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <h1 className="font-extrabold text-base text-white truncate">Tony&apos;s Kit Rider</h1>
                 <p className="text-xs text-slate-400 truncate">
                   {store?.shopName || (lang === 'th' ? 'งานจัดส่งอาหาร' : 'Delivery Dispatch')}
@@ -293,7 +312,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <PWAInstallButton lang={lang} variant="button" appName="Tony's Kit Rider" theme="emerald" />
               <LanguageToggle variant="dark" lang={lang} onToggleLang={toggleLang} />
             </div>
@@ -301,7 +320,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
 
           {/* Rider Profile Bar & Tabs */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-1.5">
+            <div className="flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-xl px-3 py-1.5 min-w-0">
               <UserCheck className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="text-xs text-slate-400 shrink-0">
                 {lang === 'th' ? 'ชื่อไรเดอร์:' : 'Rider:'}
@@ -310,11 +329,11 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                 type="text"
                 value={riderName}
                 onChange={(e) => setRiderName(e.target.value)}
-                className="bg-transparent text-xs font-bold text-white focus:outline-none w-full min-w-[110px]"
+                className="bg-transparent text-base sm:text-sm font-bold text-white focus:outline-none w-full min-w-0"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
+            <div className="grid grid-cols-2 gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700 shrink-0">
               <button
                 type="button"
                 onClick={() => setActiveTab('active')}
@@ -342,17 +361,17 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
         </div>
       </header>
 
-      <main className="w-full max-w-3xl mx-auto px-4 py-4 space-y-3">
+      <main className="flex-1 flex flex-col w-full max-w-3xl mx-auto pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:px-4 py-3.5 sm:py-4 gap-3">
 
         {errorMsg && (
           <div className="p-3.5 rounded-2xl bg-rose-950/70 border border-rose-700 text-rose-200 text-xs font-bold flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-            <span>{errorMsg}</span>
+            <span className="min-w-0 break-words">{errorMsg}</span>
           </div>
         )}
 
         {!storeId ? (
-          <div className="p-8 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-2">
+          <div className="flex-1 flex flex-col items-center justify-center p-8 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-2">
             <AlertCircle className="w-10 h-10 text-amber-400 mx-auto" />
             <p className="text-sm font-bold text-white">
               {lang === 'th' ? 'ยังไม่พบร้านค้าที่ผูกไว้' : 'Store Not Found'}
@@ -364,7 +383,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
             </p>
           </div>
         ) : visibleJobs.length === 0 ? (
-          <div className="p-12 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-2">
+          <div className="flex-1 flex flex-col items-center justify-center p-10 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-2">
             <Bike className="w-10 h-10 text-slate-600 mx-auto" />
             <p className="text-sm font-bold text-slate-300">
               {activeTab === 'active'
@@ -386,10 +405,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
             return (
               <div
                 key={order.id}
-                className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3"
+                className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
+                <div className="flex items-start justify-between gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-black text-base text-white tabular-nums">
                         {displayIds?.displayNumber || order.orderNumber}
@@ -417,7 +436,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                     </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <div className="text-sm font-black text-emerald-400 tabular-nums">
                       ฿{formatMoney(order.totalAmount)}
                     </div>
@@ -439,11 +458,11 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
 
                 {/* Customer & Address Card */}
                 <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2 text-xs">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold text-white">{order.customerName}</span>
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <span className="font-bold text-white min-w-0 truncate">{order.customerName}</span>
                     <a
                       href={`tel:${order.customerPhone}`}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold inline-flex items-center gap-1"
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold inline-flex items-center gap-1 shrink-0"
                     >
                       <Phone className="w-3.5 h-3.5" />
                       <span>{order.customerPhone}</span>
@@ -461,12 +480,12 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                 {/* Order Items Summary */}
                 <div className="text-xs text-slate-300 space-y-1">
                   {order.items.map((it, idx) => (
-                    <div key={idx} className="flex justify-between gap-2">
-                      <span>
+                    <div key={idx} className="flex justify-between gap-2 min-w-0">
+                      <span className="min-w-0 break-words">
                         {it.quantity}x {it.dishName}
                         {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
                       </span>
-                      <span className="text-slate-400 tabular-nums">
+                      <span className="text-slate-400 tabular-nums shrink-0">
                         ฿{formatMoney(it.unitPrice * it.quantity)}
                       </span>
                     </div>
