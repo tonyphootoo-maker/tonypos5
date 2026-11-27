@@ -96,6 +96,25 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
       ml.href = './manifest-rider.webmanifest';
       document.head.appendChild(ml);
     }
+
+    if (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent || '')) {
+      const vp = document.querySelector('meta[name="viewport"]');
+      if (vp) {
+        vp.setAttribute(
+          'content',
+          'width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
+        );
+      }
+      const rootStyle = document.documentElement.style;
+      rootStyle.width = '100%';
+      rootStyle.maxWidth = '100%';
+      rootStyle.overflowX = 'hidden';
+      rootStyle.setProperty('-webkit-text-size-adjust', '100%');
+      rootStyle.setProperty('text-size-adjust', '100%');
+      document.body.style.width = '100%';
+      document.body.style.maxWidth = '100%';
+      document.body.style.overflowX = 'hidden';
+    }
   }, [lang]);
 
   useEffect(() => {
@@ -241,7 +260,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative">
+      <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-white flex flex-col items-center justify-center p-6 relative">
         <div className="absolute top-4 right-4">
           <LanguageToggle variant="dark" lang={lang} onToggleLang={toggleLang} />
         </div>
@@ -254,7 +273,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-10">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-950 text-slate-100 pb-10">
       {/* Rider Header with PWA Install */}
       <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-3xl mx-auto px-4 py-3 space-y-3">
@@ -320,8 +339,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-4 space-y-3">
-        <PWAInstallButton lang={lang} variant="rider-banner" appName="Tony's Kit Rider" theme="emerald" />
+      <main className="w-full max-w-3xl mx-auto px-4 py-4 space-y-3">
 
         {errorMsg && (
           <div className="p-3.5 rounded-2xl bg-rose-950/70 border border-rose-700 text-rose-200 text-xs font-bold flex items-center gap-2">
@@ -428,12 +446,12 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                       <span>{order.customerPhone}</span>
                     </a>
                   </div>
-                  <div className="flex items-start gap-2 text-slate-300 leading-relaxed">
+                  <div className="flex items-start gap-2 text-slate-300 leading-relaxed min-w-0">
                     <MapPin className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
-                    <span>{order.deliveryAddress || '-'}</span>
+                    <span className="break-words min-w-0">{order.deliveryAddress || '-'}</span>
                   </div>
                   {order.customerNote && (
-                    <div className="text-[11px] text-amber-300">* {order.customerNote}</div>
+                    <div className="text-[11px] text-amber-300 break-words">* {order.customerNote}</div>
                   )}
                 </div>
 

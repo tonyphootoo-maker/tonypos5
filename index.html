@@ -82,6 +82,21 @@
         }
 
         if (isRider) {
+          if (/android/i.test(navigator.userAgent || '')) {
+            var riderVp = document.querySelector('meta[name="viewport"]');
+            if (riderVp) {
+              riderVp.setAttribute(
+                'content',
+                'width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
+              );
+            }
+            var riderRoot = document.documentElement;
+            riderRoot.style.width = '100%';
+            riderRoot.style.maxWidth = '100%';
+            riderRoot.style.overflowX = 'hidden';
+            riderRoot.style.textSizeAdjust = '100%';
+            riderRoot.style.webkitTextSizeAdjust = '100%';
+          }
           document.title = "Tony's Kit Rider - งานจัดส่ง";
           var appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
           if (appleTitle) appleTitle.setAttribute('content', "Tony's Kit Rider");
