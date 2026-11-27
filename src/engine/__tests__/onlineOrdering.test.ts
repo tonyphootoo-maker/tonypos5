@@ -207,6 +207,8 @@ describe('Online Ordering Engine', () => {
     expect(resolveAppMode('', '/tonypos5/order/')).toBe('customer');
     expect(resolveAppMode('?mode=rider&store=abc', '/')).toBe('rider');
     expect(resolveAppMode('', '/rider')).toBe('rider');
+    expect(resolveAppMode('?store=abc', '/rider.html')).toBe('rider');
+    expect(resolveAppMode('', '/subpath/rider.html')).toBe('rider');
     expect(resolveAppMode('', '/', '#/?mode=order&store=abc')).toBe('customer');
     expect(resolveAppMode('', '/', '#mode=rider')).toBe('rider');
     expect(resolveAppMode('', '/')).toBe('owner');
@@ -581,13 +583,17 @@ describe('Online Ordering Engine', () => {
         deliveryLng: 100.5018,
         deliveryAddress: 'Siam',
       })
-    ).toBe('https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=13.7563,100.5018');
+    ).toBe(
+      'https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=13.7563,100.5018'
+    );
 
     expect(
       buildExternalGoogleMapsUrl({
         deliveryAddress: '99 Rama 9 Bangkok',
       })
-    ).toBe('https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=99%20Rama%209%20Bangkok');
+    ).toBe(
+      'https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=99%20Rama%209%20Bangkok'
+    );
   });
 
   it('resolves POS and Customer storefront option names from Food Cost item name (ชื่อรายการ) instead of proteinType', () => {

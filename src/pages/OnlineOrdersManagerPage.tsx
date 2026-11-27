@@ -251,7 +251,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   }, []);
 
   const customerUrl = `${baseUrl}/?mode=order&store=${user.uid}`;
-  const riderUrl = `${baseUrl}/?mode=rider&store=${user.uid}`;
+  const riderUrl = `${baseUrl}/rider.html?store=${user.uid}`;
 
   const orderNumberingMap = useMemo(() => buildOnlineOrderNumberingMap(orders), [orders]);
 

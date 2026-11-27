@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TK Rider" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./rider-apple-touch-icon.png" />
+    <link rel="icon" href="./rider-192x192.png" sizes="192x192" type="image/png" />
+    <link rel="icon" type="image/svg+xml" href="./rider-icon.svg" />
+    <link rel="manifest" href="./manifest-rider.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" /></noscript>
+    <title>Tony's Kit Rider - งานจัดส่ง</title>
+    <meta name="description" content="ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ Tony's Kit Rider" />
+    <meta property="og:title" content="Tony's Kit Rider - งานจัดส่ง" />
+    <meta property="og:description" content="ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ Tony's Kit Rider" />
+    <meta property="og:type" content="website" />
+    <script>
+      window.addEventListener('error', function(e) {
+        var msgEl = document.getElementById('boot-status');
+        if (msgEl) {
+          msgEl.style.color = '#fb7185';
+          msgEl.innerText = 'Initialization Error: ' + (e.message || 'Script loading failure') + '\n(โปรดตรวจสอบการเชื่อมต่อหรือรีเฟรชหน้าเว็บ)';
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function(e) {
+        var msgEl = document.getElementById('boot-status');
+        if (msgEl) {
+          msgEl.style.color = '#fb7185';
+          var reason = e.reason && e.reason.message ? e.reason.message : String(e.reason);
+          msgEl.innerText = 'Initialization Error: ' + reason + '\n(โปรดตรวจสอบการเชื่อมต่อหรือรีเฟรชหน้าเว็บ)';
+        }
+      });
+    </script>
+  </head>
+  <body style="margin:0;padding:0;background-color:#020617;">
+    <noscript>
+      <div style="padding: 2rem; color: #fff; background: #991b1b; text-align: center; font-family: sans-serif;">
+        JavaScript is required to run Tony's Kit Rider. Please enable JavaScript in your browser settings. / กรุณาเปิดใช้งาน JavaScript
+      </div>
+    </noscript>
+    <div id="root">
+      <div id="boot-msg" style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Plus Jakarta Sans', 'Noto Sans Thai', system-ui, sans-serif; color: #f8fafc; background: linear-gradient(180deg, #0f172a 0%, #020617 100%); text-align: center; padding: 1.5rem;">
+        <div style="width: 60px; height: 60px; border-radius: 18px; background: linear-gradient(135deg, #10b981, #059669); color: #020617; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 24px; margin-bottom: 16px; box-shadow: 0 5px 0 #047857, 0 14px 28px rgba(16, 185, 129, 0.28);">R</div>
+        <h2 style="margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.3px;">Tony's Kit Rider</h2>
+        <p id="boot-status" style="margin: 8px 0 0; font-size: 13px; color: #34d399; font-weight: 600;">กำลังโหลดแอปไรเดอร์... / Loading Rider App...</p>
+        <button id="boot-retry-btn" type="button" onclick="window.location.reload()" style="display: none; margin-top: 16px; padding: 10px 18px; border-radius: 12px; border: 0; background: #10b981; color: #020617; font-size: 13px; font-weight: 800; cursor: pointer;">รีเฟรชหน้าเว็บ / Reload</button>
+      </div>
+    </div>
+    <script>
+      setTimeout(function() {
+        var bootEl = document.getElementById('boot-msg');
+        if (!bootEl) return;
+        var statusEl = document.getElementById('boot-status');
+        var retryBtn = document.getElementById('boot-retry-btn');
+        if (statusEl) {
+          statusEl.innerText = 'การโหลดใช้เวลานานกว่าปกติ กรุณากดรีเฟรช / Loading is taking longer than expected';
+        }
+        if (retryBtn) {
+          retryBtn.style.display = 'inline-block';
+        }
+      }, 12000);
+    </script>
+    <script type="module" src="./src/main.tsx" onerror="var s=document.getElementById('boot-status');var b=document.getElementById('boot-retry-btn');if(s){s.style.color='#fb7185';s.innerText='ไม่สามารถโหลดสคริปต์แอปได้ กรุณากดรีเฟรช / Failed to load app module';}if(b){b.style.display='inline-block';}"></script>
+  </body>
+</html>

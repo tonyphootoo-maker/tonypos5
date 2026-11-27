@@ -22,7 +22,7 @@ export const PWAInstallButton: React.FC<Props> = ({
 }) => {
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
-  const { isInstallable, isInstalled, isIOS, isAndroid, install } = usePWAInstall();
+  const { isInstallable, isInstalled, isIOS, isAndroid, isInAppBrowser, install } = usePWAInstall();
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [guideTab, setGuideTab] = useState<'android' | 'ios' | 'desktop'>(() =>
     isIOS ? 'ios' : isAndroid ? 'android' : 'desktop'
@@ -184,6 +184,14 @@ export const PWAInstallButton: React.FC<Props> = ({
                     {lang === 'th' ? 'คอม / Mac' : 'Desktop'}
                   </button>
                 </div>
+
+                {isInAppBrowser && (
+                  <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 font-bold leading-relaxed">
+                    {lang === 'th'
+                      ? 'คุณกำลังเปิดผ่านเบราว์เซอร์ในแอป (เช่น LINE) — กรุณากดเปิดลิงก์นี้ใน Safari (สำหรับ iOS) หรือ Google Chrome (สำหรับ Android) ก่อนจึงจะติดตั้งเป็นแอปได้สมบูรณ์'
+                      : 'Opened inside an in-app browser (e.g. LINE). Open this URL in Safari (iOS) or Google Chrome (Android) first to install as a full standalone app.'}
+                  </div>
+                )}
 
                 {guideTab === 'android' && isInstallable && (
                   <button

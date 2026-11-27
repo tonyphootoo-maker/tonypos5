@@ -75,7 +75,12 @@ export function resolveAppMode(
   if (normalizedPath === '/order' || normalizedPath.endsWith('/order')) {
     return 'customer';
   }
-  if (normalizedPath === '/rider' || normalizedPath.endsWith('/rider')) {
+  if (
+    normalizedPath === '/rider' ||
+    normalizedPath.endsWith('/rider') ||
+    normalizedPath === '/rider.html' ||
+    normalizedPath.endsWith('/rider.html')
+  ) {
     return 'rider';
   }
   return 'owner';
@@ -680,7 +685,8 @@ export function extractLatLngLiteral(input: unknown): LatLngLiteralSimple | null
 }
 
 /**
- * Builds an external Google Maps turn-by-turn directions fallback URL.
+ * Builds an external Google Maps turn-by-turn URL with `dir_action=navigate`
+ * so mobile Google Maps starts voice/turn-by-turn navigation immediately.
  */
 export function buildExternalGoogleMapsUrl(
   order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
@@ -691,10 +697,10 @@ export function buildExternalGoogleMapsUrl(
     Number.isFinite(order.deliveryLat) &&
     Number.isFinite(order.deliveryLng)
   ) {
-    return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${order.deliveryLat},${order.deliveryLng}`;
+    return `https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=${order.deliveryLat},${order.deliveryLng}`;
   }
   const addr = encodeURIComponent((order.deliveryAddress || '').trim());
-  return `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${addr}`;
+  return `https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=${addr}`;
 }
 
 /**

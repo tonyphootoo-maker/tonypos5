@@ -85,6 +85,7 @@ interface FallbackSlippyMapProps {
   onCenterChange: (nextCenter: LatLngLiteralSimple) => void;
   onZoomChange: (nextZoom: number) => void;
   onPinChange: (nextPin: LatLngLiteralSimple) => void;
+  onMovingChange?: (moving: boolean) => void;
 }
 
 const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
@@ -95,6 +96,7 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
   onCenterChange,
   onZoomChange,
   onPinChange,
+  onMovingChange,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pinRef = useRef<HTMLDivElement | null>(null);
@@ -149,6 +151,7 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     topLeftPx,
     onCenterChange,
     onPinChange,
+    onMovingChange,
   });
   latestRef.current = {
     center,
@@ -158,6 +161,7 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     topLeftPx,
     onCenterChange,
     onPinChange,
+    onMovingChange,
   };
 
   // Native non-passive touch listeners so iOS Safari does NOT hijack map/pin dragging to scroll modal
@@ -222,7 +226,13 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
       }
       if (!st.moved) return;
 
-      const { zoom: curZoom, onCenterChange: emitCenter, onPinChange: emitPin } = latestRef.current;
+      const {
+        zoom: curZoom,
+        onCenterChange: emitCenter,
+        onPinChange: emitPin,
+        onMovingChange: emitMoving,
+      } = latestRef.current;
+      emitMoving?.(true);
       if (st.mode === 'map') {
         emitCenter(
           mercatorPixelToLatLng(st.startWorldX - dx, st.startWorldY - dy, curZoom, TILE_SIZE)
@@ -238,21 +248,50 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
       const st = dragStateRef.current;
       if (!st || st.inputType !== 'touch') return;
       dragStateRef.current = null;
-      if (!st.moved && st.mode === 'map') {
-        const pt = getClientPoint(ev);
-        if (!pt) return;
-        const rect = el.getBoundingClientRect();
-        const localX = pt.x - rect.left;
-        const localY = pt.y - rect.top;
-        const { topLeftPx: tlPx, zoom: curZoom, onPinChange: emitPin } = latestRef.current;
-        emitPin(
-          mercatorPixelToLatLng(tlPx.x + localX, tlPx.y + localY, curZoom, TILE_SIZE)
-        );
+      const {
+        center: curCenter,
+        pinPos: curPin,
+        topLeftPx: tlPx,
+        zoom: curZoom,
+        onCenterChange: emitCenter,
+        onPinChange: emitPin,
+        onMovingChange: emitMoving,
+      } = latestRef.current;
+      emitMoving?.(false);
+
+      if (st.mode === 'map') {
+        if (st.moved) {
+          emitPin({
+            lat: Number(curCenter.lat.toFixed(6)),
+            lng: Number(curCenter.lng.toFixed(6)),
+          });
+        } else {
+          const pt = getClientPoint(ev);
+          if (!pt) return;
+          const rect = el.getBoundingClientRect();
+          const localX = pt.x - rect.left;
+          const localY = pt.y - rect.top;
+          const tapped = mercatorPixelToLatLng(tlPx.x + localX, tlPx.y + localY, curZoom, TILE_SIZE);
+          emitCenter(tapped);
+          emitPin(tapped);
+        }
+      } else if (st.moved && curPin) {
+        emitCenter(curPin);
       }
     };
 
     const onTouchCancel = () => {
+      const st = dragStateRef.current;
       dragStateRef.current = null;
+      const { center: curCenter, onPinChange: emitPin, onMovingChange: emitMoving } =
+        latestRef.current;
+      emitMoving?.(false);
+      if (st?.mode === 'map' && st.moved) {
+        emitPin({
+          lat: Number(curCenter.lat.toFixed(6)),
+          lng: Number(curCenter.lng.toFixed(6)),
+        });
+      }
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -346,6 +385,7 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     }
     if (!st.moved) return;
 
+    onMovingChange?.(true);
     if (st.mode === 'map') {
       onCenterChange(mercatorPixelToLatLng(st.startWorldX - dx, st.startWorldY - dy, zoom, TILE_SIZE));
     } else if (st.mode === 'pin') {
@@ -357,13 +397,23 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
     const st = dragStateRef.current;
     if (!st || st.inputType !== 'mouse') return;
     dragStateRef.current = null;
-    if (!st.moved && st.mode === 'map' && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const localX = e.clientX - rect.left;
-      const localY = e.clientY - rect.top;
-      onPinChange(
-        mercatorPixelToLatLng(topLeftPx.x + localX, topLeftPx.y + localY, zoom, TILE_SIZE)
-      );
+    onMovingChange?.(false);
+    if (st.mode === 'map') {
+      if (st.moved) {
+        onPinChange({
+          lat: Number(center.lat.toFixed(6)),
+          lng: Number(center.lng.toFixed(6)),
+        });
+      } else if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const localY = e.clientY - rect.top;
+        const tapped = mercatorPixelToLatLng(topLeftPx.x + localX, topLeftPx.y + localY, zoom, TILE_SIZE);
+        onCenterChange(tapped);
+        onPinChange(tapped);
+      }
+    } else if (st.moved && pinPos) {
+      onCenterChange(pinPos);
     }
   };
 
@@ -374,8 +424,16 @@ const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={() => {
-        if (dragStateRef.current?.inputType === 'mouse') {
+        const st = dragStateRef.current;
+        if (st?.inputType === 'mouse') {
           dragStateRef.current = null;
+          onMovingChange?.(false);
+          if (st.mode === 'map' && st.moved) {
+            onPinChange({
+              lat: Number(center.lat.toFixed(6)),
+              lng: Number(center.lng.toFixed(6)),
+            });
+          }
         }
       }}
       style={{ touchAction: 'none', WebkitUserSelect: 'none' }}
@@ -528,11 +586,36 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
   );
   const [isDefault, setIsDefault] = useState(initialAddress?.isDefault ?? true);
   const [locating, setLocating] = useState(false);
+  const [isMapMoving, setIsMapMoving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [mapErrorMsg, setMapErrorMsg] = useState<string | null>(null);
 
+  const userInteractedRef = useRef(false);
+  const idlePinTimerRef = useRef<number | null>(null);
+  const latestMapCenterRef = useRef<LatLngLiteralSimple>(mapCenter);
+  latestMapCenterRef.current = mapCenter;
+
+  const clearIdlePinTimer = useCallback(() => {
+    if (idlePinTimerRef.current !== null) {
+      window.clearTimeout(idlePinTimerRef.current);
+      idlePinTimerRef.current = null;
+    }
+  }, []);
+
+  const commitAutoPinAt = useCallback((coords: LatLngLiteralSimple) => {
+    const rounded = {
+      lat: Number(coords.lat.toFixed(6)),
+      lng: Number(coords.lng.toFixed(6)),
+    };
+    setPinPos(rounded);
+    setErrorMsg(null);
+  }, []);
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      clearIdlePinTimer();
+      return;
+    }
     setLabel(initialAddress?.label || (lang === 'th' ? 'บ้าน' : 'Home'));
     setCustomerName(initialAddress?.customerName || fallbackName);
     setCustomerPhone(initialAddress?.customerPhone || fallbackPhone);
@@ -544,11 +627,16 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
     setPinPos(initCoords);
     setPanTarget(initCoords);
     setMapCenter(initCoords || DEFAULT_BANGKOK_CENTER);
+    latestMapCenterRef.current = initCoords || DEFAULT_BANGKOK_CENTER;
     setFallbackZoom(initCoords ? 16 : 14);
     setIsDefault(initialAddress?.isDefault ?? true);
+    setIsMapMoving(false);
+    userInteractedRef.current = Boolean(initCoords);
+    clearIdlePinTimer();
     setErrorMsg(null);
     setMapErrorMsg(null);
-  }, [isOpen, initialAddress, fallbackName, fallbackPhone, lang]);
+    return clearIdlePinTimer;
+  }, [isOpen, initialAddress, fallbackName, fallbackPhone, lang, clearIdlePinTimer]);
 
   const handleMapError = useCallback((msg: string) => {
     setMapErrorMsg(msg);
@@ -559,26 +647,29 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
   const handleUseCurrentGps = async () => {
     setLocating(true);
     setErrorMsg(null);
+    userInteractedRef.current = true;
+    clearIdlePinTimer();
     try {
       const coords = await getCurrentPositionWithIosFallback();
       const nextPin = { lat: coords.lat, lng: coords.lng };
       setPinPos(nextPin);
       setPanTarget(nextPin);
       setMapCenter(nextPin);
+      latestMapCenterRef.current = nextPin;
       setFallbackZoom(17);
     } catch (err: unknown) {
       const code = (err as { code?: number })?.code ?? 2;
       if (code === 1) {
         setErrorMsg(
           lang === 'th'
-            ? 'กรุณาอนุญาตการเข้าถึงตำแหน่งที่ตั้งในการตั้งค่า iPhone (Safari > ตำแหน่งที่ตั้ง) หรือแตะ/ลากหมุดบนแผนที่ได้ทันที'
-            : 'Location permission denied. Enable Safari Location in iOS Settings, or tap/drag the pin directly on the map.'
+            ? 'กรุณาอนุญาตการเข้าถึงตำแหน่งที่ตั้งในการตั้งค่า iPhone (Safari > ตำแหน่งที่ตั้ง) หรือเลื่อนแผนที่เพื่อปักหมุดได้ทันที'
+            : 'Location permission denied. Enable Safari Location in iOS Settings, or simply pan the map to pin automatically.'
         );
       } else {
         setErrorMsg(
           lang === 'th'
-            ? 'ไม่สามารถจับตำแหน่ง GPS ปัจจุบันได้ กรุณาแตะหรือเลื่อนแผนที่แล้วกด "ปักหมุดตรงกลาง"'
-            : 'Unable to lock current GPS. Tap the map or pan and press "Pin Center".'
+            ? 'ไม่สามารถจับตำแหน่ง GPS ปัจจุบันได้ กรุณาเลื่อนแผนที่ไปยังจุดส่ง เคอร์เซอร์หยุดตรงไหนระบบจะปักหมุดให้ทันที'
+            : 'Unable to lock current GPS. Pan the map to your spot—stopping places the pin automatically.'
         );
       }
     } finally {
@@ -587,12 +678,9 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
   };
 
   const handlePinMapCenter = () => {
-    const nextPin = {
-      lat: Number(mapCenter.lat.toFixed(6)),
-      lng: Number(mapCenter.lng.toFixed(6)),
-    };
-    setPinPos(nextPin);
-    setErrorMsg(null);
+    userInteractedRef.current = true;
+    clearIdlePinTimer();
+    commitAutoPinAt(mapCenter);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -735,7 +823,15 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
 
             <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative">
               {usingGoogleMaps ? (
-                <div className="w-full h-60 sm:h-64 relative">
+                <div
+                  className="w-full h-60 sm:h-64 relative"
+                  onPointerDown={() => {
+                    userInteractedRef.current = true;
+                  }}
+                  onWheel={() => {
+                    userInteractedRef.current = true;
+                  }}
+                >
                   <APIProvider
                     apiKey={MAPS_API_KEY}
                     libraries={['marker']}
@@ -752,21 +848,56 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                       mapTypeControl={false}
                       fullscreenControl={false}
                       internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+                      onDragstart={() => {
+                        userInteractedRef.current = true;
+                        setIsMapMoving(true);
+                        clearIdlePinTimer();
+                      }}
                       onCameraChanged={(ev) => {
                         const c = ev.detail?.center;
                         if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) {
-                          setMapCenter({ lat: c.lat, lng: c.lng });
+                          const nextCenter = { lat: c.lat, lng: c.lng };
+                          latestMapCenterRef.current = nextCenter;
+                          setMapCenter(nextCenter);
+                          if (userInteractedRef.current) {
+                            setIsMapMoving(true);
+                            clearIdlePinTimer();
+                            idlePinTimerRef.current = window.setTimeout(() => {
+                              setIsMapMoving(false);
+                              if (userInteractedRef.current) {
+                                commitAutoPinAt(latestMapCenterRef.current);
+                              }
+                            }, 180);
+                          }
                         }
+                      }}
+                      onIdle={(ev) => {
+                        clearIdlePinTimer();
+                        setIsMapMoving(false);
+                        if (!userInteractedRef.current) return;
+                        const c = ev.map?.getCenter?.();
+                        const target =
+                          c && Number.isFinite(c.lat()) && Number.isFinite(c.lng())
+                            ? { lat: c.lat(), lng: c.lng() }
+                            : latestMapCenterRef.current;
+                        latestMapCenterRef.current = target;
+                        setMapCenter(target);
+                        commitAutoPinAt(target);
                       }}
                       onClick={(ev) => {
                         const latLng = ev.detail?.latLng;
                         if (latLng) {
+                          userInteractedRef.current = true;
+                          clearIdlePinTimer();
                           const nextCoords = {
                             lat: Number(latLng.lat.toFixed(6)),
                             lng: Number(latLng.lng.toFixed(6)),
                           };
                           setPinPos(nextCoords);
                           setMapCenter(nextCoords);
+                          latestMapCenterRef.current = nextCoords;
+                          setPanTarget(nextCoords);
+                          setErrorMsg(null);
                         }
                       }}
                       className="w-full h-full"
@@ -784,6 +915,7 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                           onDrag={(ev) => {
                             const literal = extractLatLngLiteral(ev.latLng);
                             if (literal) {
+                              userInteractedRef.current = true;
                               setPinPos({
                                 lat: Number(literal.lat.toFixed(6)),
                                 lng: Number(literal.lng.toFixed(6)),
@@ -793,12 +925,16 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                           onDragEnd={(ev) => {
                             const literal = extractLatLngLiteral(ev.latLng);
                             if (literal) {
+                              userInteractedRef.current = true;
+                              clearIdlePinTimer();
                               const nextCoords = {
                                 lat: Number(literal.lat.toFixed(6)),
                                 lng: Number(literal.lng.toFixed(6)),
                               };
                               setPinPos(nextCoords);
                               setMapCenter(nextCoords);
+                              latestMapCenterRef.current = nextCoords;
+                              setPanTarget(nextCoords);
                             }
                           }}
                         >
@@ -813,11 +949,26 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                     </GoogleMap>
                   </APIProvider>
 
-                  {/* Center Crosshair Guide on Google Map */}
+                  {/* Center Crosshair Guide on Google Map (Auto-pins on stop) */}
                   <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
-                    <div className="relative flex items-center justify-center">
-                      <div className="w-7 h-7 rounded-full border-2 border-orange-500/65 bg-white/25" />
-                      <div className="absolute w-1.5 h-1.5 rounded-full bg-orange-600" />
+                    <div
+                      className={`relative flex flex-col items-center justify-center transition-transform duration-150 ${
+                        isMapMoving ? '-translate-y-1.5 scale-110' : 'translate-y-0 scale-100'
+                      }`}
+                    >
+                      {isMapMoving && (
+                        <span className="absolute -top-7 px-2 py-0.5 rounded-full bg-slate-900/85 text-white text-[10px] font-bold whitespace-nowrap shadow">
+                          {lang === 'th' ? 'ปล่อยเพื่อปักหมุดตรงนี้' : 'Stop to pin here'}
+                        </span>
+                      )}
+                      <div className="relative flex items-center justify-center">
+                        <div
+                          className={`w-7 h-7 rounded-full border-2 bg-white/30 transition-colors ${
+                            isMapMoving ? 'border-orange-600' : 'border-orange-500/70'
+                          }`}
+                        />
+                        <div className="absolute w-1.5 h-1.5 rounded-full bg-orange-600" />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -827,9 +978,15 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                   zoom={fallbackZoom}
                   pinPos={pinPos}
                   lang={lang}
-                  onCenterChange={setMapCenter}
+                  onCenterChange={(nextC) => {
+                    userInteractedRef.current = true;
+                    latestMapCenterRef.current = nextC;
+                    setMapCenter(nextC);
+                  }}
                   onZoomChange={setFallbackZoom}
+                  onMovingChange={setIsMapMoving}
                   onPinChange={(nextPin) => {
+                    userInteractedRef.current = true;
                     setPinPos(nextPin);
                     setErrorMsg(null);
                   }}
@@ -838,13 +995,9 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
 
               <div className="px-3 py-2 bg-white border-t border-slate-200 text-[11px] text-slate-600 flex flex-wrap items-center justify-between gap-2">
                 <span className="font-medium">
-                  {pinPos
-                    ? lang === 'th'
-                      ? 'แตะแผนที่ ลากหมุดสีส้ม หรือเลื่อนแผนที่แล้วกด "ปักหมุดตรงกลาง" เพื่อย้ายจุดได้ทันที'
-                      : 'Tap map, drag the orange pin, or pan & press "Pin Center" to move'
-                    : lang === 'th'
-                    ? 'แตะลงบนแผนที่หรือกด "ปักหมุดตรงกลาง" เพื่อวางหมุดจัดส่ง'
-                    : 'Tap anywhere on the map or press "Pin Center" to place your pin'}
+                  {lang === 'th'
+                    ? 'เลื่อนแผนที่เพื่อวางตำแหน่ง — เคอร์เซอร์หยุดตรงไหนระบบจะปักหมุดให้ทันทีโดยอัตโนมัติ'
+                    : 'Move the map freely — stopping automatically pins the crosshair location'}
                 </span>
                 <div className="flex items-center gap-2 shrink-0 ml-auto">
                   {pinPos ? (
@@ -854,7 +1007,11 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => setPinPos(null)}
+                        onClick={() => {
+                          clearIdlePinTimer();
+                          userInteractedRef.current = false;
+                          setPinPos(null);
+                        }}
                         title={lang === 'th' ? 'ล้างหมุด' : 'Clear pin'}
                         className="p-1 rounded-md bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-600 cursor-pointer"
                       >
@@ -863,7 +1020,7 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                     </>
                   ) : (
                     <span className="text-[11px] font-semibold text-amber-700">
-                      {lang === 'th' ? 'ยังไม่ปักหมุด' : 'No pin set'}
+                      {lang === 'th' ? 'เลื่อนแผนที่เพื่อปักหมุด' : 'Move map to pin'}
                     </span>
                   )}
                 </div>

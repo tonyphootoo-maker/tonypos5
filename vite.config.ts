@@ -11,6 +11,12 @@ export default defineConfig(({mode}) => {
     base: './',
     build: {
       target: ['es2020', 'safari14'],
+      rollupOptions: {
+        input: {
+          main: path.resolve(import.meta.dirname, 'index.html'),
+          rider: path.resolve(import.meta.dirname, 'rider.html'),
+        },
+      },
     },
     define: {
       'process.env.GOOGLE_MAPS_API_KEY': JSON.stringify(mapsApiKey),
@@ -72,6 +78,7 @@ export default defineConfig(({mode}) => {
         workbox: {
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,webmanifest}'],
+          ignoreURLParametersMatching: [/^utm_/, /^fbclid$/, /^store$/, /^mode$/],
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
@@ -125,7 +132,11 @@ export default defineConfig(({mode}) => {
         enforce: 'post' as const,
         transformIndexHtml: {
           order: 'post' as const,
-          handler(html: string) {
+          handler(html: string, ctx?: { filename?: string; path?: string }) {
+            const fileId = `${ctx?.filename || ''} ${ctx?.path || ''}`.toLowerCase();
+            if (fileId.includes('rider.html')) {
+              return html.replace(/<link\s+rel=["']manifest["'][^>]*manifest\.webmanifest["'][^>]*>\s*/gi, '');
+            }
             return html.replace(/<link\s+rel=["']manifest["'][^>]*>\s*/gi, '');
           },
         },

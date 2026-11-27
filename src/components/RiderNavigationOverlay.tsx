@@ -144,13 +144,13 @@ const ActiveRouteController: React.FC<ActiveRouteControllerProps> = ({
     }
   }, [apiStatus, lang, onFatalMapError]);
 
-  // Smoothly pan camera when following live Rider GPS
+  // Smoothly pan camera when following live Rider GPS at turn-by-turn street zoom
   useEffect(() => {
     if (!map || !followRider || !riderPosition) return;
     map.panTo(riderPosition);
     const currentZoom = map.getZoom() ?? 15;
-    if (currentZoom < 15) {
-      map.setZoom(16);
+    if (currentZoom < 17) {
+      map.setZoom(17);
     }
   }, [map, followRider, riderPosition]);
 
@@ -225,8 +225,14 @@ const ActiveRouteController: React.FC<ActiveRouteControllerProps> = ({
           polylinesRef.current = newPolylines;
         }
 
-        if (primaryRoute.viewport && !hasFitInitialBoundsRef.current) {
+        if (primaryRoute.viewport && !hasFitInitialBoundsRef.current && !riderPosition) {
           map.fitBounds(primaryRoute.viewport, { top: 130, right: 24, bottom: 90, left: 24 });
+          hasFitInitialBoundsRef.current = true;
+        } else if (followRider && riderPosition && !hasFitInitialBoundsRef.current) {
+          map.panTo(riderPosition);
+          if ((map.getZoom() ?? 15) < 17) {
+            map.setZoom(17);
+          }
           hasFitInitialBoundsRef.current = true;
         }
 
@@ -726,7 +732,7 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
         )}
 
         {/* Floating Map Action Controls */}
-        <div className="absolute right-3 bottom-3 z-10 flex flex-col gap-2">
+        <div className="absolute right-3 bottom-3 z-10 flex flex-col items-end gap-2">
           <button
             type="button"
             onClick={handleRecenter}
@@ -753,10 +759,11 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
             href={externalMapsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            title={lang === 'th' ? 'เปิดในแอป Google Maps' : 'Open in Google Maps App'}
-            className="w-11 h-11 rounded-2xl bg-slate-900/95 hover:bg-slate-800 border border-slate-700 text-orange-400 shadow-lg flex items-center justify-center"
+            title={lang === 'th' ? 'เริ่มนำทางด้วยแอป Google Maps' : 'Start Google Maps Turn-by-Turn'}
+            className="min-h-[44px] px-3.5 py-2 rounded-2xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs shadow-lg flex items-center gap-1.5"
           >
-            <ExternalLink className="w-5 h-5" />
+            <Navigation className="w-4 h-4" />
+            <span>{lang === 'th' ? 'นำทาง Google Maps' : 'Start Google Maps'}</span>
           </a>
         </div>
       </div>

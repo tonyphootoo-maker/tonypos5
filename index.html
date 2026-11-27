@@ -34,8 +34,20 @@
         if (cleanPath === '/rider' || cleanPath.endsWith('/rider')) {
           var prefixR = cleanPath.slice(0, cleanPath.length - '/rider'.length) || '';
           var paramsR = new URLSearchParams(window.location.search || '');
-          if (!paramsR.get('mode')) paramsR.set('mode', 'rider');
-          window.location.replace(window.location.origin + prefixR + '/?' + paramsR.toString() + window.location.hash);
+          paramsR.delete('mode');
+          var qsR = paramsR.toString();
+          window.location.replace(window.location.origin + prefixR + '/rider.html' + (qsR ? '?' + qsR : '') + window.location.hash);
+          return;
+        }
+        var earlyParams = new URLSearchParams(window.location.search || '');
+        var earlyMode = (earlyParams.get('mode') || '').toLowerCase();
+        var earlyHashLower = (window.location.hash || '').toLowerCase();
+        if (earlyMode === 'rider' || earlyHashLower.indexOf('mode=rider') !== -1) {
+          var cleanRoot = cleanPath.replace(/\/index\.html$/i, '');
+          var prefixRoot = cleanRoot === '' ? '' : cleanRoot;
+          earlyParams.delete('mode');
+          var qsRoot = earlyParams.toString();
+          window.location.replace(window.location.origin + prefixRoot + '/rider.html' + (qsRoot ? '?' + qsRoot : '') + window.location.hash);
           return;
         }
         if (!path.endsWith('/') && !path.split('/').pop().includes('.')) {
@@ -51,6 +63,7 @@
           mode === 'rider' ||
           pathLower === '/rider' ||
           pathLower.endsWith('/rider') ||
+          pathLower.endsWith('/rider.html') ||
           hashLower.indexOf('mode=rider') !== -1;
         var isOrder =
           mode === 'order' ||

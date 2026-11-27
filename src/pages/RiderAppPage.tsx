@@ -26,7 +26,11 @@ import {
   updateOnlineOrderByRider,
 } from '../data/onlineDb';
 import { formatMoney } from '../engine/calculations';
-import { buildOnlineOrderNumberingMap, toDateSafe } from '../engine/onlineOrdering';
+import {
+  buildExternalGoogleMapsUrl,
+  buildOnlineOrderNumberingMap,
+  toDateSafe,
+} from '../engine/onlineOrdering';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { OfflineIndicator } from '../components/OfflineIndicator';
 import { RiderNavigationOverlay } from '../components/RiderNavigationOverlay';
@@ -71,7 +75,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     document.title = lang === 'th' ? "Tony's Kit Rider - งานจัดส่ง" : "Tony's Kit Rider - Delivery Dispatch";
 
     const appleTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-    if (appleTitle) appleTitle.setAttribute('content', "Tony's Kit Rider");
+    if (appleTitle) appleTitle.setAttribute('content', 'TK Rider');
+
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) themeMeta.setAttribute('content', '#0f172a');
 
     const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
     if (appleIcon) appleIcon.setAttribute('href', './rider-apple-touch-icon.png');
@@ -445,31 +452,45 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                 {order.status !== 'completed' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                     {order.status !== 'out_for_delivery' ? (
-                      <button
-                        type="button"
-                        disabled={isBusy}
-                        onClick={() => {
+                      <a
+                        href={buildExternalGoogleMapsUrl(order)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => {
+                          if (isBusy) {
+                            e.preventDefault();
+                            return;
+                          }
                           setActiveNavOrderId(order.id);
                           void handleStartDelivery(order);
                         }}
-                        className="min-h-[46px] px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        aria-disabled={isBusy}
+                        className={`min-h-[46px] px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer ${
+                          isBusy ? 'opacity-60 pointer-events-none' : ''
+                        }`}
                       >
                         <NavigationIcon className="w-4 h-4" />
                         <span>
                           {lang === 'th'
-                            ? 'รับอาหาร & เปิดแผนที่นำทาง'
-                            : 'Start Delivery & Open Maps'}
+                            ? 'รับอาหาร & เริ่มนำทางอัตโนมัติ'
+                            : 'Start Delivery & Navigate'}
                         </span>
-                      </button>
+                      </a>
                     ) : (
-                      <button
-                        type="button"
+                      <a
+                        href={buildExternalGoogleMapsUrl(order)}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         onClick={() => setActiveNavOrderId(order.id)}
                         className="min-h-[46px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <NavigationIcon className="w-4 h-4 text-orange-400" />
-                        <span>{lang === 'th' ? 'เปิดแผนที่นำทาง (Google Maps)' : 'Open Google Maps Navigation'}</span>
-                      </button>
+                        <span>
+                          {lang === 'th'
+                            ? 'เปิดแผนที่นำทาง (Google Maps)'
+                            : 'Open Google Maps Navigation'}
+                        </span>
+                      </a>
                     )}
 
                     {confirmDeliverId === order.id ? (

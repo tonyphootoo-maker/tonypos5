@@ -29,6 +29,7 @@ export function usePWAInstall() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isAndroid, setIsAndroid] = useState(false);
+  const [isInAppBrowser, setIsInAppBrowser] = useState(false);
 
   useEffect(() => {
     const checkStandalone = () => {
@@ -49,9 +50,11 @@ export function usePWAInstall() {
       /iphone|ipad|ipod/.test(userAgent) ||
       (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
     const isAndroidDevice = /android/.test(userAgent);
+    const inApp = /\bline\/|fban|fbav|instagram|micromessenger/.test(userAgent);
 
     setIsIOS(isIOSDevice);
     setIsAndroid(isAndroidDevice);
+    setIsInAppBrowser(inApp);
 
     const handlePromptUpdate = (prompt: BeforeInstallPromptEvent | null) => {
       setDeferredPrompt(prompt);
@@ -104,6 +107,7 @@ export function usePWAInstall() {
     isInstalled,
     isIOS,
     isAndroid,
+    isInAppBrowser,
     install,
   };
 }
