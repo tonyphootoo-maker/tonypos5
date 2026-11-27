@@ -19,8 +19,10 @@ import {
   isOnlineOrderInLocalPeriod,
   isOnlineOrderInRiderZone,
   isOnlineOrderPendingAlert,
+  latLngToMercatorPixel,
   matchesOnlineManagerStatusFilter,
   matchesOnlineOrderSearch,
+  mercatorPixelToLatLng,
   ONLINE_CUSTOMER_CANCEL_WINDOW_MS,
   parseFirestoreRestDocument,
   resolveAppMode,
@@ -30,11 +32,14 @@ import {
 } from '../onlineOrdering';
 import {
   deleteSavedCustomerAddress,
+  deleteSavedCustomerFavoriteItem,
   loadCustomerFavoriteDishIds,
   loadSavedCustomerAddresses,
+  loadSavedCustomerFavoriteItems,
   setDefaultCustomerAddress,
   toggleCustomerFavoriteDishId,
   upsertSavedCustomerAddress,
+  upsertSavedCustomerFavoriteItem,
 } from '../../data/onlineDb';
 import { buildPeriodPnl } from '../calculations';
 import { convertDailySummariesToSalesRecords } from '../../costing/services/firebaseSyncService';
@@ -1052,5 +1057,102 @@ describe('Online Ordering Engine', () => {
       }
     }
   });
+
+  it('persists, edits, and deletes customized customer favorite items with selected options per store', () => {
+    const memStorage = new Map<string, string>();
+    const prevStorage = (globalThis as unknown as { localStorage?: Storage }).localStorage;
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k: string) => memStorage.get(k) ?? null,
+        setItem: (k: string, v: string) => {
+          memStorage.set(k, v);
+        },
+        removeItem: (k: string) => {
+          memStorage.delete(k);
+        },
+        clear: () => {
+          memStorage.clear();
+        },
+      },
+    });
+
+    try {
+      expect(loadSavedCustomerFavoriteItems('store_a')).toEqual([]);
+
+      const saved1 = upsertSavedCustomerFavoriteItem({
+        storeId: 'store_a',
+        dishId: 'dish_kapao',
+        variantId: 'var_special',
+        selectedOptions: {
+          grp_egg: { opt_fried_egg: 1, opt_ignored_zero: 0 },
+          grp_spice: { opt_medium_spicy: 1 },
+        },
+        notes: 'ไม่ใส่ถั่วฝักยาว',
+      });
+      expect(saved1).toHaveLength(1);
+      const favId = saved1[0].id;
+      expect(saved1[0].variantId).toBe('var_special');
+      expect(saved1[0].selectedOptions).toEqual({
+        grp_egg: { opt_fried_egg: 1 },
+        grp_spice: { opt_medium_spicy: 1 },
+      });
+      expect(saved1[0].notes).toBe('ไม่ใส่ถั่วฝักยาว');
+      expect(loadCustomerFavoriteDishIds('store_a')).toContain('dish_kapao');
+      expect(loadSavedCustomerFavoriteItems('store_b')).toEqual([]);
+
+      // Edit existing favorite in place
+      const updated = upsertSavedCustomerFavoriteItem({
+        id: favId,
+        storeId: 'store_a',
+        dishId: 'dish_kapao',
+        variantId: 'var_normal',
+        selectedOptions: {
+          grp_egg: { opt_omelette: 2 },
+          grp_spice: { opt_extra_spicy: 1 },
+        },
+        notes: 'แยกข้าว',
+      });
+      expect(updated).toHaveLength(1);
+      expect(updated[0].id).toBe(favId);
+      expect(updated[0].variantId).toBe('var_normal');
+      expect(updated[0].selectedOptions).toEqual({
+        grp_egg: { opt_omelette: 2 },
+        grp_spice: { opt_extra_spicy: 1 },
+      });
+      expect(updated[0].notes).toBe('แยกข้าว');
+
+      // Delete customized favorite
+      const afterDelete = deleteSavedCustomerFavoriteItem(favId, 'store_a');
+      expect(afterDelete).toEqual([]);
+    } finally {
+      if (prevStorage === undefined) {
+        delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
+      } else {
+        Object.defineProperty(globalThis, 'localStorage', {
+          configurable: true,
+          value: prevStorage,
+        });
+      }
+    }
+  });
+
+  it('round-trips Bangkok coordinates accurately through Web Mercator projection helpers', () => {
+    const bangkokLat = 13.756331;
+    const bangkokLng = 100.501762;
+    for (const zoom of [14, 17, 19]) {
+      const px = latLngToMercatorPixel(bangkokLat, bangkokLng, zoom);
+      const unprojected = mercatorPixelToLatLng(px.x, px.y, zoom);
+      expect(unprojected.lat).toBeCloseTo(bangkokLat, 5);
+      expect(unprojected.lng).toBeCloseTo(bangkokLng, 5);
+    }
+
+    // Shifting East (+x) increases longitude; shifting South (+y) decreases latitude
+    const centerPx = latLngToMercatorPixel(bangkokLat, bangkokLng, 17);
+    const eastSouth = mercatorPixelToLatLng(centerPx.x + 120, centerPx.y + 80, 17);
+    expect(eastSouth.lng).toBeGreaterThan(bangkokLng);
+    expect(eastSouth.lat).toBeLessThan(bangkokLat);
+  });
 });
+
 

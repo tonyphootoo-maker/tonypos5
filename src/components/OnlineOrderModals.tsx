@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Clock,
   Truck,
@@ -28,51 +28,51 @@ export const ONLINE_STATUS_META: Record<
   pending: {
     th: 'รอรับออเดอร์',
     en: 'Pending',
-    textCls: 'text-amber-700',
-    dotCls: 'bg-amber-500',
-    surfaceCls: 'bg-amber-50 text-amber-800 border-amber-200',
+    textCls: 'text-amber-800',
+    dotCls: 'bg-amber-600',
+    surfaceCls: 'bg-amber-100 text-amber-950 border-amber-400',
   },
   accepted: {
-    th: 'รับออเดอร์แล้ว',
-    en: 'Accepted',
-    textCls: 'text-sky-700',
-    dotCls: 'bg-sky-500',
-    surfaceCls: 'bg-sky-50 text-sky-800 border-sky-200',
+    th: 'กำลังทำอาหาร',
+    en: 'Cooking',
+    textCls: 'text-orange-700',
+    dotCls: 'bg-orange-600',
+    surfaceCls: 'bg-orange-100 text-orange-950 border-orange-400',
   },
   preparing: {
     th: 'กำลังทำอาหาร',
-    en: 'Preparing',
+    en: 'Cooking',
     textCls: 'text-orange-700',
-    dotCls: 'bg-orange-500',
-    surfaceCls: 'bg-orange-50 text-orange-800 border-orange-200',
+    dotCls: 'bg-orange-600',
+    surfaceCls: 'bg-orange-100 text-orange-950 border-orange-400',
   },
   ready_for_pickup: {
-    th: 'พร้อมรับ / รอไรเดอร์',
-    en: 'Ready',
-    textCls: 'text-indigo-700',
-    dotCls: 'bg-indigo-500',
-    surfaceCls: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+    th: 'กำลังไปส่ง',
+    en: 'On The Way',
+    textCls: 'text-teal-800',
+    dotCls: 'bg-teal-600',
+    surfaceCls: 'bg-teal-100 text-teal-950 border-teal-500',
   },
   out_for_delivery: {
     th: 'กำลังจัดส่ง',
     en: 'Out for Delivery',
-    textCls: 'text-teal-700',
-    dotCls: 'bg-teal-500',
-    surfaceCls: 'bg-teal-50 text-teal-800 border-teal-200',
+    textCls: 'text-teal-800',
+    dotCls: 'bg-teal-600',
+    surfaceCls: 'bg-teal-100 text-teal-950 border-teal-500',
   },
   completed: {
     th: 'สำเร็จแล้ว',
     en: 'Completed',
-    textCls: 'text-emerald-700',
-    dotCls: 'bg-emerald-500',
-    surfaceCls: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    textCls: 'text-emerald-800',
+    dotCls: 'bg-emerald-600',
+    surfaceCls: 'bg-emerald-100 text-emerald-950 border-emerald-400',
   },
   cancelled: {
     th: 'ยกเลิกแล้ว',
     en: 'Cancelled',
-    textCls: 'text-rose-700',
-    dotCls: 'bg-rose-500',
-    surfaceCls: 'bg-rose-50 text-rose-800 border-rose-200',
+    textCls: 'text-rose-800',
+    dotCls: 'bg-rose-600',
+    surfaceCls: 'bg-rose-100 text-rose-950 border-rose-400',
   },
 };
 
@@ -132,9 +132,10 @@ export const OnlineOrderDetailModal: React.FC<DetailModalProps> = ({
                 {displayIds?.displayNumber || order.orderNumber}
               </h3>
               <span
-                className={`text-xs font-bold px-2 py-0.5 rounded-md border ${statusMeta.surfaceCls}`}
+                className={`inline-flex items-center gap-1.5 text-xs font-black px-2.5 py-1 rounded-lg border-2 shadow-2xs ${statusMeta.surfaceCls}`}
               >
-                {statusMeta[lang]}
+                <span className={`w-2 h-2 rounded-full shrink-0 ${statusMeta.dotCls}`} />
+                <span>{statusMeta[lang]}</span>
               </span>
             </div>
             <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
@@ -390,6 +391,7 @@ interface ReceiptModalProps {
   displayIds?: OnlineOrderDisplayIds;
   settings: SettingsDoc;
   lang: Language;
+  autoPrint?: boolean;
   onClose: () => void;
 }
 
@@ -398,9 +400,22 @@ export const OnlineOrderReceiptModal: React.FC<ReceiptModalProps> = ({
   displayIds,
   settings,
   lang,
+  autoPrint = false,
   onClose,
 }) => {
   const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>('80mm');
+
+  useEffect(() => {
+    if (!autoPrint) return;
+    const timer = window.setTimeout(() => {
+      try {
+        window.print();
+      } catch {
+        // Ignore print failures in restricted embedded environments
+      }
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [autoPrint, order.id]);
 
   return (
     <div

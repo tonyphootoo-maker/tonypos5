@@ -1007,4 +1007,46 @@ export function playIncomingOrderChime(): void {
   }
 }
 
+const MAX_MERCATOR_LAT = 85.05112878;
+
+/**
+ * Projects a WGS84 lat/lng coordinate to global Web Mercator pixel coordinates at the given zoom level.
+ */
+export function latLngToMercatorPixel(
+  lat: number,
+  lng: number,
+  zoom: number,
+  tileSize: number = 256
+): { x: number; y: number } {
+  const clampedLat = Math.max(-MAX_MERCATOR_LAT, Math.min(MAX_MERCATOR_LAT, lat));
+  const clampedZoom = Math.max(0, Math.min(22, zoom));
+  const worldSize = tileSize * Math.pow(2, clampedZoom);
+  const x = ((lng + 180) / 360) * worldSize;
+  const sinLat = Math.sin((clampedLat * Math.PI) / 180);
+  const y =
+    (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * worldSize;
+  return { x, y };
+}
+
+/**
+ * Unprojects global Web Mercator pixel coordinates back into WGS84 lat/lng rounded to 6 decimals.
+ */
+export function mercatorPixelToLatLng(
+  x: number,
+  y: number,
+  zoom: number,
+  tileSize: number = 256
+): LatLngLiteralSimple {
+  const clampedZoom = Math.max(0, Math.min(22, zoom));
+  const worldSize = tileSize * Math.pow(2, clampedZoom);
+  const rawLng = (x / worldSize) * 360 - 180;
+  const wrappedLng = ((((rawLng + 180) % 360) + 360) % 360) - 180;
+  const n = Math.PI - (2 * Math.PI * Math.max(0, Math.min(worldSize, y))) / worldSize;
+  const rawLat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  const clampedLat = Math.max(-MAX_MERCATOR_LAT, Math.min(MAX_MERCATOR_LAT, rawLat));
+  return {
+    lat: Number(clampedLat.toFixed(6)),
+    lng: Number(wrappedLng.toFixed(6)),
+  };
+}
 

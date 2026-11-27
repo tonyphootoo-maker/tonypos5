@@ -38,6 +38,7 @@ import {
 import { Navigation, AppPage } from './components/Navigation';
 import { OnlineOrderFloatingAlert } from './components/OnlineOrderFloatingAlert';
 import { OnlineOrderCancelledAlert } from './components/OnlineOrderCancelledAlert';
+import { OnlineOrderReceiptModal } from './components/OnlineOrderModals';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { LanguageToggle } from './components/LanguageToggle';
@@ -252,6 +253,7 @@ export default function App() {
   const [acceptingOnlineOrderId, setAcceptingOnlineOrderId] = useState<string | null>(null);
   const [floatingAlertError, setFloatingAlertError] = useState<string | null>(null);
   const [cancelledOrderAlerts, setCancelledOrderAlerts] = useState<OnlineOrderDoc[]>([]);
+  const [autoPrintOnlineOrder, setAutoPrintOnlineOrder] = useState<OnlineOrderDoc | null>(null);
   const onlineSoundEnabledRef = useRef(onlineSoundEnabled);
   onlineSoundEnabledRef.current = onlineSoundEnabled;
   const initialOnlineOrdersLoadedRef = useRef(false);
@@ -517,6 +519,7 @@ export default function App() {
     setFloatingAlertError(null);
     try {
       await updateOnlineOrderByOwner(order.id, 'accepted');
+      setAutoPrintOnlineOrder({ ...order, status: 'accepted' });
     } catch (err) {
       setFloatingAlertError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -879,6 +882,18 @@ export default function App() {
         }
         onDismissAll={() => setCancelledOrderAlerts([])}
       />
+
+      {/* Immediate Thermal Receipt Print Modal upon Accepting Online Order */}
+      {autoPrintOnlineOrder && settings && (
+        <OnlineOrderReceiptModal
+          order={autoPrintOnlineOrder}
+          displayIds={onlineOrderNumberingMap.get(autoPrintOnlineOrder.id)}
+          settings={settings}
+          lang={lang}
+          autoPrint={true}
+          onClose={() => setAutoPrintOnlineOrder(null)}
+        />
+      )}
 
       {/* Cash Shift Modal */}
       {isShiftModalOpen && (

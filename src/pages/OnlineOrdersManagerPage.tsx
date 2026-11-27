@@ -119,6 +119,7 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [printingOrder, setPrintingOrder] = useState<OnlineOrderDoc | null>(null);
+  const [printingOrderAutoPrint, setPrintingOrderAutoPrint] = useState(false);
   const [deleteTargetOrder, setDeleteTargetOrder] = useState<OnlineOrderDoc | null>(null);
 
   const initialOrdersLoadedRef = useRef(false);
@@ -347,6 +348,10 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
             }
           : o
       );
+      if (order.status === 'pending' && nextStatus === 'accepted') {
+        setPrintingOrderAutoPrint(true);
+        setPrintingOrder({ ...order, status: 'accepted' });
+      }
       if (
         selectedOrderId === order.id &&
         (nextStatus === 'ready_for_pickup' ||
@@ -865,9 +870,9 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                         {displayIds?.displayNumber || order.orderNumber}
                       </span>
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-bold ${statusMeta.surfaceCls}`}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-black shadow-2xs ${statusMeta.surfaceCls}`}
                       >
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dotCls}`} />
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${statusMeta.dotCls}`} />
                         <span>{statusMeta[lang]}</span>
                       </span>
                     </div>
@@ -1025,7 +1030,10 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
           lang={lang}
           onClose={() => setSelectedOrderId(null)}
           onStatusChange={handleStatusChange}
-          onPrint={(ord) => setPrintingOrder(ord)}
+          onPrint={(ord) => {
+            setPrintingOrderAutoPrint(false);
+            setPrintingOrder(ord);
+          }}
           onDelete={(ord) => setDeleteTargetOrder(ord)}
         />
       )}
@@ -1037,7 +1045,11 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
           displayIds={printingOrderIds}
           settings={settings}
           lang={lang}
-          onClose={() => setPrintingOrder(null)}
+          autoPrint={printingOrderAutoPrint}
+          onClose={() => {
+            setPrintingOrder(null);
+            setPrintingOrderAutoPrint(false);
+          }}
         />
       )}
 

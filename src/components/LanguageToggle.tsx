@@ -7,6 +7,7 @@ interface LanguageToggleProps {
   lang?: Language;
   onToggleLang?: () => void;
   variant?: 'light' | 'dark' | 'header-accent';
+  compact?: boolean;
   className?: string;
 }
 
@@ -14,6 +15,7 @@ export const LanguageToggle: React.FC<LanguageToggleProps> = ({
   lang: propLang,
   onToggleLang: propOnToggleLang,
   variant = 'light',
+  compact = false,
   className = '',
 }) => {
   const { lang: ctxLang, setLang, toggleLang } = useLanguage();
@@ -35,6 +37,21 @@ export const LanguageToggle: React.FC<LanguageToggleProps> = ({
       toggleLang();
     }
   };
+
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={handleCycle}
+        title={activeLang === 'th' ? 'เปลี่ยนภาษา (TH / EN)' : 'Switch Language (TH / EN)'}
+        aria-label={activeLang === 'th' ? 'เปลี่ยนภาษาเป็นภาษาอังกฤษ' : 'Switch language to Thai'}
+        className={`min-h-[38px] px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs font-extrabold shadow-[0_2px_0_#e2e8f0] inline-flex items-center gap-1 cursor-pointer shrink-0 transition-colors ${className}`}
+      >
+        <Globe className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+        <span className="uppercase tracking-tight">{activeLang === 'th' ? 'TH' : 'EN'}</span>
+      </button>
+    );
+  }
 
   if (variant === 'dark') {
     return (

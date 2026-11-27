@@ -199,49 +199,20 @@ export const OnlineOrderFloatingAlert: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Ordered Items Preview */}
-          <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-40 overflow-y-auto">
-            {order.items.map((it, idx) => (
-              <div key={idx} className="px-3 py-2 flex justify-between gap-2 text-xs">
-                <div className="min-w-0">
-                  <div className="font-semibold text-slate-900">
-                    <span className="font-bold tabular-nums">{it.quantity}x</span> {it.dishName}
-                    {it.variantName && it.variantName !== 'Standard' && (
-                      <span className="text-slate-500 font-normal"> ({it.variantName})</span>
-                    )}
-                  </div>
-                  {it.options?.length > 0 && (
-                    <div className="text-[11px] text-slate-500 pl-4">
-                      +{' '}
-                      {it.options
-                        .map((op) =>
-                          op.quantity && op.quantity > 1
-                            ? `${op.choiceName} x${op.quantity}`
-                            : op.choiceName
-                        )
-                        .join(', ')}
-                    </div>
-                  )}
-                  {it.notes && (
-                    <div className="text-[11px] text-amber-700 pl-4">* {it.notes}</div>
-                  )}
-                </div>
-                <div className="font-bold text-slate-900 tabular-nums shrink-0">
-                  ฿{formatMoney(it.unitPrice * it.quantity)}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Total Summary */}
+          {/* Total Summary (Compact Card without inline food item list) */}
           <div className="flex items-center justify-between px-1 text-sm font-extrabold text-slate-900">
             <span>
               {lang === 'th' ? 'ยอดรวมสุทธิ' : 'Total'}
-              {order.deliveryFee > 0 && (
-                <span className="text-[11px] font-medium text-slate-500 ml-1.5">
-                  ({lang === 'th' ? 'รวมค่าส่ง' : 'incl. delivery'} ฿{formatMoney(order.deliveryFee)})
-                </span>
-              )}
+              <span className="text-[11px] font-semibold text-slate-500 ml-1.5 tabular-nums">
+                ({order.items.reduce((sum, item) => sum + (item.quantity || 1), 0)}{' '}
+                {lang === 'th' ? 'รายการ' : 'items'}
+                {order.deliveryFee > 0
+                  ? ` · ${lang === 'th' ? 'รวมค่าส่ง' : 'incl. delivery'} ฿${formatMoney(
+                      order.deliveryFee
+                    )}`
+                  : ''}
+                )
+              </span>
             </span>
             <span className="text-orange-600 text-base tabular-nums">
               ฿{formatMoney(order.totalAmount)}

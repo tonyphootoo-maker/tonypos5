@@ -24,6 +24,12 @@ import {
   Heart,
   Pencil,
   RotateCcw,
+  ArrowLeft,
+  Check,
+  Menu,
+  User,
+  History,
+  Info,
 } from 'lucide-react';
 import {
   Language,
@@ -42,21 +48,25 @@ import {
   cancelOnlineOrderByCustomer,
   createOnlineOrder,
   deleteSavedCustomerAddress,
+  deleteSavedCustomerFavoriteItem,
   fetchPublicStoreImage,
   fetchPublicStoreOnce,
   loadCustomerFavoriteDishIds,
   loadSavedCustomerAddresses,
+  loadSavedCustomerFavoriteItems,
   loadSavedCustomerInfo,
   loadTrackedCustomerOrderIds,
   resolveCustomerOrRiderSession,
   resolvePublicStoreId,
   saveCustomerInfo,
   SavedCustomerAddress,
+  SavedCustomerFavoriteItem,
   subscribeCustomerOrders,
   subscribeGuestOrdersByIds,
   subscribePublicStore,
   toggleCustomerFavoriteDishId,
   upsertSavedCustomerAddress,
+  upsertSavedCustomerFavoriteItem,
 } from '../data/onlineDb';
 import {
   formatMoney,
@@ -99,6 +109,8 @@ interface Props {
   onToggleLang?: () => void;
 }
 
+const STORE_LOGO_SRC = '/assets/aistudio/Logo-Ex_a8e2a318.png';
+
 const STATUS_BADGE: Record<
   OnlineOrderDoc['status'],
   { th: string; en: string; color: string }
@@ -131,18 +143,26 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   const [dishImages, setDishImages] = useState<Record<string, string>>({});
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
 
-  // Dish customization modal
+  // Dish customization modal & Favorite editing
   const [activeDish, setActiveDish] = useState<PublicDish | null>(null);
   const [selectedVariant, setSelectedVariant] = useState<PublicDishVariant | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<Record<string, Record<string, number>>>({});
   const [itemNote, setItemNote] = useState('');
   const [itemQty, setItemQty] = useState(1);
   const [optionValidationMsg, setOptionValidationMsg] = useState<string | null>(null);
+  const [editingFavoriteId, setEditingFavoriteId] = useState<string | null>(null);
+  const [favoriteSavedNotice, setFavoriteSavedNotice] = useState<string | null>(null);
 
-  // Cart & Checkout
+  // Cart, Checkout & 2-Minute Order Review Confirmation Window
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [isOrderReviewOpen, setIsOrderReviewOpen] = useState(false);
+  const [reviewSecondsLeft, setReviewSecondsLeft] = useState(120);
   const [isOrdersOpen, setIsOrdersOpen] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isCustomerProfileModalOpen, setIsCustomerProfileModalOpen] = useState(false);
+  const [isAboutStoreModalOpen, setIsAboutStoreModalOpen] = useState(false);
+  const [profileSavedNotice, setProfileSavedNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [locatingGps, setLocatingGps] = useState(false);
@@ -152,6 +172,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   const [cancelTickNowMs, setCancelTickNowMs] = useState<number>(() => Date.now());
 
   const [favoriteDishIds, setFavoriteDishIds] = useState<string[]>([]);
+  const [savedFavoriteItems, setSavedFavoriteItems] = useState<SavedCustomerFavoriteItem[]>([]);
   const [savedAddresses, setSavedAddresses] = useState<SavedCustomerAddress[]>(() =>
     loadSavedCustomerAddresses()
   );
@@ -255,6 +276,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         setStoreId(resolvedStoreId);
         setTrackedOrderIds(loadTrackedCustomerOrderIds(resolvedStoreId));
         setFavoriteDishIds(loadCustomerFavoriteDishIds(resolvedStoreId));
+        setSavedFavoriteItems(loadSavedCustomerFavoriteItems(resolvedStoreId));
 
         if (resolvedStoreId) {
           // Run active one-shot fetch (SDK + REST fallback) concurrently with real-time subscription
@@ -360,6 +382,14 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     return () => clearInterval(timer);
   }, [isOrdersOpen, customerOrders]);
 
+  useEffect(() => {
+    if (!isOrderReviewOpen || reviewSecondsLeft <= 0) return;
+    const timer = window.setInterval(() => {
+      setReviewSecondsLeft((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isOrderReviewOpen, reviewSecondsLeft]);
+
   // Load dish photos + store PromptPay QR photo lazily from publicStores/{storeId}/images
   useEffect(() => {
     if (!storeId || !store) return;
@@ -444,16 +474,112 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       });
   }, [store, selectedCategoryId, searchQuery, lang, categoryRankMap, favoriteDishIds]);
 
+  const resolvedSavedFavorites = useMemo(() => {
+    const dishesById = new Map((store?.dishes || []).map((d) => [d.id, d]));
+    const q = searchQuery.trim().toLowerCase();
+    const list: Array<{
+      fav: SavedCustomerFavoriteItem;
+      dish: PublicDish;
+      variant: PublicDishVariant;
+      flatOptions: OnlineOrderItemOption[];
+      unitPrice: number;
+    }> = [];
+
+    for (const fav of savedFavoriteItems) {
+      const dish = dishesById.get(fav.dishId);
+      if (!dish || !dish.variants || dish.variants.length === 0) continue;
+      if (q) {
+        const matchEn = dish.name.toLowerCase().includes(q);
+        const matchTh = (dish.nameTh || '').toLowerCase().includes(q);
+        const matchLoc = getLocalizedText(lang, dish.nameTh || dish.name, dish.name)
+          .toLowerCase()
+          .includes(q);
+        const matchNote = (fav.notes || '').toLowerCase().includes(q);
+        if (!matchEn && !matchTh && !matchLoc && !matchNote) continue;
+      }
+      const variant = dish.variants.find((v) => v.id === fav.variantId) || dish.variants[0];
+      const flatOptions: OnlineOrderItemOption[] = [];
+      let extra = 0;
+
+      for (const gId of dish.optionGroupIds || []) {
+        const grp = optionGroupMap.get(gId);
+        if (!grp) continue;
+        const chosenMap = fav.selectedOptions?.[gId] || {};
+        for (const [cId, rawQty] of Object.entries(chosenMap)) {
+          if (!rawQty || rawQty <= 0) continue;
+          const choice = grp.choices.find((c) => c.id === cId);
+          if (!choice) continue;
+          const allowQty = isOptionChoiceQuantityEnabled(choice);
+          const effQty = allowQty ? Math.max(1, Math.round(rawQty)) : 1;
+          const baseChoiceName = getLocalizedText(lang, choice.nameTh || choice.name, choice.name);
+          const linePrice = calculateOptionChoiceLinePrice(choice.price, effQty);
+          extra += linePrice;
+          flatOptions.push({
+            groupId: grp.id,
+            groupName: getLocalizedText(lang, grp.nameTh || grp.name, grp.name),
+            choiceId: choice.id,
+            choiceName: formatOptionChoiceDisplayName(baseChoiceName, effQty),
+            price: linePrice,
+            ...(allowQty ? { quantity: effQty } : {}),
+          });
+        }
+      }
+
+      list.push({
+        fav,
+        dish,
+        variant,
+        flatOptions,
+        unitPrice: Math.max(0, variant.price + extra),
+      });
+    }
+
+    return list;
+  }, [savedFavoriteItems, store?.dishes, optionGroupMap, lang, searchQuery]);
+
+  const savedFavoriteDishIdSet = useMemo(
+    () => new Set(savedFavoriteItems.map((f) => f.dishId)),
+    [savedFavoriteItems]
+  );
+
+  const bareFavoriteDishes = useMemo(() => {
+    if (selectedCategoryId !== 'favorites') return filteredDishes;
+    return filteredDishes.filter((d) => !savedFavoriteDishIdSet.has(d.id));
+  }, [filteredDishes, selectedCategoryId, savedFavoriteDishIdSet]);
+
+  const totalFavoritesCount = useMemo(() => {
+    const bareOnlyCount = favoriteDishIds.filter((id) => !savedFavoriteDishIdSet.has(id)).length;
+    return savedFavoriteItems.length + bareOnlyCount;
+  }, [savedFavoriteItems.length, favoriteDishIds, savedFavoriteDishIdSet]);
+
   const handleToggleFavoriteDish = (dishId: string) => {
     setFavoriteDishIds(toggleCustomerFavoriteDishId(dishId, storeId));
   };
 
-  const openDishModal = (dish: PublicDish) => {
-    const defaultVariant = dish.variants[0] || null;
+  const openDishModal = (dish: PublicDish, existingFavorite?: SavedCustomerFavoriteItem) => {
+    const defaultVariant =
+      (existingFavorite
+        ? dish.variants.find((v) => v.id === existingFavorite.variantId)
+        : null) ||
+      dish.variants[0] ||
+      null;
+
     const initOpts: Record<string, Record<string, number>> = {};
     for (const gId of dish.optionGroupIds || []) {
       const grp = optionGroupMap.get(gId);
-      if (grp && grp.minSelect > 0 && grp.choices.length > 0) {
+      if (!grp) continue;
+      if (existingFavorite?.selectedOptions?.[gId]) {
+        const favMap: Record<string, number> = {};
+        for (const [cId, qty] of Object.entries(existingFavorite.selectedOptions[gId])) {
+          const ch = grp.choices.find((c) => c.id === cId);
+          if (ch && qty > 0) {
+            favMap[cId] = isOptionChoiceQuantityEnabled(ch) ? Math.max(1, Math.round(qty)) : 1;
+          }
+        }
+        if (Object.keys(favMap).length > 0) {
+          initOpts[gId] = favMap;
+        }
+      } else if (grp.minSelect > 0 && grp.choices.length > 0) {
         const grpMap: Record<string, number> = {};
         grp.choices.slice(0, grp.minSelect).forEach((c) => {
           grpMap[c.id] = getOptionChoiceEffectiveQuantity(c);
@@ -461,12 +587,118 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         initOpts[gId] = grpMap;
       }
     }
+
     setActiveDish(dish);
     setSelectedVariant(defaultVariant);
     setSelectedOptions(initOpts);
-    setItemNote('');
+    setItemNote(existingFavorite?.notes || '');
     setItemQty(1);
     setOptionValidationMsg(null);
+    setEditingFavoriteId(existingFavorite?.id ?? null);
+    setFavoriteSavedNotice(null);
+  };
+
+  const handleSaveCurrentDishFavorite = () => {
+    if (!activeDish || !selectedVariant) return;
+    for (const gId of activeDish.optionGroupIds || []) {
+      const grp = optionGroupMap.get(gId);
+      if (!grp) continue;
+      const count = Object.values(selectedOptions[gId] || {}).filter((q) => q > 0).length;
+      if (count < grp.minSelect) {
+        const gLabel = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
+        setOptionValidationMsg(
+          lang === 'th'
+            ? `กรุณาเลือก "${gLabel}" อย่างน้อย ${grp.minSelect} รายการก่อนบันทึกรายการโปรด`
+            : `Please select at least ${grp.minSelect} for "${gLabel}" before saving favorite`
+        );
+        return;
+      }
+    }
+
+    const updated = upsertSavedCustomerFavoriteItem({
+      ...(editingFavoriteId ? { id: editingFavoriteId } : {}),
+      storeId,
+      dishId: activeDish.id,
+      variantId: selectedVariant.id,
+      selectedOptions,
+      notes: itemNote,
+    });
+    setSavedFavoriteItems(updated);
+    setFavoriteDishIds(loadCustomerFavoriteDishIds(storeId));
+    setOptionValidationMsg(null);
+    if (!editingFavoriteId && updated[0]) {
+      setEditingFavoriteId(updated[0].id);
+    }
+    setFavoriteSavedNotice(
+      editingFavoriteId
+        ? lang === 'th'
+          ? 'บันทึกการแก้ไขรายการโปรดแล้ว ✓'
+          : 'Favorite updated ✓'
+        : lang === 'th'
+        ? 'บันทึกลงรายการโปรดพร้อมตัวเลือกแล้ว ✓'
+        : 'Saved to favorites with options ✓'
+    );
+  };
+
+  const handleDeleteSavedFavorite = (fav: SavedCustomerFavoriteItem) => {
+    const next = deleteSavedCustomerFavoriteItem(fav.id, storeId);
+    setSavedFavoriteItems(next);
+  };
+
+  const handleAddSavedFavoriteToCart = (item: {
+    fav: SavedCustomerFavoriteItem;
+    dish: PublicDish;
+    variant: PublicDishVariant;
+    flatOptions: OnlineOrderItemOption[];
+    unitPrice: number;
+  }) => {
+    if (isStoreClosed) return;
+    // Verify required option groups are still satisfied
+    for (const gId of item.dish.optionGroupIds || []) {
+      const grp = optionGroupMap.get(gId);
+      if (!grp) continue;
+      const count = Object.values(item.fav.selectedOptions?.[gId] || {}).filter((q) => q > 0).length;
+      if (count < grp.minSelect) {
+        openDishModal(item.dish, item.fav);
+        return;
+      }
+    }
+
+    const dishLabel = getLocalizedText(lang, item.dish.nameTh || item.dish.name, item.dish.name);
+    const varLabel = getLocalizedText(
+      lang,
+      item.variant.nameTh || item.variant.name,
+      item.variant.name
+    );
+    const optionSig = item.flatOptions
+      .map((o) => `${o.choiceId}:${o.quantity ?? 1}`)
+      .sort()
+      .join(',');
+    const noteTrim = (item.fav.notes || '').trim();
+    const key = `${item.dish.id}::${item.variant.id}::${optionSig}::${noteTrim}`;
+
+    setCart((prev) => {
+      const idx = prev.findIndex((c) => c.key === key);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], quantity: copy[idx].quantity + 1 };
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          key,
+          dishId: item.dish.id,
+          dishName: dishLabel,
+          variantId: item.variant.id,
+          variantName: varLabel,
+          unitPrice: item.unitPrice,
+          quantity: 1,
+          ...(noteTrim ? { notes: noteTrim } : {}),
+          options: item.flatOptions,
+        },
+      ];
+    });
   };
 
   const toggleOptionChoice = (group: PublicOptionGroup, choice: PublicOptionChoice) => {
@@ -640,7 +872,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     );
   };
 
-  const handleSubmitOrder = async (e: React.FormEvent) => {
+  const handleProceedToOrderReview = (e: React.FormEvent) => {
     e.preventDefault();
     if (!store || !storeId || cart.length === 0) return;
 
@@ -661,21 +893,33 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       return;
     }
 
+    setSubmitError(null);
+    saveCustomerInfo({
+      customerName: trimmedName,
+      customerPhone: trimmedPhone,
+      deliveryAddress: trimmedAddr,
+      customerNote: customerNote.trim(),
+      orderMode,
+      paymentMethod,
+      deliveryLat,
+      deliveryLng,
+    });
+
+    setReviewSecondsLeft(120);
+    setIsOrderReviewOpen(true);
+  };
+
+  const handleConfirmAndSendOrder = async () => {
+    if (!store || !storeId || cart.length === 0 || reviewSecondsLeft <= 0) return;
+
+    const trimmedName = customerName.trim();
+    const trimmedPhone = customerPhone.trim();
+    const trimmedAddr = deliveryAddress.trim();
+
     setIsSubmitting(true);
     setSubmitError(null);
 
     try {
-      saveCustomerInfo({
-        customerName: trimmedName,
-        customerPhone: trimmedPhone,
-        deliveryAddress: trimmedAddr,
-        customerNote: customerNote.trim(),
-        orderMode,
-        paymentMethod,
-        deliveryLat,
-        deliveryLng,
-      });
-
       const items: OnlineOrderItem[] = cart.map((c) => ({
         dishId: c.dishId,
         dishName: c.dishName,
@@ -707,6 +951,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         prev.includes(createdOrder.id) ? prev : [createdOrder.id, ...prev]
       );
       setCart([]);
+      setIsOrderReviewOpen(false);
       setIsCheckoutOpen(false);
       setIsOrdersOpen(true);
     } catch (err) {
@@ -877,7 +1122,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     return (
       <div className="min-h-screen bg-[#FAF8F5] flex flex-col items-center justify-center p-6 text-slate-800 relative">
         <div className="absolute top-4 right-4">
-          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
+          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
         </div>
         <Loader2 className="w-8 h-8 animate-spin text-orange-600 mb-3" />
         <p className="text-sm font-bold">{lang === 'th' ? 'กำลังโหลดเมนูอาหาร...' : 'Loading storefront menu...'}</p>
@@ -889,7 +1134,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     return (
       <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-6 relative">
         <div className="absolute top-4 right-4">
-          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
+          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
         </div>
         <div className="max-w-md w-full bg-white rounded-3xl border border-rose-200 p-6 text-center space-y-4 shadow-sm">
           <AlertCircle className="w-10 h-10 text-rose-500 mx-auto" />
@@ -916,7 +1161,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     return (
       <div className="min-h-screen bg-[#FAF8F5] flex items-center justify-center p-6 relative">
         <div className="absolute top-4 right-4">
-          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
+          <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
         </div>
         <div className="max-w-md w-full bg-white rounded-3xl border border-slate-200 p-7 text-center space-y-3 shadow-sm">
           <Store className="w-12 h-12 text-orange-500 mx-auto" />
@@ -939,16 +1184,15 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     <div className="min-h-screen bg-[#FAF8F5] text-slate-900 pb-24">
       {/* Slim Mobile-First Store Header */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-orange-600 bg-gradient-to-br from-orange-500 to-red-600 text-white font-black text-lg flex items-center justify-center shrink-0">
-              {store.shopName.slice(0, 1).toUpperCase()}
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="font-extrabold text-base sm:text-lg text-slate-900 truncate">
-                  {store.shopName}
-                </h1>
+        <div className="max-w-5xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2.5">
+          <div className="min-w-0 flex items-center gap-2.5 sm:gap-3">
+            <img
+              src={STORE_LOGO_SRC}
+              alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-contain bg-white border border-orange-200 shadow-2xs shrink-0"
+            />
+            <div className="min-w-0 flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
                 <span
                   className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
                     isStoreClosed
@@ -966,26 +1210,27 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 </span>
               </div>
               <p className="text-xs text-slate-500 flex items-center gap-2 truncate">
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 shrink-0">
                   <Clock className="w-3 h-3 text-orange-500" />
                   ~{store.onlineEstimatedPrepMinutes || 20}{' '}
                   {lang === 'th' ? 'นาที' : 'mins'}
                 </span>
                 {store.shopPhone && (
-                  <span className="inline-flex items-center gap-1">
-                    <Phone className="w-3 h-3 text-slate-400" />
-                    {store.shopPhone}
+                  <span className="hidden xs:inline-flex sm:inline-flex items-center gap-1 truncate">
+                    <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span className="truncate">{store.shopPhone}</span>
                   </span>
                 )}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setIsOrdersOpen(true)}
-              className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              aria-label={lang === 'th' ? 'ติดตามออเดอร์ / ประวัติการซื้อ' : 'Track orders'}
+              className="min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <Receipt className="w-4 h-4 text-orange-600" />
               <span className="hidden sm:inline">
@@ -997,7 +1242,15 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 </span>
               )}
             </button>
-            <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} />
+            <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen(true)}
+              aria-label={lang === 'th' ? 'เปิดเมนูร้านค้า' : 'Open menu'}
+              className="min-h-[38px] w-[38px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 flex items-center justify-center cursor-pointer relative shrink-0"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
           </div>
         </div>
 
@@ -1043,7 +1296,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 }`}
               />
               <span>{lang === 'th' ? 'รายการโปรด' : 'Favorites'}</span>
-              {favoriteDishIds.length > 0 && (
+              {totalFavoritesCount > 0 && (
                 <span
                   className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold tabular-nums ${
                     selectedCategoryId === 'favorites'
@@ -1051,7 +1304,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                       : 'bg-white text-rose-600'
                   }`}
                 >
-                  {favoriteDishIds.length}
+                  {totalFavoritesCount}
                 </span>
               )}
             </button>
@@ -1087,21 +1340,126 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         </div>
       )}
 
-      {/* Main Dish Grid */}
-      <main className="max-w-5xl mx-auto px-4 py-4">
-        {filteredDishes.length === 0 ? (
-          <div className="py-16 text-center text-slate-500 text-sm">
-            {selectedCategoryId === 'favorites'
-              ? lang === 'th'
-                ? 'ยังไม่มีเมนูโปรด — กดรูปหัวใจบนเมนูที่ชอบเพื่อบันทึกไว้สั่งครั้งหน้า'
-                : 'No favorite dishes yet — tap the heart icon on any dish to save it here.'
-              : lang === 'th'
-              ? 'ไม่พบเมนูในหมวดหมู่นี้'
-              : 'No menu items match your search.'}
-          </div>
+      {/* Main Dish Grid + Customized Saved Favorites Section */}
+      <main className="max-w-5xl mx-auto px-4 py-4 space-y-5">
+        {selectedCategoryId === 'favorites' && resolvedSavedFavorites.length > 0 && (
+          <section className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-extrabold text-slate-700 flex items-center gap-1.5">
+                <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
+                <span>
+                  {lang === 'th'
+                    ? 'รายการโปรดที่บันทึกตัวเลือกไว้ (แก้ไขและสั่งซ้ำได้ทันที)'
+                    : 'Saved Customized Favorites (Edit or Add Directly)'}
+                </span>
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {resolvedSavedFavorites.map((entry) => {
+                const { fav, dish, variant, flatOptions, unitPrice } = entry;
+                const title = getLocalizedText(lang, dish.nameTh || dish.name, dish.name);
+                const variantLabel = getLocalizedText(
+                  lang,
+                  variant.nameTh || variant.name,
+                  variant.name
+                );
+                const photoUrl = dish.imageId ? dishImages[dish.imageId] : null;
+                return (
+                  <div
+                    key={fav.id}
+                    className="bg-white rounded-2xl border border-rose-200 p-3.5 flex flex-col justify-between gap-3 shadow-2xs"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="w-20 h-20 rounded-xl bg-slate-100 overflow-hidden shrink-0 flex items-center justify-center border border-slate-100">
+                        {photoUrl ? (
+                          <img src={photoUrl} alt={title} className="w-full h-full object-cover" />
+                        ) : (
+                          <ShoppingBag className="w-6 h-6 text-slate-300" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="font-bold text-sm text-slate-900 line-clamp-1">
+                          {title}
+                        </div>
+                        {variantLabel && variantLabel !== 'Standard' && (
+                          <div className="text-[11px] font-semibold text-orange-700">
+                            {variantLabel}
+                          </div>
+                        )}
+                        {flatOptions.length > 0 ? (
+                          <div className="text-[11px] text-slate-600 leading-snug">
+                            + {flatOptions.map((o) => o.choiceName).join(', ')}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-400">
+                            {lang === 'th' ? 'ไม่มีตัวเลือกเพิ่มเติม' : 'Standard options'}
+                          </div>
+                        )}
+                        {fav.notes && (
+                          <div className="text-[11px] text-amber-700 font-semibold">
+                            * {fav.notes}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-slate-100">
+                      <span className="font-black text-sm text-orange-600 tabular-nums">
+                        ฿{formatMoney(unitPrice)}
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => openDishModal(dish, fav)}
+                          disabled={isStoreClosed}
+                          aria-label={lang === 'th' ? 'แก้ไขตัวเลือกรายการโปรด' : 'Edit favorite options'}
+                          className="min-h-[34px] px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>{lang === 'th' ? 'แก้ไข' : 'Edit'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSavedFavorite(fav)}
+                          aria-label={lang === 'th' ? 'ลบรายการโปรด' : 'Delete favorite'}
+                          className="w-8 h-8 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddSavedFavoriteToCart(entry)}
+                          disabled={isStoreClosed}
+                          className="min-h-[34px] px-3 py-1 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{lang === 'th' ? 'ใส่ตะกร้า' : 'Add'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {(selectedCategoryId === 'favorites' ? bareFavoriteDishes : filteredDishes).length === 0 ? (
+          selectedCategoryId === 'favorites' && resolvedSavedFavorites.length > 0 ? null : (
+            <div className="py-16 text-center text-slate-500 text-sm">
+              {selectedCategoryId === 'favorites'
+                ? lang === 'th'
+                  ? 'ยังไม่มีเมนูโปรด — เปิดเมนูที่ต้องการแล้วเลือกตัวเลือก จากนั้นกด "บันทึกรายการโปรด" เพื่อบันทึกไว้สั่งครั้งหน้า'
+                  : 'No favorites yet — open any dish, pick your options, and tap "Save Favorite" to store it here.'
+                : lang === 'th'
+                ? 'ไม่พบเมนูในหมวดหมู่นี้'
+                : 'No menu items match your search.'}
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {filteredDishes.map((dish) => {
+            {(selectedCategoryId === 'favorites' ? bareFavoriteDishes : filteredDishes).map((dish) => {
               const title = getLocalizedText(lang, dish.nameTh || dish.name, dish.name);
               const dishDescription = getLocalizedDishDescription(
                 lang,
@@ -1110,7 +1468,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               );
               const minPrice = Math.min(...dish.variants.map((v) => v.price));
               const photoUrl = dish.imageId ? dishImages[dish.imageId] : null;
-              const isFavorite = favoriteDishIds.includes(dish.id);
+              const isFavorite =
+                favoriteDishIds.includes(dish.id) || savedFavoriteDishIdSet.has(dish.id);
               return (
                 <div
                   key={dish.id}
@@ -1219,35 +1578,50 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4">
           <div className="modal-panel bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl">
             <div className="modal-header border-b border-slate-200 flex items-center justify-between gap-3">
-              <h3 className="font-extrabold text-base text-slate-900 truncate">
-                {getLocalizedText(lang, activeDish.nameTh || activeDish.name, activeDish.name)}
-              </h3>
+              <div className="min-w-0">
+                <h3 className="font-extrabold text-base text-slate-900 truncate">
+                  {getLocalizedText(lang, activeDish.nameTh || activeDish.name, activeDish.name)}
+                </h3>
+                {editingFavoriteId && (
+                  <div className="text-[11px] font-bold text-rose-600">
+                    {lang === 'th' ? 'กำลังแก้ไขรายการโปรด' : 'Editing Saved Favorite'}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
-                  aria-label={
-                    favoriteDishIds.includes(activeDish.id)
-                      ? lang === 'th'
-                        ? 'ลบออกจากรายการโปรด'
-                        : 'Remove from favorites'
-                      : lang === 'th'
-                      ? 'เพิ่มในรายการโปรด'
-                      : 'Add to favorites'
-                  }
-                  onClick={() => handleToggleFavoriteDish(activeDish.id)}
-                  className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-rose-50 flex items-center justify-center cursor-pointer transition-colors"
+                  onClick={handleSaveCurrentDishFavorite}
+                  className={`min-h-[36px] px-2.5 py-1.5 rounded-xl border text-[11px] font-extrabold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+                    editingFavoriteId
+                      ? 'bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-700'
+                  }`}
                 >
                   <Heart
-                    className={`w-4 h-4 ${
-                      favoriteDishIds.includes(activeDish.id)
+                    className={`w-3.5 h-3.5 ${
+                      editingFavoriteId || savedFavoriteDishIdSet.has(activeDish.id)
                         ? 'fill-rose-500 text-rose-500'
-                        : 'text-slate-500'
+                        : 'text-rose-500'
                     }`}
                   />
+                  <span>
+                    {editingFavoriteId
+                      ? lang === 'th'
+                        ? 'บันทึกการแก้ไขโปรด'
+                        : 'Save Favorite'
+                      : lang === 'th'
+                      ? 'บันทึกรายการโปรด'
+                      : 'Save Favorite'}
+                  </span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveDish(null)}
+                  onClick={() => {
+                    setActiveDish(null);
+                    setEditingFavoriteId(null);
+                    setFavoriteSavedNotice(null);
+                  }}
                   className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 cursor-pointer"
                 >
                   <X className="w-5 h-5" />
@@ -1482,6 +1856,13 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 />
               </div>
 
+              {favoriteSavedNotice && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700 flex items-center gap-2">
+                  <Heart className="w-4 h-4 fill-rose-500 text-rose-500 shrink-0" />
+                  <span>{favoriteSavedNotice}</span>
+                </div>
+              )}
+
               {optionValidationMsg && (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700">
                   {optionValidationMsg}
@@ -1526,7 +1907,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       {isCheckoutOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4">
           <form
-            onSubmit={handleSubmitOrder}
+            onSubmit={handleProceedToOrderReview}
             className="modal-panel bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl"
           >
             <div className="modal-header border-b border-slate-200 flex items-center justify-between">
@@ -1955,19 +2336,221 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 disabled={isSubmitting || isStoreClosed || cart.length === 0}
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-orange-600 bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-sm cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2"
               >
-                {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                 <span>
                   {lang === 'th'
-                    ? `ยืนยันสั่งอาหาร • ฿${formatMoney(grandTotal)}`
-                    : `Place Order • ฿${formatMoney(grandTotal)}`}
+                    ? `ส่งรายการอาหาร • ฿${formatMoney(grandTotal)}`
+                    : `Submit Order Items • ฿${formatMoney(grandTotal)}`}
                 </span>
+                <ChevronRight className="w-4 h-4" />
               </button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Live Order Tracking Modal */}
+      {/* Order Review & 2-Minute Countdown Confirmation Modal */}
+      {isOrderReviewOpen && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-950/70 backdrop-blur-xs p-0 sm:p-4">
+          <div className="modal-panel bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl border border-slate-200 shadow-2xl">
+            <div className="modal-header border-b border-slate-200 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="font-extrabold text-base text-slate-900">
+                  {lang === 'th' ? 'ทบทวนรายการสั่งซื้อ' : 'Review Your Order'}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {lang === 'th'
+                    ? 'รายการนี้ยังไม่ถูกส่งไปยังร้านค้า กรุณาตรวจสอบก่อนกดยืนยันออเดอร์'
+                    : 'Not sent to store yet. Review all items before confirming.'}
+                </p>
+              </div>
+              <div
+                className={`px-3 py-1.5 rounded-xl border-2 text-xs font-black tabular-nums inline-flex items-center gap-1.5 shrink-0 ${
+                  reviewSecondsLeft > 0
+                    ? 'bg-amber-100 border-amber-400 text-amber-950'
+                    : 'bg-rose-100 border-rose-400 text-rose-900'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>{formatCountdownMMSS(reviewSecondsLeft)}</span>
+              </div>
+            </div>
+
+            <div className="modal-body space-y-4">
+              {/* 2-Minute Decision Banner */}
+              <div
+                className={`p-3 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 ${
+                  reviewSecondsLeft > 0
+                    ? 'bg-amber-50 border-amber-200 text-amber-900'
+                    : 'bg-rose-50 border-rose-200 text-rose-900'
+                }`}
+              >
+                <span>
+                  {reviewSecondsLeft > 0
+                    ? lang === 'th'
+                      ? `กรุณาตรวจสอบรายการและกดปุ่ม "ยืนยันออเดอร์" ภายใน ${formatCountdownMMSS(
+                          reviewSecondsLeft
+                        )} นาที เพื่อส่งเข้าครัวทันที`
+                      : `Review and tap "Confirm Order" within ${formatCountdownMMSS(
+                          reviewSecondsLeft
+                        )} to send immediately to the kitchen.`
+                    : lang === 'th'
+                    ? 'หมดเวลา 2 นาทีแล้ว กรุณากด "เริ่มนับใหม่" หรือ "ย้อนกลับ" เพื่อตรวจสอบอีกครั้ง'
+                    : 'The 2-minute review window expired. Restart timer or go Back.'}
+                </span>
+                {reviewSecondsLeft === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setReviewSecondsLeft(120)}
+                    className="px-2.5 py-1.5 rounded-lg bg-rose-600 text-white text-[11px] font-bold shrink-0 cursor-pointer"
+                  >
+                    {lang === 'th' ? 'เริ่มนับใหม่' : 'Restart'}
+                  </button>
+                )}
+              </div>
+
+              {/* Customer & Delivery Overview */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-extrabold text-slate-900">{customerName.trim()}</span>
+                  <span className="font-mono font-semibold text-slate-700 tabular-nums">
+                    {customerPhone.trim()}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-slate-600 font-semibold">
+                  <span className="inline-flex items-center gap-1">
+                    {orderMode === 'delivery' ? (
+                      <>
+                        <Truck className="w-3.5 h-3.5 text-orange-600" />
+                        <span>{lang === 'th' ? 'เดลิเวอรี' : 'Delivery'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Store className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>{lang === 'th' ? 'รับเองที่ร้าน' : 'Self-Pickup'}</span>
+                      </>
+                    )}
+                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    {paymentMethod === 'qr_payment'
+                      ? 'QR PromptPay'
+                      : lang === 'th'
+                      ? 'เงินสดปลายทาง / หน้าร้าน'
+                      : 'Cash'}
+                  </span>
+                </div>
+                {orderMode === 'delivery' && deliveryAddress.trim() && (
+                  <div className="text-[11px] text-slate-600 flex items-start gap-1.5 pt-0.5">
+                    <MapPin className="w-3.5 h-3.5 text-orange-500 shrink-0 mt-0.5" />
+                    <span>
+                      {deliveryAddress.trim()}
+                      {deliveryLat != null && deliveryLng != null
+                        ? ` (GPS: ${deliveryLat.toFixed(5)}, ${deliveryLng.toFixed(5)})`
+                        : ''}
+                    </span>
+                  </div>
+                )}
+                {customerNote.trim() && (
+                  <div className="text-[11px] text-amber-700 font-semibold">
+                    * {customerNote.trim()}
+                  </div>
+                )}
+              </div>
+
+              {/* Ordered Items Review List */}
+              <div className="space-y-1.5">
+                <div className="text-xs font-extrabold text-slate-700">
+                  {lang === 'th'
+                    ? `รายการอาหารที่เลือก (${totalCartItems} รายการ)`
+                    : `Selected Items (${totalCartItems})`}
+                </div>
+                <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
+                  {cart.map((entry) => (
+                    <div key={entry.key} className="px-3.5 py-2.5 flex justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900">
+                          <span className="tabular-nums">{entry.quantity}x</span> {entry.dishName}
+                          {entry.variantName && entry.variantName !== 'Standard' && (
+                            <span className="text-slate-500 font-normal"> ({entry.variantName})</span>
+                          )}
+                        </div>
+                        {entry.options.length > 0 && (
+                          <div className="text-[11px] text-slate-500 pl-4 mt-0.5">
+                            + {entry.options.map((o) => o.choiceName).join(', ')}
+                          </div>
+                        )}
+                        {entry.notes && (
+                          <div className="text-[11px] text-amber-700 pl-4 mt-0.5">
+                            * {entry.notes}
+                          </div>
+                        )}
+                      </div>
+                      <div className="font-extrabold text-slate-900 tabular-nums shrink-0">
+                        ฿{formatMoney(entry.unitPrice * entry.quantity)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Totals Breakdown */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
+                <div className="flex justify-between text-slate-600">
+                  <span>{lang === 'th' ? 'ค่าอาหาร' : 'Food Subtotal'}</span>
+                  <span className="font-bold tabular-nums">฿{formatMoney(subtotal)}</span>
+                </div>
+                {orderMode === 'delivery' && (
+                  <div className="flex justify-between text-slate-600">
+                    <span>{lang === 'th' ? 'ค่าบริการจัดส่ง' : 'Delivery Fee'}</span>
+                    <span className="font-bold tabular-nums">฿{formatMoney(deliveryFee)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm font-black text-slate-900 pt-1.5 border-t border-slate-200">
+                  <span>{lang === 'th' ? 'ยอดชำระทั้งหมด' : 'Grand Total'}</span>
+                  <span className="text-orange-600 tabular-nums">฿{formatMoney(grandTotal)}</span>
+                </div>
+              </div>
+
+              {submitError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700">
+                  {submitError}
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer border-t border-slate-200 bg-white flex items-center gap-2.5">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setIsOrderReviewOpen(false)}
+                className="min-h-[48px] px-4 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold text-xs sm:text-sm inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-60"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>{lang === 'th' ? 'ย้อนกลับ' : 'Back'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting || isStoreClosed || cart.length === 0 || reviewSecondsLeft <= 0}
+                onClick={handleConfirmAndSendOrder}
+                className="flex-1 min-h-[48px] px-4 py-3 rounded-xl bg-orange-600 bg-gradient-to-r from-orange-500 to-red-600 text-white font-extrabold text-xs sm:text-sm cursor-pointer disabled:opacity-60 flex items-center justify-center gap-2 tabular-nums"
+              >
+                {isSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                <span>
+                  {lang === 'th'
+                    ? `ยืนยันออเดอร์ • ฿${formatMoney(grandTotal)}`
+                    : `Confirm Order • ฿${formatMoney(grandTotal)}`}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Live Order Tracking & Purchase History Modal */}
       {isOrdersOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4">
           <div className="bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl max-h-[90dvh] flex flex-col overflow-hidden">
@@ -1975,7 +2558,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               <div className="flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-orange-600" />
                 <h3 className="font-extrabold text-base text-slate-900">
-                  {lang === 'th' ? 'ติดตามสถานะออเดอร์' : 'Live Order Status'}
+                  {lang === 'th' ? 'ประวัติการซื้อ & สถานะออเดอร์' : 'Order History & Live Status'}
                 </h3>
               </div>
               <button
@@ -2136,6 +2719,515 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                   );
                 })
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hamburger Slide-Out Drawer Menu */}
+      {isMenuOpen && (
+        <div
+          className="fixed inset-0 z-50 flex justify-end bg-slate-950/55 backdrop-blur-xs"
+          onClick={() => setIsMenuOpen(false)}
+        >
+          <aside
+            aria-label={lang === 'th' ? 'เมนูหลัก' : 'Storefront Navigation Menu'}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white w-80 max-w-[85vw] h-full shadow-2xl border-l border-slate-200 flex flex-col justify-between overflow-hidden"
+          >
+            <div className="flex flex-col min-h-0 flex-1">
+              <div className="px-4 py-3.5 border-b border-slate-200 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img
+                    src={STORE_LOGO_SRC}
+                    alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
+                    className="w-11 h-11 rounded-full object-contain bg-white border border-orange-200 shrink-0"
+                  />
+                  <span
+                    className={`text-[11px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
+                      isStoreClosed
+                        ? 'bg-rose-100 text-rose-700'
+                        : 'bg-emerald-100 text-emerald-700'
+                    }`}
+                  >
+                    {isStoreClosed
+                      ? lang === 'th'
+                        ? 'ปิดชั่วคราว'
+                        : 'Closed'
+                      : lang === 'th'
+                      ? 'เปิดรับออเดอร์'
+                      : 'Open'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsMenuOpen(false)}
+                  aria-label={lang === 'th' ? 'ปิดเมนู' : 'Close menu'}
+                  className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center cursor-pointer shrink-0"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <nav className="p-3 space-y-2 overflow-y-auto flex-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileSavedNotice(null);
+                    setIsMenuOpen(false);
+                    setIsCustomerProfileModalOpen(true);
+                  }}
+                  className="w-full p-3.5 rounded-2xl border border-slate-200 hover:border-orange-300 bg-slate-50/70 hover:bg-orange-50/50 flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center shrink-0">
+                      <User className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-sm text-slate-900">
+                        {lang === 'th' ? 'ข้อมูลลูกค้า' : 'Customer Info'}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {customerName.trim()
+                          ? `${customerName.trim()}${
+                              customerPhone.trim() ? ` · ${customerPhone.trim()}` : ''
+                            }`
+                          : lang === 'th'
+                          ? 'จัดการชื่อ เบอร์โทร และที่อยู่จัดส่ง'
+                          : 'Manage name, phone & saved addresses'}
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setIsOrdersOpen(true);
+                  }}
+                  className="w-full p-3.5 rounded-2xl border border-slate-200 hover:border-orange-300 bg-slate-50/70 hover:bg-orange-50/50 flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-600 flex items-center justify-center shrink-0">
+                      <History className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+                        <span>{lang === 'th' ? 'ประวัติการซื้อ' : 'Purchase History'}</span>
+                        {customerOrders.length > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 text-[10px] font-extrabold tabular-nums">
+                            {customerOrders.length}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {activeOrderCount > 0
+                          ? lang === 'th'
+                            ? `มี ${activeOrderCount} ออเดอร์กำลังดำเนินการ`
+                            : `${activeOrderCount} active orders in progress`
+                          : lang === 'th'
+                          ? 'ดูคำสั่งซื้อที่ผ่านมาและสั่งซ้ำ'
+                          : 'View past orders & reorder'}
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setIsAboutStoreModalOpen(true);
+                  }}
+                  className="w-full p-3.5 rounded-2xl border border-slate-200 hover:border-orange-300 bg-slate-50/70 hover:bg-orange-50/50 flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <Info className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-extrabold text-sm text-slate-900">
+                        {lang === 'th' ? 'ข้อมูลเกี่ยวกับร้าน' : 'About Store'}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate">
+                        {lang === 'th'
+                          ? 'บริการจัดส่ง ค่าส่ง เบอร์ติดต่อ และที่อยู่ร้าน'
+                          : 'Delivery options, phone & store info'}
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                </button>
+              </nav>
+            </div>
+
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-600">
+                {lang === 'th' ? 'ภาษา / Language' : 'Language / ภาษา'}
+              </span>
+              <LanguageToggle lang={lang} onToggleLang={handleSwitchLang} compact />
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Customer Profile & Saved Addresses Modal */}
+      {isCustomerProfileModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4"
+          onClick={() => setIsCustomerProfileModalOpen(false)}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveCustomerInfo({
+                customerName: customerName.trim(),
+                customerPhone: customerPhone.trim(),
+                deliveryAddress: deliveryAddress.trim(),
+                customerNote,
+                orderMode,
+                paymentMethod,
+                deliveryLat,
+                deliveryLng,
+              });
+              setProfileSavedNotice(
+                lang === 'th' ? 'บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว' : 'Customer profile saved!'
+              );
+            }}
+            className="modal-panel bg-white w-full sm:max-w-lg sm:rounded-3xl rounded-t-3xl border border-slate-200 shadow-2xl"
+          >
+            <div className="modal-header border-b border-slate-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <User className="w-5 h-5 text-orange-600" />
+                <h3 className="font-extrabold text-base text-slate-900">
+                  {lang === 'th' ? 'ข้อมูลลูกค้า' : 'Customer Information'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCustomerProfileModalOpen(false)}
+                className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body space-y-4">
+              {profileSavedNotice && (
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                  <span>{profileSavedNotice}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs font-bold text-slate-700 mb-1">
+                    {lang === 'th' ? 'ชื่อลูกค้า' : 'Customer Name'}
+                  </div>
+                  <input
+                    type="text"
+                    value={customerName}
+                    onChange={(e) => {
+                      setCustomerName(e.target.value);
+                      setProfileSavedNotice(null);
+                    }}
+                    placeholder={lang === 'th' ? 'ระบุชื่อของคุณ' : 'Your name'}
+                    className="w-full px-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-700 mb-1">
+                    {lang === 'th' ? 'เบอร์โทรศัพท์' : 'Phone Number'}
+                  </div>
+                  <input
+                    type="tel"
+                    value={customerPhone}
+                    onChange={(e) => {
+                      setCustomerPhone(e.target.value);
+                      setProfileSavedNotice(null);
+                    }}
+                    placeholder="08x-xxx-xxxx"
+                    className="w-full px-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-700">
+                    {lang === 'th' ? 'ที่อยู่จัดส่งที่บันทึกไว้' : 'Saved Delivery Addresses'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAddressTarget(null);
+                      setIsAddressModalOpen(true);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-700 text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{lang === 'th' ? 'เพิ่มที่อยู่ / ปักหมุดแผนที่' : 'Add / Pin Map'}</span>
+                  </button>
+                </div>
+
+                {savedAddresses.length === 0 ? (
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 text-center">
+                    {lang === 'th'
+                      ? 'ยังไม่มีที่อยู่ที่บันทึกไว้ กด "เพิ่มที่อยู่ / ปักหมุดแผนที่" เพื่อบันทึก'
+                      : 'No saved addresses yet. Tap Add / Pin Map to save your delivery spot.'}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {savedAddresses.map((addr) => {
+                      const isSelected = selectedAddressId === addr.id;
+                      return (
+                        <div
+                          key={addr.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            applySavedAddress(addr);
+                            setProfileSavedNotice(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              applySavedAddress(addr);
+                              setProfileSavedNotice(null);
+                            }
+                          }}
+                          className={`p-3 rounded-xl border text-xs transition-colors cursor-pointer flex items-start justify-between gap-2 ${
+                            isSelected
+                              ? 'bg-orange-50/70 border-orange-500 text-slate-900'
+                              : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-extrabold text-slate-900">{addr.label}</span>
+                              {addr.lat != null && addr.lng != null && (
+                                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded-md inline-flex items-center gap-0.5">
+                                  <MapPin className="w-2.5 h-2.5" />
+                                  {lang === 'th' ? 'ปักหมุด GPS แล้ว' : 'GPS Pinned'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-600">{addr.address}</div>
+                            {(addr.customerName || addr.customerPhone) && (
+                              <div className="text-[11px] text-slate-500">
+                                {[addr.customerName, addr.customerPhone].filter(Boolean).join(' · ')}
+                              </div>
+                            )}
+                          </div>
+                          <div
+                            className="flex items-center gap-1 shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              aria-label={lang === 'th' ? 'แก้ไขที่อยู่' : 'Edit address'}
+                              onClick={() => {
+                                setEditingAddressTarget(addr);
+                                setIsAddressModalOpen(true);
+                              }}
+                              className="w-7 h-7 rounded-lg bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={lang === 'th' ? 'ลบที่อยู่' : 'Delete address'}
+                              onClick={() => handleDeleteSavedAddress(addr.id)}
+                              className="w-7 h-7 rounded-lg bg-white hover:bg-rose-50 border border-slate-200 text-rose-500 flex items-center justify-center cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer border-t border-slate-200 bg-white flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCustomerProfileModalOpen(false)}
+                className="min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer"
+              >
+                {lang === 'th' ? 'ปิด' : 'Close'}
+              </button>
+              <button
+                type="submit"
+                className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>{lang === 'th' ? 'บันทึกข้อมูลลูกค้า' : 'Save Customer Info'}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* About Store Information Modal */}
+      {isAboutStoreModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4"
+          onClick={() => setIsAboutStoreModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="modal-panel bg-white w-full sm:max-w-md sm:rounded-3xl rounded-t-3xl border border-slate-200 shadow-2xl"
+          >
+            <div className="modal-header border-b border-slate-200 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Info className="w-5 h-5 text-orange-600" />
+                <h3 className="font-extrabold text-base text-slate-900">
+                  {lang === 'th' ? 'ข้อมูลเกี่ยวกับร้าน' : 'About Store'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAboutStoreModalOpen(false)}
+                className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="modal-body space-y-4">
+              <div className="flex flex-col items-center text-center gap-2.5 py-2">
+                <img
+                  src={STORE_LOGO_SRC}
+                  alt={lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo'}
+                  className="w-24 h-24 rounded-full object-contain bg-white border-2 border-orange-200 shadow-xs"
+                />
+                <span
+                  className={`text-xs font-bold px-3 py-1 rounded-lg ${
+                    isStoreClosed
+                      ? 'bg-rose-100 text-rose-700'
+                      : 'bg-emerald-100 text-emerald-700'
+                  }`}
+                >
+                  {isStoreClosed
+                    ? lang === 'th'
+                      ? 'ขณะนี้ร้านปิดรับออเดอร์ชั่วคราว'
+                      : 'Temporarily Closed'
+                    : lang === 'th'
+                    ? 'เปิดให้บริการรับออเดอร์ออนไลน์'
+                    : 'Open for Online Orders'}
+                </span>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 divide-y divide-slate-100 bg-slate-50/70 text-xs">
+                <div className="px-3.5 py-3 flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-orange-500" />
+                    {lang === 'th' ? 'เวลาเตรียมอาหารโดยประมาณ' : 'Est. Preparation Time'}
+                  </span>
+                  <span className="font-extrabold text-slate-900">
+                    ~{store.onlineEstimatedPrepMinutes || 20} {lang === 'th' ? 'นาที' : 'mins'}
+                  </span>
+                </div>
+
+                <div className="px-3.5 py-3 flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-orange-500" />
+                    {lang === 'th' ? 'รูปแบบบริการ' : 'Service Modes'}
+                  </span>
+                  <span className="font-extrabold text-slate-900">
+                    {[
+                      store.onlineDeliveryEnabled !== false
+                        ? lang === 'th'
+                          ? 'เดลิเวอรี'
+                          : 'Delivery'
+                        : null,
+                      store.onlinePickupEnabled !== false
+                        ? lang === 'th'
+                          ? 'รับเองที่ร้าน'
+                          : 'Self-Pickup'
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </div>
+
+                {store.onlineDeliveryEnabled !== false && (
+                  <div className="px-3.5 py-3 flex items-center justify-between gap-2">
+                    <span className="text-slate-500 font-semibold">
+                      {lang === 'th' ? 'ค่าบริการจัดส่ง' : 'Delivery Fee'}
+                    </span>
+                    <span className="font-extrabold text-orange-600 tabular-nums">
+                      {(store.onlineDeliveryFee || 0) > 0
+                        ? `฿${formatMoney(store.onlineDeliveryFee || 0)}`
+                        : lang === 'th'
+                        ? 'ส่งฟรี'
+                        : 'Free'}
+                    </span>
+                  </div>
+                )}
+
+                <div className="px-3.5 py-3 flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold flex items-center gap-1.5">
+                    <Banknote className="w-4 h-4 text-emerald-600" />
+                    {lang === 'th' ? 'ช่องทางชำระเงิน' : 'Payment Methods'}
+                  </span>
+                  <span className="font-extrabold text-slate-900">
+                    {qrDataUrl
+                      ? lang === 'th'
+                        ? 'เงินสด / QR พร้อมเพย์'
+                        : 'Cash / PromptPay QR'
+                      : lang === 'th'
+                      ? 'เงินสดปลายทาง / หน้าร้าน'
+                      : 'Cash'}
+                  </span>
+                </div>
+
+                {store.shopPhone && (
+                  <div className="px-3.5 py-3 flex items-center justify-between gap-2">
+                    <span className="text-slate-500 font-semibold flex items-center gap-1.5">
+                      <Phone className="w-4 h-4 text-orange-500" />
+                      {lang === 'th' ? 'เบอร์ติดต่อร้าน' : 'Store Phone'}
+                    </span>
+                    <a
+                      href={`tel:${store.shopPhone}`}
+                      className="font-extrabold text-orange-600 hover:underline tabular-nums"
+                    >
+                      {store.shopPhone}
+                    </a>
+                  </div>
+                )}
+
+                {store.shopAddress && (
+                  <div className="px-3.5 py-3 space-y-1">
+                    <div className="text-slate-500 font-semibold flex items-center gap-1.5">
+                      <MapPin className="w-4 h-4 text-orange-500" />
+                      <span>{lang === 'th' ? 'ที่ตั้งร้าน' : 'Store Address'}</span>
+                    </div>
+                    <p className="text-slate-800 font-medium leading-relaxed pl-5">
+                      {store.shopAddress}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer border-t border-slate-200 bg-white">
+              <button
+                type="button"
+                onClick={() => setIsAboutStoreModalOpen(false)}
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-extrabold cursor-pointer"
+              >
+                {lang === 'th' ? 'ปิด' : 'Close'}
+              </button>
             </div>
           </div>
         </div>

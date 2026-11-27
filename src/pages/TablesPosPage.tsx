@@ -201,6 +201,7 @@ export const TablesPosPage: React.FC<Props> = ({
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null); // null = bills/floor/online/rider view visible
   const [selectedOnlineOrderId, setSelectedOnlineOrderId] = useState<string | null>(null);
   const [printingOnlineOrder, setPrintingOnlineOrder] = useState<OnlineOrderDoc | null>(null);
+  const [printingOnlineOrderAutoPrint, setPrintingOnlineOrderAutoPrint] = useState(false);
   const [completingOnlineOrderId, setCompletingOnlineOrderId] = useState<string | null>(null);
   const [onlineZoneError, setOnlineZoneError] = useState<string | null>(null);
 
@@ -458,6 +459,10 @@ export const TablesPosPage: React.FC<Props> = ({
         nextStatus,
         nextStatus === 'cancelled' ? { cancelReason: 'ร้านค้ายกเลิกออเดอร์' } : undefined
       );
+      if (order.status === 'pending' && nextStatus === 'accepted') {
+        setPrintingOnlineOrderAutoPrint(true);
+        setPrintingOnlineOrder({ ...order, status: 'accepted' });
+      }
       const updatedOrders = onlineOrders.map((o) =>
         o.id === order.id ? { ...o, status: nextStatus } : o
       );
@@ -2766,15 +2771,15 @@ export const TablesPosPage: React.FC<Props> = ({
                         {/* Header: Order No + Status + Time */}
                         <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
                           <div className="min-w-0">
-                            <div className="flex items-baseline gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="text-lg font-black text-slate-900 tracking-tight uppercase tabular-nums">
                                 {displayIds?.displayNumber || order.orderNumber}
                               </span>
                               <span
-                                className={`inline-flex items-center gap-1 text-[11px] font-extrabold ${statusMeta.textCls}`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-black shadow-2xs ${statusMeta.surfaceCls}`}
                               >
-                                <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dotCls}`} />
-                                {statusMeta[lang]}
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${statusMeta.dotCls}`} />
+                                <span>{statusMeta[lang]}</span>
                               </span>
                             </div>
                             <div className="text-[11px] font-mono text-slate-500 tabular-nums mt-0.5">
@@ -2866,7 +2871,10 @@ export const TablesPosPage: React.FC<Props> = ({
                           >
                             <button
                               type="button"
-                              onClick={() => setPrintingOnlineOrder(order)}
+                              onClick={() => {
+                                setPrintingOnlineOrderAutoPrint(false);
+                                setPrintingOnlineOrder(order);
+                              }}
                               title={lang === 'th' ? 'พิมพ์ใบรายการ' : 'Print Receipt'}
                               className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors"
                             >
@@ -3002,21 +3010,19 @@ export const TablesPosPage: React.FC<Props> = ({
                         {/* Header: Order No + Rider Status + Time */}
                         <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
                           <div className="min-w-0">
-                            <div className="flex flex-wrap items-baseline gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="text-lg font-black text-slate-900 tracking-tight uppercase tabular-nums">
                                 {displayIds?.displayNumber || order.orderNumber}
                               </span>
                               <span
-                                className={`inline-flex items-center gap-1 text-[11px] font-extrabold ${statusMeta.textCls}`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-black shadow-2xs ${statusMeta.surfaceCls}`}
                               >
-                                <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dotCls}`} />
-                                {order.status === 'ready_for_pickup'
-                                  ? lang === 'th'
-                                    ? 'รอไรเดอร์รับ'
-                                    : 'Waiting Rider'
-                                  : order.riderName
-                                  ? `${statusMeta[lang]} • ${order.riderName}`
-                                  : statusMeta[lang]}
+                                <span className={`w-2 h-2 rounded-full shrink-0 ${statusMeta.dotCls}`} />
+                                <span>
+                                  {order.riderName
+                                    ? `${statusMeta[lang]} • ${order.riderName}`
+                                    : statusMeta[lang]}
+                                </span>
                               </span>
                             </div>
                             <div className="text-[11px] font-mono text-slate-500 tabular-nums mt-0.5">
@@ -3093,7 +3099,10 @@ export const TablesPosPage: React.FC<Props> = ({
                           >
                             <button
                               type="button"
-                              onClick={() => setPrintingOnlineOrder(order)}
+                              onClick={() => {
+                                setPrintingOnlineOrderAutoPrint(false);
+                                setPrintingOnlineOrder(order);
+                              }}
                               title={lang === 'th' ? 'พิมพ์ใบรายการ' : 'Print Receipt'}
                               className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors"
                             >
@@ -5550,7 +5559,10 @@ export const TablesPosPage: React.FC<Props> = ({
           lang={lang}
           onClose={() => setSelectedOnlineOrderId(null)}
           onStatusChange={handleOnlineZoneStatusChange}
-          onPrint={(ord) => setPrintingOnlineOrder(ord)}
+          onPrint={(ord) => {
+            setPrintingOnlineOrderAutoPrint(false);
+            setPrintingOnlineOrder(ord);
+          }}
         />
       )}
 
@@ -5561,7 +5573,11 @@ export const TablesPosPage: React.FC<Props> = ({
           displayIds={onlineOrderNumberingMap.get(printingOnlineOrder.id)}
           settings={settings}
           lang={lang}
-          onClose={() => setPrintingOnlineOrder(null)}
+          autoPrint={printingOnlineOrderAutoPrint}
+          onClose={() => {
+            setPrintingOnlineOrder(null);
+            setPrintingOnlineOrderAutoPrint(false);
+          }}
         />
       )}
     </div>

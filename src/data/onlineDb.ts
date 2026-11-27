@@ -57,6 +57,7 @@ const STORAGE_RIDER_NAME_KEY = 'kinpos_rider_name';
 const STORAGE_CUSTOMER_INFO_KEY = 'kinpos_online_customer_profile';
 const STORAGE_CUSTOMER_ADDRESSES_KEY = 'kinpos_online_customer_addresses';
 const STORAGE_CUSTOMER_FAVORITES_KEY = 'kinpos_online_customer_favorites';
+const STORAGE_CUSTOMER_FAVORITE_ITEMS_KEY = 'kinpos_online_customer_favorite_items';
 const STORAGE_GUEST_UID_KEY = 'kinpos_guest_uid';
 const STORAGE_TRACKED_ORDER_IDS_KEY = 'kinpos_tracked_order_ids';
 const publicImageCache = new Map<string, string>();
@@ -401,6 +402,151 @@ export function toggleCustomerFavoriteDishId(
     // Ignore storage errors
   }
   return updated;
+}
+
+export function addCustomerFavoriteDishIdIfMissing(
+  dishId: string,
+  storeId?: string | null
+): string[] {
+  const existing = loadCustomerFavoriteDishIds(storeId);
+  if (existing.includes(dishId)) return existing;
+  const updated = [dishId, ...existing];
+  try {
+    localStorage.setItem(getFavoriteStorageKey(storeId), JSON.stringify(updated));
+  } catch {
+    // Ignore storage errors
+  }
+  return updated;
+}
+
+export interface SavedCustomerFavoriteItem {
+  id: string;
+  storeId: string;
+  dishId: string;
+  variantId: string;
+  selectedOptions: Record<string, Record<string, number>>;
+  notes?: string;
+  updatedAt: string;
+}
+
+function getFavoriteItemsStorageKey(storeId?: string | null): string {
+  return storeId
+    ? `${STORAGE_CUSTOMER_FAVORITE_ITEMS_KEY}::${storeId}`
+    : STORAGE_CUSTOMER_FAVORITE_ITEMS_KEY;
+}
+
+function normalizeFavoriteOptions(
+  raw: unknown
+): Record<string, Record<string, number>> {
+  const clean: Record<string, Record<string, number>> = {};
+  if (!raw || typeof raw !== 'object') return clean;
+  for (const [gId, choicesObj] of Object.entries(raw as Record<string, unknown>)) {
+    if (!gId || !choicesObj || typeof choicesObj !== 'object') continue;
+    const grpClean: Record<string, number> = {};
+    for (const [cId, rawQty] of Object.entries(choicesObj as Record<string, unknown>)) {
+      const qty = Math.round(Number(rawQty) || 0);
+      if (cId && qty > 0) {
+        grpClean[cId] = qty;
+      }
+    }
+    if (Object.keys(grpClean).length > 0) {
+      clean[gId] = grpClean;
+    }
+  }
+  return clean;
+}
+
+function persistSavedCustomerFavoriteItems(
+  list: SavedCustomerFavoriteItem[],
+  storeId?: string | null
+): void {
+  try {
+    localStorage.setItem(
+      getFavoriteItemsStorageKey(storeId),
+      JSON.stringify(list.slice(0, 50))
+    );
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+export function loadSavedCustomerFavoriteItems(
+  storeId?: string | null
+): SavedCustomerFavoriteItem[] {
+  try {
+    const raw = localStorage.getItem(getFavoriteItemsStorageKey(storeId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item) =>
+          item &&
+          typeof item.id === 'string' &&
+          typeof item.dishId === 'string' &&
+          typeof item.variantId === 'string'
+      )
+      .map((item) => ({
+        id: item.id,
+        storeId: typeof item.storeId === 'string' ? item.storeId : storeId || '',
+        dishId: item.dishId,
+        variantId: item.variantId,
+        selectedOptions: normalizeFavoriteOptions(item.selectedOptions),
+        ...(typeof item.notes === 'string' && item.notes.trim()
+          ? { notes: item.notes.trim() }
+          : {}),
+        updatedAt:
+          typeof item.updatedAt === 'string' ? item.updatedAt : new Date().toISOString(),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export function upsertSavedCustomerFavoriteItem(input: {
+  id?: string;
+  storeId?: string | null;
+  dishId: string;
+  variantId: string;
+  selectedOptions: Record<string, Record<string, number>>;
+  notes?: string;
+}): SavedCustomerFavoriteItem[] {
+  const existing = loadSavedCustomerFavoriteItems(input.storeId);
+  const cleanOptions = normalizeFavoriteOptions(input.selectedOptions);
+  const cleanNotes = (input.notes || '').trim();
+  const targetId = input.id?.trim() || `fav_${Date.now()}_${generateRandomAlphaNum(6)}`;
+
+  const entry: SavedCustomerFavoriteItem = {
+    id: targetId,
+    storeId: input.storeId || '',
+    dishId: input.dishId,
+    variantId: input.variantId,
+    selectedOptions: cleanOptions,
+    ...(cleanNotes ? { notes: cleanNotes } : {}),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const existsIdx = existing.findIndex((f) => f.id === targetId);
+  let next: SavedCustomerFavoriteItem[];
+  if (existsIdx >= 0) {
+    next = existing.map((f, idx) => (idx === existsIdx ? entry : f));
+  } else {
+    next = [entry, ...existing];
+  }
+
+  persistSavedCustomerFavoriteItems(next, input.storeId);
+  addCustomerFavoriteDishIdIfMissing(input.dishId, input.storeId);
+  return next;
+}
+
+export function deleteSavedCustomerFavoriteItem(
+  favoriteId: string,
+  storeId?: string | null
+): SavedCustomerFavoriteItem[] {
+  const existing = loadSavedCustomerFavoriteItems(storeId);
+  const next = existing.filter((f) => f.id !== favoriteId);
+  persistSavedCustomerFavoriteItems(next, storeId);
+  return next;
 }
 
 export function loadSavedRiderName(): string {

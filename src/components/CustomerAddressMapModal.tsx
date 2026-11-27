@@ -1,5 +1,5 @@
 /// <reference types="google.maps" />
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   APIProvider,
   APILoadingStatus,
@@ -14,14 +14,22 @@ import {
   MapPin,
   X,
   Check,
-  AlertCircle,
   Loader2,
   Home,
   Briefcase,
+  Crosshair,
+  Plus,
+  Minus,
+  Trash2,
 } from 'lucide-react';
 import { Language } from '../types';
 import { SavedCustomerAddress } from '../data/onlineDb';
-import { LatLngLiteralSimple } from '../engine/onlineOrdering';
+import {
+  LatLngLiteralSimple,
+  extractLatLngLiteral,
+  latLngToMercatorPixel,
+  mercatorPixelToLatLng,
+} from '../engine/onlineOrdering';
 
 const MAPS_API_KEY: string =
   import.meta.env.VITE_GOOGLE_MAPS_API_KEY ||
@@ -29,6 +37,7 @@ const MAPS_API_KEY: string =
   '';
 
 const DEFAULT_BANGKOK_CENTER: LatLngLiteralSimple = { lat: 13.7563, lng: 100.5018 };
+const TILE_SIZE = 256;
 
 interface MapControllerProps {
   centerTarget: LatLngLiteralSimple | null;
@@ -45,14 +54,14 @@ const PinMapController: React.FC<MapControllerProps> = ({ centerTarget, onMapErr
       window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
       onMapError(
         lang === 'th'
-          ? 'ไม่สามารถโหลดแผนที่ Google Maps ได้ กรุณากรอกที่อยู่หรือกดใช้ตำแหน่ง GPS ปัจจุบันแทน'
-          : 'Google Maps authorization failed. You can still type your address or use Current GPS.'
+          ? 'สลับใช้แผนที่สำรองอัตโนมัติ (แตะหรือลากหมุดเพื่อเลือกตำแหน่งได้ตามปกติ)'
+          : 'Switched to fallback map (tap or drag pin normally).'
       );
     } else if (status === APILoadingStatus.FAILED) {
       onMapError(
         lang === 'th'
-          ? 'โหลดแผนที่ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ต'
-          : 'Failed to load Google Maps. Check your internet connection.'
+          ? 'โหลด Google Maps ไม่สำเร็จ สลับใช้แผนที่สำรองอัตโนมัติ'
+          : 'Google Maps failed to load. Switched to interactive fallback map.'
       );
     }
   }, [status, lang, onMapError]);
@@ -65,6 +74,292 @@ const PinMapController: React.FC<MapControllerProps> = ({ centerTarget, onMapErr
   }, [map, centerTarget]);
 
   return null;
+};
+
+interface FallbackSlippyMapProps {
+  center: LatLngLiteralSimple;
+  zoom: number;
+  pinPos: LatLngLiteralSimple | null;
+  lang: Language;
+  onCenterChange: (nextCenter: LatLngLiteralSimple) => void;
+  onZoomChange: (nextZoom: number) => void;
+  onPinChange: (nextPin: LatLngLiteralSimple) => void;
+}
+
+const FallbackInteractiveMap: React.FC<FallbackSlippyMapProps> = ({
+  center,
+  zoom,
+  pinPos,
+  lang,
+  onCenterChange,
+  onZoomChange,
+  onPinChange,
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState<{ width: number; height: number }>({ width: 420, height: 256 });
+  const dragStateRef = useRef<{
+    mode: 'map' | 'pin';
+    pointerId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+    startWorldX: number;
+    startWorldY: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setSize({ width: rect.width, height: rect.height });
+      }
+    };
+    updateSize();
+    if (typeof ResizeObserver !== 'undefined') {
+      const obs = new ResizeObserver(updateSize);
+      obs.observe(el);
+      return () => obs.disconnect();
+    }
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
+
+  const centerPx = useMemo(
+    () => latLngToMercatorPixel(center.lat, center.lng, zoom, TILE_SIZE),
+    [center.lat, center.lng, zoom]
+  );
+
+  const topLeftPx = useMemo(
+    () => ({
+      x: centerPx.x - size.width / 2,
+      y: centerPx.y - size.height / 2,
+    }),
+    [centerPx.x, centerPx.y, size.width, size.height]
+  );
+
+  const tiles = useMemo(() => {
+    const maxTileIdx = Math.pow(2, zoom);
+    const minTx = Math.floor(topLeftPx.x / TILE_SIZE);
+    const maxTx = Math.floor((topLeftPx.x + size.width) / TILE_SIZE);
+    const minTy = Math.floor(topLeftPx.y / TILE_SIZE);
+    const maxTy = Math.floor((topLeftPx.y + size.height) / TILE_SIZE);
+
+    const list: Array<{
+      key: string;
+      src: string;
+      left: number;
+      top: number;
+    }> = [];
+
+    for (let tx = minTx; tx <= maxTx; tx++) {
+      for (let ty = minTy; ty <= maxTy; ty++) {
+        if (ty < 0 || ty >= maxTileIdx) continue;
+        const wrappedTx = ((tx % maxTileIdx) + maxTileIdx) % maxTileIdx;
+        list.push({
+          key: `${zoom}-${tx}-${ty}`,
+          src: `https://tile.openstreetmap.org/${zoom}/${wrappedTx}/${ty}.png`,
+          left: tx * TILE_SIZE - topLeftPx.x,
+          top: ty * TILE_SIZE - topLeftPx.y,
+        });
+      }
+    }
+    return list;
+  }, [zoom, topLeftPx.x, topLeftPx.y, size.width, size.height]);
+
+  const pinScreenPos = useMemo(() => {
+    if (!pinPos) return null;
+    const px = latLngToMercatorPixel(pinPos.lat, pinPos.lng, zoom, TILE_SIZE);
+    return {
+      x: px.x - topLeftPx.x,
+      y: px.y - topLeftPx.y,
+    };
+  }, [pinPos, zoom, topLeftPx.x, topLeftPx.y]);
+
+  const handleMapPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStateRef.current = {
+      mode: 'map',
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      startWorldX: centerPx.x,
+      startWorldY: centerPx.y,
+    };
+  };
+
+  const handlePinPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const curPin = pinPos || center;
+    const pinWorld = latLngToMercatorPixel(curPin.lat, curPin.lng, zoom, TILE_SIZE);
+    dragStateRef.current = {
+      mode: 'pin',
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      startWorldX: pinWorld.x,
+      startWorldY: pinWorld.y,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const st = dragStateRef.current;
+    if (!st || st.pointerId !== e.pointerId) return;
+    const dx = e.clientX - st.startX;
+    const dy = e.clientY - st.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      st.moved = true;
+    }
+    if (!st.moved) return;
+
+    if (st.mode === 'map') {
+      const nextCenter = mercatorPixelToLatLng(
+        st.startWorldX - dx,
+        st.startWorldY - dy,
+        zoom,
+        TILE_SIZE
+      );
+      onCenterChange(nextCenter);
+    } else if (st.mode === 'pin') {
+      const nextPin = mercatorPixelToLatLng(
+        st.startWorldX + dx,
+        st.startWorldY + dy,
+        zoom,
+        TILE_SIZE
+      );
+      onPinChange(nextPin);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const st = dragStateRef.current;
+    if (!st || st.pointerId !== e.pointerId) return;
+    dragStateRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // Ignore if capture was already released
+    }
+
+    if (!st.moved && st.mode === 'map' && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const localX = e.clientX - rect.left;
+      const localY = e.clientY - rect.top;
+      const clickedCoords = mercatorPixelToLatLng(
+        topLeftPx.x + localX,
+        topLeftPx.y + localY,
+        zoom,
+        TILE_SIZE
+      );
+      onPinChange(clickedCoords);
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onPointerDown={handleMapPointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={() => {
+        dragStateRef.current = null;
+      }}
+      className="relative w-full h-60 sm:h-64 overflow-hidden select-none touch-none bg-slate-200 cursor-grab active:cursor-grabbing"
+    >
+      {/* OSM XYZ Map Tiles */}
+      <div className="absolute inset-0 pointer-events-none">
+        {tiles.map((t) => (
+          <img
+            key={t.key}
+            src={t.src}
+            alt=""
+            draggable={false}
+            style={{
+              position: 'absolute',
+              width: `${TILE_SIZE}px`,
+              height: `${TILE_SIZE}px`,
+              left: `${Math.round(t.left)}px`,
+              top: `${Math.round(t.top)}px`,
+            }}
+            className="max-w-none select-none"
+          />
+        ))}
+      </div>
+
+      {/* Subtle Center Crosshair Target */}
+      <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
+        <div className="relative flex items-center justify-center">
+          <div className="w-7 h-7 rounded-full border-2 border-orange-500/70 bg-white/30 backdrop-blur-[1px]" />
+          <div className="absolute w-1.5 h-1.5 rounded-full bg-orange-600" />
+        </div>
+      </div>
+
+      {/* Draggable Delivery Pin */}
+      {pinScreenPos && (
+        <div
+          role="slider"
+          aria-label={lang === 'th' ? 'หมุดจัดส่งอาหาร (ลากเพื่อย้ายตำแหน่ง)' : 'Delivery pin (drag to move)'}
+          aria-valuenow={Math.round(pinPos!.lat * 1000)}
+          tabIndex={0}
+          onPointerDown={handlePinPointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={() => {
+            dragStateRef.current = null;
+          }}
+          style={{
+            left: `${pinScreenPos.x}px`,
+            top: `${pinScreenPos.y}px`,
+          }}
+          className="absolute -translate-x-1/2 -translate-y-full z-20 cursor-move touch-none group"
+        >
+          <div className="flex flex-col items-center drop-shadow-[0_4px_8px_rgba(0,0,0,0.35)]">
+            <div className="px-2 py-0.5 mb-0.5 rounded-full bg-slate-900/90 text-white text-[10px] font-extrabold whitespace-nowrap">
+              {lang === 'th' ? 'ลากย้ายหมุดได้' : 'Drag Pin'}
+            </div>
+            <div className="w-9 h-9 rounded-full bg-orange-600 border-2 border-white text-white flex items-center justify-center shadow-lg group-active:scale-110 transition-transform">
+              <MapPin className="w-5 h-5 fill-white/25" />
+            </div>
+            <div className="w-2.5 h-2.5 bg-orange-600 rotate-45 -mt-1.5 border-r border-b border-white" />
+          </div>
+        </div>
+      )}
+
+      {/* Map Controls: Zoom + Pin Center */}
+      <div
+        className="absolute right-2.5 top-2.5 z-30 flex flex-col gap-1.5"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={() => onZoomChange(Math.min(18, zoom + 1))}
+          aria-label={lang === 'th' ? 'ซูมเข้า' : 'Zoom in'}
+          className="w-8 h-8 rounded-lg bg-white/95 hover:bg-white border border-slate-300 shadow-sm flex items-center justify-center text-slate-800 cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onZoomChange(Math.max(10, zoom - 1))}
+          aria-label={lang === 'th' ? 'ซูมออก' : 'Zoom out'}
+          className="w-8 h-8 rounded-lg bg-white/95 hover:bg-white border border-slate-300 shadow-sm flex items-center justify-center text-slate-800 cursor-pointer"
+        >
+          <Minus className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Bottom-left Attribution & Quick Hint */}
+      <div className="absolute left-2 bottom-2 z-20 pointer-events-none px-2 py-0.5 rounded-md bg-white/85 backdrop-blur-xs text-[10px] text-slate-600 font-medium border border-slate-200/80">
+        © OpenStreetMap
+      </div>
+    </div>
+  );
 };
 
 interface Props {
@@ -115,6 +410,14 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
       ? { lat: initialAddress.lat, lng: initialAddress.lng }
       : null
   );
+  const [mapCenter, setMapCenter] = useState<LatLngLiteralSimple>(
+    initialAddress?.lat != null && initialAddress?.lng != null
+      ? { lat: initialAddress.lat, lng: initialAddress.lng }
+      : DEFAULT_BANGKOK_CENTER
+  );
+  const [fallbackZoom, setFallbackZoom] = useState<number>(
+    initialAddress?.lat != null && initialAddress?.lng != null ? 16 : 14
+  );
   const [isDefault, setIsDefault] = useState(initialAddress?.isDefault ?? true);
   const [locating, setLocating] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -132,10 +435,16 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
         : null;
     setPinPos(initCoords);
     setPanTarget(initCoords);
+    setMapCenter(initCoords || DEFAULT_BANGKOK_CENTER);
+    setFallbackZoom(initCoords ? 16 : 14);
     setIsDefault(initialAddress?.isDefault ?? true);
     setErrorMsg(null);
     setMapErrorMsg(null);
   }, [isOpen, initialAddress, fallbackName, fallbackPhone, lang]);
+
+  const handleMapError = useCallback((msg: string) => {
+    setMapErrorMsg(msg);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -156,6 +465,8 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
         };
         setPinPos(coords);
         setPanTarget(coords);
+        setMapCenter(coords);
+        setFallbackZoom(17);
         setLocating(false);
       },
       (err) => {
@@ -169,13 +480,22 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
         } else {
           setErrorMsg(
             lang === 'th'
-              ? 'ไม่สามารถจับตำแหน่ง GPS ปัจจุบันได้ กรุณาแตะปักหมุดบนแผนที่แทน'
-              : 'Unable to lock current GPS. Please tap the map to place your delivery pin.'
+              ? 'ไม่สามารถจับตำแหน่ง GPS ปัจจุบันได้ กรุณาแตะหรือเลื่อนแผนที่เพื่อปักหมุดเอง'
+              : 'Unable to lock current GPS. Please tap or pan the map to place your delivery pin.'
           );
         }
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
     );
+  };
+
+  const handlePinMapCenter = () => {
+    const nextPin = {
+      lat: Number(mapCenter.lat.toFixed(6)),
+      lng: Number(mapCenter.lng.toFixed(6)),
+    };
+    setPinPos(nextPin);
+    setErrorMsg(null);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -201,6 +521,7 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
   };
 
   const initialCenter = pinPos || DEFAULT_BANGKOK_CENTER;
+  const usingGoogleMaps = Boolean(MAPS_API_KEY && !mapErrorMsg);
 
   return (
     <div
@@ -274,40 +595,50 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Interactive Google Map Pin Picker + Current GPS CTA */}
+          {/* Interactive Map Pin Picker (Select, Tap, Drag, Center Pin, or Use Current GPS) */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold text-slate-700">
                 {lang === 'th'
                   ? 'ปักหมุดตำแหน่งจัดส่งบนแผนที่'
                   : 'Pin Delivery Location on Map'}
               </span>
-              <button
-                type="button"
-                onClick={handleUseCurrentGps}
-                disabled={locating}
-                className="min-h-[34px] px-3 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
-              >
-                {locating ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <LocateFixed className="w-3.5 h-3.5" />
-                )}
-                <span>
-                  {locating
-                    ? lang === 'th'
-                      ? 'กำลังค้นหา...'
-                      : 'Locating...'
-                    : lang === 'th'
-                    ? 'ใช้ตำแหน่งปัจจุบัน'
-                    : 'Use Current GPS'}
-                </span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handlePinMapCenter}
+                  className="min-h-[34px] px-2.5 py-1 rounded-xl bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-800 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  <span>{lang === 'th' ? 'ปักหมุดตรงกลาง' : 'Pin Center'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUseCurrentGps}
+                  disabled={locating}
+                  className="min-h-[34px] px-2.5 py-1 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  {locating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <LocateFixed className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {locating
+                      ? lang === 'th'
+                        ? 'กำลังค้นหา...'
+                        : 'Locating...'
+                      : lang === 'th'
+                      ? 'GPS ปัจจุบัน'
+                      : 'Current GPS'}
+                  </span>
+                </button>
+              </div>
             </div>
 
-            {MAPS_API_KEY && !mapErrorMsg ? (
-              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative">
-                <div className="w-full h-56 sm:h-64">
+            <div className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-100 relative">
+              {usingGoogleMaps ? (
+                <div className="w-full h-60 sm:h-64 relative">
                   <APIProvider
                     apiKey={MAPS_API_KEY}
                     libraries={['marker']}
@@ -316,45 +647,61 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                   >
                     <GoogleMap
                       defaultCenter={initialCenter}
-                      defaultZoom={pinPos ? 16 : 12}
+                      defaultZoom={pinPos ? 16 : 14}
                       mapId="DEMO_MAP_ID"
                       gestureHandling="greedy"
                       disableDefaultUI={false}
                       streetViewControl={false}
                       mapTypeControl={false}
                       fullscreenControl={false}
-                      internalUsageAttributionIds={[
-                        'gmp_mcp_codeassist_v1_aistudio',
-                        'gmp_git_agentskills_v1',
-                      ]}
+                      internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+                      onCameraChanged={(ev) => {
+                        const c = ev.detail?.center;
+                        if (c && Number.isFinite(c.lat) && Number.isFinite(c.lng)) {
+                          setMapCenter({ lat: c.lat, lng: c.lng });
+                        }
+                      }}
                       onClick={(ev) => {
                         const latLng = ev.detail?.latLng;
                         if (latLng) {
-                          setPinPos({
+                          const nextCoords = {
                             lat: Number(latLng.lat.toFixed(6)),
                             lng: Number(latLng.lng.toFixed(6)),
-                          });
+                          };
+                          setPinPos(nextCoords);
+                          setMapCenter(nextCoords);
                         }
                       }}
                       className="w-full h-full"
                     >
                       <PinMapController
                         centerTarget={panTarget}
-                        onMapError={setMapErrorMsg}
+                        onMapError={handleMapError}
                         lang={lang}
                       />
                       {pinPos && (
                         <AdvancedMarker
                           position={pinPos}
-                          draggable
-                          title={lang === 'th' ? 'จุดจัดส่งอาหาร' : 'Delivery Pin'}
-                          onDragEnd={(ev) => {
-                            const pos = ev.latLng;
-                            if (pos) {
+                          draggable={true}
+                          title={lang === 'th' ? 'จุดจัดส่งอาหาร (ลากย้ายได้)' : 'Delivery Pin (Drag to move)'}
+                          onDrag={(ev) => {
+                            const literal = extractLatLngLiteral(ev.latLng);
+                            if (literal) {
                               setPinPos({
-                                lat: Number(pos.lat().toFixed(6)),
-                                lng: Number(pos.lng().toFixed(6)),
+                                lat: Number(literal.lat.toFixed(6)),
+                                lng: Number(literal.lng.toFixed(6)),
                               });
+                            }
+                          }}
+                          onDragEnd={(ev) => {
+                            const literal = extractLatLngLiteral(ev.latLng);
+                            if (literal) {
+                              const nextCoords = {
+                                lat: Number(literal.lat.toFixed(6)),
+                                lng: Number(literal.lng.toFixed(6)),
+                              };
+                              setPinPos(nextCoords);
+                              setMapCenter(nextCoords);
                             }
                           }}
                         >
@@ -362,44 +709,69 @@ export const CustomerAddressMapModal: React.FC<Props> = ({
                             background="#ea580c"
                             borderColor="#9a3412"
                             glyphColor="#ffffff"
-                            scale={1.2}
+                            scale={1.25}
                           />
                         </AdvancedMarker>
                       )}
                     </GoogleMap>
                   </APIProvider>
+
+                  {/* Center Crosshair Guide on Google Map */}
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
+                    <div className="relative flex items-center justify-center">
+                      <div className="w-7 h-7 rounded-full border-2 border-orange-500/65 bg-white/25" />
+                      <div className="absolute w-1.5 h-1.5 rounded-full bg-orange-600" />
+                    </div>
+                  </div>
                 </div>
-                <div className="px-3 py-1.5 bg-white/95 border-t border-slate-200 text-[11px] text-slate-600 flex items-center justify-between gap-2">
-                  <span>
-                    {lang === 'th'
-                      ? 'แตะบนแผนที่หรือลากหมุดสีส้มเพื่อปรับตำแหน่งให้ตรงหน้าบ้าน'
-                      : 'Tap map or drag orange pin to match exact drop-off spot'}
-                  </span>
-                  {pinPos && (
-                    <span className="font-mono font-semibold text-emerald-700 shrink-0 tabular-nums">
-                      {pinPos.lat.toFixed(5)}, {pinPos.lng.toFixed(5)}
+              ) : (
+                <FallbackInteractiveMap
+                  center={mapCenter}
+                  zoom={fallbackZoom}
+                  pinPos={pinPos}
+                  lang={lang}
+                  onCenterChange={setMapCenter}
+                  onZoomChange={setFallbackZoom}
+                  onPinChange={(nextPin) => {
+                    setPinPos(nextPin);
+                    setErrorMsg(null);
+                  }}
+                />
+              )}
+
+              <div className="px-3 py-2 bg-white border-t border-slate-200 text-[11px] text-slate-600 flex flex-wrap items-center justify-between gap-2">
+                <span className="font-medium">
+                  {pinPos
+                    ? lang === 'th'
+                      ? 'แตะแผนที่ ลากหมุดสีส้ม หรือเลื่อนแผนที่แล้วกด "ปักหมุดตรงกลาง" เพื่อย้ายจุดได้ทันที'
+                      : 'Tap map, drag the orange pin, or pan & press "Pin Center" to move'
+                    : lang === 'th'
+                    ? 'แตะลงบนแผนที่หรือกด "ปักหมุดตรงกลาง" เพื่อวางหมุดจัดส่ง'
+                    : 'Tap anywhere on the map or press "Pin Center" to place your pin'}
+                </span>
+                <div className="flex items-center gap-2 shrink-0 ml-auto">
+                  {pinPos ? (
+                    <>
+                      <span className="font-mono font-bold text-emerald-700 tabular-nums">
+                        {pinPos.lat.toFixed(5)}, {pinPos.lng.toFixed(5)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPinPos(null)}
+                        title={lang === 'th' ? 'ล้างหมุด' : 'Clear pin'}
+                        className="p-1 rounded-md bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-600 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[11px] font-semibold text-amber-700">
+                      {lang === 'th' ? 'ยังไม่ปักหมุด' : 'No pin set'}
                     </span>
                   )}
                 </div>
               </div>
-            ) : (
-              <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-600 space-y-1.5">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-                  <span>
-                    {mapErrorMsg ||
-                      (lang === 'th'
-                        ? 'สามารถกดปุ่ม "ใช้ตำแหน่งปัจจุบัน" ด้านบนเพื่อแนบพิกัด GPS ให้ไรเดอร์นำทางได้ทันที'
-                        : 'Tap "Use Current GPS" above to attach exact GPS coordinates for Rider navigation.')}
-                  </span>
-                </div>
-                {pinPos && (
-                  <div className="text-[11px] font-mono font-bold text-emerald-700 pl-6 tabular-nums">
-                    GPS: {pinPos.lat}, {pinPos.lng}
-                  </div>
-                )}
-              </div>
-            )}
+            </div>
           </div>
 
           {/* Address Text & Recipient Contact */}
