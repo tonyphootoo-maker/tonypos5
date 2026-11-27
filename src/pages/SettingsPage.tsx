@@ -22,6 +22,7 @@ import {
   fetchCollection,
   saveDocument,
 } from '../data/db';
+import { publishPublicStoreImage } from '../data/onlineDb';
 import { compressImage } from '../utils/imageCompressor';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import {
@@ -70,12 +71,14 @@ import {
 interface Props {
   settings: SettingsDoc;
   lang?: Language;
-  onSettingsUpdated: (newSettings: SettingsDoc) => void;
+  storeId?: string;
+  onSettingsUpdated: (newSettings: SettingsDoc, logoDataUrl?: string | null) => void;
 }
 
 export const SettingsPage: React.FC<Props> = ({
   settings,
   lang: propLang,
+  storeId: propStoreId,
   onSettingsUpdated,
 }) => {
   const { lang: ctxLang } = useLanguage();
@@ -203,6 +206,13 @@ export const SettingsPage: React.FC<Props> = ({
       const imgId = `logo_${Date.now()}`;
       await saveImageDoc(imgId, dataUrl, sizeBytes);
 
+      const resolvedStoreId = propStoreId || auth?.currentUser?.uid;
+      if (resolvedStoreId) {
+        await publishPublicStoreImage(resolvedStoreId, imgId, dataUrl, sizeBytes).catch((err) => {
+          console.warn('Direct public store logo publish warning:', err);
+        });
+      }
+
       const nextVersion = settings.version + 1;
       const nowIso = new Date().toISOString();
       lastAutoSyncedLogoVersionRef.current = nextVersion;
@@ -215,16 +225,19 @@ export const SettingsPage: React.FC<Props> = ({
         version: nextVersion,
         updatedAt: nowIso,
       }));
-      onSettingsUpdated({
-        ...settings,
-        logoImageId: imgId,
-        version: nextVersion,
-        updatedAt: nowIso,
-      });
+      onSettingsUpdated(
+        {
+          ...settings,
+          logoImageId: imgId,
+          version: nextVersion,
+          updatedAt: nowIso,
+        },
+        dataUrl
+      );
       setLogoStatusMsg(
         lang === 'th'
-          ? 'อัปโหลดและเปลี่ยนโลโก้ร้านเรียบร้อยแล้ว (ซิงค์ขึ้นหน้าลูกค้าอัตโนมัติ)'
-          : 'Store logo updated and synced to customer storefront.'
+          ? 'อัปโหลดและเปลี่ยนโลโก้ร้านทั้งฝั่งร้านค้าและฝั่งลูกค้าเรียบร้อยแล้ว'
+          : 'Store logo updated on both store and customer views.'
       );
     } catch (err: unknown) {
       lastAutoSyncedLogoVersionRef.current = null;
@@ -258,12 +271,15 @@ export const SettingsPage: React.FC<Props> = ({
         version: nextVersion,
         updatedAt: nowIso,
       }));
-      onSettingsUpdated({
-        ...settings,
-        logoImageId: '',
-        version: nextVersion,
-        updatedAt: nowIso,
-      });
+      onSettingsUpdated(
+        {
+          ...settings,
+          logoImageId: '',
+          version: nextVersion,
+          updatedAt: nowIso,
+        },
+        null
+      );
       setLogoStatusMsg(
         lang === 'th'
           ? 'เปลี่ยนกลับเป็นโลโก้เริ่มต้นเรียบร้อยแล้ว'
@@ -819,6 +835,12 @@ export const SettingsPage: React.FC<Props> = ({
               <div className="w-20 h-20 rounded-full bg-white border-2 border-orange-200 shadow-xs overflow-hidden flex items-center justify-center shrink-0">
                 <img
                   src={logoDataUrl || './assets/aistudio/Logo-Ex_a8e2a318.png'}
+                  onError={(e) => {
+                    const img = e.currentTarget;
+                    if (img.dataset.fallbackApplied === '1') return;
+                    img.dataset.fallbackApplied = '1';
+                    img.src = '/assets/aistudio/Logo-Ex_a8e2a318.png';
+                  }}
                   alt={lang === 'th' ? 'ตัวอย่างโลโก้ร้าน' : 'Store Logo Preview'}
                   className="w-full h-full object-contain"
                 />

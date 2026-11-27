@@ -71,6 +71,21 @@ const UNIFIED_FINANCE_PAGES: AppPage[] = [
   'cost_sales_entry',
 ];
 
+const DEFAULT_STORE_LOGO_SRC = './assets/aistudio/Logo-Ex_a8e2a318.png';
+const DEFAULT_STORE_LOGO_FALLBACK_SRC = '/assets/aistudio/Logo-Ex_a8e2a318.png';
+
+function handleStoreLogoError(e: React.SyntheticEvent<HTMLImageElement>) {
+  const img = e.currentTarget;
+  if (img.src.startsWith('data:') && img.dataset.customFallbackApplied !== '1') {
+    img.dataset.customFallbackApplied = '1';
+    img.src = DEFAULT_STORE_LOGO_SRC;
+    return;
+  }
+  if (img.dataset.fallbackApplied === '1') return;
+  img.dataset.fallbackApplied = '1';
+  img.src = DEFAULT_STORE_LOGO_FALLBACK_SRC;
+}
+
 interface Props {
   currentPage: AppPage;
   onSelectPage: (page: AppPage) => void;
@@ -79,6 +94,8 @@ interface Props {
   userEmail?: string | null;
   activeShift?: ShiftDoc | null;
   onOpenShiftModal: () => void;
+  storeLogoDataUrl?: string | null;
+  shopName?: string;
 }
 
 interface MenuItemDef {
@@ -101,7 +118,11 @@ export const Navigation: React.FC<Props> = ({
   userEmail,
   activeShift,
   onOpenShiftModal,
+  storeLogoDataUrl,
+  shopName,
 }) => {
+  const activeStoreLogoSrc = storeLogoDataUrl || DEFAULT_STORE_LOGO_SRC;
+  const activeStoreLogoKey = storeLogoDataUrl ? 'custom' : 'default';
   const [isOpen, setIsOpen] = useState(false);
   const { lang: ctxLang, toggleLang: ctxToggleLang } = useLanguage();
   const lang = propLang ?? ctxLang;
@@ -283,8 +304,14 @@ export const Navigation: React.FC<Props> = ({
         {/* Drawer Header */}
         <div className="p-4 bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 text-white flex items-center justify-between shadow-[0_4px_0_rgba(154,52,18,0.3),0_10px_20px_-6px_rgba(234,88,12,0.3)] shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center font-black text-white text-lg border border-white/40 shadow-[inset_0_1px_0_rgba(255,255,255,0.45),0_3px_0_rgba(0,0,0,0.16)]">
-              T
+            <div className="w-10 h-10 rounded-full bg-white overflow-hidden flex items-center justify-center border-2 border-white/80 shadow-[0_3px_8px_rgba(0,0,0,0.16)] shrink-0">
+              <img
+                key={`nav-drawer-logo-${activeStoreLogoKey}`}
+                src={activeStoreLogoSrc}
+                onError={handleStoreLogoError}
+                alt={shopName || (lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo')}
+                className="w-full h-full object-contain"
+              />
             </div>
             <div className="leading-tight">
               <div className="flex items-center gap-1.5">
@@ -414,8 +441,14 @@ export const Navigation: React.FC<Props> = ({
             onClick={() => onSelectPage('pos')}
             className="flex items-center gap-2.5 cursor-pointer select-none"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 via-orange-600 to-red-600 flex items-center justify-center text-white font-black text-lg border border-orange-300/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.4),0_3px_0_#c2410c,0_8px_16px_-4px_rgba(234,88,12,0.35)]">
-              T
+            <div className="w-9 h-9 rounded-full bg-white overflow-hidden flex items-center justify-center border border-orange-200 shadow-[0_2px_6px_-2px_rgba(234,88,12,0.28)] shrink-0">
+              <img
+                key={`nav-header-logo-${activeStoreLogoKey}`}
+                src={activeStoreLogoSrc}
+                onError={handleStoreLogoError}
+                alt={shopName || (lang === 'th' ? 'โลโก้ร้าน' : 'Store Logo')}
+                className="w-full h-full object-contain"
+              />
             </div>
             <div className="leading-tight">
               <div className="font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">

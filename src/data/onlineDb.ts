@@ -796,9 +796,25 @@ export async function fetchPublicStoreImage(
   }
 }
 
+export async function publishPublicStoreImage(
+  storeId: string,
+  imageId: string,
+  dataUrl: string,
+  sizeBytes?: number
+): Promise<void> {
+  if (!db || !storeId || !imageId || !dataUrl) return;
+  await setDoc(doc(db, 'publicStores', storeId, 'images', imageId), {
+    id: imageId,
+    dataUrl,
+    sizeBytes: sizeBytes || dataUrl.length,
+    updatedAt: serverTimestamp(),
+  });
+  publicImageCache.set(`${storeId}::${imageId}`, dataUrl);
+}
+
 /**
  * Publishes strictly sanitized menu, categories, option groups, storefront settings,
- * and dish/QR images from Owner private collections to `/publicStores/{uid}`.
+ * and dish/QR/logo images from Owner private collections to `/publicStores/{uid}`.
  */
 export async function publishMenuToPublicStore(params: {
   storeId: string;
@@ -823,13 +839,8 @@ export async function publishMenuToPublicStore(params: {
     publishedAt,
   });
 
-  const storePath = `publicStores/${storeId}`;
-  try {
-    await setDoc(doc(db, 'publicStores', storeId), stripUndefined(publicStore));
-  } catch (err) {
-    handleFirestoreError(err, OperationType.WRITE, storePath);
-  }
-
+  // Upload referenced images (including store logo, QR, and dish photos) BEFORE updating
+  // publicStores/{storeId} so real-time Customer listeners never fetch a new imageId before it exists.
   let copiedImages = 0;
   for (const imageId of referencedImageIds) {
     if (skipImageIds?.has(imageId)) {
@@ -838,19 +849,20 @@ export async function publishMenuToPublicStore(params: {
     try {
       const imgDoc = await getImageDoc(imageId);
       if (imgDoc?.dataUrl) {
-        await setDoc(doc(db, 'publicStores', storeId, 'images', imageId), {
-          id: imageId,
-          dataUrl: imgDoc.dataUrl,
-          sizeBytes: imgDoc.sizeBytes || imgDoc.dataUrl.length,
-          updatedAt: serverTimestamp(),
-        });
-        publicImageCache.set(`${storeId}::${imageId}`, imgDoc.dataUrl);
+        await publishPublicStoreImage(storeId, imageId, imgDoc.dataUrl, imgDoc.sizeBytes);
         skipImageIds?.add(imageId);
         copiedImages += 1;
       }
     } catch (err) {
       console.warn(`Skipped copying public image ${imageId}:`, err);
     }
+  }
+
+  const storePath = `publicStores/${storeId}`;
+  try {
+    await setDoc(doc(db, 'publicStores', storeId), stripUndefined(publicStore));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, storePath);
   }
 
   if (settings.onlinePublishDefaultIndex !== false) {

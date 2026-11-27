@@ -42,6 +42,7 @@ import { compressImage } from '../utils/imageCompressor';
 import {
   deleteOnlineOrderByOwner,
   publishMenuToPublicStore,
+  publishPublicStoreImage,
   subscribeOwnerOnlineOrders,
   syncCompletedOnlineOrdersToPnl,
   updateOnlineOrderByOwner,
@@ -74,7 +75,7 @@ interface Props {
   externalOrders?: OnlineOrderDoc[];
   soundEnabled?: boolean;
   onToggleSound?: () => void;
-  onSettingsUpdated: (newSettings: SettingsDoc) => void;
+  onSettingsUpdated: (newSettings: SettingsDoc, logoDataUrl?: string | null) => void;
 }
 
 export const OnlineOrdersManagerPage: React.FC<Props> = ({
@@ -285,21 +286,27 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
       const { dataUrl, sizeBytes } = await compressImage(file);
       const imgId = `logo_${Date.now()}`;
       await saveImageDoc(imgId, dataUrl, sizeBytes);
+      await publishPublicStoreImage(user.uid, imgId, dataUrl, sizeBytes).catch((err) => {
+        console.warn('Direct public store logo publish warning:', err);
+      });
 
       const nextVersion = settings.version + 1;
       const nowIso = new Date().toISOString();
       await updateSettings({ logoImageId: imgId }, settings.version);
       setLogoDataUrl(dataUrl);
-      onSettingsUpdated({
-        ...settings,
-        logoImageId: imgId,
-        version: nextVersion,
-        updatedAt: nowIso,
-      });
+      onSettingsUpdated(
+        {
+          ...settings,
+          logoImageId: imgId,
+          version: nextVersion,
+          updatedAt: nowIso,
+        },
+        dataUrl
+      );
       setPublishMessage(
         lang === 'th'
-          ? 'อัปโหลดและเปลี่ยนโลโก้หน้าร้านเรียบร้อยแล้ว'
-          : 'Storefront logo updated successfully.'
+          ? 'อัปโหลดและเปลี่ยนโลโก้ร้านทั้งฝั่งร้านค้าและฝั่งลูกค้าเรียบร้อยแล้ว'
+          : 'Storefront logo updated on both store and customer views.'
       );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -317,12 +324,15 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
       const nowIso = new Date().toISOString();
       await updateSettings({ logoImageId: '' }, settings.version);
       setLogoDataUrl(null);
-      onSettingsUpdated({
-        ...settings,
-        logoImageId: '',
-        version: nextVersion,
-        updatedAt: nowIso,
-      });
+      onSettingsUpdated(
+        {
+          ...settings,
+          logoImageId: '',
+          version: nextVersion,
+          updatedAt: nowIso,
+        },
+        null
+      );
       setPublishMessage(
         lang === 'th'
           ? 'เปลี่ยนกลับเป็นโลโก้เริ่มต้นเรียบร้อยแล้ว'
@@ -782,6 +792,12 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
                 <div className="w-12 h-12 rounded-full bg-white border border-orange-200 overflow-hidden flex items-center justify-center shrink-0">
                   <img
                     src={logoDataUrl || './assets/aistudio/Logo-Ex_a8e2a318.png'}
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      if (img.dataset.fallbackApplied === '1') return;
+                      img.dataset.fallbackApplied = '1';
+                      img.src = '/assets/aistudio/Logo-Ex_a8e2a318.png';
+                    }}
                     alt={lang === 'th' ? 'โลโก้หน้าร้าน' : 'Store Logo'}
                     className="w-full h-full object-contain"
                   />

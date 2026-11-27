@@ -438,19 +438,35 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       return;
     }
     let cancelled = false;
-    fetchPublicStoreImage(storeId, logoImageId)
-      .then((url) => {
-        if (!cancelled) {
-          setStoreLogoDataUrl(url || null);
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    setStoreLogoDataUrl(null);
+
+    const loadLogo = async (allowRetry: boolean) => {
+      try {
+        const url = await fetchPublicStoreImage(storeId, logoImageId);
+        if (cancelled) return;
+        if (url) {
+          setStoreLogoDataUrl(url);
+        } else if (allowRetry) {
+          retryTimer = setTimeout(() => {
+            if (!cancelled) {
+              void loadLogo(false);
+            }
+          }, 650);
+        } else {
+          setStoreLogoDataUrl(null);
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
           setStoreLogoDataUrl(null);
         }
-      });
+      }
+    };
+
+    void loadLogo(true);
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [storeId, store?.logoImageId]);
 
@@ -1216,7 +1232,9 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
 
   const isStoreClosed = store.onlineOrderingEnabled === false;
   const activeStoreLogoSrc = storeLogoDataUrl || STORE_LOGO_SRC;
-  const activeStoreLogoKey = store.logoImageId || 'default-logo';
+  const activeStoreLogoKey = `${store.logoImageId || 'default-logo'}-${
+    storeLogoDataUrl ? 'custom' : 'default'
+  }`;
 
   return (
     <div className="min-h-screen bg-[#FAF8F5] text-slate-900 pb-24">

@@ -17,6 +17,7 @@ import {
   subscribeCollection,
   subscribeTranslationGlossary,
   saveTranslationGlossaryToCloud,
+  getImageDoc,
   firebaseInitError,
 } from './data/db';
 import {
@@ -96,6 +97,7 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
   const [readyFlags, setReadyFlags] = useState({ cats: false, dishes: false, opts: false });
 
   const lastPublishedSigRef = useRef<string>('');
+  const lastPublishedLogoIdRef = useRef<string>(settings.logoImageId || '');
   const syncedImagesRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -195,6 +197,9 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
 
     if (signature === lastPublishedSigRef.current) return;
 
+    const logoChanged = (settings.logoImageId || '') !== lastPublishedLogoIdRef.current;
+    const delayMs = logoChanged ? 0 : 800;
+
     const timer = setTimeout(async () => {
       try {
         await publishMenuToPublicStore({
@@ -207,10 +212,11 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
           skipImageIds: syncedImagesRef.current,
         });
         lastPublishedSigRef.current = signature;
+        lastPublishedLogoIdRef.current = settings.logoImageId || '';
       } catch (err) {
         console.warn('AutoSync public storefront menu warning:', err);
       }
-    }, 800);
+    }, delayMs);
 
     return () => clearTimeout(timer);
   }, [user.uid, settings, categories, dishes, optionGroups, costMenus, readyFlags]);
@@ -229,6 +235,8 @@ export default function App() {
   const { lang, toggleLang: handleToggleLanguage, t } = useLanguage();
 
   const [settings, setSettings] = useState<SettingsDoc | null>(null);
+  const [storeLogoDataUrl, setStoreLogoDataUrl] = useState<string | null>(null);
+  const storeLogoCacheRef = useRef<Map<string, string>>(new Map());
   const [currentPage, setCurrentPage] = useState<AppPage>('pos');
   const [activeShift, setActiveShift] = useState<ShiftDoc | null>(null);
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
@@ -278,6 +286,49 @@ export default function App() {
     window.addEventListener('gmp-quota-exceeded', handleQuota);
     return () => window.removeEventListener('gmp-quota-exceeded', handleQuota);
   }, []);
+
+  // Synchronize store logo image for Owner / Store UI whenever settings.logoImageId changes
+  useEffect(() => {
+    const logoId = settings?.logoImageId;
+    if (!user || !logoId) {
+      setStoreLogoDataUrl(null);
+      return;
+    }
+    const cached = storeLogoCacheRef.current.get(logoId);
+    if (cached) {
+      setStoreLogoDataUrl(cached);
+      return;
+    }
+    let cancelled = false;
+    getImageDoc(logoId)
+      .then((img) => {
+        if (cancelled) return;
+        if (img?.dataUrl) {
+          storeLogoCacheRef.current.set(logoId, img.dataUrl);
+          setStoreLogoDataUrl(img.dataUrl);
+        } else {
+          setStoreLogoDataUrl(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStoreLogoDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, settings?.logoImageId]);
+
+  const handleSettingsUpdated = (newSettings: SettingsDoc, uploadedLogoDataUrl?: string | null) => {
+    if (uploadedLogoDataUrl !== undefined) {
+      if (uploadedLogoDataUrl && newSettings.logoImageId) {
+        storeLogoCacheRef.current.set(newSettings.logoImageId, uploadedLogoDataUrl);
+        setStoreLogoDataUrl(uploadedLogoDataUrl);
+      } else if (!newSettings.logoImageId) {
+        setStoreLogoDataUrl(null);
+      }
+    }
+    setSettings(newSettings);
+  };
 
   // Subscribe to Auth state changes for Owner mode ONLY
   useEffect(() => {
@@ -732,6 +783,8 @@ export default function App() {
         userEmail={user.email}
         activeShift={activeShift}
         onOpenShiftModal={() => setIsShiftModalOpen(true)}
+        storeLogoDataUrl={storeLogoDataUrl}
+        shopName={settings.shopName}
       />
 
       {/* Main Active Page Content */}
@@ -817,7 +870,7 @@ export default function App() {
               externalOrders={onlineOrders}
               soundEnabled={onlineSoundEnabled}
               onToggleSound={handleToggleOnlineSound}
-              onSettingsUpdated={(newSet) => setSettings(newSet)}
+              onSettingsUpdated={handleSettingsUpdated}
             />
           </Suspense>
         )}
@@ -837,7 +890,8 @@ export default function App() {
           <SettingsPage
             settings={settings}
             lang={lang}
-            onSettingsUpdated={(newSet) => setSettings(newSet)}
+            storeId={user.uid}
+            onSettingsUpdated={handleSettingsUpdated}
           />
         )}
         {currentPage.startsWith('cost_') && financeHubTab === undefined && (
