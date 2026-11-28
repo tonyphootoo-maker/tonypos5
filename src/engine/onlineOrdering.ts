@@ -695,18 +695,21 @@ export function extractLatLngLiteral(input: unknown): LatLngLiteralSimple | null
  * so mobile Google Maps starts voice/turn-by-turn navigation immediately.
  */
 export function buildExternalGoogleMapsUrl(
-  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
+  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>,
+  origin?: string | null
 ): string {
+  const originTrimmed = (origin || '').trim();
+  const originQuery = originTrimmed ? `&origin=${encodeURIComponent(originTrimmed)}` : '';
   if (
     typeof order.deliveryLat === 'number' &&
     typeof order.deliveryLng === 'number' &&
     Number.isFinite(order.deliveryLat) &&
     Number.isFinite(order.deliveryLng)
   ) {
-    return `https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=${order.deliveryLat},${order.deliveryLng}`;
+    return `https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate${originQuery}&destination=${order.deliveryLat},${order.deliveryLng}`;
   }
   const addr = encodeURIComponent((order.deliveryAddress || '').trim());
-  return `https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=${addr}`;
+  return `https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate${originQuery}&destination=${addr}`;
 }
 
 /**
@@ -735,10 +738,11 @@ export function buildAndroidGoogleNavigationUri(
  * - On iOS / Desktop: opens Google Maps navigation URL in external tab/app.
  */
 export function launchExternalGoogleMapsNavigation(
-  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
+  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>,
+  origin?: string | null
 ): void {
   if (typeof window === 'undefined') return;
-  const httpsUrl = buildExternalGoogleMapsUrl(order);
+  const httpsUrl = buildExternalGoogleMapsUrl(order, origin);
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
 
   if (/android/i.test(ua)) {

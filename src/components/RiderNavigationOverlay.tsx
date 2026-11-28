@@ -18,9 +18,13 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { formatMoney } from '../engine/calculations';
 import {
   LatLngLiteralSimple,
-  buildGoogleMapsDirectionsLink,
+  buildExternalGoogleMapsUrl,
   buildGoogleMapsNoKeyEmbedUrl,
+  formatNavDistance,
+  formatNavDuration,
   getCurrentPositionWithIosFallback,
+  haversineMeters,
+  launchExternalGoogleMapsNavigation,
   resolveOrderDestinationParam,
   resolveRiderOriginParam,
 } from '../engine/onlineOrdering';
@@ -46,6 +50,7 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
   const lang = propLang ?? ctxLang;
 
   const [riderPosition, setRiderPosition] = useState<LatLngLiteralSimple | null>(null);
+  const [embedOriginPosition, setEmbedOriginPosition] = useState<LatLngLiteralSimple | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'locating' | 'active' | 'denied' | 'unavailable'>(
     typeof navigator !== 'undefined' && 'geolocation' in navigator ? 'locating' : 'unavailable'
   );
@@ -60,17 +65,45 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
   const isSubmitting = busy || isCompleting;
 
   const destinationParam = useMemo(() => resolveOrderDestinationParam(order), [order]);
-  const externalDirectionsUrl = useMemo(() => buildGoogleMapsDirectionsLink(order), [order]);
+  const gpsOriginString = riderPosition ? `${riderPosition.lat},${riderPosition.lng}` : null;
+  const turnByTurnUrl = useMemo(
+    () => buildExternalGoogleMapsUrl(order, gpsOriginString),
+    [order, gpsOriginString]
+  );
 
   const originInfo = useMemo(
     () =>
       resolveRiderOriginParam({
-        riderPosition,
+        riderPosition: embedOriginPosition ?? riderPosition,
         storeAddress: store?.shopAddress,
         fallbackDestination: destinationParam,
       }),
-    [riderPosition, store?.shopAddress, destinationParam]
+    [embedOriginPosition, riderPosition, store?.shopAddress, destinationParam]
   );
+
+  const liveNavMetrics = useMemo(() => {
+    if (
+      !riderPosition ||
+      typeof order.deliveryLat !== 'number' ||
+      typeof order.deliveryLng !== 'number' ||
+      !Number.isFinite(order.deliveryLat) ||
+      !Number.isFinite(order.deliveryLng)
+    ) {
+      return null;
+    }
+    const meters = haversineMeters(riderPosition, {
+      lat: order.deliveryLat,
+      lng: order.deliveryLng,
+    });
+    // Approximate city motorbike speed ~30 km/h (8.33 m/s) for live ETA estimate
+    const etaMillis = (meters / 8.33) * 1000;
+    return {
+      meters,
+      distanceLabel: formatNavDistance(meters, lang),
+      etaLabel: formatNavDuration(etaMillis, lang),
+      isNearDestination: meters <= 80,
+    };
+  }, [riderPosition, order.deliveryLat, order.deliveryLng, lang]);
 
   // Build API-key-free Google Maps directions embed URL once GPS locks or brief initial grace window elapses
   const canBuildEmbed = Boolean(destinationParam) && (gpsStatus === 'active' || gpsWaitElapsed);
@@ -83,28 +116,39 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
     });
   }, [canBuildEmbed, originInfo.value, destinationParam]);
 
-  const requestGpsFix = useCallback(() => {
-    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
-      setGpsStatus('unavailable');
-      setGpsWaitElapsed(true);
-      return;
-    }
-    setGpsStatus('locating');
-    getCurrentPositionWithIosFallback()
-      .then((pos) => {
-        setRiderPosition({ lat: pos.lat, lng: pos.lng });
-        setGpsStatus('active');
-        setGpsWaitElapsed(true);
-      })
-      .catch((err: { code?: number }) => {
-        if (err && err.code === 1) {
-          setGpsStatus('denied');
-        } else {
-          setGpsStatus('unavailable');
-        }
-        setGpsWaitElapsed(true);
-      });
+  const applyNewGpsPosition = useCallback((pos: LatLngLiteralSimple, forceEmbedRefresh = false) => {
+    setRiderPosition(pos);
+    setGpsStatus('active');
+    setGpsWaitElapsed(true);
+    setEmbedOriginPosition((prev) => {
+      if (!prev || forceEmbedRefresh) return pos;
+      return haversineMeters(prev, pos) >= 250 ? pos : prev;
+    });
   }, []);
+
+  const requestGpsFix = useCallback(
+    (forceEmbedRefresh = false) => {
+      if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+        setGpsStatus('unavailable');
+        setGpsWaitElapsed(true);
+        return;
+      }
+      setGpsStatus((prev) => (prev === 'active' ? prev : 'locating'));
+      getCurrentPositionWithIosFallback()
+        .then((pos) => {
+          applyNewGpsPosition({ lat: pos.lat, lng: pos.lng }, forceEmbedRefresh);
+        })
+        .catch((err: { code?: number }) => {
+          if (err && err.code === 1) {
+            setGpsStatus('denied');
+          } else {
+            setGpsStatus((prev) => (prev === 'active' ? prev : 'unavailable'));
+          }
+          setGpsWaitElapsed(true);
+        });
+    },
+    [applyNewGpsPosition]
+  );
 
   // Lock body scroll and support Escape key to close without completing delivery
   useEffect(() => {
@@ -133,10 +177,43 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
     return () => window.clearTimeout(timer);
   }, []);
 
-  // Initial geolocation lock on mount
+  // Initial geolocation lock + live watchPosition tracking while modal is open
   useEffect(() => {
-    requestGpsFix();
-  }, [requestGpsFix]);
+    requestGpsFix(true);
+    if (
+      typeof navigator === 'undefined' ||
+      !('geolocation' in navigator) ||
+      typeof navigator.geolocation.watchPosition !== 'function'
+    ) {
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          applyNewGpsPosition({ lat, lng }, false);
+        }
+      },
+      (err) => {
+        if (err && err.code === 1) {
+          setGpsStatus('denied');
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 5000,
+        timeout: 15000,
+      }
+    );
+
+    return () => {
+      if (typeof navigator.geolocation.clearWatch === 'function') {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [requestGpsFix, applyNewGpsPosition]);
 
   // Reset iframe state when embed URL or manual reload changes
   useEffect(() => {
@@ -247,7 +324,7 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
                 </span>
                 <button
                   type="button"
-                  onClick={requestGpsFix}
+                  onClick={() => requestGpsFix(true)}
                   className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold shrink-0 inline-flex items-center gap-1 cursor-pointer"
                 >
                   <LocateFixed className="w-3 h-3" />
@@ -256,17 +333,27 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
               </div>
             ) : gpsStatus === 'active' ? (
               <div className="flex items-center justify-between gap-2 text-emerald-300/90">
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex items-center gap-1 min-w-0 truncate">
                   <LocateFixed className="w-3 h-3 shrink-0" />
-                  {lang === 'th' ? 'ต้นทาง: ตำแหน่ง GPS ปัจจุบันของคุณ' : 'Origin: Your current GPS location'}
+                  {liveNavMetrics
+                    ? liveNavMetrics.isNearDestination
+                      ? lang === 'th'
+                        ? `ใกล้ถึงปลายทางแล้ว! (${liveNavMetrics.distanceLabel})`
+                        : `Near destination! (${liveNavMetrics.distanceLabel})`
+                      : lang === 'th'
+                        ? `GPS สด • เหลือ ${liveNavMetrics.distanceLabel} (~${liveNavMetrics.etaLabel})`
+                        : `Live GPS • ${liveNavMetrics.distanceLabel} (~${liveNavMetrics.etaLabel})`
+                    : lang === 'th'
+                      ? 'ต้นทาง: ตำแหน่ง GPS ปัจจุบันของคุณ'
+                      : 'Origin: Your current GPS location'}
                 </span>
                 <button
                   type="button"
                   onClick={() => {
-                    requestGpsFix();
+                    requestGpsFix(true);
                     setReloadNonce((n) => n + 1);
                   }}
-                  className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold inline-flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold inline-flex items-center gap-1 shrink-0 cursor-pointer"
                 >
                   <RefreshCw className="w-3 h-3" />
                   <span>{lang === 'th' ? 'รีเฟรช' : 'Refresh'}</span>
@@ -340,8 +427,8 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
                     </p>
                     <p className="text-[11px] text-amber-200/90">
                       {lang === 'th'
-                        ? 'กรุณากดปุ่ม "เปิดใน Google Maps" ด้านล่างเพื่อเริ่มนำทางได้ทันที'
-                        : 'Tap "Open in Google Maps" below to start navigation immediately.'}
+                        ? 'กรุณากดปุ่ม "เริ่มนำทาง (Google Maps)" ด้านล่างเพื่อเปิดระบบนำทางทันที'
+                        : 'Tap "Start Turn-by-Turn Navigation" below to navigate immediately.'}
                     </p>
                   </div>
                 </div>
@@ -350,7 +437,7 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
           )}
         </div>
 
-        {/* 3. Sticky Bottom Footer: Fallback Link + Close + Delivered */}
+        {/* 3. Sticky Bottom Footer: Turn-by-Turn Start Navigation + Close + Delivered */}
         <footer className="shrink-0 bg-slate-900 border-t border-slate-800 px-3.5 pt-2.5 pb-[max(0.85rem,env(safe-area-inset-bottom))] space-y-2">
           {/* Payment & Amount Strip */}
           <div className="flex items-center justify-between gap-2 text-xs">
@@ -372,19 +459,29 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Fallback External Google Maps Button directly below embedded map */}
+          {/* Primary Turn-by-Turn Navigation Launcher (Native Android google.navigation: / iOS & Web dir_action=navigate) */}
           <a
-            href={externalDirectionsUrl}
+            href={turnByTurnUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className={`w-full min-h-[42px] px-3 py-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-colors ${
+            onClick={(e) => {
+              const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+              if (/android/i.test(ua)) {
+                e.preventDefault();
+                launchExternalGoogleMapsNavigation(order, gpsOriginString);
+              }
+            }}
+            className={`w-full min-h-[46px] px-4 py-2.5 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-colors ${
               showIframeFallbackAlert
-                ? 'bg-orange-500 hover:bg-orange-400 text-slate-950 ring-2 ring-orange-300 shadow-lg shadow-orange-500/25'
-                : 'bg-slate-800 hover:bg-slate-700 border border-slate-600 text-orange-300'
+                ? 'bg-orange-400 hover:bg-orange-300 text-slate-950 ring-2 ring-orange-200 shadow-orange-500/30'
+                : 'bg-orange-500 hover:bg-orange-400 active:bg-orange-600 text-slate-950 shadow-orange-500/25'
             }`}
           >
-            <ExternalLink className="w-4 h-4 shrink-0" />
-            <span>{lang === 'th' ? 'เปิดใน Google Maps' : 'Open in Google Maps'}</span>
+            <Navigation className="w-4 h-4 shrink-0" />
+            <span>
+              {lang === 'th' ? 'เริ่มนำทาง (Google Maps)' : 'Start Turn-by-Turn Navigation'}
+            </span>
+            <ExternalLink className="w-3.5 h-3.5 shrink-0 opacity-80" />
           </a>
 
           {/* Close Without Completing + Primary Complete Delivery Button */}

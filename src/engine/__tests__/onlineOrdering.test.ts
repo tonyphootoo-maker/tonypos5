@@ -1522,7 +1522,19 @@ describe('Online Ordering Engine', () => {
       'https://www.google.com/maps/dir/?api=1&destination=13.7563%2C100.5018&travelmode=driving'
     );
 
-    // Ensure RiderNavigationOverlay never requires a Google Maps API key
+    const turnByTurnWithOrigin = buildExternalGoogleMapsUrl(
+      {
+        deliveryLat: 13.7563,
+        deliveryLng: 100.5018,
+        deliveryAddress: 'Bangkok',
+      },
+      '13.74,100.52'
+    );
+    expect(turnByTurnWithOrigin).toBe(
+      'https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&origin=13.74%2C100.52&destination=13.7563,100.5018'
+    );
+
+    // Ensure RiderNavigationOverlay never requires a Google Maps API key and includes live GPS + Turn-by-Turn
     const rootDir = path.resolve(__dirname, '../../..');
     const overlaySource = fs.readFileSync(
       path.join(rootDir, 'src/components/RiderNavigationOverlay.tsx'),
@@ -1531,7 +1543,9 @@ describe('Online Ordering Engine', () => {
     expect(overlaySource).not.toContain('VITE_GOOGLE_MAPS_API_KEY');
     expect(overlaySource).not.toContain('@vis.gl/react-google-maps');
     expect(overlaySource).toContain('buildGoogleMapsNoKeyEmbedUrl');
-    expect(overlaySource).toContain('buildGoogleMapsDirectionsLink');
+    expect(overlaySource).toContain('buildExternalGoogleMapsUrl');
+    expect(overlaySource).toContain('launchExternalGoogleMapsNavigation');
+    expect(overlaySource).toContain('watchPosition');
   });
 });
 
