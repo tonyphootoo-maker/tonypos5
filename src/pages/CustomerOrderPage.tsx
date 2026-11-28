@@ -1654,8 +1654,6 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               );
               const minPrice = Math.min(...dish.variants.map((v) => v.price));
               const photoUrl = dish.imageId ? dishImages[dish.imageId] : null;
-              const isFavorite =
-                favoriteDishIds.includes(dish.id) || savedFavoriteDishIdSet.has(dish.id);
               return (
                 <div
                   key={dish.id}
@@ -1687,36 +1685,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                     )}
                   </div>
                   <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <h2 className="font-bold text-sm text-slate-900 line-clamp-2">{title}</h2>
-                        {dishDescription && (
-                          <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{dishDescription}</p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        aria-label={
-                          isFavorite
-                            ? lang === 'th'
-                              ? 'ลบออกจากรายการโปรด'
-                              : 'Remove from favorites'
-                            : lang === 'th'
-                            ? 'เพิ่มในรายการโปรด'
-                            : 'Add to favorites'
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleFavoriteDish(dish.id);
-                        }}
-                        className="w-8 h-8 rounded-xl bg-slate-50 hover:bg-rose-50 flex items-center justify-center shrink-0 cursor-pointer transition-colors"
-                      >
-                        <Heart
-                          className={`w-4 h-4 transition-colors ${
-                            isFavorite ? 'fill-rose-500 text-rose-500' : 'text-slate-400'
-                          }`}
-                        />
-                      </button>
+                    <div className="min-w-0">
+                      <h2 className="font-bold text-sm text-slate-900 line-clamp-2">{title}</h2>
+                      {dishDescription && (
+                        <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{dishDescription}</p>
+                      )}
                     </div>
                     <div className="flex items-center justify-between pt-2">
                       <span className="font-extrabold text-sm text-orange-600 tabular-nums">
@@ -1786,7 +1759,9 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 >
                   <Heart
                     className={`w-3.5 h-3.5 ${
-                      editingFavoriteId || savedFavoriteDishIdSet.has(activeDish.id)
+                      editingFavoriteId ||
+                      savedFavoriteDishIdSet.has(activeDish.id) ||
+                      favoriteDishIds.includes(activeDish.id)
                         ? 'fill-rose-500 text-rose-500'
                         : 'text-rose-500'
                     }`}

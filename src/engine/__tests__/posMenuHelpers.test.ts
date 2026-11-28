@@ -253,6 +253,10 @@ describe('posMenuHelpers', () => {
       expect(source).toContain('dishModalBodyRef.current');
       expect(source).toContain('role="alert"');
       expect(source).not.toContain('optionValidationMsg');
+
+      // Main menu grid dish cards no longer display heart favorite buttons; favorite action lives inside the dish modal
+      expect(source).not.toContain('handleToggleFavoriteDish(dish.id)');
+      expect(source).toContain('handleSaveCurrentDishFavorite');
     });
   });
 });
