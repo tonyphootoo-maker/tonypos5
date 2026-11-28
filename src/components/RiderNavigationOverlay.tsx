@@ -1,74 +1,29 @@
-/// <reference types="google.maps" />
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  APIProvider,
-  APILoadingStatus,
-  AdvancedMarker,
-  Map as GoogleMap,
-  Pin,
-  useApiLoadingStatus,
-  useMap,
-  useMapsLibrary,
-} from '@vis.gl/react-google-maps';
-import {
-  ArrowLeft,
-  ArrowUp,
-  ArrowUpRight,
-  ArrowUpLeft,
-  CornerUpLeft,
-  CornerUpRight,
   Navigation,
   Phone,
   MapPin,
   LocateFixed,
   RefreshCw,
   ExternalLink,
-  CheckCircle2,
   PackageCheck,
-  ChevronDown,
-  ChevronUp,
   AlertCircle,
   Loader2,
   Banknote,
   QrCode,
-  Clock,
-  Route as RouteIcon,
+  X,
 } from 'lucide-react';
 import { Language, OnlineOrderDoc, PublicStoreDoc } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
-import { LanguageToggle } from './LanguageToggle';
 import { formatMoney } from '../engine/calculations';
 import {
   LatLngLiteralSimple,
-  buildExternalGoogleMapsUrl,
-  extractLatLngLiteral,
-  formatNavDistance,
-  formatNavDuration,
-  haversineMeters,
-  launchExternalGoogleMapsNavigation,
-  stripHtmlInstructions,
+  buildGoogleMapsDirectionsLink,
+  buildGoogleMapsNoKeyEmbedUrl,
+  getCurrentPositionWithIosFallback,
+  resolveOrderDestinationParam,
+  resolveRiderOriginParam,
 } from '../engine/onlineOrdering';
-
-const MAPS_API_KEY: string =
-  import.meta.env.VITE_GOOGLE_MAPS_API_KEY ||
-  (typeof process !== 'undefined' ? process.env.GOOGLE_MAPS_API_KEY || '' : '') ||
-  '';
-
-const DEFAULT_THAILAND_CENTER: LatLngLiteralSimple = { lat: 13.7563, lng: 100.5018 };
-const RECALCULATE_DISTANCE_THRESHOLD_M = 150;
-
-export interface NavStepItem {
-  instruction: string;
-  distanceMeters: number;
-  maneuver: string;
-}
-
-export interface RouteSummaryState {
-  distanceMeters: number;
-  durationMillis: number;
-  steps: NavStepItem[];
-  destinationCoords: LatLngLiteralSimple | null;
-}
 
 interface Props {
   order: OnlineOrderDoc;
@@ -76,319 +31,8 @@ interface Props {
   lang?: Language;
   busy: boolean;
   onBack: () => void;
-  onCompleteDelivery: (order: OnlineOrderDoc) => Promise<void>;
+  onCompleteDelivery: (order: OnlineOrderDoc) => Promise<boolean | void>;
 }
-
-function renderManeuverIcon(maneuver: string) {
-  const m = (maneuver || '').toUpperCase();
-  if (m.includes('SHARP_LEFT') || m.includes('TURN_LEFT') || m.includes('UTURN_LEFT')) {
-    return <CornerUpLeft className="w-6 h-6 shrink-0" />;
-  }
-  if (m.includes('SHARP_RIGHT') || m.includes('TURN_RIGHT') || m.includes('UTURN_RIGHT')) {
-    return <CornerUpRight className="w-6 h-6 shrink-0" />;
-  }
-  if (m.includes('SLIGHT_LEFT') || m.includes('KEEP_LEFT') || m.includes('RAMP_LEFT')) {
-    return <ArrowUpLeft className="w-6 h-6 shrink-0" />;
-  }
-  if (m.includes('SLIGHT_RIGHT') || m.includes('KEEP_RIGHT') || m.includes('RAMP_RIGHT')) {
-    return <ArrowUpRight className="w-6 h-6 shrink-0" />;
-  }
-  return <ArrowUp className="w-6 h-6 shrink-0" />;
-}
-
-interface ActiveRouteControllerProps {
-  origin: LatLngLiteralSimple | string | null;
-  destination: LatLngLiteralSimple | string;
-  riderPosition: LatLngLiteralSimple | null;
-  followRider: boolean;
-  routeTriggerNonce: number;
-  lang: Language;
-  onRouteLoading: (loading: boolean) => void;
-  onRouteSuccess: (summary: RouteSummaryState) => void;
-  onRouteError: (message: string | null) => void;
-  onFatalMapError: (message: string) => void;
-}
-
-const ActiveRouteController: React.FC<ActiveRouteControllerProps> = ({
-  origin,
-  destination,
-  riderPosition,
-  followRider,
-  routeTriggerNonce,
-  lang,
-  onRouteLoading,
-  onRouteSuccess,
-  onRouteError,
-  onFatalMapError,
-}) => {
-  const map = useMap();
-  const routesLib = useMapsLibrary('routes');
-  const apiStatus = useApiLoadingStatus();
-  const polylinesRef = useRef<google.maps.Polyline[]>([]);
-  const hasFitInitialBoundsRef = useRef(false);
-
-  // Monitor SDK load/auth status
-  useEffect(() => {
-    if (apiStatus === APILoadingStatus.AUTH_FAILURE) {
-      window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-      onFatalMapError(
-        lang === 'th'
-          ? 'ไม่สามารถยืนยันสิทธิ์แผนที่ Google Maps ได้ กรุณาเปิดแอป Google Maps ภายนอกชั่วคราว'
-          : 'Google Maps authorization failed. Use external Google Maps fallback below.'
-      );
-    } else if (apiStatus === APILoadingStatus.FAILED) {
-      onFatalMapError(
-        lang === 'th'
-          ? 'โหลด Google Maps SDK ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตหรือเปิดแอป Google Maps ภายนอก'
-          : 'Failed to load Google Maps SDK. Check connection or open external Google Maps.'
-      );
-    }
-  }, [apiStatus, lang, onFatalMapError]);
-
-  // Smoothly pan camera when following live Rider GPS at turn-by-turn street zoom
-  useEffect(() => {
-    if (!map || !followRider || !riderPosition) return;
-    map.panTo(riderPosition);
-    const currentZoom = map.getZoom() ?? 15;
-    if (currentZoom < 17) {
-      map.setZoom(17);
-    }
-  }, [map, followRider, riderPosition]);
-
-  // Compute route and render polyline using official Maps JS Routes API
-  useEffect(() => {
-    if (!routesLib || !map || !origin || !destination) return;
-
-    let isCancelled = false;
-
-    const clearPolylines = () => {
-      polylinesRef.current.forEach((p) => p.setMap(null));
-      polylinesRef.current = [];
-    };
-
-    clearPolylines();
-    onRouteError(null);
-    onRouteLoading(true);
-
-    const request = {
-      origin,
-      destination,
-      travelMode: 'DRIVING',
-      fields: ['path', 'distanceMeters', 'durationMillis', 'viewport', 'legs'],
-      internalUsageAttributionIds: ['gmp_mcp_codeassist_v1_aistudio'],
-    };
-
-    const computeViaLegacyDirections = () => {
-      if (typeof google === 'undefined' || !google.maps?.DirectionsService) {
-        return Promise.reject(new Error('DIRECTIONS_UNAVAILABLE'));
-      }
-      const svc = new google.maps.DirectionsService();
-      return svc
-        .route({
-          origin,
-          destination,
-          travelMode: google.maps.TravelMode.DRIVING,
-        })
-        .then((dirResult) => {
-          if (isCancelled) return;
-          onRouteLoading(false);
-          const firstRoute = dirResult?.routes?.[0];
-          if (!firstRoute) {
-            onRouteError(
-              lang === 'th'
-                ? 'ไม่พบเส้นทางรถยนต์อัตโนมัติบนแผนที่ คุณสามารถกดเปิดในแอป Google Maps ด้านล่างได้'
-                : 'No driving route found for this address. You can launch external Google Maps below.'
-            );
-            return;
-          }
-          if (Array.isArray(firstRoute.overview_path) && firstRoute.overview_path.length > 0) {
-            const poly = new google.maps.Polyline({
-              path: firstRoute.overview_path,
-              strokeColor: '#0ea5e9',
-              strokeOpacity: 0.95,
-              strokeWeight: 7,
-              map,
-            });
-            polylinesRef.current = [poly];
-          }
-          if (firstRoute.bounds && !hasFitInitialBoundsRef.current && !riderPosition) {
-            map.fitBounds(firstRoute.bounds, { top: 130, right: 24, bottom: 90, left: 24 });
-            hasFitInitialBoundsRef.current = true;
-          } else if (followRider && riderPosition && !hasFitInitialBoundsRef.current) {
-            map.panTo(riderPosition);
-            if ((map.getZoom() ?? 15) < 17) {
-              map.setZoom(17);
-            }
-            hasFitInitialBoundsRef.current = true;
-          }
-          const leg = firstRoute.legs?.[0];
-          const steps: NavStepItem[] = (leg?.steps || [])
-            .map((s) => ({
-              instruction: stripHtmlInstructions(s.instructions || ''),
-              distanceMeters: Number(s.distance?.value) || 0,
-              maneuver: String((s as unknown as { maneuver?: string }).maneuver || ''),
-            }))
-            .filter((s) => s.instruction.length > 0);
-          const resolvedEnd = extractLatLngLiteral(leg?.end_location);
-          onRouteSuccess({
-            distanceMeters: Number(leg?.distance?.value) || 0,
-            durationMillis: (Number(leg?.duration?.value) || 0) * 1000,
-            steps,
-            destinationCoords: resolvedEnd,
-          });
-        });
-    };
-
-    const RouteClass = routesLib?.Route as unknown as
-      | { computeRoutes?: (req: Record<string, unknown>) => Promise<{ routes?: unknown[] }> }
-      | undefined;
-
-    const routePromise =
-      RouteClass && typeof RouteClass.computeRoutes === 'function'
-        ? RouteClass.computeRoutes(request).then((response) => {
-            if (isCancelled) return;
-            onRouteLoading(false);
-
-            const routes = response?.routes;
-            if (!routes || routes.length === 0) {
-              onRouteError(
-                lang === 'th'
-                  ? 'ไม่พบเส้นทางรถยนต์อัตโนมัติบนแผนที่ คุณสามารถกดเปิดในแอป Google Maps ด้านล่างได้'
-                  : 'No driving route found for this address. You can launch external Google Maps below.'
-              );
-              return;
-            }
-
-            const primaryRoute = routes[0] as {
-              distanceMeters?: number;
-              durationMillis?: number;
-              viewport?: google.maps.LatLngBounds | google.maps.LatLngBoundsLiteral;
-              legs?: Array<{
-                endLocation?: unknown;
-                steps?: Array<{
-                  instructions?: string;
-                  distanceMeters?: number;
-                  navigationInstruction?: { maneuver?: string };
-                }>;
-              }>;
-              createPolylines?: () => google.maps.Polyline[];
-            };
-
-            if (typeof primaryRoute.createPolylines === 'function') {
-              const newPolylines = primaryRoute.createPolylines();
-              newPolylines.forEach((polyline) => {
-                polyline.setOptions({
-                  strokeColor: '#0ea5e9',
-                  strokeOpacity: 0.95,
-                  strokeWeight: 7,
-                });
-                polyline.setMap(map);
-              });
-              polylinesRef.current = newPolylines;
-            }
-
-            if (primaryRoute.viewport && !hasFitInitialBoundsRef.current && !riderPosition) {
-              map.fitBounds(primaryRoute.viewport, { top: 130, right: 24, bottom: 90, left: 24 });
-              hasFitInitialBoundsRef.current = true;
-            } else if (followRider && riderPosition && !hasFitInitialBoundsRef.current) {
-              map.panTo(riderPosition);
-              if ((map.getZoom() ?? 15) < 17) {
-                map.setZoom(17);
-              }
-              hasFitInitialBoundsRef.current = true;
-            }
-
-            const firstLeg = primaryRoute.legs?.[0];
-            const steps: NavStepItem[] = (firstLeg?.steps || [])
-              .map((s) => ({
-                instruction: stripHtmlInstructions(s.instructions || ''),
-                distanceMeters: Number(s.distanceMeters) || 0,
-                maneuver: s.navigationInstruction?.maneuver || '',
-              }))
-              .filter((s) => s.instruction.length > 0);
-
-            const resolvedEnd = extractLatLngLiteral(firstLeg?.endLocation);
-
-            onRouteSuccess({
-              distanceMeters: Number(primaryRoute.distanceMeters) || 0,
-              durationMillis: Number(primaryRoute.durationMillis) || 0,
-              steps,
-              destinationCoords: resolvedEnd,
-            });
-          })
-        : computeViaLegacyDirections();
-
-    routePromise.catch((err: unknown) => {
-      if (isCancelled) return;
-      const initialMsg = err instanceof Error ? err.message : String(err);
-      if (
-        !initialMsg.includes('ZERO_RESULTS') &&
-        !initialMsg.includes('DIRECTIONS_UNAVAILABLE') &&
-        RouteClass &&
-        typeof RouteClass.computeRoutes === 'function'
-      ) {
-        computeViaLegacyDirections().catch((fallbackErr: unknown) => {
-          if (isCancelled) return;
-          onRouteLoading(false);
-          const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
-          if (
-            fallbackMsg.includes('OVER_QUERY_LIMIT') ||
-            fallbackMsg.includes('RESOURCE_EXHAUSTED') ||
-            fallbackMsg.includes('429')
-          ) {
-            window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-          }
-          onRouteError(
-            lang === 'th'
-              ? 'ไม่สามารถคำนวณเส้นทางได้ชั่วคราว สามารถกดเปิดนำทาง Google Maps ด้านล่าง'
-              : 'Unable to compute route right now. Use Google Maps navigation below.'
-          );
-        });
-        return;
-      }
-
-      onRouteLoading(false);
-      if (
-        initialMsg.includes('OVER_QUERY_LIMIT') ||
-        initialMsg.includes('RESOURCE_EXHAUSTED') ||
-        initialMsg.includes('429')
-      ) {
-        window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-      }
-
-      if (initialMsg.includes('ZERO_RESULTS')) {
-        onRouteError(
-          lang === 'th'
-            ? 'ไม่พบเส้นทางจากที่อยู่นี้ กดปุ่มเปิด Google Maps ภายนอกเพื่อดูหมุดเพิ่มเติมได้'
-            : 'No driving route found for this address. Use external Google Maps if needed.'
-        );
-      } else {
-        onRouteError(
-          lang === 'th'
-            ? 'ไม่สามารถคำนวณเส้นทางได้ชั่วคราว สามารถกดคำนวณใหม่หรือเปิด Google Maps ภายนอก'
-            : 'Unable to compute route right now. Try refreshing or use external Google Maps.'
-        );
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-      clearPolylines();
-    };
-  }, [
-    routesLib,
-    map,
-    origin,
-    destination,
-    routeTriggerNonce,
-    lang,
-    onRouteLoading,
-    onRouteSuccess,
-    onRouteError,
-  ]);
-
-  return null;
-};
 
 export const RiderNavigationOverlay: React.FC<Props> = ({
   order,
@@ -400,71 +44,76 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
 }) => {
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
-  const initialDestCoords = useMemo<LatLngLiteralSimple | null>(() => {
-    if (
-      typeof order.deliveryLat === 'number' &&
-      typeof order.deliveryLng === 'number' &&
-      Number.isFinite(order.deliveryLat) &&
-      Number.isFinite(order.deliveryLng)
-    ) {
-      return { lat: order.deliveryLat, lng: order.deliveryLng };
-    }
-    return null;
-  }, [order.deliveryLat, order.deliveryLng]);
 
   const [riderPosition, setRiderPosition] = useState<LatLngLiteralSimple | null>(null);
   const [gpsStatus, setGpsStatus] = useState<'locating' | 'active' | 'denied' | 'unavailable'>(
     typeof navigator !== 'undefined' && 'geolocation' in navigator ? 'locating' : 'unavailable'
   );
-  const [fallbackOriginAllowed, setFallbackOriginAllowed] = useState(false);
-  const [routedOrigin, setRoutedOrigin] = useState<LatLngLiteralSimple | string | null>(null);
-  const [routeTriggerNonce, setRouteTriggerNonce] = useState(0);
-  const lastRoutedCoordsRef = useRef<LatLngLiteralSimple | null>(null);
+  const [gpsWaitElapsed, setGpsWaitElapsed] = useState(false);
 
-  const [followRider, setFollowRider] = useState(true);
-  const [routeLoading, setRouteLoading] = useState(false);
-  const [routeSummary, setRouteSummary] = useState<RouteSummaryState | null>(null);
-  const [routeError, setRouteError] = useState<string | null>(null);
-  const [fatalMapError, setFatalMapError] = useState<string | null>(null);
-  const [stepsExpanded, setStepsExpanded] = useState(false);
-  const [confirmComplete, setConfirmComplete] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [iframeFailed, setIframeFailed] = useState(false);
+  const [iframeTimedOut, setIframeTimedOut] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [isCompleting, setIsCompleting] = useState(false);
 
-  const externalMapsUrl = useMemo(() => buildExternalGoogleMapsUrl(order), [order]);
+  const isSubmitting = busy || isCompleting;
 
-  const exitFullscreenSafe = useCallback(() => {
-    try {
-      if (typeof document !== 'undefined' && document.fullscreenElement) {
-        document.exitFullscreen?.().catch(() => {});
-      }
-    } catch {
-      // Ignore fullscreen exit failures
+  const destinationParam = useMemo(() => resolveOrderDestinationParam(order), [order]);
+  const externalDirectionsUrl = useMemo(() => buildGoogleMapsDirectionsLink(order), [order]);
+
+  const originInfo = useMemo(
+    () =>
+      resolveRiderOriginParam({
+        riderPosition,
+        storeAddress: store?.shopAddress,
+        fallbackDestination: destinationParam,
+      }),
+    [riderPosition, store?.shopAddress, destinationParam]
+  );
+
+  // Build API-key-free Google Maps directions embed URL once GPS locks or brief initial grace window elapses
+  const canBuildEmbed = Boolean(destinationParam) && (gpsStatus === 'active' || gpsWaitElapsed);
+
+  const embedUrl = useMemo(() => {
+    if (!canBuildEmbed || !destinationParam) return '';
+    return buildGoogleMapsNoKeyEmbedUrl({
+      origin: originInfo.value,
+      destination: destinationParam,
+    });
+  }, [canBuildEmbed, originInfo.value, destinationParam]);
+
+  const requestGpsFix = useCallback(() => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setGpsStatus('unavailable');
+      setGpsWaitElapsed(true);
+      return;
     }
+    setGpsStatus('locating');
+    getCurrentPositionWithIosFallback()
+      .then((pos) => {
+        setRiderPosition({ lat: pos.lat, lng: pos.lng });
+        setGpsStatus('active');
+        setGpsWaitElapsed(true);
+      })
+      .catch((err: { code?: number }) => {
+        if (err && err.code === 1) {
+          setGpsStatus('denied');
+        } else {
+          setGpsStatus('unavailable');
+        }
+        setGpsWaitElapsed(true);
+      });
   }, []);
 
-  const handleBackPress = useCallback(() => {
-    exitFullscreenSafe();
-    onBack();
-  }, [exitFullscreenSafe, onBack]);
-
-  // Auto-enter fullscreen on open and lock body scroll cleanly
+  // Lock body scroll and support Escape key to close without completing delivery
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    try {
-      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {
-          // Graceful no-op when iOS Safari or embedded iframe denies native Fullscreen API;
-          // CSS fixed inset-0 h-[100dvh] still fills 100% of screen automatically.
-        });
-      }
-    } catch {
-      // Ignore fullscreen request errors
-    }
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !isSubmitting) {
         onBack();
       }
     };
@@ -473,471 +122,304 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
     return () => {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', handleKeyDown);
-      exitFullscreenSafe();
     };
-  }, [exitFullscreenSafe, onBack]);
+  }, [onBack, isSubmitting]);
 
-  // Brief grace timer so GPS can lock before falling back to store/Bangkok origin (conserves Demo Key quota)
+  // Brief grace timer (1.2s) so initial GPS fix resolves cleanly before rendering fallback origin
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setFallbackOriginAllowed(true);
+    const timer = window.setTimeout(() => {
+      setGpsWaitElapsed(true);
     }, 1200);
-    return () => clearTimeout(timer);
+    return () => window.clearTimeout(timer);
   }, []);
 
-  // Live GPS tracking via navigator.geolocation.watchPosition
+  // Initial geolocation lock on mount
   useEffect(() => {
-    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
-      setGpsStatus('unavailable');
-      setFallbackOriginAllowed(true);
-      return;
-    }
+    requestGpsFix();
+  }, [requestGpsFix]);
 
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const next: LatLngLiteralSimple = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        };
-        setRiderPosition(next);
-        setGpsStatus('active');
+  // Reset iframe state when embed URL or manual reload changes
+  useEffect(() => {
+    if (!embedUrl) return;
+    setIframeLoaded(false);
+    setIframeFailed(false);
+    setIframeTimedOut(false);
 
-        const prevRouted = lastRoutedCoordsRef.current;
-        if (!prevRouted) {
-          lastRoutedCoordsRef.current = next;
-          setRoutedOrigin(next);
-        } else if (haversineMeters(prevRouted, next) >= RECALCULATE_DISTANCE_THRESHOLD_M) {
-          lastRoutedCoordsRef.current = next;
-          setRoutedOrigin(next);
-        }
-      },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
-          setGpsStatus('denied');
-        } else {
-          setGpsStatus('unavailable');
-        }
-        setFallbackOriginAllowed(true);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 3000,
-      }
-    );
+    const loadTimer = window.setTimeout(() => {
+      setIframeTimedOut(true);
+    }, 8000);
 
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-    };
-  }, []);
+    return () => window.clearTimeout(loadTimer);
+  }, [embedUrl, reloadNonce]);
 
-  // Resolve origin cleanly once GPS locks OR after 1.2s fallback
-  const effectiveOrigin = useMemo<LatLngLiteralSimple | string | null>(() => {
-    if (routedOrigin) return routedOrigin;
-    if (riderPosition) return riderPosition;
-    if (!fallbackOriginAllowed) return null;
-    if (store?.shopAddress && store.shopAddress.trim().length > 0) {
-      return store.shopAddress.trim();
-    }
-    return initialDestCoords ? DEFAULT_THAILAND_CENTER : DEFAULT_THAILAND_CENTER;
-  }, [routedOrigin, riderPosition, fallbackOriginAllowed, store?.shopAddress, initialDestCoords]);
-
-  const effectiveDestination = useMemo<LatLngLiteralSimple | string>(() => {
-    if (initialDestCoords) return initialDestCoords;
-    return order.deliveryAddress?.trim() || 'Bangkok, Thailand';
-  }, [initialDestCoords, order.deliveryAddress]);
-
-  const destinationMarkerPos = initialDestCoords || routeSummary?.destinationCoords || null;
-  const defaultMapCenter = riderPosition || destinationMarkerPos || DEFAULT_THAILAND_CENTER;
-
-  const currentStep = routeSummary?.steps?.[0] || null;
-  const straightDistanceMeters = useMemo(() => {
-    if (!riderPosition || !destinationMarkerPos) return null;
-    return haversineMeters(riderPosition, destinationMarkerPos);
-  }, [riderPosition, destinationMarkerPos]);
-
-  const handleRecenter = () => {
-    setFollowRider(true);
-  };
-
-  const handleManualRecalculate = () => {
-    if (riderPosition) {
-      lastRoutedCoordsRef.current = riderPosition;
-      setRoutedOrigin(riderPosition);
-    }
-    setRouteTriggerNonce((n) => n + 1);
-  };
-
-  const handleConfirmComplete = async () => {
-    await onCompleteDelivery(order);
-    exitFullscreenSafe();
+  const handleCloseWithoutCompleting = () => {
+    if (isSubmitting) return;
     onBack();
   };
 
-  const isKeyMissing = !MAPS_API_KEY;
-  const showFallbackCard = isKeyMissing || Boolean(fatalMapError);
+  const handleCompleteClick = async () => {
+    if (isSubmitting) return;
+    setIsCompleting(true);
+    try {
+      const result = await onCompleteDelivery(order);
+      if (result !== false) {
+        onBack();
+      }
+    } finally {
+      setIsCompleting(false);
+    }
+  };
+
+  const showIframeFallbackAlert =
+    !destinationParam || iframeFailed || (!iframeLoaded && iframeTimedOut);
 
   return (
     <div
-      className="fixed inset-0 z-[60] w-full h-[100dvh] bg-slate-950 text-slate-100 flex flex-col overflow-hidden"
+      className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-xs flex items-end sm:items-center justify-center sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-label={lang === 'th' ? 'ระบบนำทางจัดส่งเต็มหน้าจอ' : 'Full-Screen Delivery Navigation'}
+      aria-label={lang === 'th' ? 'แผนที่นำทางส่งอาหารในแอป' : 'In-App Delivery Route Map'}
     >
-      {/* 1. Top Navigation HUD */}
-      <header className="shrink-0 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-3.5 pt-[max(0.65rem,env(safe-area-inset-top))] pb-2.5 space-y-2 z-20">
-        {/* Turn-by-Turn Primary Banner */}
-        <div className="rounded-2xl bg-emerald-600 text-slate-950 px-3.5 py-2.5 shadow-lg">
-          <div className="flex items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-slate-950/15 flex items-center justify-center shrink-0">
-                {routeLoading ? (
-                  <Loader2 className="w-5 h-5 animate-spin text-slate-950" />
-                ) : currentStep ? (
-                  renderManeuverIcon(currentStep.maneuver)
-                ) : (
-                  <Navigation className="w-5 h-5 text-slate-950" />
-                )}
+      <div className="w-full sm:max-w-2xl h-[92dvh] sm:h-[88dvh] max-h-[100dvh] bg-slate-900 border-t sm:border border-slate-700 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden text-slate-100">
+        {/* 1. Compact Header with Order Summary & Close Button */}
+        <header className="shrink-0 bg-slate-900 border-b border-slate-800 px-3.5 pt-3 pb-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-orange-500/20 border border-orange-500/40 text-orange-400 flex items-center justify-center shrink-0">
+                <Navigation className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <div className="text-[11px] font-black uppercase tracking-wide opacity-80 flex items-center gap-1.5">
-                  <span>{lang === 'th' ? 'กำลังนำทางอัตโนมัติ' : 'Auto Navigation Active'}</span>
-                  {currentStep && currentStep.distanceMeters > 0 && (
-                    <span>• {formatNavDistance(currentStep.distanceMeters, lang)}</span>
-                  )}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-black text-sm text-white truncate">
+                    {order.orderNumber}
+                  </span>
+                  <span className="text-xs font-bold text-slate-300 truncate">
+                    • {order.customerName}
+                  </span>
                 </div>
-                <p className="text-sm font-black leading-snug line-clamp-2">
-                  {routeLoading
-                    ? lang === 'th'
-                      ? 'กำลังคำนวณเส้นทางที่ดีที่สุด...'
-                      : 'Calculating optimal route...'
-                    : currentStep
-                      ? currentStep.instruction
-                      : lang === 'th'
-                        ? `มุ่งหน้าไปยัง: ${order.deliveryAddress || order.customerName}`
-                        : `Head to: ${order.deliveryAddress || order.customerName}`}
+                <p className="text-[11px] text-slate-400 truncate">
+                  {lang === 'th' ? 'แผนที่นำทางในแอป (Google Maps)' : 'In-App Route Map'}
                 </p>
               </div>
             </div>
 
-            {/* ETA & Total Distance Pill */}
-            {(routeSummary || straightDistanceMeters !== null) && (
-              <div className="text-right shrink-0 bg-slate-950/15 rounded-xl px-2.5 py-1.5">
-                {routeSummary ? (
-                  <>
-                    <div className="text-xs font-black tabular-nums">
-                      {formatNavDuration(routeSummary.durationMillis, lang)}
-                    </div>
-                    <div className="text-[11px] font-extrabold opacity-85 tabular-nums">
-                      {formatNavDistance(routeSummary.distanceMeters, lang)}
-                    </div>
-                  </>
-                ) : straightDistanceMeters !== null ? (
-                  <div className="text-xs font-black tabular-nums">
-                    ~{formatNavDistance(straightDistanceMeters, lang)}
-                  </div>
-                ) : null}
-              </div>
-            )}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {order.customerPhone && (
+                <a
+                  href={`tel:${order.customerPhone}`}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold text-xs inline-flex items-center gap-1"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  <span>{lang === 'th' ? 'โทร' : 'Call'}</span>
+                </a>
+              )}
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleCloseWithoutCompleting}
+                aria-label={lang === 'th' ? 'ปิดหน้าต่างแผนที่' : 'Close map'}
+                className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 flex items-center justify-center cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* Expandable Steps Toggle */}
-          {routeSummary && routeSummary.steps.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setStepsExpanded((prev) => !prev)}
-              className="mt-2 w-full py-1 px-2.5 rounded-lg bg-slate-950/12 hover:bg-slate-950/20 text-[11px] font-extrabold flex items-center justify-between cursor-pointer"
-            >
-              <span className="inline-flex items-center gap-1">
-                <RouteIcon className="w-3.5 h-3.5" />
-                {lang === 'th'
-                  ? `ดูขั้นตอนนำทางทั้งหมด (${routeSummary.steps.length} จุด)`
-                  : `All turn-by-turn steps (${routeSummary.steps.length})`}
+          {/* Destination & Origin Status Strip */}
+          <div className="px-2.5 py-1.5 rounded-xl bg-slate-950/75 border border-slate-800 space-y-1 text-[11px]">
+            <div className="flex items-start gap-1.5 text-slate-200 min-w-0">
+              <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+              <span className="min-w-0 break-words leading-snug">
+                {order.deliveryAddress || destinationParam || '-'}
               </span>
-              {stepsExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
+            </div>
+
+            {gpsStatus === 'denied' || gpsStatus === 'unavailable' ? (
+              <div className="flex items-center justify-between gap-2 pt-0.5 text-amber-300">
+                <span className="min-w-0 leading-snug">
+                  {gpsStatus === 'denied'
+                    ? lang === 'th'
+                      ? 'กรุณาเปิดสิทธิ์ตำแหน่ง (GPS) — ใช้ที่อยู่ร้านเป็นต้นทางชั่วคราว'
+                      : 'Location permission denied — using store address as origin.'
+                    : lang === 'th'
+                      ? 'ไม่พบสัญญาณ GPS — ใช้ที่อยู่ร้านเป็นต้นทางชั่วคราว'
+                      : 'GPS unavailable — using store address as origin.'}
+                </span>
+                <button
+                  type="button"
+                  onClick={requestGpsFix}
+                  className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-200 font-bold shrink-0 inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <LocateFixed className="w-3 h-3" />
+                  <span>{lang === 'th' ? 'ลองใหม่' : 'Retry'}</span>
+                </button>
+              </div>
+            ) : gpsStatus === 'active' ? (
+              <div className="flex items-center justify-between gap-2 text-emerald-300/90">
+                <span className="inline-flex items-center gap-1">
+                  <LocateFixed className="w-3 h-3 shrink-0" />
+                  {lang === 'th' ? 'ต้นทาง: ตำแหน่ง GPS ปัจจุบันของคุณ' : 'Origin: Your current GPS location'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    requestGpsFix();
+                    setReloadNonce((n) => n + 1);
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold inline-flex items-center gap-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>{lang === 'th' ? 'รีเฟรช' : 'Refresh'}</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </header>
+
+        {/* 2. Embedded API-Key-Free Google Maps Iframe Area */}
+        <div className="flex-1 min-h-0 relative bg-slate-950 flex flex-col">
+          {!destinationParam ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-5 text-center space-y-2">
+              <AlertCircle className="w-9 h-9 text-amber-400" />
+              <p className="text-sm font-bold text-white">
+                {lang === 'th' ? 'ไม่พบพิกัดหรือที่อยู่ปลายทาง' : 'Missing delivery location'}
+              </p>
+              <p className="text-xs text-slate-400">
+                {lang === 'th'
+                  ? 'กรุณาโทรสอบถามลูกค้าหรือใช้ลิงก์เปิดใน Google Maps ด้านล่าง'
+                  : 'Call the customer or open Google Maps below.'}
+              </p>
+            </div>
+          ) : !embedUrl ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-5 text-center space-y-2">
+              <Loader2 className="w-7 h-7 animate-spin text-emerald-400" />
+              <p className="text-xs font-bold text-slate-300">
+                {lang === 'th' ? 'กำลังดึงตำแหน่งปัจจุบันของไรเดอร์...' : 'Getting your current GPS location...'}
+              </p>
+            </div>
+          ) : (
+            <>
+              <iframe
+                key={`${embedUrl}_${reloadNonce}`}
+                src={embedUrl}
+                title={
+                  lang === 'th'
+                    ? `เส้นทางส่งอาหาร ${order.orderNumber}`
+                    : `Delivery Route ${order.orderNumber}`
+                }
+                className="w-full flex-1 min-h-[180px] border-0 bg-slate-900"
+                loading="eager"
+                referrerPolicy="no-referrer-when-downgrade"
+                allow="geolocation"
+                onLoad={() => {
+                  setIframeLoaded(true);
+                  setIframeTimedOut(false);
+                }}
+                onError={() => {
+                  setIframeFailed(true);
+                }}
+              />
+
+              {!iframeLoaded && !iframeFailed && !iframeTimedOut && (
+                <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-slate-950/60 backdrop-blur-[1px] gap-2">
+                  <Loader2 className="w-7 h-7 animate-spin text-emerald-400" />
+                  <span className="text-xs font-bold text-slate-200">
+                    {lang === 'th' ? 'กำลังโหลดแผนที่เส้นทาง...' : 'Loading route map...'}
+                  </span>
+                </div>
+              )}
+
+              {showIframeFallbackAlert && (
+                <div className="mx-3 my-2 px-3 py-2.5 rounded-xl bg-amber-950/85 border border-amber-500/60 text-amber-100 text-xs flex items-start gap-2 shrink-0">
+                  <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="font-bold">
+                      {lang === 'th'
+                        ? 'แผนที่ฝังโหลดไม่สำเร็จหรือแสดงหน้าว่าง'
+                        : 'Embedded map failed to load or appeared blank'}
+                    </p>
+                    <p className="text-[11px] text-amber-200/90">
+                      {lang === 'th'
+                        ? 'กรุณากดปุ่ม "เปิดใน Google Maps" ด้านล่างเพื่อเริ่มนำทางได้ทันที'
+                        : 'Tap "Open in Google Maps" below to start navigation immediately.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Collapsible Turn-by-Turn Steps Drawer */}
-        {stepsExpanded && routeSummary && routeSummary.steps.length > 0 && (
-          <div className="max-h-40 overflow-y-auto rounded-xl bg-slate-950/90 border border-slate-800 divide-y divide-slate-800/80">
-            {routeSummary.steps.map((step, idx) => (
-              <div key={idx} className="px-3 py-2 flex items-start gap-2.5 text-xs">
-                <span className="w-5 h-5 rounded-full bg-slate-800 text-emerald-400 font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">
-                  {idx + 1}
-                </span>
-                <span className="flex-1 text-slate-200 leading-snug">{step.instruction}</span>
-                {step.distanceMeters > 0 && (
-                  <span className="text-[11px] font-bold text-slate-400 tabular-nums shrink-0">
-                    {formatNavDistance(step.distanceMeters, lang)}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Compact Customer & Address Strip */}
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 min-w-0 text-slate-300">
-            <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-            <span className="font-bold text-white shrink-0">{order.customerName}</span>
-            <span className="text-slate-500 shrink-0">•</span>
-            <span className="truncate">{order.deliveryAddress || '-'}</span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {order.customerPhone && (
-              <a
-                href={`tel:${order.customerPhone}`}
-                className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 shrink-0"
-              >
-                <Phone className="w-3 h-3" />
-                <span>{lang === 'th' ? 'โทร' : 'Call'}</span>
-              </a>
-            )}
-            <LanguageToggle variant="dark" lang={lang} />
-          </div>
-        </div>
-      </header>
-
-      {/* 2. Full-Viewport Map Area (Explicit height parent to prevent 0x0 collapse) */}
-      <div className="flex-1 min-h-0 relative w-full bg-slate-900">
-        {showFallbackCard ? (
-          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center space-y-4">
-            <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center">
-              <AlertCircle className="w-7 h-7" />
-            </div>
-            <div className="max-w-sm space-y-1.5">
-              <h2 className="text-base font-extrabold text-white">
-                {lang === 'th' ? 'ไม่สามารถแสดงแผนที่ในหน้าจอได้' : 'Map Unavailable'}
-              </h2>
-              <p className="text-xs text-slate-300 leading-relaxed">
-                {fatalMapError ||
-                  (lang === 'th'
-                    ? 'ยังไม่ได้ตั้งค่า Google Maps API Key สำหรับแผนที่ในแอป สามารถเปิดแอป Google Maps ภายนอกเพื่อนำทางได้ทันที'
-                    : 'Google Maps API key is not configured. Launch external Google Maps below for directions.')}
-              </p>
-              <div className="mt-2 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200">
-                <span className="text-slate-400 block text-[11px]">
-                  {lang === 'th' ? 'ที่อยู่จัดส่ง:' : 'Delivery Address:'}
-                </span>
-                <span className="font-bold">{order.deliveryAddress || '-'}</span>
-              </div>
-            </div>
-            <a
-              href={externalMapsUrl}
-              onClick={(e) => {
-                e.preventDefault();
-                launchExternalGoogleMapsNavigation(order);
-              }}
-              className="px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs inline-flex items-center gap-2 cursor-pointer"
-            >
-              <ExternalLink className="w-4 h-4" />
-              <span>{lang === 'th' ? 'เปิดแอป Google Maps ภายนอก' : 'Open External Google Maps'}</span>
-            </a>
-          </div>
-        ) : (
-          <div className="w-full h-full">
-            <APIProvider
-              apiKey={MAPS_API_KEY}
-              language={lang}
-              region="TH"
-              libraries={['routes', 'marker']}
-            >
-              <GoogleMap
-                mapId="DEMO_MAP_ID"
-                internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                defaultCenter={defaultMapCenter}
-                defaultZoom={15}
-                gestureHandling="greedy"
-                disableDefaultUI={false}
-                fullscreenControl={false}
-                mapTypeControl={false}
-                streetViewControl={false}
-                className="w-full h-full"
-                onDragstart={() => setFollowRider(false)}
-              >
-                <ActiveRouteController
-                  origin={effectiveOrigin}
-                  destination={effectiveDestination}
-                  riderPosition={riderPosition}
-                  followRider={followRider}
-                  routeTriggerNonce={routeTriggerNonce}
-                  lang={lang}
-                  onRouteLoading={setRouteLoading}
-                  onRouteSuccess={setRouteSummary}
-                  onRouteError={setRouteError}
-                  onFatalMapError={setFatalMapError}
-                />
-
-                {/* Live Rider GPS Marker */}
-                {riderPosition && (
-                  <AdvancedMarker
-                    position={riderPosition}
-                    title={lang === 'th' ? 'ตำแหน่งไรเดอร์ (คุณ)' : 'Your Location (Rider)'}
-                  >
-                    <div className="relative flex items-center justify-center">
-                      <span className="absolute w-9 h-9 rounded-full bg-sky-400/40 animate-ping" />
-                      <span className="relative w-5 h-5 rounded-full bg-sky-500 border-2 border-white shadow-lg" />
-                    </div>
-                  </AdvancedMarker>
-                )}
-
-                {/* Customer Destination Pin */}
-                {destinationMarkerPos && (
-                  <AdvancedMarker
-                    position={destinationMarkerPos}
-                    title={`${order.customerName} (${order.orderNumber})`}
-                  >
-                    <Pin
-                      background="#f97316"
-                      borderColor="#9a3412"
-                      glyphColor="#ffffff"
-                      scale={1.2}
-                    />
-                  </AdvancedMarker>
-                )}
-              </GoogleMap>
-            </APIProvider>
-          </div>
-        )}
-
-        {/* GPS & Route Warnings Toast */}
-        {(gpsStatus === 'denied' || routeError) && !showFallbackCard && (
-          <div className="absolute top-3 left-3 right-16 z-10 space-y-1.5 pointer-events-none">
-            {gpsStatus === 'denied' && (
-              <div className="px-3 py-2 rounded-xl bg-slate-900/90 border border-amber-500/40 text-amber-200 text-[11px] font-bold backdrop-blur-md">
-                {lang === 'th'
-                  ? 'ไม่ได้รับสิทธิ์ GPS — กำลังแสดงเส้นทางจากตำแหน่งร้าน/พื้นที่โดยประมาณ'
-                  : 'GPS permission denied — showing approximate route from store area.'}
-              </div>
-            )}
-            {routeError && (
-              <div className="px-3 py-2 rounded-xl bg-slate-900/90 border border-rose-500/40 text-rose-200 text-[11px] font-bold backdrop-blur-md">
-                {routeError}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Floating Map Action Controls */}
-        <div className="absolute right-3 bottom-3 z-10 flex flex-col items-end gap-2">
-          <button
-            type="button"
-            onClick={handleRecenter}
-            title={lang === 'th' ? 'ติดตามตำแหน่ง GPS ของฉัน' : 'Follow My GPS'}
-            className={`w-11 h-11 rounded-2xl border shadow-lg flex items-center justify-center cursor-pointer transition-all ${
-              followRider
-                ? 'bg-emerald-500 border-emerald-400 text-slate-950'
-                : 'bg-slate-900/95 border-slate-700 text-white hover:bg-slate-800'
-            }`}
-          >
-            <LocateFixed className="w-5 h-5" />
-          </button>
-
-          <button
-            type="button"
-            onClick={handleManualRecalculate}
-            title={lang === 'th' ? 'คำนวณเส้นทางใหม่' : 'Recalculate Route'}
-            className="w-11 h-11 rounded-2xl bg-slate-900/95 hover:bg-slate-800 border border-slate-700 text-white shadow-lg flex items-center justify-center cursor-pointer"
-          >
-            <RefreshCw className={`w-5 h-5 ${routeLoading ? 'animate-spin text-emerald-400' : ''}`} />
-          </button>
-
-          <a
-            href={externalMapsUrl}
-            onClick={(e) => {
-              e.preventDefault();
-              launchExternalGoogleMapsNavigation(order);
-            }}
-            title={lang === 'th' ? 'เริ่มนำทางด้วยแอป Google Maps' : 'Start Google Maps Turn-by-Turn'}
-            className="min-h-[44px] px-3.5 py-2 rounded-2xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs shadow-lg flex items-center gap-1.5 cursor-pointer"
-          >
-            <Navigation className="w-4 h-4" />
-            <span>{lang === 'th' ? 'นำทาง Google Maps' : 'Start Google Maps'}</span>
-          </a>
-        </div>
-      </div>
-
-      {/* 3. Sticky Bottom Action Bar: Back + Job Done Paired Together */}
-      <footer className="shrink-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 px-3.5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] space-y-2.5 z-20">
-        {/* Order & Cash Collection Quick Strip */}
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-black text-white">{order.orderNumber}</span>
-            {order.customerNote && (
-              <span className="text-[11px] text-amber-300 truncate">* {order.customerNote}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {routeSummary && (
-              <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
-                <Clock className="w-3 h-3" />
-                {formatNavDuration(routeSummary.durationMillis, lang)}
-              </span>
-            )}
+        {/* 3. Sticky Bottom Footer: Fallback Link + Close + Delivered */}
+        <footer className="shrink-0 bg-slate-900 border-t border-slate-800 px-3.5 pt-2.5 pb-[max(0.85rem,env(safe-area-inset-bottom))] space-y-2">
+          {/* Payment & Amount Strip */}
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="font-bold text-slate-300 truncate">
+              {order.customerNote ? `* ${order.customerNote}` : order.customerName}
+            </span>
             {order.paymentMethod === 'cash' ? (
-              <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-black inline-flex items-center gap-1">
+              <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 font-black inline-flex items-center gap-1 shrink-0">
                 <Banknote className="w-3.5 h-3.5" />
                 {lang === 'th'
                   ? `เก็บเงินสด ฿${formatMoney(order.totalAmount)}`
                   : `Cash ฿${formatMoney(order.totalAmount)}`}
               </span>
             ) : (
-              <span className="px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-300 font-black inline-flex items-center gap-1">
+              <span className="px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-300 font-black inline-flex items-center gap-1 shrink-0">
                 <QrCode className="w-3.5 h-3.5" />
                 {lang === 'th' ? 'โอน QR แล้ว' : 'QR Paid'}
               </span>
             )}
           </div>
-        </div>
 
-        {/* Paired Bottom Buttons: ย้อนกลับ (Back) + จบงาน (Job Done) */}
-        {confirmComplete ? (
-          <div className="grid grid-cols-2 gap-2.5">
+          {/* Fallback External Google Maps Button directly below embedded map */}
+          <a
+            href={externalDirectionsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`w-full min-h-[42px] px-3 py-2 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-colors ${
+              showIframeFallbackAlert
+                ? 'bg-orange-500 hover:bg-orange-400 text-slate-950 ring-2 ring-orange-300 shadow-lg shadow-orange-500/25'
+                : 'bg-slate-800 hover:bg-slate-700 border border-slate-600 text-orange-300'
+            }`}
+          >
+            <ExternalLink className="w-4 h-4 shrink-0" />
+            <span>{lang === 'th' ? 'เปิดใน Google Maps' : 'Open in Google Maps'}</span>
+          </a>
+
+          {/* Close Without Completing + Primary Complete Delivery Button */}
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
-              disabled={busy}
-              onClick={() => setConfirmComplete(false)}
-              className="min-h-[50px] px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSubmitting}
+              onClick={handleCloseWithoutCompleting}
+              className="col-span-1 min-h-[48px] px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
-              <ArrowLeft className="w-4 h-4" />
-              <span>{lang === 'th' ? 'ยกเลิก' : 'Cancel'}</span>
+              <X className="w-4 h-4 shrink-0" />
+              <span>{lang === 'th' ? 'ปิด' : 'Close'}</span>
             </button>
+
             <button
               type="button"
-              disabled={busy}
-              onClick={handleConfirmComplete}
-              className="min-h-[50px] px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/25"
+              disabled={isSubmitting}
+              onClick={handleCompleteClick}
+              className="col-span-2 min-h-[48px] px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/25"
             >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
-              <span>{lang === 'th' ? 'ยืนยันจบงาน' : 'Confirm Done'}</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  <span>{lang === 'th' ? 'กำลังบันทึก...' : 'Saving...'}</span>
+                </>
+              ) : (
+                <>
+                  <PackageCheck className="w-5 h-5 shrink-0" />
+                  <span>{lang === 'th' ? 'ส่งอาหารสำเร็จ' : 'Delivered'}</span>
+                </>
+              )}
             </button>
           </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2.5">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleBackPress}
-              className="min-h-[50px] px-4 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 cursor-pointer active:scale-98 transition-all"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span>{lang === 'th' ? 'ย้อนกลับ' : 'Back'}</span>
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setConfirmComplete(true)}
-              className="min-h-[50px] px-4 py-2.5 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-emerald-500/25 active:scale-98 transition-all"
-            >
-              <PackageCheck className="w-5 h-5" />
-              <span>{lang === 'th' ? 'จบงาน (Job Done)' : 'Job Done'}</span>
-            </button>
-          </div>
-        )}
-      </footer>
+        </footer>
+      </div>
     </div>
   );
 };

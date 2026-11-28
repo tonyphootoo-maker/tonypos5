@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAndroidGoogleNavigationUri,
   buildExternalGoogleMapsUrl,
+  buildGoogleMapsDirectionsLink,
+  buildGoogleMapsNoKeyEmbedUrl,
   buildOnlineOrderNumberingMap,
   buildWebSyncDailySalesRecords,
   calculateOnlineOrderCostSnapshot,
@@ -17,7 +19,9 @@ import {
   getActiveRiderZoneOrders,
   getBangkokBusinessWorkDate,
   getCurrentPositionWithIosFallback,
+  getMillisUntilNextBangkokMidnight,
   getPendingOnlineOrders,
+  groupRiderCompletedOrders,
   haversineMeters,
   isOnlineOrderInActiveZone,
   isOnlineOrderInLocalPeriod,
@@ -31,6 +35,8 @@ import {
   parseFirestoreRestDocument,
   resolveAppMode,
   resolveNextReadyActionStatus,
+  resolveOrderDestinationParam,
+  resolveRiderOriginParam,
   sanitizeMenuForPublicStore,
   stripHtmlInstructions,
 } from '../onlineOrdering';
@@ -1376,6 +1382,158 @@ describe('Online Ordering Engine', () => {
       })
     ).toBe('google.navigation:q=99%20Rama%209%20Bangkok&mode=d');
   });
+
+  it('groups Rider completed orders into today/yesterday/past in Asia/Bangkok, handles legacy orders, and prunes >15 days', () => {
+    // Reference: 2026-11-28 00:10:00 Bangkok (UTC+7) = 2026-11-27T17:10:00.000Z
+    const referenceNow = new Date('2026-11-28T00:10:00+07:00');
+    const makeCompletedOrder = (
+      id: string,
+      overrides: Partial<OnlineOrderDoc> = {}
+    ): OnlineOrderDoc => ({
+      id,
+      storeId: 'store-1',
+      orderNumber: `ONL-${id}`,
+      customerUid: 'guest-1',
+      customerName: `Customer ${id}`,
+      customerPhone: '0810000000',
+      orderMode: 'delivery',
+      deliveryAddress: 'Bangkok',
+      deliveryLat: 13.75,
+      deliveryLng: 100.5,
+      items: [],
+      subtotal: 100,
+      deliveryFee: 20,
+      totalAmount: 120,
+      paymentMethod: 'cash',
+      status: 'completed',
+      createdAt: '2026-11-20T10:00:00+07:00',
+      updatedAt: '2026-11-20T10:00:00+07:00',
+      completedAt: '2026-11-28T00:05:00+07:00',
+      ...overrides,
+    });
+
+    const orders: OnlineOrderDoc[] = [
+      // Today (early and later)
+      makeCompletedOrder('today-early', { completedAt: '2026-11-28T00:01:00+07:00' }),
+      makeCompletedOrder('today-late', { completedAt: '2026-11-28T00:09:00+07:00' }),
+      // Yesterday across midnight (2026-11-27 23:55 Bangkok)
+      makeCompletedOrder('yest-late', { completedAt: '2026-11-27T23:55:00+07:00' }),
+      makeCompletedOrder('yest-early', { completedAt: '2026-11-27T08:00:00+07:00' }),
+      // Past (2..15 days)
+      makeCompletedOrder('past-2d', { completedAt: '2026-11-26T12:00:00+07:00' }),
+      makeCompletedOrder('past-15d-edge', { completedAt: '2026-11-13T18:00:00+07:00' }),
+      // Legacy without completedAt (within 15d) -> safely falls under past
+      makeCompletedOrder('legacy-no-completed-at', {
+        completedAt: undefined,
+        updatedAt: '2026-11-24T12:00:00+07:00',
+      }),
+      // Legacy without any timestamp -> safely falls under past without crashing
+      makeCompletedOrder('legacy-no-dates', {
+        completedAt: undefined,
+        updatedAt: undefined,
+        createdAt: undefined,
+      }),
+      // Expired (>15 days: 2026-11-12 is 16 calendar days before 2026-11-28)
+      makeCompletedOrder('expired-16d', { completedAt: '2026-11-12T23:59:00+07:00' }),
+      // Non-completed status must be ignored
+      makeCompletedOrder('still-delivering', { status: 'out_for_delivery' }),
+      // Previously pruned ID must stay excluded
+      makeCompletedOrder('already-pruned', { completedAt: '2026-11-28T00:02:00+07:00' }),
+      // Optimistic completedAt overrides missing serverTimestamp on just-completed order -> today
+      makeCompletedOrder('optimistic-today', { completedAt: undefined }),
+    ];
+
+    const grouped = groupRiderCompletedOrders(orders, {
+      referenceNow,
+      prunedOrderIds: new Set(['already-pruned']),
+      optimisticCompletedAtMap: {
+        'optimistic-today': '2026-11-28T00:08:00+07:00',
+      },
+    });
+
+    expect(grouped.today.map((o) => o.id)).toEqual([
+      'today-late',
+      'optimistic-today',
+      'today-early',
+    ]);
+    expect(grouped.yesterday.map((o) => o.id)).toEqual(['yest-late', 'yest-early']);
+    expect(grouped.past.map((o) => o.id)).toEqual([
+      'past-2d',
+      'legacy-no-completed-at',
+      'past-15d-edge',
+      'legacy-no-dates',
+    ]);
+    expect(grouped.expiredOrderIds).toEqual(['expired-16d']);
+    expect(grouped.visibleOrders.length).toBe(
+      grouped.today.length + grouped.yesterday.length + grouped.past.length
+    );
+
+    // Bangkok midnight calculation sanity check:
+    // At 2026-11-28 23:59:00+07:00, next Bangkok midnight is ~60s away
+    const beforeMidnight = new Date('2026-11-28T23:59:00+07:00');
+    const msUntilMidnight = getMillisUntilNextBangkokMidnight(beforeMidnight);
+    expect(msUntilMidnight).toBeGreaterThanOrEqual(60000);
+    expect(msUntilMidnight).toBeLessThanOrEqual(61000);
+  });
+
+  it('builds no-API-key Google Maps iframe URLs and external fallback links properly', () => {
+    const destLatLng = resolveOrderDestinationParam({
+      deliveryLat: 13.7563,
+      deliveryLng: 100.5018,
+      deliveryAddress: 'Siam Paragon',
+    });
+    expect(destLatLng).toBe('13.7563,100.5018');
+
+    const destAddress = resolveOrderDestinationParam({
+      deliveryLat: null,
+      deliveryLng: null,
+      deliveryAddress: ' 99/1 สุขุมวิท 55 กรุงเทพฯ ',
+    });
+    expect(destAddress).toBe('99/1 สุขุมวิท 55 กรุงเทพฯ');
+
+    expect(
+      resolveRiderOriginParam({
+        riderPosition: { lat: 13.74, lng: 100.52 },
+        storeAddress: 'Shop Address',
+      })
+    ).toEqual({ value: '13.74,100.52', source: 'gps' });
+
+    expect(
+      resolveRiderOriginParam({
+        riderPosition: null,
+        storeAddress: ' 123 ถนนพระราม 9 ',
+      })
+    ).toEqual({ value: '123 ถนนพระราม 9', source: 'store' });
+
+    const embedUrl = buildGoogleMapsNoKeyEmbedUrl({
+      origin: '13.74,100.52',
+      destination: '99/1 สุขุมวิท 55 กรุงเทพฯ',
+    });
+    expect(embedUrl).toBe(
+      'https://maps.google.com/maps?saddr=13.74%2C100.52&daddr=99%2F1%20%E0%B8%AA%E0%B8%B8%E0%B8%82%E0%B8%B8%E0%B8%A1%E0%B8%A7%E0%B8%B4%E0%B8%97%2055%20%E0%B8%81%E0%B8%A3%E0%B8%B8%E0%B8%87%E0%B9%80%E0%B8%97%E0%B8%9E%E0%B8%AF&output=embed'
+    );
+
+    const externalLink = buildGoogleMapsDirectionsLink({
+      deliveryLat: 13.7563,
+      deliveryLng: 100.5018,
+      deliveryAddress: 'Bangkok',
+    });
+    expect(externalLink).toBe(
+      'https://www.google.com/maps/dir/?api=1&destination=13.7563%2C100.5018&travelmode=driving'
+    );
+
+    // Ensure RiderNavigationOverlay never requires a Google Maps API key
+    const rootDir = path.resolve(__dirname, '../../..');
+    const overlaySource = fs.readFileSync(
+      path.join(rootDir, 'src/components/RiderNavigationOverlay.tsx'),
+      'utf-8'
+    );
+    expect(overlaySource).not.toContain('VITE_GOOGLE_MAPS_API_KEY');
+    expect(overlaySource).not.toContain('@vis.gl/react-google-maps');
+    expect(overlaySource).toContain('buildGoogleMapsNoKeyEmbedUrl');
+    expect(overlaySource).toContain('buildGoogleMapsDirectionsLink');
+  });
 });
+
 
 

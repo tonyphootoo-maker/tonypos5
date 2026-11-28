@@ -29,9 +29,11 @@ import {
 } from '../data/onlineDb';
 import { formatMoney } from '../engine/calculations';
 import {
-  buildExternalGoogleMapsUrl,
   buildOnlineOrderNumberingMap,
-  launchExternalGoogleMapsNavigation,
+  getMillisUntilNextBangkokMidnight,
+  groupRiderCompletedOrders,
+  loadPrunedRiderCompletedOrderIds,
+  savePrunedRiderCompletedOrderIds,
   toDateSafe,
 } from '../engine/onlineOrdering';
 import { PWAInstallButton } from '../components/PWAInstallButton';
@@ -68,6 +70,9 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
   const [confirmDeliverId, setConfirmDeliverId] = useState<string | null>(null);
   const [activeNavOrderId, setActiveNavOrderId] = useState<string | null>(null);
   const [expandedJobIds, setExpandedJobIds] = useState<Record<string, boolean>>({});
+  const [bangkokNow, setBangkokNow] = useState<Date>(() => new Date());
+  const [prunedCompletedIds, setPrunedCompletedIds] = useState<string[]>([]);
+  const [optimisticCompletedAt, setOptimisticCompletedAt] = useState<Record<string, string>>({});
 
   useEffect(() => {
     saveRiderName(riderName);
@@ -220,6 +225,38 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     };
   }, []);
 
+  // Load previously pruned (>15-day) Rider completed order IDs for this store
+  useEffect(() => {
+    if (!storeId) return;
+    setPrunedCompletedIds(loadPrunedRiderCompletedOrderIds(storeId));
+    setBangkokNow(new Date());
+  }, [storeId]);
+
+  // Automatic Asia/Bangkok midnight rollover & app-resume refresh
+  useEffect(() => {
+    let midnightTimer: number | undefined;
+    const scheduleNextMidnight = () => {
+      const delay = getMillisUntilNextBangkokMidnight(new Date());
+      midnightTimer = window.setTimeout(() => {
+        setBangkokNow(new Date());
+        scheduleNextMidnight();
+      }, delay);
+    };
+    scheduleNextMidnight();
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        setBangkokNow(new Date());
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      if (midnightTimer !== undefined) window.clearTimeout(midnightTimer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+
   const orderNumberingMap = useMemo(
     () => buildOnlineOrderNumberingMap(orders),
     [orders]
@@ -235,12 +272,28 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     [orders]
   );
 
-  const completedJobs = useMemo(
-    () => orders.filter((o) => o.status === 'completed'),
-    [orders]
+  const completedSections = useMemo(
+    () =>
+      groupRiderCompletedOrders(orders, {
+        referenceNow: bangkokNow,
+        prunedOrderIds: prunedCompletedIds,
+        optimisticCompletedAtMap: optimisticCompletedAt,
+      }),
+    [orders, bangkokNow, prunedCompletedIds, optimisticCompletedAt]
   );
 
-  const visibleJobs = activeTab === 'active' ? activeJobs : completedJobs;
+  // Auto-prune >15-day completed orders from Rider history only (shared store/P&L records remain intact)
+  useEffect(() => {
+    if (!storeId || completedSections.expiredOrderIds.length === 0) return;
+    setPrunedCompletedIds((prev) => {
+      const merged = Array.from(new Set([...prev, ...completedSections.expiredOrderIds]));
+      if (merged.length === prev.length) return prev;
+      savePrunedRiderCompletedOrderIds(storeId, merged);
+      return merged;
+    });
+  }, [storeId, activeTab, bangkokNow, completedSections.expiredOrderIds]);
+
+  const completedJobs = completedSections.visibleOrders;
   const activeNavOrder = useMemo(
     () => orders.find((o) => o.id === activeNavOrderId) || null,
     [orders, activeNavOrderId]
@@ -263,9 +316,11 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
     }
   };
 
-  const handleCompleteDelivery = async (order: OnlineOrderDoc) => {
+  const handleCompleteDelivery = async (order: OnlineOrderDoc): Promise<boolean> => {
+    if (busyOrderId === order.id) return false;
     setBusyOrderId(order.id);
     setErrorMsg(null);
+    const localCompletedIso = new Date().toISOString();
     try {
       await updateOnlineOrderByRider(
         order.id,
@@ -273,9 +328,29 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
         riderName,
         riderUid || undefined
       );
+      setOptimisticCompletedAt((prev) => ({
+        ...prev,
+        [order.id]: localCompletedIso,
+      }));
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === order.id
+            ? {
+                ...o,
+                status: 'completed',
+                riderName,
+                ...(riderUid ? { riderUid } : {}),
+                completedAt: o.completedAt || localCompletedIso,
+              }
+            : o
+        )
+      );
+      setBangkokNow(new Date());
       setConfirmDeliverId(null);
+      return true;
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setBusyOrderId(null);
     }
@@ -351,7 +426,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('completed')}
+                onClick={() => {
+                  setBangkokNow(new Date());
+                  setActiveTab('completed');
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
                   activeTab === 'completed'
                     ? 'bg-emerald-500 text-slate-950'
@@ -386,187 +464,170 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                 : 'Open the Rider link generated from the Owner dashboard.'}
             </p>
           </div>
-        ) : visibleJobs.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-10 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-2">
-            <Bike className="w-10 h-10 text-slate-600 mx-auto" />
-            <p className="text-sm font-bold text-slate-300">
-              {activeTab === 'active'
-                ? lang === 'th'
-                  ? 'ไม่มีงานจัดส่งค้างอยู่'
-                  : 'No active delivery jobs'
-                : lang === 'th'
-                ? 'ยังไม่มีรายการส่งสำเร็จ'
-                : 'No completed deliveries yet'}
-            </p>
-          </div>
-        ) : (
-          visibleJobs.map((order) => {
-            const st = RIDER_STATUS_LABELS[order.status] || RIDER_STATUS_LABELS.ready_for_pickup;
-            const displayIds = orderNumberingMap.get(order.id);
-            const created = toDateSafe(order.createdAt);
-            const isBusy = busyOrderId === order.id;
-            const isExpanded = Boolean(expandedJobIds[order.id]);
-            const totalItemCount = (order.items || []).reduce(
-              (sum, it) => sum + Math.max(1, Number(it.quantity) || 1),
-              0
-            );
-            const toggleExpanded = () =>
-              setExpandedJobIds((prev) => ({ ...prev, [order.id]: !prev[order.id] }));
+        ) : activeTab === 'active' ? (
+          activeJobs.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-10 rounded-3xl bg-slate-900 border border-slate-800 text-center space-y-2">
+              <Bike className="w-10 h-10 text-slate-600 mx-auto" />
+              <p className="text-sm font-bold text-slate-300">
+                {lang === 'th' ? 'ไม่มีงานจัดส่งค้างอยู่' : 'No active delivery jobs'}
+              </p>
+            </div>
+          ) : (
+            activeJobs.map((order) => {
+              const st = RIDER_STATUS_LABELS[order.status] || RIDER_STATUS_LABELS.ready_for_pickup;
+              const displayIds = orderNumberingMap.get(order.id);
+              const created = toDateSafe(order.createdAt);
+              const isBusy = busyOrderId === order.id;
+              const isExpanded = Boolean(expandedJobIds[order.id]);
+              const totalItemCount = (order.items || []).reduce(
+                (sum, it) => sum + Math.max(1, Number(it.quantity) || 1),
+                0
+              );
+              const toggleExpanded = () =>
+                setExpandedJobIds((prev) => ({ ...prev, [order.id]: !prev[order.id] }));
 
-            return (
-              <div
-                key={order.id}
-                className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2"
-              >
-                {/* Compact Header Row */}
-                <div className="flex items-start justify-between gap-2 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-black text-sm text-white tabular-nums">
-                        {displayIds?.displayNumber || order.orderNumber}
-                      </span>
-                      {displayIds?.referenceNumber && (
-                        <span className="text-[11px] font-mono text-slate-400 tabular-nums">
-                          {displayIds.referenceNumber}
+              return (
+                <div
+                  key={order.id}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2"
+                >
+                  {/* Compact Header Row */}
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="font-black text-sm text-white tabular-nums">
+                          {displayIds?.displayNumber || order.orderNumber}
                         </span>
-                      )}
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${st.cls}`}>
-                        {st[lang]}
-                      </span>
+                        {displayIds?.referenceNumber && (
+                          <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                            {displayIds.referenceNumber}
+                          </span>
+                        )}
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${st.cls}`}>
+                          {st[lang]}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                        <Clock className="w-3 h-3 shrink-0" />
+                        <span>
+                          {created
+                            ? created.toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', {
+                                timeZone: 'Asia/Bangkok',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : ''}
+                        </span>
+                        <span>• {lang === 'th' ? `${totalItemCount} รายการ` : `${totalItemCount} items`}</span>
+                        {order.riderName && isExpanded && <span className="truncate">• {order.riderName}</span>}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                      <Clock className="w-3 h-3 shrink-0" />
-                      <span>
-                        {created
-                          ? created.toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
-                          : ''}
-                      </span>
-                      <span>• {lang === 'th' ? `${totalItemCount} รายการ` : `${totalItemCount} items`}</span>
-                      {order.riderName && isExpanded && <span className="truncate">• {order.riderName}</span>}
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="text-right">
+                        <div className="text-sm font-black text-emerald-400 tabular-nums">
+                          ฿{formatMoney(order.totalAmount)}
+                        </div>
+                        <div className="text-[10px] font-bold flex items-center justify-end gap-1">
+                          {order.paymentMethod === 'cash' ? (
+                            <span className="text-amber-300 inline-flex items-center gap-0.5">
+                              <Banknote className="w-3 h-3" />
+                              {lang === 'th' ? 'เก็บเงินสด' : 'Cash'}
+                            </span>
+                          ) : (
+                            <span className="text-sky-300 inline-flex items-center gap-0.5">
+                              <QrCode className="w-3 h-3" />
+                              {lang === 'th' ? 'โอน QR' : 'QR'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={toggleExpanded}
+                        aria-expanded={isExpanded}
+                        className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                      >
+                        <span>{isExpanded ? (lang === 'th' ? 'ย่อ' : 'Hide') : lang === 'th' ? 'ดู' : 'More'}</span>
+                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      </button>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="text-right">
-                      <div className="text-sm font-black text-emerald-400 tabular-nums">
-                        ฿{formatMoney(order.totalAmount)}
-                      </div>
-                      <div className="text-[10px] font-bold flex items-center justify-end gap-1">
-                        {order.paymentMethod === 'cash' ? (
-                          <span className="text-amber-300 inline-flex items-center gap-0.5">
-                            <Banknote className="w-3 h-3" />
-                            {lang === 'th' ? 'เก็บเงินสด' : 'Cash'}
-                          </span>
-                        ) : (
-                          <span className="text-sky-300 inline-flex items-center gap-0.5">
-                            <QrCode className="w-3 h-3" />
-                            {lang === 'th' ? 'โอน QR' : 'QR'}
-                          </span>
-                        )}
-                      </div>
+                  {/* Compact Customer & Address Strip */}
+                  <div className="px-2.5 py-2 rounded-xl bg-slate-950/75 border border-slate-800/90 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <span className="font-bold text-white min-w-0 truncate">{order.customerName}</span>
+                      <a
+                        href={`tel:${order.customerPhone}`}
+                        className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 shrink-0"
+                      >
+                        <Phone className="w-3 h-3" />
+                        <span>{order.customerPhone}</span>
+                      </a>
                     </div>
-
                     <button
                       type="button"
                       onClick={toggleExpanded}
-                      aria-expanded={isExpanded}
-                      className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                      className="w-full flex items-start gap-1.5 text-left text-slate-300 text-[11px] leading-snug min-w-0 cursor-pointer"
                     >
-                      <span>{isExpanded ? (lang === 'th' ? 'ย่อ' : 'Hide') : lang === 'th' ? 'ดู' : 'More'}</span>
-                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                      <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+                      <span className={isExpanded ? 'break-words min-w-0' : 'truncate min-w-0'}>
+                        {order.deliveryAddress || '-'}
+                      </span>
                     </button>
+                    {isExpanded && order.customerNote && (
+                      <div className="text-[11px] text-amber-300 break-words pt-0.5">* {order.customerNote}</div>
+                    )}
                   </div>
-                </div>
 
-                {/* Compact Customer & Address Strip */}
-                <div className="px-2.5 py-2 rounded-xl bg-slate-950/75 border border-slate-800/90 space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between gap-2 min-w-0">
-                    <span className="font-bold text-white min-w-0 truncate">{order.customerName}</span>
-                    <a
-                      href={`tel:${order.customerPhone}`}
-                      className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 shrink-0"
-                    >
-                      <Phone className="w-3 h-3" />
-                      <span>{order.customerPhone}</span>
-                    </a>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={toggleExpanded}
-                    className="w-full flex items-start gap-1.5 text-left text-slate-300 text-[11px] leading-snug min-w-0 cursor-pointer"
-                  >
-                    <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
-                    <span className={isExpanded ? 'break-words min-w-0' : 'truncate min-w-0'}>
-                      {order.deliveryAddress || '-'}
-                    </span>
-                  </button>
-                  {isExpanded && order.customerNote && (
-                    <div className="text-[11px] text-amber-300 break-words pt-0.5">* {order.customerNote}</div>
+                  {/* Expandable Order Items Summary */}
+                  {isExpanded && (
+                    <div className="px-2.5 py-2 rounded-xl bg-slate-950/50 border border-slate-800/70 text-xs text-slate-300 space-y-1">
+                      {order.items.map((it, idx) => (
+                        <div key={idx} className="flex justify-between gap-2 min-w-0">
+                          <span className="min-w-0 break-words">
+                            {it.quantity}x {it.dishName}
+                            {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
+                          </span>
+                          <span className="text-slate-400 tabular-nums shrink-0">
+                            ฿{formatMoney(it.unitPrice * it.quantity)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   )}
-                </div>
 
-                {/* Expandable Order Items Summary */}
-                {isExpanded && (
-                  <div className="px-2.5 py-2 rounded-xl bg-slate-950/50 border border-slate-800/70 text-xs text-slate-300 space-y-1">
-                    {order.items.map((it, idx) => (
-                      <div key={idx} className="flex justify-between gap-2 min-w-0">
-                        <span className="min-w-0 break-words">
-                          {it.quantity}x {it.dishName}
-                          {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
-                        </span>
-                        <span className="text-slate-400 tabular-nums shrink-0">
-                          ฿{formatMoney(it.unitPrice * it.quantity)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Compact Action Buttons */}
-                {order.status !== 'completed' && (
+                  {/* Compact Action Buttons — opens In-App Navigation Modal without external jump */}
                   <div className="grid grid-cols-2 gap-2 pt-0.5">
                     {order.status !== 'out_for_delivery' ? (
-                      <a
-                        href={buildExternalGoogleMapsUrl(order)}
-                        onClick={(e) => {
-                          e.preventDefault();
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => {
                           if (isBusy) return;
                           setActiveNavOrderId(order.id);
                           void handleStartDelivery(order);
-                          launchExternalGoogleMapsNavigation(order);
                         }}
-                        aria-disabled={isBusy}
-                        className={`min-h-[42px] px-2.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 text-center cursor-pointer ${
-                          isBusy ? 'opacity-60 pointer-events-none' : ''
-                        }`}
+                        className="min-h-[42px] px-2.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 text-center cursor-pointer"
                       >
                         <NavigationIcon className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate">
-                          {lang === 'th'
-                            ? 'รับอาหาร & นำทาง'
-                            : 'Start & Navigate'}
+                          {lang === 'th' ? 'รับอาหาร/นำทาง' : 'Start & Navigate'}
                         </span>
-                      </a>
+                      </button>
                     ) : (
-                      <a
-                        href={buildExternalGoogleMapsUrl(order)}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setActiveNavOrderId(order.id);
-                          launchExternalGoogleMapsNavigation(order);
-                        }}
+                      <button
+                        type="button"
+                        onClick={() => setActiveNavOrderId(order.id)}
                         className="min-h-[42px] px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 text-center cursor-pointer"
                       >
                         <NavigationIcon className="w-3.5 h-3.5 text-orange-400 shrink-0" />
                         <span className="truncate">
-                          {lang === 'th'
-                            ? 'เปิดนำทาง Maps'
-                            : 'Navigate Maps'}
+                          {lang === 'th' ? 'เปิดแผนที่นำทาง' : 'Open Route Map'}
                         </span>
-                      </a>
+                      </button>
                     )}
 
                     {confirmDeliverId === order.id ? (
@@ -574,14 +635,17 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                         <button
                           type="button"
                           disabled={isBusy}
-                          onClick={() => handleCompleteDelivery(order)}
-                          className="flex-1 min-h-[42px] px-2 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1 cursor-pointer"
+                          onClick={() => {
+                            void handleCompleteDelivery(order);
+                          }}
+                          className="flex-1 min-h-[42px] px-2 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1 cursor-pointer"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                           <span>{lang === 'th' ? 'ยืนยัน' : 'Confirm'}</span>
                         </button>
                         <button
                           type="button"
+                          disabled={isBusy}
                           onClick={() => setConfirmDeliverId(null)}
                           className="min-h-[42px] px-2.5 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-[11px] cursor-pointer"
                         >
@@ -593,17 +657,195 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                         type="button"
                         disabled={isBusy}
                         onClick={() => setConfirmDeliverId(order.id)}
-                        className="min-h-[42px] px-2.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="min-h-[42px] px-2.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <PackageCheck className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate">{lang === 'th' ? 'ส่งอาหารสำเร็จ' : 'Delivered'}</span>
                       </button>
                     )}
                   </div>
+                </div>
+              );
+            })
+          )
+        ) : (
+          <div className="space-y-4">
+            {[
+              {
+                key: 'today' as const,
+                title: lang === 'th' ? 'วันนี้' : 'Today',
+                items: completedSections.today,
+              },
+              {
+                key: 'yesterday' as const,
+                title: lang === 'th' ? 'เมื่อวาน' : 'Yesterday',
+                items: completedSections.yesterday,
+              },
+              {
+                key: 'past' as const,
+                title: lang === 'th' ? 'ที่ผ่านมา' : 'Earlier',
+                items: completedSections.past,
+              },
+            ].map((section) => (
+              <section key={section.key} className="space-y-2.5">
+                <div className="flex items-center justify-between px-1">
+                  <h2 className="text-xs font-extrabold uppercase tracking-wide text-slate-300">
+                    {section.title}
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] font-bold text-slate-300 tabular-nums">
+                    {lang === 'th'
+                      ? `${section.items.length} รายการ`
+                      : `${section.items.length}`}
+                  </span>
+                </div>
+
+                {section.items.length === 0 ? (
+                  <div className="w-full rounded-2xl bg-slate-900/60 border border-slate-800/80 px-4 py-4 text-center text-xs font-medium text-slate-500">
+                    {lang === 'th' ? 'ไม่มีรายการ' : 'No items'}
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {section.items.map((order) => {
+                      const st = RIDER_STATUS_LABELS[order.status] || RIDER_STATUS_LABELS.completed;
+                      const displayIds = orderNumberingMap.get(order.id);
+                      const completedOrCreated =
+                        toDateSafe(order.completedAt ?? optimisticCompletedAt[order.id]) ||
+                        toDateSafe(order.createdAt);
+                      const isExpanded = Boolean(expandedJobIds[order.id]);
+                      const totalItemCount = (order.items || []).reduce(
+                        (sum, it) => sum + Math.max(1, Number(it.quantity) || 1),
+                        0
+                      );
+                      const toggleExpanded = () =>
+                        setExpandedJobIds((prev) => ({ ...prev, [order.id]: !prev[order.id] }));
+
+                      return (
+                        <div
+                          key={order.id}
+                          className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2"
+                        >
+                          {/* Compact Header Row */}
+                          <div className="flex items-start justify-between gap-2 min-w-0">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-black text-sm text-white tabular-nums">
+                                  {displayIds?.displayNumber || order.orderNumber}
+                                </span>
+                                {displayIds?.referenceNumber && (
+                                  <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                                    {displayIds.referenceNumber}
+                                  </span>
+                                )}
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${st.cls}`}>
+                                  {st[lang]}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                <Clock className="w-3 h-3 shrink-0" />
+                                <span>
+                                  {completedOrCreated
+                                    ? completedOrCreated.toLocaleTimeString(
+                                        lang === 'th' ? 'th-TH' : 'en-US',
+                                        {
+                                          timeZone: 'Asia/Bangkok',
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                        }
+                                      )
+                                    : '-'}
+                                </span>
+                                <span>• {lang === 'th' ? `${totalItemCount} รายการ` : `${totalItemCount} items`}</span>
+                                {order.riderName && isExpanded && (
+                                  <span className="truncate">• {order.riderName}</span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="text-right">
+                                <div className="text-sm font-black text-emerald-400 tabular-nums">
+                                  ฿{formatMoney(order.totalAmount)}
+                                </div>
+                                <div className="text-[10px] font-bold flex items-center justify-end gap-1">
+                                  {order.paymentMethod === 'cash' ? (
+                                    <span className="text-amber-300 inline-flex items-center gap-0.5">
+                                      <Banknote className="w-3 h-3" />
+                                      {lang === 'th' ? 'เก็บเงินสด' : 'Cash'}
+                                    </span>
+                                  ) : (
+                                    <span className="text-sky-300 inline-flex items-center gap-0.5">
+                                      <QrCode className="w-3 h-3" />
+                                      {lang === 'th' ? 'โอน QR' : 'QR'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={toggleExpanded}
+                                aria-expanded={isExpanded}
+                                className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                              >
+                                <span>{isExpanded ? (lang === 'th' ? 'ย่อ' : 'Hide') : lang === 'th' ? 'ดู' : 'More'}</span>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Compact Customer & Address Strip */}
+                          <div className="px-2.5 py-2 rounded-xl bg-slate-950/75 border border-slate-800/90 space-y-1.5 text-xs">
+                            <div className="flex items-center justify-between gap-2 min-w-0">
+                              <span className="font-bold text-white min-w-0 truncate">{order.customerName}</span>
+                              <a
+                                href={`tel:${order.customerPhone}`}
+                                className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 shrink-0"
+                              >
+                                <Phone className="w-3 h-3" />
+                                <span>{order.customerPhone}</span>
+                              </a>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={toggleExpanded}
+                              className="w-full flex items-start gap-1.5 text-left text-slate-300 text-[11px] leading-snug min-w-0 cursor-pointer"
+                            >
+                              <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+                              <span className={isExpanded ? 'break-words min-w-0' : 'truncate min-w-0'}>
+                                {order.deliveryAddress || '-'}
+                              </span>
+                            </button>
+                            {isExpanded && order.customerNote && (
+                              <div className="text-[11px] text-amber-300 break-words pt-0.5">
+                                * {order.customerNote}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Expandable Order Items Summary */}
+                          {isExpanded && (
+                            <div className="px-2.5 py-2 rounded-xl bg-slate-950/50 border border-slate-800/70 text-xs text-slate-300 space-y-1">
+                              {order.items.map((it, idx) => (
+                                <div key={idx} className="flex justify-between gap-2 min-w-0">
+                                  <span className="min-w-0 break-words">
+                                    {it.quantity}x {it.dishName}
+                                    {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
+                                  </span>
+                                  <span className="text-slate-400 tabular-nums shrink-0">
+                                    ฿{formatMoney(it.unitPrice * it.quantity)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
-              </div>
-            );
-          })
+              </section>
+            ))}
+          </div>
         )}
       </main>
 

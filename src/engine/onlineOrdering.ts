@@ -1224,4 +1224,249 @@ export function getCurrentPositionWithIosFallback(
   });
 }
 
+export const RIDER_COMPLETED_RETENTION_DAYS = 15;
+
+export type RiderCompletedSectionKey = 'today' | 'yesterday' | 'past';
+
+export interface RiderCompletedSections {
+  today: OnlineOrderDoc[];
+  yesterday: OnlineOrderDoc[];
+  past: OnlineOrderDoc[];
+  visibleOrders: OnlineOrderDoc[];
+  expiredOrderIds: string[];
+}
+
+function bangkokDateStringToUtcMs(dateStr: string): number {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return Date.UTC(y || 2026, (m || 1) - 1, d || 1);
+}
+
+/**
+ * Returns whole calendar day difference in Asia/Bangkok between referenceNow and targetDate:
+ * 0 = same Bangkok date (today), 1 = yesterday, 2+ = earlier.
+ */
+export function getBangkokCalendarDayDiff(
+  targetInput: unknown,
+  referenceNow: Date = new Date()
+): number | null {
+  const targetDate = toDateSafe(targetInput);
+  if (!targetDate) return null;
+  const targetBkk = getBangkokDateParts(targetDate);
+  const nowBkk = getBangkokDateParts(referenceNow);
+  const diffMs =
+    bangkokDateStringToUtcMs(nowBkk.dateStr) - bangkokDateStringToUtcMs(targetBkk.dateStr);
+  return Math.round(diffMs / 86400000);
+}
+
+/**
+ * Computes milliseconds until the next 00:00:00 in Asia/Bangkok timezone (UTC+7).
+ */
+export function getMillisUntilNextBangkokMidnight(referenceNow: Date = new Date()): number {
+  const bkkNow = getBangkokDateParts(referenceNow);
+  const nextDateStr = shiftIsoDateDays(bkkNow.dateStr, 1);
+  const nextMidnightMs = new Date(`${nextDateStr}T00:00:00+07:00`).getTime();
+  return Math.max(1000, nextMidnightMs - referenceNow.getTime() + 50);
+}
+
+export function getPrunedRiderStorageKey(storeId: string): string {
+  return `tonys_rider_pruned_completed_${(storeId || 'default').trim()}`;
+}
+
+export function loadPrunedRiderCompletedOrderIds(storeId: string): string[] {
+  if (typeof localStorage === 'undefined' || !storeId) return [];
+  try {
+    const raw = localStorage.getItem(getPrunedRiderStorageKey(storeId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePrunedRiderCompletedOrderIds(storeId: string, ids: string[]): void {
+  if (typeof localStorage === 'undefined' || !storeId) return;
+  try {
+    const unique = Array.from(new Set(ids.filter(Boolean))).slice(-300);
+    localStorage.setItem(getPrunedRiderStorageKey(storeId), JSON.stringify(unique));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function getOrderCompletedSortTimestamp(order: OnlineOrderDoc): number {
+  return (
+    toDateSafe(order.completedAt)?.getTime() ??
+    toDateSafe(order.updatedAt)?.getTime() ??
+    toDateSafe(order.createdAt)?.getTime() ??
+    0
+  );
+}
+
+/**
+ * Groups completed delivery orders for the Rider "Done" tab into 3 Asia/Bangkok calendar sections:
+ * - today: completed today (diffDays <= 0)
+ * - yesterday: completed yesterday (diffDays === 1)
+ * - past: completed 2..15 days ago, OR legacy completed orders without a completedAt timestamp
+ *
+ * Orders older than 15 days (or previously pruned in Rider history) are excluded and returned
+ * in `expiredOrderIds` so Rider history hides them without deleting shared store/P&L data.
+ */
+export function groupRiderCompletedOrders(
+  orders: OnlineOrderDoc[],
+  options?: {
+    referenceNow?: Date;
+    prunedOrderIds?: Set<string> | string[];
+    optimisticCompletedAtMap?: Record<string, string>;
+    retentionDays?: number;
+  }
+): RiderCompletedSections {
+  const referenceNow = options?.referenceNow ?? new Date();
+  const retentionDays = options?.retentionDays ?? RIDER_COMPLETED_RETENTION_DAYS;
+  const prunedSet =
+    options?.prunedOrderIds instanceof Set
+      ? options.prunedOrderIds
+      : new Set(options?.prunedOrderIds || []);
+  const optimisticMap = options?.optimisticCompletedAtMap || {};
+
+  const today: OnlineOrderDoc[] = [];
+  const yesterday: OnlineOrderDoc[] = [];
+  const past: OnlineOrderDoc[] = [];
+  const expiredOrderIds: string[] = [];
+
+  for (const order of orders || []) {
+    if (!order || order.status !== 'completed') continue;
+    if (prunedSet.has(order.id)) continue;
+
+    const effectiveCompletedAt = order.completedAt ?? optimisticMap[order.id];
+    const completedDate = toDateSafe(effectiveCompletedAt);
+
+    if (completedDate) {
+      const diffDays = getBangkokCalendarDayDiff(completedDate, referenceNow);
+      if (diffDays !== null && diffDays > retentionDays) {
+        expiredOrderIds.push(order.id);
+        continue;
+      }
+      if (diffDays !== null && diffDays <= 0) {
+        today.push(order);
+      } else if (diffDays === 1) {
+        yesterday.push(order);
+      } else {
+        past.push(order);
+      }
+    } else {
+      // Legacy completed order lacking `completedAt`: check fallback date only for >15d retention,
+      // and always categorize valid legacy entries under "past" ("ที่ผ่านมา") without crashing.
+      const fallbackDate = toDateSafe(order.updatedAt) ?? toDateSafe(order.createdAt);
+      if (fallbackDate) {
+        const fallbackDiff = getBangkokCalendarDayDiff(fallbackDate, referenceNow);
+        if (fallbackDiff !== null && fallbackDiff > retentionDays) {
+          expiredOrderIds.push(order.id);
+          continue;
+        }
+      }
+      past.push(order);
+    }
+  }
+
+  const sortNewestFirst = (a: OnlineOrderDoc, b: OnlineOrderDoc) => {
+    const ta = getOrderCompletedSortTimestamp({
+      ...a,
+      completedAt: a.completedAt ?? optimisticMap[a.id],
+    });
+    const tb = getOrderCompletedSortTimestamp({
+      ...b,
+      completedAt: b.completedAt ?? optimisticMap[b.id],
+    });
+    return tb - ta || a.id.localeCompare(b.id);
+  };
+
+  today.sort(sortNewestFirst);
+  yesterday.sort(sortNewestFirst);
+  past.sort(sortNewestFirst);
+
+  return {
+    today,
+    yesterday,
+    past,
+    visibleOrders: [...today, ...yesterday, ...past],
+    expiredOrderIds,
+  };
+}
+
+/**
+ * Resolves the destination string for Google Maps embed/directions links:
+ * prefers `lat,lng` when valid numbers are present, otherwise trimmed delivery address.
+ */
+export function resolveOrderDestinationParam(
+  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
+): string {
+  if (
+    typeof order.deliveryLat === 'number' &&
+    typeof order.deliveryLng === 'number' &&
+    Number.isFinite(order.deliveryLat) &&
+    Number.isFinite(order.deliveryLng)
+  ) {
+    return `${order.deliveryLat},${order.deliveryLng}`;
+  }
+  return (order.deliveryAddress || '').trim();
+}
+
+/**
+ * Resolves the origin (`saddr`) for Rider navigation:
+ * prefers live GPS `lat,lng`, falls back to store pickup address if GPS permission is denied/unavailable.
+ */
+export function resolveRiderOriginParam(params: {
+  riderPosition?: LatLngLiteralSimple | null;
+  storeAddress?: string | null;
+  fallbackDestination?: string | null;
+}): { value: string; source: 'gps' | 'store' | 'fallback' } {
+  const { riderPosition, storeAddress, fallbackDestination } = params;
+  if (
+    riderPosition &&
+    typeof riderPosition.lat === 'number' &&
+    typeof riderPosition.lng === 'number' &&
+    Number.isFinite(riderPosition.lat) &&
+    Number.isFinite(riderPosition.lng)
+  ) {
+    return {
+      value: `${riderPosition.lat},${riderPosition.lng}`,
+      source: 'gps',
+    };
+  }
+  const trimmedStore = (storeAddress || '').trim();
+  if (trimmedStore) {
+    return { value: trimmedStore, source: 'store' };
+  }
+  return {
+    value: (fallbackDestination || '').trim() || 'Bangkok, Thailand',
+    source: 'fallback',
+  };
+}
+
+/**
+ * Builds an API-key-free Google Maps directions embed iframe URL:
+ * https://maps.google.com/maps?saddr=<origin>&daddr=<destination>&output=embed
+ */
+export function buildGoogleMapsNoKeyEmbedUrl(params: {
+  origin: string;
+  destination: string;
+}): string {
+  const saddr = encodeURIComponent((params.origin || '').trim());
+  const daddr = encodeURIComponent((params.destination || '').trim());
+  return `https://maps.google.com/maps?saddr=${saddr}&daddr=${daddr}&output=embed`;
+}
+
+/**
+ * Builds the external Google Maps fallback directions URL (`<a target="_blank" rel="noopener noreferrer">`):
+ * https://www.google.com/maps/dir/?api=1&destination=...&travelmode=driving
+ */
+export function buildGoogleMapsDirectionsLink(
+  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
+): string {
+  const dest = encodeURIComponent(resolveOrderDestinationParam(order));
+  return `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+}
+
+
 
