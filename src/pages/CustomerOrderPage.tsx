@@ -77,7 +77,10 @@ import {
   toggleOptionChoiceMap,
   updateOptionChoiceQuantityMap,
 } from '../engine/calculations';
-import { buildInitialOptionSelections } from '../engine/posMenuHelpers';
+import {
+  buildInitialOptionSelections,
+  findMissingRequiredOptionGroups,
+} from '../engine/posMenuHelpers';
 import {
   canCustomerCancelOrder,
   formatCountdownMMSS,
@@ -166,7 +169,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   const [selectedOptions, setSelectedOptions] = useState<Record<string, Record<string, number>>>({});
   const [itemNote, setItemNote] = useState('');
   const [itemQty, setItemQty] = useState(1);
-  const [optionValidationMsg, setOptionValidationMsg] = useState<string | null>(null);
+  const [optionValidationErrors, setOptionValidationErrors] = useState<Record<string, string>>({});
+  const [optionValidationScrollTarget, setOptionValidationScrollTarget] = useState<{
+    groupId: string;
+    nonce: number;
+  } | null>(null);
   const [editingFavoriteId, setEditingFavoriteId] = useState<string | null>(null);
   const [favoriteSavedNotice, setFavoriteSavedNotice] = useState<string | null>(null);
 
@@ -227,6 +234,31 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   );
 
   const loadedImageIdsRef = useRef<Set<string>>(new Set());
+  const dishModalBodyRef = useRef<HTMLDivElement | null>(null);
+  const optionGroupRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  // Auto-scroll dish modal body directly to the first missing required option group's alert card
+  useEffect(() => {
+    if (!optionValidationScrollTarget || !activeDish) return;
+    const rafId = window.requestAnimationFrame(() => {
+      const container = dishModalBodyRef.current;
+      const targetEl = optionGroupRefs.current[optionValidationScrollTarget.groupId];
+      if (!container || !targetEl) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = targetEl.getBoundingClientRect();
+      const nextScrollTop = Math.max(
+        0,
+        container.scrollTop + (targetRect.top - containerRect.top) - 10
+      );
+      if (typeof container.scrollTo === 'function') {
+        container.scrollTo({ top: nextScrollTop, behavior: 'smooth' });
+      } else {
+        container.scrollTop = nextScrollTop;
+      }
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [optionValidationScrollTarget, activeDish]);
 
   const handleSwitchLang = () => {
     if (onToggleLang) {
@@ -718,26 +750,35 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     setSelectedOptions(initOpts);
     setItemNote(existingFavorite?.notes || '');
     setItemQty(1);
-    setOptionValidationMsg(null);
+    setOptionValidationErrors({});
+    setOptionValidationScrollTarget(null);
     setEditingFavoriteId(existingFavorite?.id ?? null);
     setFavoriteSavedNotice(null);
   };
 
   const handleSaveCurrentDishFavorite = () => {
     if (!activeDish || !selectedVariant) return;
-    for (const gId of activeDish.optionGroupIds || []) {
-      const grp = optionGroupMap.get(gId);
-      if (!grp) continue;
-      const count = Object.values(selectedOptions[gId] || {}).filter((q) => q > 0).length;
-      if (count < grp.minSelect) {
-        const gLabel = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
-        setOptionValidationMsg(
+    const missing = findMissingRequiredOptionGroups({
+      optionGroupIds: activeDish.optionGroupIds,
+      optionGroupMap,
+      selectedOptions,
+    });
+    if (missing.length > 0) {
+      const nextErrors: Record<string, string> = {};
+      for (const item of missing) {
+        const grp = optionGroupMap.get(item.groupId);
+        const gLabel = grp ? getLocalizedText(lang, grp.nameTh || grp.name, grp.name) : '';
+        nextErrors[item.groupId] =
           lang === 'th'
-            ? `กรุณาเลือก "${gLabel}" อย่างน้อย ${grp.minSelect} รายการก่อนบันทึกรายการโปรด`
-            : `Please select at least ${grp.minSelect} for "${gLabel}" before saving favorite`
-        );
-        return;
+            ? `กรุณาเลือก "${gLabel}" อย่างน้อย ${item.minSelect} รายการก่อนบันทึกรายการโปรด`
+            : `Please select at least ${item.minSelect} for "${gLabel}" before saving favorite`;
       }
+      setOptionValidationErrors(nextErrors);
+      setOptionValidationScrollTarget((prev) => ({
+        groupId: missing[0].groupId,
+        nonce: (prev?.nonce ?? 0) + 1,
+      }));
+      return;
     }
 
     const updated = upsertSavedCustomerFavoriteItem({
@@ -750,7 +791,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     });
     setSavedFavoriteItems(updated);
     setFavoriteDishIds(loadCustomerFavoriteDishIds(storeId));
-    setOptionValidationMsg(null);
+    setOptionValidationErrors({});
+    setOptionValidationScrollTarget(null);
     if (!editingFavoriteId && updated[0]) {
       setEditingFavoriteId(updated[0].id);
     }
@@ -827,11 +869,24 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
   };
 
   const toggleOptionChoice = (group: PublicOptionGroup, choice: PublicOptionChoice) => {
-    setOptionValidationMsg(null);
+    const nextGroupMap = toggleOptionChoiceMap(
+      selectedOptions[group.id] || {},
+      choice,
+      group.maxSelect
+    );
     setSelectedOptions((prev) => ({
       ...prev,
       [group.id]: toggleOptionChoiceMap(prev[group.id] || {}, choice, group.maxSelect),
     }));
+    const nextCount = Object.values(nextGroupMap).filter((q) => q > 0).length;
+    if (optionValidationErrors[group.id] && nextCount >= group.minSelect) {
+      setOptionValidationErrors((prev) => {
+        if (!prev[group.id]) return prev;
+        const copy = { ...prev };
+        delete copy[group.id];
+        return copy;
+      });
+    }
   };
 
   const updateOptionChoiceQty = (
@@ -839,7 +894,12 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     choice: PublicOptionChoice,
     nextQuantity: number
   ) => {
-    setOptionValidationMsg(null);
+    const nextGroupMap = updateOptionChoiceQuantityMap(
+      selectedOptions[group.id] || {},
+      choice,
+      nextQuantity,
+      group.maxSelect
+    );
     setSelectedOptions((prev) => ({
       ...prev,
       [group.id]: updateOptionChoiceQuantityMap(
@@ -849,6 +909,15 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
         group.maxSelect
       ),
     }));
+    const nextCount = Object.values(nextGroupMap).filter((q) => q > 0).length;
+    if (optionValidationErrors[group.id] && nextCount >= group.minSelect) {
+      setOptionValidationErrors((prev) => {
+        if (!prev[group.id]) return prev;
+        const copy = { ...prev };
+        delete copy[group.id];
+        return copy;
+      });
+    }
   };
 
   const activeDishLiveUnitPrice = useMemo(() => {
@@ -876,19 +945,27 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
     if (!activeDish || !selectedVariant) return;
 
     // Validate minSelect
-    for (const gId of activeDish.optionGroupIds || []) {
-      const grp = optionGroupMap.get(gId);
-      if (!grp) continue;
-      const count = Object.values(selectedOptions[gId] || {}).filter((q) => q > 0).length;
-      if (count < grp.minSelect) {
-        const gLabel = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
-        setOptionValidationMsg(
+    const missing = findMissingRequiredOptionGroups({
+      optionGroupIds: activeDish.optionGroupIds,
+      optionGroupMap,
+      selectedOptions,
+    });
+    if (missing.length > 0) {
+      const nextErrors: Record<string, string> = {};
+      for (const item of missing) {
+        const grp = optionGroupMap.get(item.groupId);
+        const gLabel = grp ? getLocalizedText(lang, grp.nameTh || grp.name, grp.name) : '';
+        nextErrors[item.groupId] =
           lang === 'th'
-            ? `กรุณาเลือก "${gLabel}" อย่างน้อย ${grp.minSelect} รายการ`
-            : `Please select at least ${grp.minSelect} for "${gLabel}"`
-        );
-        return;
+            ? `กรุณาเลือก "${gLabel}" อย่างน้อย ${item.minSelect} รายการ`
+            : `Please select at least ${item.minSelect} for "${gLabel}"`;
       }
+      setOptionValidationErrors(nextErrors);
+      setOptionValidationScrollTarget((prev) => ({
+        groupId: missing[0].groupId,
+        nonce: (prev?.nonce ?? 0) + 1,
+      }));
+      return;
     }
 
     const flatOptions: OnlineOrderItemOption[] = [];
@@ -1730,6 +1807,8 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                     setActiveDish(null);
                     setEditingFavoriteId(null);
                     setFavoriteSavedNotice(null);
+                    setOptionValidationErrors({});
+                    setOptionValidationScrollTarget(null);
                   }}
                   className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-700 cursor-pointer"
                 >
@@ -1738,7 +1817,7 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
               </div>
             </div>
 
-            <div className="modal-body space-y-5">
+            <div ref={dishModalBodyRef} className="modal-body space-y-5">
               {(() => {
                 const activeDesc = getLocalizedDishDescription(
                   lang,
@@ -1785,13 +1864,36 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 const grp = optionGroupMap.get(gId);
                 if (!grp || grp.choices.length === 0) return null;
                 const selectedMap = selectedOptions[gId] || {};
+                const selectedCount = Object.values(selectedMap).filter((q) => q > 0).length;
+                const groupErrorMsg = optionValidationErrors[grp.id];
+                const showGroupError = Boolean(groupErrorMsg) && selectedCount < grp.minSelect;
                 const grpTitle = getLocalizedText(lang, grp.nameTh || grp.name, grp.name);
 
                 return (
-                  <div key={grp.id} className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-extrabold text-slate-800">{grpTitle}</span>
-                      <span className="text-[11px] font-semibold text-slate-500">
+                  <div
+                    key={grp.id}
+                    ref={(el) => {
+                      optionGroupRefs.current[grp.id] = el;
+                    }}
+                    className={`space-y-2 rounded-2xl transition-colors ${
+                      showGroupError
+                        ? 'p-3 -mx-1 bg-rose-50/75 border border-rose-300 ring-2 ring-rose-500/20'
+                        : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span
+                        className={`font-extrabold ${
+                          showGroupError ? 'text-rose-800' : 'text-slate-800'
+                        }`}
+                      >
+                        {grpTitle}
+                      </span>
+                      <span
+                        className={`text-[11px] font-semibold ${
+                          showGroupError ? 'text-rose-600 font-bold' : 'text-slate-500'
+                        }`}
+                      >
                         {grp.minSelect > 0
                           ? lang === 'th'
                             ? `บังคับเลือก ${grp.minSelect} (สูงสุด ${grp.maxSelect})`
@@ -1801,6 +1903,15 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                           : `Optional (max ${grp.maxSelect})`}
                       </span>
                     </div>
+                    {showGroupError && (
+                      <div
+                        role="alert"
+                        className="p-2.5 rounded-xl bg-rose-100/95 border border-rose-300 text-xs font-bold text-rose-800 flex items-center gap-2"
+                      >
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                        <span>{groupErrorMsg}</span>
+                      </div>
+                    )}
                     <div className="space-y-1.5">
                       {grp.choices.map((ch) => {
                         const chosenQty = selectedMap[ch.id] || 0;
@@ -1969,12 +2080,6 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700 flex items-center gap-2">
                   <Heart className="w-4 h-4 fill-rose-500 text-rose-500 shrink-0" />
                   <span>{favoriteSavedNotice}</span>
-                </div>
-              )}
-
-              {optionValidationMsg && (
-                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-700">
-                  {optionValidationMsg}
                 </div>
               )}
             </div>

@@ -203,3 +203,42 @@ export function buildInitialOptionSelections(params: {
 
   return initOpts;
 }
+
+export interface MissingRequiredOptionGroup {
+  groupId: string;
+  minSelect: number;
+  selectedCount: number;
+}
+
+/**
+ * Finds all required option groups attached to a dish that do not yet satisfy `minSelect`.
+ * Preserves the dish's optionGroupIds display order so callers can highlight all missing groups
+ * and auto-scroll directly to the first missing option group's header alert.
+ */
+export function findMissingRequiredOptionGroups(params: {
+  optionGroupIds?: string[];
+  optionGroupMap: Map<string, { id: string; minSelect: number; choices: unknown[] }>;
+  selectedOptions: Record<string, Record<string, number>>;
+}): MissingRequiredOptionGroup[] {
+  const { optionGroupIds = [], optionGroupMap, selectedOptions } = params;
+  const missing: MissingRequiredOptionGroup[] = [];
+
+  for (const gId of optionGroupIds) {
+    const grp = optionGroupMap.get(gId);
+    if (!grp || !grp.choices || grp.choices.length === 0) continue;
+    if (grp.minSelect <= 0) continue;
+
+    const chosenMap = selectedOptions[gId] || {};
+    const selectedCount = Object.values(chosenMap).filter((q) => q > 0).length;
+    if (selectedCount < grp.minSelect) {
+      missing.push({
+        groupId: grp.id,
+        minSelect: grp.minSelect,
+        selectedCount,
+      });
+    }
+  }
+
+  return missing;
+}
+

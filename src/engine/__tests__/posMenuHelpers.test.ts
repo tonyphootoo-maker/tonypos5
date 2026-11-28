@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
   isPosOwnedCategory,
@@ -9,6 +11,7 @@ import {
   doesCostMenuMatchPosCategory,
   moveDishToCategoryList,
   buildInitialOptionSelections,
+  findMissingRequiredOptionGroups,
 } from '../posMenuHelpers';
 import { CategoryDoc, DishDoc, OptionChoice } from '../../types';
 
@@ -200,4 +203,57 @@ describe('posMenuHelpers', () => {
       });
     });
   });
+
+  describe('findMissingRequiredOptionGroups (inline option header alert & scroll target)', () => {
+    const c1: OptionChoice = { id: 'c1', name: 'Mild', price: 0 };
+    const c2: OptionChoice = { id: 'c2', name: 'Spicy', price: 0 };
+    const optionGroupMap = new Map<
+      string,
+      { id: string; minSelect: number; choices: OptionChoice[] }
+    >([
+      ['grp_optional', { id: 'grp_optional', minSelect: 0, choices: [c1] }],
+      ['grp_spice', { id: 'grp_spice', minSelect: 1, choices: [c1, c2] }],
+      ['grp_two_toppings', { id: 'grp_two_toppings', minSelect: 2, choices: [c1, c2] }],
+      ['grp_empty', { id: 'grp_empty', minSelect: 1, choices: [] }],
+    ]);
+
+    it('returns missing required groups in display order while ignoring optional and empty groups', () => {
+      const missing = findMissingRequiredOptionGroups({
+        optionGroupIds: ['grp_optional', 'grp_spice', 'grp_two_toppings', 'grp_empty'],
+        optionGroupMap,
+        selectedOptions: {
+          grp_two_toppings: { c1: 1 }, // only 1 selected out of minSelect 2
+        },
+      });
+
+      expect(missing).toEqual([
+        { groupId: 'grp_spice', minSelect: 1, selectedCount: 0 },
+        { groupId: 'grp_two_toppings', minSelect: 2, selectedCount: 1 },
+      ]);
+    });
+
+    it('returns empty list once all required option groups meet minSelect', () => {
+      const missing = findMissingRequiredOptionGroups({
+        optionGroupIds: ['grp_optional', 'grp_spice', 'grp_two_toppings'],
+        optionGroupMap,
+        selectedOptions: {
+          grp_spice: { c2: 1 },
+          grp_two_toppings: { c1: 1, c2: 1 },
+        },
+      });
+
+      expect(missing).toEqual([]);
+    });
+
+    it('renders inline alert at option group header and scrolls modal body in CustomerOrderPage', () => {
+      const customerPagePath = path.resolve(__dirname, '../../pages/CustomerOrderPage.tsx');
+      const source = fs.readFileSync(customerPagePath, 'utf-8');
+      expect(source).toContain('findMissingRequiredOptionGroups');
+      expect(source).toContain('optionGroupRefs.current[grp.id]');
+      expect(source).toContain('dishModalBodyRef.current');
+      expect(source).toContain('role="alert"');
+      expect(source).not.toContain('optionValidationMsg');
+    });
+  });
 });
+
