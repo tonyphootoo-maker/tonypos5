@@ -71,13 +71,13 @@ import {
 } from '../data/onlineDb';
 import {
   formatMoney,
-  getOptionChoiceEffectiveQuantity,
   isOptionChoiceQuantityEnabled,
   calculateOptionChoiceLinePrice,
   formatOptionChoiceDisplayName,
   toggleOptionChoiceMap,
   updateOptionChoiceQuantityMap,
 } from '../engine/calculations';
+import { buildInitialOptionSelections } from '../engine/posMenuHelpers';
 import {
   canCustomerCancelOrder,
   formatCountdownMMSS,
@@ -247,6 +247,101 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       appleTitle.setAttribute('content', resolvedTitle.slice(0, 32));
     }
   }, [store?.shopName, lang]);
+
+  // Keep dedicated Customer PWA manifest & Store Logo touch/favicon icons synchronized
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let cancelled = false;
+
+    const manifestLink = document.querySelector('link[rel="manifest"]');
+    if (manifestLink) {
+      if (manifestLink.getAttribute('href') !== './manifest-order.webmanifest') {
+        manifestLink.setAttribute('href', './manifest-order.webmanifest');
+      }
+    } else {
+      const ml = document.createElement('link');
+      ml.rel = 'manifest';
+      ml.href = './manifest-order.webmanifest';
+      document.head.appendChild(ml);
+    }
+
+    const applyIconHref = (appleHref: string, faviconHref: string) => {
+      if (cancelled) return;
+      const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+      if (appleIcon) {
+        appleIcon.setAttribute('href', appleHref);
+      } else {
+        const ai = document.createElement('link');
+        ai.rel = 'apple-touch-icon';
+        ai.setAttribute('sizes', '180x180');
+        ai.href = appleHref;
+        document.head.appendChild(ai);
+      }
+      const favIcons = document.querySelectorAll('link[rel="icon"]');
+      if (favIcons.length > 0) {
+        favIcons.forEach((iconEl) => {
+          iconEl.setAttribute('type', 'image/png');
+          iconEl.setAttribute('href', faviconHref);
+        });
+      } else {
+        const fi = document.createElement('link');
+        fi.rel = 'icon';
+        fi.type = 'image/png';
+        fi.setAttribute('sizes', '192x192');
+        fi.href = faviconHref;
+        document.head.appendChild(fi);
+      }
+    };
+
+    if (!storeLogoDataUrl) {
+      applyIconHref('./order-apple-touch-icon.png', './order-192x192.png');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const img = new Image();
+    img.onload = () => {
+      if (cancelled) return;
+      try {
+        const renderSquarePng = (size: number): string | null => {
+          const canvas = document.createElement('canvas');
+          canvas.width = size;
+          canvas.height = size;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return null;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, size, size);
+          const pad = Math.round(size * 0.06);
+          const maxBox = size - pad * 2;
+          const ratio = Math.min(maxBox / Math.max(1, img.width), maxBox / Math.max(1, img.height));
+          const drawW = Math.round(img.width * ratio);
+          const drawH = Math.round(img.height * ratio);
+          const dx = Math.round((size - drawW) / 2);
+          const dy = Math.round((size - drawH) / 2);
+          ctx.drawImage(img, dx, dy, drawW, drawH);
+          return canvas.toDataURL('image/png');
+        };
+        const applePng = renderSquarePng(180);
+        const favPng = renderSquarePng(192);
+        if (applePng && favPng) {
+          applyIconHref(applePng, favPng);
+          return;
+        }
+      } catch {
+        // Fallback to static store logo PNGs
+      }
+      applyIconHref('./order-apple-touch-icon.png', './order-192x192.png');
+    };
+    img.onerror = () => {
+      applyIconHref('./order-apple-touch-icon.png', './order-192x192.png');
+    };
+    img.src = storeLogoDataUrl;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [storeLogoDataUrl]);
 
   useEffect(() => {
     let mounted = true;
@@ -612,29 +707,11 @@ export const CustomerOrderPage: React.FC<Props> = ({ lang: propLang, onToggleLan
       dish.variants[0] ||
       null;
 
-    const initOpts: Record<string, Record<string, number>> = {};
-    for (const gId of dish.optionGroupIds || []) {
-      const grp = optionGroupMap.get(gId);
-      if (!grp) continue;
-      if (existingFavorite?.selectedOptions?.[gId]) {
-        const favMap: Record<string, number> = {};
-        for (const [cId, qty] of Object.entries(existingFavorite.selectedOptions[gId])) {
-          const ch = grp.choices.find((c) => c.id === cId);
-          if (ch && qty > 0) {
-            favMap[cId] = isOptionChoiceQuantityEnabled(ch) ? Math.max(1, Math.round(qty)) : 1;
-          }
-        }
-        if (Object.keys(favMap).length > 0) {
-          initOpts[gId] = favMap;
-        }
-      } else if (grp.minSelect > 0 && grp.choices.length > 0) {
-        const grpMap: Record<string, number> = {};
-        grp.choices.slice(0, grp.minSelect).forEach((c) => {
-          grpMap[c.id] = getOptionChoiceEffectiveQuantity(c);
-        });
-        initOpts[gId] = grpMap;
-      }
-    }
+    const initOpts = buildInitialOptionSelections({
+      optionGroupIds: dish.optionGroupIds,
+      optionGroupMap,
+      savedSelections: existingFavorite?.selectedOptions,
+    });
 
     setActiveDish(dish);
     setSelectedVariant(defaultVariant);

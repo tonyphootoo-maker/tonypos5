@@ -78,8 +78,15 @@ import {
   Link2,
   AlertTriangle,
   BookOpen,
+  GripVertical,
 } from 'lucide-react';
 import { CENTRAL_RECIPE_BUTTON_LABELS } from '../costing/utils/centralRecipeNav';
+import {
+  filterPosOwnedCategories,
+  isPosOwnedCategory,
+  moveDishToCategoryList,
+  resolveSafePosCategoryId,
+} from '../engine/posMenuHelpers';
 
 interface Props {
   settings: SettingsDoc;
@@ -179,6 +186,21 @@ export const MenuFoodCostPage: React.FC<Props> = ({
   } | null>(null);
   const [isNavigatingToRecipe, setIsNavigatingToRecipe] = useState<boolean>(false);
 
+  // Cross-category dish drag & drop state (Desktop + Android touch)
+  const [draggingDishId, setDraggingDishId] = useState<string | null>(null);
+  const [dragOverCatId, setDragOverCatId] = useState<string | null>(null);
+  const [dishTouchCoords, setDishTouchCoords] = useState<{ x: number; y: number } | null>(null);
+  const [dishMoveNotice, setDishMoveNotice] = useState<string | null>(null);
+  const dishMoveNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dishTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dishTouchRef = useRef<{
+    sourceId: string;
+    targetCatId: string | null;
+    active: boolean;
+    startX: number;
+    startY: number;
+  } | null>(null);
+
   const serializeDishModalDraft = (
     dish: Partial<DishDoc> | null,
     overrides: Record<string, number>
@@ -235,9 +257,15 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       subscribeCollection<IngredientDoc>('ingredients', (ings) => setIngredients(ings)),
       subscribeCollection<SubRecipeDoc>('subRecipes', (subs) => setSubRecipes(subs)),
       subscribeCollection<PackagingDoc>('packaging', (pkgs) => setPackagings(pkgs)),
-      subscribeCollection<CategoryDoc>('categories', (cats) =>
-        setCategories([...cats].sort((a, b) => (a.order || 0) - (b.order || 0)))
-      ),
+      subscribeCollection<CategoryDoc>('categories', (cats) => {
+        const posCats = filterPosOwnedCategories(cats).sort(
+          (a, b) => (a.order || 0) - (b.order || 0)
+        );
+        setCategories(posCats);
+        setSelectedCategoryId((prev) =>
+          prev && !isPosOwnedCategory({ id: prev }) ? null : prev
+        );
+      }),
       subscribeCollection<ChannelDoc>('channels', (chs) => setChannels(chs)),
       subscribeCollection<OptionGroupDoc>('optionGroups', (ogs) =>
         setOptionGroups([...ogs].sort((a, b) => (a.order || 0) - (b.order || 0)))
@@ -291,6 +319,8 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
     return () => {
       unsubs.forEach((u) => u());
+      if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+      if (dishMoveNoticeTimerRef.current) clearTimeout(dishMoveNoticeTimerRef.current);
     };
   }, []);
 
@@ -776,6 +806,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
     }
     const draftDish: Partial<DishDoc> = {
       ...dish,
+      categoryId: resolveSafePosCategoryId(dish.categoryId, categories),
       description: resolvedDesc.description,
       descriptionTh: resolvedDesc.descriptionTh,
       descriptionEnManual: hasManualEnDesc,
@@ -957,7 +988,7 @@ export const MenuFoodCostPage: React.FC<Props> = ({
       name: finalDishEn || finalDishTh,
       nameEnManual: isDishManual,
       ...(finalDishTh ? { nameTh: finalDishTh } : {}),
-      categoryId: editingDish.categoryId || categories[0]?.id || 'cat_main',
+      categoryId: resolveSafePosCategoryId(editingDish.categoryId, categories),
       ...(editingDish.imageId ? { imageId: editingDish.imageId } : {}),
       ...(finalDescEn ? { description: finalDescEn } : {}),
       ...(finalDescTh ? { descriptionTh: finalDescTh } : {}),
@@ -1024,6 +1055,113 @@ export const MenuFoodCostPage: React.FC<Props> = ({
   const handleSaveDish = async (e: React.FormEvent) => {
     e.preventDefault();
     await saveDishFromModal();
+  };
+
+  const moveDishToCategory = async (dishId: string, targetCategoryId: string) => {
+    const result = moveDishToCategoryList({
+      dishes,
+      dishId,
+      targetCategoryId,
+    });
+    if (!result.changed || !result.updatedDish) return;
+
+    setDishes(result.nextDishes);
+    setEditingDish((prev) =>
+      prev && prev.id === dishId ? { ...prev, categoryId: targetCategoryId } : prev
+    );
+
+    const movedDish = result.updatedDish;
+    const targetCat = categories.find((c) => c.id === targetCategoryId);
+    const dishTitle = lang === 'th' && movedDish.nameTh ? movedDish.nameTh : movedDish.name;
+    const catTitle = targetCat
+      ? lang === 'th' && targetCat.nameTh
+        ? targetCat.nameTh
+        : targetCat.name
+      : '';
+    if (dishMoveNoticeTimerRef.current) clearTimeout(dishMoveNoticeTimerRef.current);
+    setDishMoveNotice(
+      lang === 'th'
+        ? `ย้าย "${dishTitle}" ไปหมวดหมู่ "${catTitle}" และอัปเดตหมวดหมู่แล้ว`
+        : `Moved "${dishTitle}" to "${catTitle}"`
+    );
+    dishMoveNoticeTimerRef.current = setTimeout(() => {
+      setDishMoveNotice(null);
+    }, 2600);
+
+    try {
+      await saveDocument('dishes', movedDish, false);
+    } catch (err) {
+      console.error('Move dish to category error:', err);
+    }
+  };
+
+  const moveDishToCategoryRef = useRef(moveDishToCategory);
+  moveDishToCategoryRef.current = moveDishToCategory;
+
+  const updateDishTouchTarget = (
+    clientX: number,
+    clientY: number,
+    state: NonNullable<typeof dishTouchRef.current>
+  ) => {
+    const hitTarget = document.elementFromPoint(clientX, clientY);
+    const catEl = hitTarget?.closest('[data-cat-id]') as HTMLElement | null;
+    const hitCatId = catEl?.getAttribute('data-cat-id') || null;
+    state.targetCatId = hitCatId;
+    setDragOverCatId(hitCatId);
+  };
+
+  useEffect(() => {
+    if (!draggingDishId) return;
+
+    const handleDocTouchMove = (ev: TouchEvent) => {
+      const state = dishTouchRef.current;
+      if (!state || !state.active || ev.touches.length !== 1) return;
+      const touch = ev.touches[0];
+      if (ev.cancelable) ev.preventDefault();
+      setDishTouchCoords({ x: touch.clientX, y: touch.clientY });
+      updateDishTouchTarget(touch.clientX, touch.clientY, state);
+    };
+
+    const handleDocTouchEnd = () => {
+      const state = dishTouchRef.current;
+      dishTouchRef.current = null;
+      if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+      setDishTouchCoords(null);
+      setDraggingDishId(null);
+      setDragOverCatId(null);
+      if (state?.active && state.targetCatId) {
+        void moveDishToCategoryRef.current(state.sourceId, state.targetCatId);
+      }
+    };
+
+    document.addEventListener('touchmove', handleDocTouchMove, { passive: false });
+    document.addEventListener('touchend', handleDocTouchEnd);
+    document.addEventListener('touchcancel', handleDocTouchEnd);
+    return () => {
+      document.removeEventListener('touchmove', handleDocTouchMove);
+      document.removeEventListener('touchend', handleDocTouchEnd);
+      document.removeEventListener('touchcancel', handleDocTouchEnd);
+    };
+  }, [draggingDishId]);
+
+  const handleDishGripTouchStart = (e: React.TouchEvent<HTMLSpanElement>, dish: DishDoc) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+    const touch = e.touches[0];
+    dishTouchRef.current = {
+      sourceId: dish.id,
+      targetCatId: null,
+      active: true,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+    setDraggingDishId(dish.id);
+    setDragOverCatId(null);
+    setDishTouchCoords({ x: touch.clientX, y: touch.clientY });
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(15);
+    }
   };
 
   const filteredDishes = dishes.filter((d) => {
@@ -1171,21 +1309,53 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     : dish.variants[0]?.price ?? 0;
                 const optionCount = activeCostVars.length > 0 ? activeCostVars.length : dish.variants.length;
 
+                const isDraggingThis = draggingDishId === dish.id;
+
                 return (
                   <div
                     key={dish.id}
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggingDishId(dish.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData('text/kinpos-dish-id', dish.id);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingDishId(null);
+                      setDragOverCatId(null);
+                    }}
                     onDoubleClick={() => openEditDish(dish)}
-                    title={lang === 'th' ? 'ดับเบิลคลิกเพื่อแก้ไขเมนู' : 'Double-click to edit menu'}
-                    className="p-2 bg-white rounded-xl border border-neutral-200 shadow-xs hover:shadow-md hover:border-orange-300 transition-all flex flex-col justify-between cursor-pointer"
+                    title={
+                      lang === 'th'
+                        ? 'ดับเบิลคลิกเพื่อแก้ไข • ลากไปวางบนการ์ดหมวดหมู่ด้านล่างเพื่อย้ายหมวดหมู่'
+                        : 'Double-click to edit • Drag onto a category card below to move'
+                    }
+                    className={`p-2 bg-white rounded-xl border border-neutral-200 shadow-xs hover:shadow-md hover:border-orange-300 transition-all flex flex-col justify-between cursor-grab active:cursor-grabbing select-none ${
+                      isDraggingThis ? 'opacity-50 scale-95' : ''
+                    }`}
                   >
                     <div>
                       {/* Compact Photo & Title (Reduced ~40%) */}
                       <div className="flex items-start gap-2 mb-1.5">
-                        <div className="w-10 h-10 rounded-lg bg-neutral-100 overflow-hidden shrink-0 border border-neutral-200 flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-lg bg-neutral-100 overflow-hidden shrink-0 border border-neutral-200 relative flex items-center justify-center">
+                          <span
+                            onTouchStart={(e) => handleDishGripTouchStart(e, dish)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ touchAction: 'none' }}
+                            title={
+                              lang === 'th'
+                                ? 'กดลากเพื่อย้ายข้ามหมวดหมู่'
+                                : 'Drag to move category'
+                            }
+                            className="absolute top-0.5 left-0.5 z-10 p-0.5 rounded bg-white/85 text-neutral-500 hover:text-orange-600 shadow-2xs cursor-grab active:cursor-grabbing"
+                          >
+                            <GripVertical className="w-3 h-3" />
+                          </span>
                           {imgDataUrl ? (
                             <img
                               src={imgDataUrl}
                               alt={dish.name}
+                              draggable={false}
                               className="w-full h-full object-cover"
                             />
                           ) : (
@@ -1523,13 +1693,52 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
           {categories.map((cat) => {
             const isSelected = selectedCategoryId === cat.id;
+            const isDishDropTarget = Boolean(draggingDishId) && dragOverCatId === cat.id;
+            const draggedDishObj = draggingDishId
+              ? dishes.find((d) => d.id === draggingDishId)
+              : null;
+            const isAvailableDishTarget = Boolean(
+              draggedDishObj && draggedDishObj.categoryId !== cat.id
+            );
             const dishCount = dishes.filter((d) => d.categoryId === cat.id).length;
 
             return (
               <div
                 key={cat.id}
+                data-cat-id={cat.id}
+                onDragOver={(e) => {
+                  const isDishDrag =
+                    Boolean(draggingDishId) || e.dataTransfer.types.includes('text/kinpos-dish-id');
+                  if (isDishDrag) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverCatId !== cat.id) {
+                      setDragOverCatId(cat.id);
+                    }
+                  }
+                }}
+                onDragLeave={() => {
+                  if (dragOverCatId === cat.id) setDragOverCatId(null);
+                }}
+                onDrop={async (e) => {
+                  e.preventDefault();
+                  const dishSrcId = e.dataTransfer.getData('text/kinpos-dish-id') || draggingDishId;
+                  setDraggingDishId(null);
+                  setDragOverCatId(null);
+                  if (dishSrcId) {
+                    await moveDishToCategory(dishSrcId, cat.id);
+                  }
+                }}
                 className={`h-10 rounded-xl flex items-center shrink-0 transition-all border ${
-                  isSelected
+                  isDishDropTarget
+                    ? 'ring-2 ring-emerald-500 ring-offset-2 scale-[1.06] border-emerald-500 bg-emerald-50 text-emerald-900'
+                    : isAvailableDishTarget
+                    ? 'border-2 border-dashed border-orange-400 bg-orange-50/70'
+                    : ''
+                } ${
+                  isDishDropTarget
+                    ? ''
+                    : isSelected
                     ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white border-orange-600 shadow-[0_3px_0_#c2410c,0_8px_16px_-6px_rgba(234,88,12,0.32)]'
                     : 'bg-white text-slate-800 hover:bg-orange-50/70 border-slate-200 shadow-[0_2px_0_#e2e8f0]'
                 }`}
@@ -1541,7 +1750,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 >
                   <Utensils
                     className={`w-3.5 h-3.5 shrink-0 ${
-                      isSelected ? 'text-amber-200' : 'text-orange-500'
+                      isDishDropTarget
+                        ? 'text-emerald-600'
+                        : isSelected
+                        ? 'text-amber-200'
+                        : 'text-orange-500'
                     }`}
                   />
                   <div className="text-left">
@@ -1550,7 +1763,11 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                     </div>
                     <div
                       className={`text-[9.5px] font-semibold leading-none mt-0.5 ${
-                        isSelected ? 'text-orange-100' : 'text-slate-500'
+                        isDishDropTarget
+                          ? 'text-emerald-700'
+                          : isSelected
+                          ? 'text-orange-100'
+                          : 'text-slate-500'
                       }`}
                     >
                       {dishCount} {lang === 'th' ? 'เมนู' : 'dishes'}
@@ -1626,6 +1843,31 @@ export const MenuFoodCostPage: React.FC<Props> = ({
           </button>
         </div>
       )}
+
+      {/* Cross-Category Dish Move Confirmation Toast */}
+      {dishMoveNotice && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[75] px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-extrabold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 pointer-events-none">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>{dishMoveNotice}</span>
+        </div>
+      )}
+
+      {/* Touch Drag Floating Pill Indicator (Android / Touchscreens) */}
+      {draggingDishId && dishTouchCoords && (() => {
+        const dragged = dishes.find((d) => d.id === draggingDishId);
+        if (!dragged) return null;
+        return (
+          <div
+            className="fixed z-[80] pointer-events-none px-3 py-1.5 rounded-xl bg-slate-900/90 text-white text-xs font-extrabold shadow-xl border border-orange-400 flex items-center gap-1.5 -translate-x-1/2 -translate-y-full"
+            style={{ left: dishTouchCoords.x, top: Math.max(40, dishTouchCoords.y - 18) }}
+          >
+            <Utensils className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+            <span className="max-w-[160px] truncate">
+              {lang === 'th' && dragged.nameTh ? dragged.nameTh : dragged.name}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* ========================================================= */}
       {/* DISH MODAL (POS FRONT-OF-HOUSE MENU EDITOR) */}

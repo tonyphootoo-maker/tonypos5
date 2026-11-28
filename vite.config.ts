@@ -14,6 +14,7 @@ export default defineConfig(({mode}) => {
       rollupOptions: {
         input: {
           main: path.resolve(import.meta.dirname, 'index.html'),
+          order: path.resolve(import.meta.dirname, 'order.html'),
           rider: path.resolve(import.meta.dirname, 'rider.html'),
         },
       },
@@ -38,6 +39,10 @@ export default defineConfig(({mode}) => {
           'rider-512x512.png',
           'rider-maskable-512x512.png',
           'rider-apple-touch-icon.png',
+          'order-192x192.png',
+          'order-512x512.png',
+          'order-maskable-512x512.png',
+          'order-apple-touch-icon.png',
           'manifest-rider.webmanifest',
           'manifest-order.webmanifest',
           'assets/aistudio/Logo-Ex_a8e2a318.png',
@@ -87,6 +92,7 @@ export default defineConfig(({mode}) => {
             /^\/__/,
             /^\/api/,
             /\/rider\.html$/i,
+            /\/order\.html$/i,
             /manifest-rider\.webmanifest$/,
             /manifest-order\.webmanifest$/,
             /manifest\.webmanifest$/,
@@ -136,7 +142,7 @@ export default defineConfig(({mode}) => {
           order: 'post' as const,
           handler(html: string, ctx?: { filename?: string; path?: string }) {
             const fileId = `${ctx?.filename || ''} ${ctx?.path || ''}`.toLowerCase();
-            if (fileId.includes('rider.html')) {
+            if (fileId.includes('rider.html') || fileId.includes('order.html')) {
               return html.replace(/<link\s+rel=["']manifest["'][^>]*manifest\.webmanifest["'][^>]*>\s*/gi, '');
             }
             return html.replace(/<link\s+rel=["']manifest["'][^>]*>\s*/gi, '');

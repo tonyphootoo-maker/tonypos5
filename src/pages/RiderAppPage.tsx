@@ -12,6 +12,8 @@ import {
   Loader2,
   UserCheck,
   PackageCheck,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Language, OnlineOrderDoc, PublicStoreDoc } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -29,6 +31,7 @@ import { formatMoney } from '../engine/calculations';
 import {
   buildExternalGoogleMapsUrl,
   buildOnlineOrderNumberingMap,
+  launchExternalGoogleMapsNavigation,
   toDateSafe,
 } from '../engine/onlineOrdering';
 import { PWAInstallButton } from '../components/PWAInstallButton';
@@ -64,6 +67,7 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
   const [confirmDeliverId, setConfirmDeliverId] = useState<string | null>(null);
   const [activeNavOrderId, setActiveNavOrderId] = useState<string | null>(null);
+  const [expandedJobIds, setExpandedJobIds] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     saveRiderName(riderName);
@@ -401,16 +405,24 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
             const displayIds = orderNumberingMap.get(order.id);
             const created = toDateSafe(order.createdAt);
             const isBusy = busyOrderId === order.id;
+            const isExpanded = Boolean(expandedJobIds[order.id]);
+            const totalItemCount = (order.items || []).reduce(
+              (sum, it) => sum + Math.max(1, Number(it.quantity) || 1),
+              0
+            );
+            const toggleExpanded = () =>
+              setExpandedJobIds((prev) => ({ ...prev, [order.id]: !prev[order.id] }));
 
             return (
               <div
                 key={order.id}
-                className="w-full bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3"
+                className="w-full bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-2"
               >
+                {/* Compact Header Row */}
                 <div className="flex items-start justify-between gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-black text-base text-white tabular-nums">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-black text-sm text-white tabular-nums">
                         {displayIds?.displayNumber || order.orderNumber}
                       </span>
                       {displayIds?.referenceNumber && (
@@ -418,12 +430,12 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                           {displayIds.referenceNumber}
                         </span>
                       )}
-                      <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-md ${st.cls}`}>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${st.cls}`}>
                         {st[lang]}
                       </span>
                     </div>
-                    <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
-                      <Clock className="w-3.5 h-3.5" />
+                    <div className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                      <Clock className="w-3 h-3 shrink-0" />
                       <span>
                         {created
                           ? created.toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', {
@@ -432,126 +444,146 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                             })
                           : ''}
                       </span>
-                      {order.riderName && <span>• {order.riderName}</span>}
+                      <span>• {lang === 'th' ? `${totalItemCount} รายการ` : `${totalItemCount} items`}</span>
+                      {order.riderName && isExpanded && <span className="truncate">• {order.riderName}</span>}
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-black text-emerald-400 tabular-nums">
-                      ฿{formatMoney(order.totalAmount)}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="text-right">
+                      <div className="text-sm font-black text-emerald-400 tabular-nums">
+                        ฿{formatMoney(order.totalAmount)}
+                      </div>
+                      <div className="text-[10px] font-bold flex items-center justify-end gap-1">
+                        {order.paymentMethod === 'cash' ? (
+                          <span className="text-amber-300 inline-flex items-center gap-0.5">
+                            <Banknote className="w-3 h-3" />
+                            {lang === 'th' ? 'เก็บเงินสด' : 'Cash'}
+                          </span>
+                        ) : (
+                          <span className="text-sky-300 inline-flex items-center gap-0.5">
+                            <QrCode className="w-3 h-3" />
+                            {lang === 'th' ? 'โอน QR' : 'QR'}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="text-[11px] font-bold flex items-center justify-end gap-1 mt-0.5">
-                      {order.paymentMethod === 'cash' ? (
-                        <span className="text-amber-300 inline-flex items-center gap-1">
-                          <Banknote className="w-3.5 h-3.5" />
-                          {lang === 'th' ? 'เก็บเงินสด' : 'Collect Cash'}
-                        </span>
-                      ) : (
-                        <span className="text-sky-300 inline-flex items-center gap-1">
-                          <QrCode className="w-3.5 h-3.5" />
-                          {lang === 'th' ? 'โอน QR' : 'QR Transfer'}
-                        </span>
-                      )}
-                    </div>
+
+                    <button
+                      type="button"
+                      onClick={toggleExpanded}
+                      aria-expanded={isExpanded}
+                      className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      <span>{isExpanded ? (lang === 'th' ? 'ย่อ' : 'Hide') : lang === 'th' ? 'ดู' : 'More'}</span>
+                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                    </button>
                   </div>
                 </div>
 
-                {/* Customer & Address Card */}
-                <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2 text-xs">
+                {/* Compact Customer & Address Strip */}
+                <div className="px-2.5 py-2 rounded-xl bg-slate-950/75 border border-slate-800/90 space-y-1.5 text-xs">
                   <div className="flex items-center justify-between gap-2 min-w-0">
                     <span className="font-bold text-white min-w-0 truncate">{order.customerName}</span>
                     <a
                       href={`tel:${order.customerPhone}`}
-                      className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 font-bold inline-flex items-center gap-1 shrink-0"
+                      className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold text-[11px] inline-flex items-center gap-1 shrink-0"
                     >
-                      <Phone className="w-3.5 h-3.5" />
+                      <Phone className="w-3 h-3" />
                       <span>{order.customerPhone}</span>
                     </a>
                   </div>
-                  <div className="flex items-start gap-2 text-slate-300 leading-relaxed min-w-0">
-                    <MapPin className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
-                    <span className="break-words min-w-0">{order.deliveryAddress || '-'}</span>
-                  </div>
-                  {order.customerNote && (
-                    <div className="text-[11px] text-amber-300 break-words">* {order.customerNote}</div>
+                  <button
+                    type="button"
+                    onClick={toggleExpanded}
+                    className="w-full flex items-start gap-1.5 text-left text-slate-300 text-[11px] leading-snug min-w-0 cursor-pointer"
+                  >
+                    <MapPin className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+                    <span className={isExpanded ? 'break-words min-w-0' : 'truncate min-w-0'}>
+                      {order.deliveryAddress || '-'}
+                    </span>
+                  </button>
+                  {isExpanded && order.customerNote && (
+                    <div className="text-[11px] text-amber-300 break-words pt-0.5">* {order.customerNote}</div>
                   )}
                 </div>
 
-                {/* Order Items Summary */}
-                <div className="text-xs text-slate-300 space-y-1">
-                  {order.items.map((it, idx) => (
-                    <div key={idx} className="flex justify-between gap-2 min-w-0">
-                      <span className="min-w-0 break-words">
-                        {it.quantity}x {it.dishName}
-                        {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
-                      </span>
-                      <span className="text-slate-400 tabular-nums shrink-0">
-                        ฿{formatMoney(it.unitPrice * it.quantity)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                {/* Expandable Order Items Summary */}
+                {isExpanded && (
+                  <div className="px-2.5 py-2 rounded-xl bg-slate-950/50 border border-slate-800/70 text-xs text-slate-300 space-y-1">
+                    {order.items.map((it, idx) => (
+                      <div key={idx} className="flex justify-between gap-2 min-w-0">
+                        <span className="min-w-0 break-words">
+                          {it.quantity}x {it.dishName}
+                          {it.variantName && it.variantName !== 'Standard' ? ` (${it.variantName})` : ''}
+                        </span>
+                        <span className="text-slate-400 tabular-nums shrink-0">
+                          ฿{formatMoney(it.unitPrice * it.quantity)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
-                {/* Action Buttons */}
+                {/* Compact Action Buttons */}
                 {order.status !== 'completed' && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <div className="grid grid-cols-2 gap-2 pt-0.5">
                     {order.status !== 'out_for_delivery' ? (
                       <a
                         href={buildExternalGoogleMapsUrl(order)}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         onClick={(e) => {
-                          if (isBusy) {
-                            e.preventDefault();
-                            return;
-                          }
+                          e.preventDefault();
+                          if (isBusy) return;
                           setActiveNavOrderId(order.id);
                           void handleStartDelivery(order);
+                          launchExternalGoogleMapsNavigation(order);
                         }}
                         aria-disabled={isBusy}
-                        className={`min-h-[46px] px-4 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer ${
+                        className={`min-h-[42px] px-2.5 py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 text-center cursor-pointer ${
                           isBusy ? 'opacity-60 pointer-events-none' : ''
                         }`}
                       >
-                        <NavigationIcon className="w-4 h-4" />
-                        <span>
+                        <NavigationIcon className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">
                           {lang === 'th'
-                            ? 'รับอาหาร & เริ่มนำทางอัตโนมัติ'
-                            : 'Start Delivery & Navigate'}
+                            ? 'รับอาหาร & นำทาง'
+                            : 'Start & Navigate'}
                         </span>
                       </a>
                     ) : (
                       <a
                         href={buildExternalGoogleMapsUrl(order)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={() => setActiveNavOrderId(order.id)}
-                        className="min-h-[46px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setActiveNavOrderId(order.id);
+                          launchExternalGoogleMapsNavigation(order);
+                        }}
+                        className="min-h-[42px] px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 text-center cursor-pointer"
                       >
-                        <NavigationIcon className="w-4 h-4 text-orange-400" />
-                        <span>
+                        <NavigationIcon className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                        <span className="truncate">
                           {lang === 'th'
-                            ? 'เปิดแผนที่นำทาง (Google Maps)'
-                            : 'Open Google Maps Navigation'}
+                            ? 'เปิดนำทาง Maps'
+                            : 'Navigate Maps'}
                         </span>
                       </a>
                     )}
 
                     {confirmDeliverId === order.id ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           disabled={isBusy}
                           onClick={() => handleCompleteDelivery(order)}
-                          className="flex-1 min-h-[46px] px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                          className="flex-1 min-h-[42px] px-2 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1 cursor-pointer"
                         >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>{lang === 'th' ? 'ยืนยันส่งแล้ว' : 'Confirm'}</span>
+                          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                          <span>{lang === 'th' ? 'ยืนยัน' : 'Confirm'}</span>
                         </button>
                         <button
                           type="button"
                           onClick={() => setConfirmDeliverId(null)}
-                          className="min-h-[46px] px-3 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs cursor-pointer"
+                          className="min-h-[42px] px-2.5 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-[11px] cursor-pointer"
                         >
                           {lang === 'th' ? 'ยกเลิก' : 'No'}
                         </button>
@@ -561,10 +593,10 @@ export const RiderAppPage: React.FC<Props> = ({ lang: propLang }) => {
                         type="button"
                         disabled={isBusy}
                         onClick={() => setConfirmDeliverId(order.id)}
-                        className="min-h-[46px] px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                        className="min-h-[42px] px-2.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[11px] sm:text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        <PackageCheck className="w-4 h-4" />
-                        <span>{lang === 'th' ? 'ส่งอาหารสำเร็จ' : 'Mark Delivered'}</span>
+                        <PackageCheck className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{lang === 'th' ? 'ส่งอาหารสำเร็จ' : 'Delivered'}</span>
                       </button>
                     )}
                   </div>

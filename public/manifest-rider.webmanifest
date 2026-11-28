@@ -4,7 +4,7 @@
   "short_name": "TK Rider",
   "description": "ระบบรับงานจัดส่งอาหารและนำทางสำหรับไรเดอร์ Tony's Kit",
   "start_url": "./rider.html",
-  "scope": "./",
+  "scope": "./rider.html",
   "display": "standalone",
   "orientation": "portrait",
   "theme_color": "#0f172a",

@@ -249,12 +249,12 @@ export const OnlineOrdersManagerPage: React.FC<Props> = ({
   const baseUrl = useMemo(() => {
     if (typeof window === 'undefined') return '';
     const cleanPath = window.location.pathname
-      .replace(/\/(index|rider)\.html$/i, '')
+      .replace(/\/(index|rider|order)\.html$/i, '')
       .replace(/\/+$/, '');
     return `${window.location.origin}${cleanPath}`;
   }, []);
 
-  const customerUrl = `${baseUrl}/?mode=order&store=${user.uid}`;
+  const customerUrl = `${baseUrl}/order.html?store=${user.uid}`;
   const riderUrl = `${baseUrl}/rider.html?store=${user.uid}`;
 
   const orderNumberingMap = useMemo(() => buildOnlineOrderNumberingMap(orders), [orders]);

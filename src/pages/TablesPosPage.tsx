@@ -64,6 +64,11 @@ import {
   toDateSafe,
 } from '../engine/onlineOrdering';
 import {
+  filterPosOwnedCategories,
+  moveDishToCategoryList,
+  resolveSafePosCategoryId,
+} from '../engine/posMenuHelpers';
+import {
   ONLINE_STATUS_META,
   OnlineOrderDetailModal,
   OnlineOrderReceiptModal,
@@ -362,13 +367,17 @@ export const TablesPosPage: React.FC<Props> = ({
   } | null>(null);
   const suppressBillClickRef = useRef<boolean>(false);
 
-  // Dish Cards Drag-and-Drop Reorder State (Mouse & Touch)
+  // Dish Cards Drag-and-Drop Reorder & Cross-Category Move State (Mouse & Touch)
   const [draggingDishId, setDraggingDishId] = useState<string | null>(null);
   const [dragOverDishId, setDragOverDishId] = useState<string | null>(null);
+  const [dishTouchCoords, setDishTouchCoords] = useState<{ x: number; y: number } | null>(null);
+  const [dishMoveNotice, setDishMoveNotice] = useState<string | null>(null);
+  const dishMoveNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dishTouchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dishTouchRef = useRef<{
     sourceId: string;
     targetId: string | null;
+    targetCatId: string | null;
     active: boolean;
     startX: number;
     startY: number;
@@ -539,7 +548,7 @@ export const TablesPosPage: React.FC<Props> = ({
         );
       }),
       subscribeCollection<CategoryDoc>('categories', (c) =>
-        setCategories([...c].sort((a, b) => (a.order || 0) - (b.order || 0)))
+        setCategories(filterPosOwnedCategories(c).sort((a, b) => (a.order || 0) - (b.order || 0)))
       ),
       subscribeCollection<ChannelDoc>('channels', (ch) => {
         setChannels(ch);
@@ -607,6 +616,7 @@ export const TablesPosPage: React.FC<Props> = ({
       if (touchDragTimerRef.current) clearTimeout(touchDragTimerRef.current);
       if (variantTouchTimerRef.current) clearTimeout(variantTouchTimerRef.current);
       if (savedNoticeTimerRef.current) clearTimeout(savedNoticeTimerRef.current);
+      if (dishMoveNoticeTimerRef.current) clearTimeout(dishMoveNoticeTimerRef.current);
       if (dishNameClickTimerRef.current) clearTimeout(dishNameClickTimerRef.current);
     };
   }, []);
@@ -1645,6 +1655,7 @@ export const TablesPosPage: React.FC<Props> = ({
     }
     const draftDish: DishDoc = {
       ...dish,
+      categoryId: resolveSafePosCategoryId(dish.categoryId, categories),
       description: resolvedDesc.description,
       descriptionTh: resolvedDesc.descriptionTh,
       descriptionEnManual: hasManualEnDesc,
@@ -1929,6 +1940,44 @@ export const TablesPosPage: React.FC<Props> = ({
     }
   };
 
+  const moveDishToCategory = async (dishId: string, targetCategoryId: string) => {
+    const result = moveDishToCategoryList({
+      dishes,
+      dishId,
+      targetCategoryId,
+    });
+    if (!result.changed || !result.updatedDish) return;
+
+    setDishes(result.nextDishes);
+    setEditingDishInPos((prev) =>
+      prev && prev.id === dishId ? { ...prev, categoryId: targetCategoryId } : prev
+    );
+
+    const movedDish = result.updatedDish;
+    const targetCat = categories.find((c) => c.id === targetCategoryId);
+    const dishTitle = lang === 'th' && movedDish.nameTh ? movedDish.nameTh : movedDish.name;
+    const catTitle = targetCat
+      ? lang === 'th' && targetCat.nameTh
+        ? targetCat.nameTh
+        : targetCat.name
+      : '';
+    if (dishMoveNoticeTimerRef.current) clearTimeout(dishMoveNoticeTimerRef.current);
+    setDishMoveNotice(
+      lang === 'th'
+        ? `ย้าย "${dishTitle}" ไปหมวดหมู่ "${catTitle}" และอัปเดตหมวดหมู่แล้ว`
+        : `Moved "${dishTitle}" to "${catTitle}"`
+    );
+    dishMoveNoticeTimerRef.current = setTimeout(() => {
+      setDishMoveNotice(null);
+    }, 2600);
+
+    try {
+      await saveDocument('dishes', movedDish, false);
+    } catch (err) {
+      console.error('Move dish to category error:', err);
+    }
+  };
+
   const clearDishEditHoldTimer = () => {
     if (dishEditHoldTimerRef.current) {
       clearTimeout(dishEditHoldTimerRef.current);
@@ -1954,6 +2003,8 @@ export const TablesPosPage: React.FC<Props> = ({
       dishTouchRef.current = null;
       setDraggingDishId(null);
       setDragOverDishId(null);
+      setDragOverCatId(null);
+      setDishTouchCoords(null);
       suppressDishClickRef.current = true;
       setTimeout(() => {
         suppressDishClickRef.current = false;
@@ -1965,6 +2016,148 @@ export const TablesPosPage: React.FC<Props> = ({
     }, 500);
   };
 
+  const updateDishTouchTargetFromPoint = (
+    clientX: number,
+    clientY: number,
+    state: NonNullable<typeof dishTouchRef.current>
+  ) => {
+    const hitTarget = document.elementFromPoint(clientX, clientY);
+    const catEl = hitTarget?.closest('[data-cat-id]') as HTMLElement | null;
+    const hitCatId = catEl?.getAttribute('data-cat-id') || null;
+    if (hitCatId) {
+      clearDishEditHoldTimer();
+      state.targetCatId = hitCatId;
+      state.targetId = null;
+      setDragOverCatId(hitCatId);
+      setDragOverDishId(null);
+      return;
+    }
+    setDragOverCatId(null);
+    const dishEl = hitTarget?.closest('[data-dish-id]') as HTMLElement | null;
+    const hitDishId = dishEl?.getAttribute('data-dish-id') || null;
+    if (hitDishId) {
+      if (hitDishId !== state.sourceId) clearDishEditHoldTimer();
+      state.targetCatId = null;
+      state.targetId = hitDishId;
+      setDragOverDishId(hitDishId);
+    } else {
+      state.targetCatId = null;
+      state.targetId = null;
+      setDragOverDishId(null);
+    }
+  };
+
+  const finishDishTouchDrag = async () => {
+    clearDishEditHoldTimer();
+    if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+    const state = dishTouchRef.current;
+    dishTouchRef.current = null;
+    setDishTouchCoords(null);
+
+    if (state?.active) {
+      suppressDishClickRef.current = true;
+      setTimeout(() => {
+        suppressDishClickRef.current = false;
+      }, 220);
+      setDraggingDishId(null);
+      setDragOverDishId(null);
+      setDragOverCatId(null);
+      if (state.targetCatId) {
+        await moveDishToCategory(state.sourceId, state.targetCatId);
+      } else if (state.targetId && state.targetId !== state.sourceId) {
+        await reorderDishesByIds(state.sourceId, state.targetId);
+      }
+    }
+  };
+
+  const reorderDishesByIdsRef = useRef(reorderDishesByIds);
+  reorderDishesByIdsRef.current = reorderDishesByIds;
+  const moveDishToCategoryRef = useRef(moveDishToCategory);
+  moveDishToCategoryRef.current = moveDishToCategory;
+
+  // Non-passive document touch tracking during active dish drag (prevents Android browser scroll from hijacking cross-category drop)
+  useEffect(() => {
+    if (!draggingDishId) return;
+
+    const handleDocTouchMove = (ev: TouchEvent) => {
+      const state = dishTouchRef.current;
+      if (!state || !state.active || ev.touches.length !== 1) return;
+      const touch = ev.touches[0];
+      if (
+        dishEditHoldOriginRef.current &&
+        Math.hypot(
+          touch.clientX - dishEditHoldOriginRef.current.startX,
+          touch.clientY - dishEditHoldOriginRef.current.startY
+        ) > 6
+      ) {
+        clearDishEditHoldTimer();
+      }
+      if (ev.cancelable) ev.preventDefault();
+      setDishTouchCoords({ x: touch.clientX, y: touch.clientY });
+      updateDishTouchTargetFromPoint(touch.clientX, touch.clientY, state);
+    };
+
+    const handleDocTouchEnd = () => {
+      if (!dishTouchRef.current) return;
+      const state = dishTouchRef.current;
+      dishTouchRef.current = null;
+      clearDishEditHoldTimer();
+      if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+      setDishTouchCoords(null);
+
+      if (state.active) {
+        suppressDishClickRef.current = true;
+        setTimeout(() => {
+          suppressDishClickRef.current = false;
+        }, 220);
+        setDraggingDishId(null);
+        setDragOverDishId(null);
+        setDragOverCatId(null);
+        if (state.targetCatId) {
+          void moveDishToCategoryRef.current(state.sourceId, state.targetCatId);
+        } else if (state.targetId && state.targetId !== state.sourceId) {
+          void reorderDishesByIdsRef.current(state.sourceId, state.targetId);
+        }
+      }
+    };
+
+    document.addEventListener('touchmove', handleDocTouchMove, { passive: false });
+    document.addEventListener('touchend', handleDocTouchEnd);
+    document.addEventListener('touchcancel', handleDocTouchEnd);
+    return () => {
+      document.removeEventListener('touchmove', handleDocTouchMove);
+      document.removeEventListener('touchend', handleDocTouchEnd);
+      document.removeEventListener('touchcancel', handleDocTouchEnd);
+    };
+  }, [draggingDishId]);
+
+  const handleDishGripTouchStart = (e: React.TouchEvent<HTMLSpanElement>, dish: DishDoc) => {
+    if (e.touches.length !== 1) return;
+    e.stopPropagation();
+    clearDishEditHoldTimer();
+    if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
+    if (dishNameClickTimerRef.current) {
+      clearTimeout(dishNameClickTimerRef.current);
+      dishNameClickTimerRef.current = null;
+    }
+    const touch = e.touches[0];
+    dishTouchRef.current = {
+      sourceId: dish.id,
+      targetId: dish.id,
+      targetCatId: null,
+      active: true,
+      startX: touch.clientX,
+      startY: touch.clientY,
+    };
+    setDraggingDishId(dish.id);
+    setDragOverDishId(dish.id);
+    setDragOverCatId(null);
+    setDishTouchCoords({ x: touch.clientX, y: touch.clientY });
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(15);
+    }
+  };
+
   const handleDishTouchStart = (e: React.TouchEvent<HTMLDivElement>, dish: DishDoc) => {
     if (e.touches.length !== 1) return;
     const touch = e.touches[0];
@@ -1973,6 +2166,7 @@ export const TablesPosPage: React.FC<Props> = ({
     dishTouchRef.current = {
       sourceId: dish.id,
       targetId: dish.id,
+      targetCatId: null,
       active: false,
       startX: touch.clientX,
       startY: touch.clientY,
@@ -1986,6 +2180,7 @@ export const TablesPosPage: React.FC<Props> = ({
         dishTouchRef.current.active = true;
         setDraggingDishId(dish.id);
         setDragOverDishId(dish.id);
+        setDishTouchCoords({ x: touch.clientX, y: touch.clientY });
         if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
           navigator.vibrate(15);
         }
@@ -2013,34 +2208,12 @@ export const TablesPosPage: React.FC<Props> = ({
       return;
     }
 
-    e.preventDefault();
-    const el = document
-      .elementFromPoint(touch.clientX, touch.clientY)
-      ?.closest('[data-dish-id]') as HTMLElement | null;
-    const hitId = el?.getAttribute('data-dish-id') || null;
-    if (hitId) {
-      state.targetId = hitId;
-      setDragOverDishId(hitId);
-    }
+    setDishTouchCoords({ x: touch.clientX, y: touch.clientY });
+    updateDishTouchTargetFromPoint(touch.clientX, touch.clientY, state);
   };
 
   const handleDishTouchEnd = async () => {
-    clearDishEditHoldTimer();
-    if (dishTouchTimerRef.current) clearTimeout(dishTouchTimerRef.current);
-    const state = dishTouchRef.current;
-    dishTouchRef.current = null;
-
-    if (state?.active) {
-      suppressDishClickRef.current = true;
-      setTimeout(() => {
-        suppressDishClickRef.current = false;
-      }, 220);
-      setDraggingDishId(null);
-      setDragOverDishId(null);
-      if (state.targetId && state.targetId !== state.sourceId) {
-        await reorderDishesByIds(state.sourceId, state.targetId);
-      }
-    }
+    await finishDishTouchDrag();
   };
 
   // Unpaid ordered bills sorted by persisted card order
@@ -2428,6 +2601,7 @@ export const TablesPosPage: React.FC<Props> = ({
                           clearDishEditHoldTimer();
                           setDraggingDishId(null);
                           setDragOverDishId(null);
+                          setDragOverCatId(null);
                         }}
                         onTouchStart={(e) => handleDishTouchStart(e, dish)}
                         onTouchMove={handleDishTouchMove}
@@ -2443,8 +2617,8 @@ export const TablesPosPage: React.FC<Props> = ({
                         style={{ touchAction: draggingDishId ? 'none' : 'pan-y' }}
                         title={
                           lang === 'th'
-                            ? 'แตะเพื่อสั่ง • กดค้าง 0.5 วินาที หรือดับเบิลคลิกชื่อเพื่อแก้ไข • ลากวางเพื่อสลับตำแหน่ง'
-                            : 'Tap to order • Hold 0.5s or double-click name to edit • Drag & drop to reorder'
+                            ? 'แตะเพื่อสั่ง • กดค้าง 0.5 วินาที หรือดับเบิลคลิกชื่อเพื่อแก้ไข • ลากวางเพื่อจัดลำดับหรือย้ายหมวดหมู่'
+                            : 'Tap to order • Hold 0.5s or double-click name to edit • Drag to reorder or move category'
                         }
                         className={`group bg-white rounded-2xl border p-2.5 shadow-[inset_0_1px_0_#ffffff,0_2px_0_#e2e8f0,0_6px_12px_-6px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 hover:shadow-[0_3px_0_#fdba74,0_10px_16px_-6px_rgba(234,88,12,0.18)] transition-all duration-150 cursor-grab active:cursor-grabbing flex flex-col items-center text-center select-none ${
                           isDraggingThis ? 'opacity-50 scale-95' : ''
@@ -2455,7 +2629,18 @@ export const TablesPosPage: React.FC<Props> = ({
                         }`}
                       >
                         <div className="w-full aspect-square rounded-xl bg-slate-100 overflow-hidden mb-2 relative flex items-center justify-center shadow-[inset_0_1px_3px_rgba(15,23,42,0.06)]">
-                          <span className="absolute top-1.5 left-1.5 z-10 p-1 rounded-md bg-white/75 backdrop-blur-xs text-slate-400 opacity-50 group-hover:opacity-100 pointer-events-none">
+                          <span
+                            data-dish-drag-handle={dish.id}
+                            onTouchStart={(e) => handleDishGripTouchStart(e, dish)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ touchAction: 'none' }}
+                            title={
+                              lang === 'th'
+                                ? 'กดลากเพื่อย้ายตำแหน่งหรือข้ามหมวดหมู่'
+                                : 'Drag to reorder or move to another category'
+                            }
+                            className="absolute top-1.5 left-1.5 z-10 p-1.5 rounded-lg bg-white/85 backdrop-blur-xs text-slate-500 hover:text-orange-600 shadow-2xs cursor-grab active:cursor-grabbing"
+                          >
                             <GripVertical className="w-3.5 h-3.5" />
                           </span>
                           {imgDataUrl ? (
@@ -3659,11 +3844,14 @@ export const TablesPosPage: React.FC<Props> = ({
         {/* Separator */}
         <div className="h-8 w-px bg-slate-200 shrink-0" />
 
-        {/* Draggable Food Category Cards (Drag-and-drop to reorder, saved to Cloud) */}
+        {/* Draggable Food Category Cards (Also accept dropped dishes to move across categories) */}
         {categories.map((cat) => {
           const isSelected = selectedCategoryId === cat.id;
           const isDraggingThis = draggingCatId === cat.id;
-          const isDropTarget = dragOverCatId === cat.id && draggingCatId !== cat.id;
+          const isCatDropTarget = dragOverCatId === cat.id && Boolean(draggingCatId) && draggingCatId !== cat.id;
+          const isDishDropTarget = Boolean(draggingDishId) && dragOverCatId === cat.id;
+          const draggedDishObj = draggingDishId ? dishes.find((d) => d.id === draggingDishId) : null;
+          const isAvailableDishTarget = Boolean(draggedDishObj && draggedDishObj.categoryId !== cat.id);
           const dishCount = dishes.filter((d) => d.categoryId === cat.id).length;
 
           return (
@@ -3678,10 +3866,16 @@ export const TablesPosPage: React.FC<Props> = ({
                 e.dataTransfer.setData('text/kinpos-cat-id', cat.id);
               }}
               onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (draggingCatId && draggingCatId !== cat.id) {
-                  setDragOverCatId(cat.id);
+                const isDishDrag =
+                  Boolean(draggingDishId) || e.dataTransfer.types.includes('text/kinpos-dish-id');
+                const isCatDrag =
+                  Boolean(draggingCatId) || e.dataTransfer.types.includes('text/kinpos-cat-id');
+                if (isDishDrag || (isCatDrag && draggingCatId !== cat.id)) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverCatId !== cat.id) {
+                    setDragOverCatId(cat.id);
+                  }
                 }
               }}
               onDragLeave={() => {
@@ -3689,6 +3883,18 @@ export const TablesPosPage: React.FC<Props> = ({
               }}
               onDrop={async (e) => {
                 e.preventDefault();
+                const dishSrcId = e.dataTransfer.getData('text/kinpos-dish-id') || draggingDishId;
+                if (dishSrcId) {
+                  setDraggingDishId(null);
+                  setDragOverDishId(null);
+                  setDragOverCatId(null);
+                  suppressDishClickRef.current = true;
+                  setTimeout(() => {
+                    suppressDishClickRef.current = false;
+                  }, 180);
+                  await moveDishToCategory(dishSrcId, cat.id);
+                  return;
+                }
                 const srcId = e.dataTransfer.getData('text/kinpos-cat-id') || draggingCatId;
                 setDraggingCatId(null);
                 setDragOverCatId(null);
@@ -3711,24 +3917,36 @@ export const TablesPosPage: React.FC<Props> = ({
                 }
                 setSelectedCategoryId(cat.id);
               }}
-              title={lang === 'th' ? 'ลากวางเพื่อสลับตำแหน่งหมวดหมู่อาหาร' : 'Drag and drop to reorder category'}
+              title={
+                lang === 'th'
+                  ? 'ลากวางเพื่อสลับตำแหน่งหมวดหมู่ หรือลากเมนูมาวางเพื่อย้ายหมวดหมู่'
+                  : 'Drag to reorder category or drop a dish here to move'
+              }
               className={`h-12 px-3.5 rounded-xl flex items-center gap-2 font-bold text-xs cursor-grab active:cursor-grabbing transition-all shrink-0 active:translate-y-[1px] ${
                 isDraggingThis ? 'opacity-50 scale-95' : ''
               } ${
-                isDropTarget ? 'ring-2 ring-orange-500 ring-offset-1 scale-[1.03]' : ''
+                isDishDropTarget
+                  ? 'ring-2 ring-emerald-500 ring-offset-2 scale-[1.06] border-emerald-500 bg-emerald-50 text-emerald-900'
+                  : isCatDropTarget
+                  ? 'ring-2 ring-orange-500 ring-offset-1 scale-[1.03]'
+                  : isAvailableDishTarget
+                  ? 'border-2 border-dashed border-orange-400 bg-orange-50/70'
+                  : ''
               } ${
-                isSelected
+                isDishDropTarget
+                  ? ''
+                  : isSelected
                   ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-[0_3px_0_#c2410c,0_8px_16px_-6px_rgba(234,88,12,0.32)]'
                   : 'bg-white text-slate-800 hover:bg-orange-50/70 border border-slate-200 shadow-[0_2px_0_#e2e8f0]'
               }`}
             >
-              <GripVertical className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-orange-100' : 'text-slate-300'}`} />
-              <Utensils className={`w-4 h-4 shrink-0 ${isSelected ? 'text-amber-200' : 'text-orange-500'}`} />
+              <GripVertical className={`w-3.5 h-3.5 shrink-0 ${isSelected && !isDishDropTarget ? 'text-orange-100' : 'text-slate-300'}`} />
+              <Utensils className={`w-4 h-4 shrink-0 ${isSelected && !isDishDropTarget ? 'text-amber-200' : isDishDropTarget ? 'text-emerald-600' : 'text-orange-500'}`} />
               <div className="text-left">
                 <div className="leading-tight font-extrabold">
                   {lang === 'th' && cat.nameTh ? cat.nameTh : cat.name}
                 </div>
-                <div className={`text-[10px] font-semibold ${isSelected ? 'text-orange-100' : 'text-slate-500'}`}>
+                <div className={`text-[10px] font-semibold ${isSelected && !isDishDropTarget ? 'text-orange-100' : isDishDropTarget ? 'text-emerald-700' : 'text-slate-500'}`}>
                   {dishCount} dishes
                 </div>
               </div>
@@ -3736,6 +3954,38 @@ export const TablesPosPage: React.FC<Props> = ({
           );
         })}
       </div>
+
+      {/* Cross-Category Dish Move Confirmation Toast */}
+      {dishMoveNotice && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[75] px-4 py-2 rounded-2xl bg-emerald-600 text-white text-xs font-extrabold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 pointer-events-none">
+          <Check className="w-4 h-4 shrink-0" />
+          <span>{dishMoveNotice}</span>
+        </div>
+      )}
+
+      {/* Floating Touch Drag Ghost Indicator (pointer-events-none so elementFromPoint hits category cards underneath) */}
+      {draggingDishId && dishTouchCoords && (() => {
+        const draggedDish = dishes.find((d) => d.id === draggingDishId);
+        if (!draggedDish) return null;
+        const dishTitle = lang === 'th' && draggedDish.nameTh ? draggedDish.nameTh : draggedDish.name;
+        const hoveredCat = dragOverCatId ? categories.find((c) => c.id === dragOverCatId) : null;
+        const catTitle = hoveredCat
+          ? lang === 'th' && hoveredCat.nameTh
+            ? hoveredCat.nameTh
+            : hoveredCat.name
+          : '';
+        return (
+          <div
+            style={{ left: dishTouchCoords.x, top: Math.max(12, dishTouchCoords.y - 44) }}
+            className="fixed -translate-x-1/2 z-[80] px-3 py-1.5 rounded-xl bg-slate-900/95 text-white text-xs font-extrabold shadow-xl border border-orange-400 pointer-events-none whitespace-nowrap flex items-center gap-1.5"
+          >
+            <span>{dishTitle}</span>
+            {catTitle && (
+              <span className="text-emerald-300 font-black">→ {catTitle}</span>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Dish Options & Variants Customizer Dialog */}
       {selectedDishForOptions && (

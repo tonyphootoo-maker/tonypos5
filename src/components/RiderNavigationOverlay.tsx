@@ -45,6 +45,7 @@ import {
   formatNavDistance,
   formatNavDuration,
   haversineMeters,
+  launchExternalGoogleMapsNavigation,
   stripHtmlInstructions,
 } from '../engine/onlineOrdering';
 
@@ -177,111 +178,198 @@ const ActiveRouteController: React.FC<ActiveRouteControllerProps> = ({
       internalUsageAttributionIds: ['gmp_mcp_codeassist_v1_aistudio'],
     };
 
-    // Cast Route constructor/static call safely for @types/google.maps compatibility
-    const RouteClass = routesLib.Route as unknown as {
-      computeRoutes: (req: Record<string, unknown>) => Promise<{ routes?: unknown[] }>;
-    };
-
-    RouteClass.computeRoutes(request)
-      .then((response) => {
-        if (isCancelled) return;
-        onRouteLoading(false);
-
-        const routes = response?.routes;
-        if (!routes || routes.length === 0) {
-          onRouteError(
-            lang === 'th'
-              ? 'ไม่พบเส้นทางรถยนต์อัตโนมัติบนแผนที่ คุณสามารถกดเปิดในแอป Google Maps ด้านล่างได้'
-              : 'No driving route found for this address. You can launch external Google Maps below.'
-          );
-          return;
-        }
-
-        const primaryRoute = routes[0] as {
-          distanceMeters?: number;
-          durationMillis?: number;
-          viewport?: google.maps.LatLngBounds | google.maps.LatLngBoundsLiteral;
-          legs?: Array<{
-            endLocation?: unknown;
-            steps?: Array<{
-              instructions?: string;
-              distanceMeters?: number;
-              navigationInstruction?: { maneuver?: string };
-            }>;
-          }>;
-          createPolylines?: () => google.maps.Polyline[];
-        };
-
-        if (typeof primaryRoute.createPolylines === 'function') {
-          const newPolylines = primaryRoute.createPolylines();
-          newPolylines.forEach((polyline) => {
-            polyline.setOptions({
+    const computeViaLegacyDirections = () => {
+      if (typeof google === 'undefined' || !google.maps?.DirectionsService) {
+        return Promise.reject(new Error('DIRECTIONS_UNAVAILABLE'));
+      }
+      const svc = new google.maps.DirectionsService();
+      return svc
+        .route({
+          origin,
+          destination,
+          travelMode: google.maps.TravelMode.DRIVING,
+        })
+        .then((dirResult) => {
+          if (isCancelled) return;
+          onRouteLoading(false);
+          const firstRoute = dirResult?.routes?.[0];
+          if (!firstRoute) {
+            onRouteError(
+              lang === 'th'
+                ? 'ไม่พบเส้นทางรถยนต์อัตโนมัติบนแผนที่ คุณสามารถกดเปิดในแอป Google Maps ด้านล่างได้'
+                : 'No driving route found for this address. You can launch external Google Maps below.'
+            );
+            return;
+          }
+          if (Array.isArray(firstRoute.overview_path) && firstRoute.overview_path.length > 0) {
+            const poly = new google.maps.Polyline({
+              path: firstRoute.overview_path,
               strokeColor: '#0ea5e9',
               strokeOpacity: 0.95,
               strokeWeight: 7,
+              map,
             });
-            polyline.setMap(map);
-          });
-          polylinesRef.current = newPolylines;
-        }
-
-        if (primaryRoute.viewport && !hasFitInitialBoundsRef.current && !riderPosition) {
-          map.fitBounds(primaryRoute.viewport, { top: 130, right: 24, bottom: 90, left: 24 });
-          hasFitInitialBoundsRef.current = true;
-        } else if (followRider && riderPosition && !hasFitInitialBoundsRef.current) {
-          map.panTo(riderPosition);
-          if ((map.getZoom() ?? 15) < 17) {
-            map.setZoom(17);
+            polylinesRef.current = [poly];
           }
-          hasFitInitialBoundsRef.current = true;
-        }
-
-        const firstLeg = primaryRoute.legs?.[0];
-        const steps: NavStepItem[] = (firstLeg?.steps || [])
-          .map((s) => ({
-            instruction: stripHtmlInstructions(s.instructions || ''),
-            distanceMeters: Number(s.distanceMeters) || 0,
-            maneuver: s.navigationInstruction?.maneuver || '',
-          }))
-          .filter((s) => s.instruction.length > 0);
-
-        const resolvedEnd = extractLatLngLiteral(firstLeg?.endLocation);
-
-        onRouteSuccess({
-          distanceMeters: Number(primaryRoute.distanceMeters) || 0,
-          durationMillis: Number(primaryRoute.durationMillis) || 0,
-          steps,
-          destinationCoords: resolvedEnd,
+          if (firstRoute.bounds && !hasFitInitialBoundsRef.current && !riderPosition) {
+            map.fitBounds(firstRoute.bounds, { top: 130, right: 24, bottom: 90, left: 24 });
+            hasFitInitialBoundsRef.current = true;
+          } else if (followRider && riderPosition && !hasFitInitialBoundsRef.current) {
+            map.panTo(riderPosition);
+            if ((map.getZoom() ?? 15) < 17) {
+              map.setZoom(17);
+            }
+            hasFitInitialBoundsRef.current = true;
+          }
+          const leg = firstRoute.legs?.[0];
+          const steps: NavStepItem[] = (leg?.steps || [])
+            .map((s) => ({
+              instruction: stripHtmlInstructions(s.instructions || ''),
+              distanceMeters: Number(s.distance?.value) || 0,
+              maneuver: String((s as unknown as { maneuver?: string }).maneuver || ''),
+            }))
+            .filter((s) => s.instruction.length > 0);
+          const resolvedEnd = extractLatLngLiteral(leg?.end_location);
+          onRouteSuccess({
+            distanceMeters: Number(leg?.distance?.value) || 0,
+            durationMillis: (Number(leg?.duration?.value) || 0) * 1000,
+            steps,
+            destinationCoords: resolvedEnd,
+          });
         });
-      })
-      .catch((err: unknown) => {
-        if (isCancelled) return;
-        onRouteLoading(false);
-        const msg = err instanceof Error ? err.message : String(err);
+    };
 
-        // Tier 2 Quota Defense: notify quota banner ONLY on real quota errors
-        if (
-          msg.includes('OVER_QUERY_LIMIT') ||
-          msg.includes('RESOURCE_EXHAUSTED') ||
-          msg.includes('429')
-        ) {
-          window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
-        }
+    const RouteClass = routesLib?.Route as unknown as
+      | { computeRoutes?: (req: Record<string, unknown>) => Promise<{ routes?: unknown[] }> }
+      | undefined;
 
-        if (msg.includes('ZERO_RESULTS')) {
+    const routePromise =
+      RouteClass && typeof RouteClass.computeRoutes === 'function'
+        ? RouteClass.computeRoutes(request).then((response) => {
+            if (isCancelled) return;
+            onRouteLoading(false);
+
+            const routes = response?.routes;
+            if (!routes || routes.length === 0) {
+              onRouteError(
+                lang === 'th'
+                  ? 'ไม่พบเส้นทางรถยนต์อัตโนมัติบนแผนที่ คุณสามารถกดเปิดในแอป Google Maps ด้านล่างได้'
+                  : 'No driving route found for this address. You can launch external Google Maps below.'
+              );
+              return;
+            }
+
+            const primaryRoute = routes[0] as {
+              distanceMeters?: number;
+              durationMillis?: number;
+              viewport?: google.maps.LatLngBounds | google.maps.LatLngBoundsLiteral;
+              legs?: Array<{
+                endLocation?: unknown;
+                steps?: Array<{
+                  instructions?: string;
+                  distanceMeters?: number;
+                  navigationInstruction?: { maneuver?: string };
+                }>;
+              }>;
+              createPolylines?: () => google.maps.Polyline[];
+            };
+
+            if (typeof primaryRoute.createPolylines === 'function') {
+              const newPolylines = primaryRoute.createPolylines();
+              newPolylines.forEach((polyline) => {
+                polyline.setOptions({
+                  strokeColor: '#0ea5e9',
+                  strokeOpacity: 0.95,
+                  strokeWeight: 7,
+                });
+                polyline.setMap(map);
+              });
+              polylinesRef.current = newPolylines;
+            }
+
+            if (primaryRoute.viewport && !hasFitInitialBoundsRef.current && !riderPosition) {
+              map.fitBounds(primaryRoute.viewport, { top: 130, right: 24, bottom: 90, left: 24 });
+              hasFitInitialBoundsRef.current = true;
+            } else if (followRider && riderPosition && !hasFitInitialBoundsRef.current) {
+              map.panTo(riderPosition);
+              if ((map.getZoom() ?? 15) < 17) {
+                map.setZoom(17);
+              }
+              hasFitInitialBoundsRef.current = true;
+            }
+
+            const firstLeg = primaryRoute.legs?.[0];
+            const steps: NavStepItem[] = (firstLeg?.steps || [])
+              .map((s) => ({
+                instruction: stripHtmlInstructions(s.instructions || ''),
+                distanceMeters: Number(s.distanceMeters) || 0,
+                maneuver: s.navigationInstruction?.maneuver || '',
+              }))
+              .filter((s) => s.instruction.length > 0);
+
+            const resolvedEnd = extractLatLngLiteral(firstLeg?.endLocation);
+
+            onRouteSuccess({
+              distanceMeters: Number(primaryRoute.distanceMeters) || 0,
+              durationMillis: Number(primaryRoute.durationMillis) || 0,
+              steps,
+              destinationCoords: resolvedEnd,
+            });
+          })
+        : computeViaLegacyDirections();
+
+    routePromise.catch((err: unknown) => {
+      if (isCancelled) return;
+      const initialMsg = err instanceof Error ? err.message : String(err);
+      if (
+        !initialMsg.includes('ZERO_RESULTS') &&
+        !initialMsg.includes('DIRECTIONS_UNAVAILABLE') &&
+        RouteClass &&
+        typeof RouteClass.computeRoutes === 'function'
+      ) {
+        computeViaLegacyDirections().catch((fallbackErr: unknown) => {
+          if (isCancelled) return;
+          onRouteLoading(false);
+          const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+          if (
+            fallbackMsg.includes('OVER_QUERY_LIMIT') ||
+            fallbackMsg.includes('RESOURCE_EXHAUSTED') ||
+            fallbackMsg.includes('429')
+          ) {
+            window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+          }
           onRouteError(
             lang === 'th'
-              ? 'ไม่พบเส้นทางจากที่อยู่นี้ กดปุ่มเปิด Google Maps ภายนอกเพื่อดูหมุดเพิ่มเติมได้'
-              : 'No driving route found for this address. Use external Google Maps if needed.'
+              ? 'ไม่สามารถคำนวณเส้นทางได้ชั่วคราว สามารถกดเปิดนำทาง Google Maps ด้านล่าง'
+              : 'Unable to compute route right now. Use Google Maps navigation below.'
           );
-        } else {
-          onRouteError(
-            lang === 'th'
-              ? 'ไม่สามารถคำนวณเส้นทางได้ชั่วคราว สามารถกดคำนวณใหม่หรือเปิด Google Maps ภายนอก'
-              : 'Unable to compute route right now. Try refreshing or use external Google Maps.'
-          );
-        }
-      });
+        });
+        return;
+      }
+
+      onRouteLoading(false);
+      if (
+        initialMsg.includes('OVER_QUERY_LIMIT') ||
+        initialMsg.includes('RESOURCE_EXHAUSTED') ||
+        initialMsg.includes('429')
+      ) {
+        window.dispatchEvent(new CustomEvent('gmp-quota-exceeded'));
+      }
+
+      if (initialMsg.includes('ZERO_RESULTS')) {
+        onRouteError(
+          lang === 'th'
+            ? 'ไม่พบเส้นทางจากที่อยู่นี้ กดปุ่มเปิด Google Maps ภายนอกเพื่อดูหมุดเพิ่มเติมได้'
+            : 'No driving route found for this address. Use external Google Maps if needed.'
+        );
+      } else {
+        onRouteError(
+          lang === 'th'
+            ? 'ไม่สามารถคำนวณเส้นทางได้ชั่วคราว สามารถกดคำนวณใหม่หรือเปิด Google Maps ภายนอก'
+            : 'Unable to compute route right now. Try refreshing or use external Google Maps.'
+        );
+      }
+    });
 
     return () => {
       isCancelled = true;
@@ -639,9 +727,11 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
             </div>
             <a
               href={externalMapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs inline-flex items-center gap-2"
+              onClick={(e) => {
+                e.preventDefault();
+                launchExternalGoogleMapsNavigation(order);
+              }}
+              className="px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs inline-flex items-center gap-2 cursor-pointer"
             >
               <ExternalLink className="w-4 h-4" />
               <span>{lang === 'th' ? 'เปิดแอป Google Maps ภายนอก' : 'Open External Google Maps'}</span>
@@ -757,10 +847,12 @@ export const RiderNavigationOverlay: React.FC<Props> = ({
 
           <a
             href={externalMapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              launchExternalGoogleMapsNavigation(order);
+            }}
             title={lang === 'th' ? 'เริ่มนำทางด้วยแอป Google Maps' : 'Start Google Maps Turn-by-Turn'}
-            className="min-h-[44px] px-3.5 py-2 rounded-2xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs shadow-lg flex items-center gap-1.5"
+            className="min-h-[44px] px-3.5 py-2 rounded-2xl bg-orange-500 hover:bg-orange-400 text-slate-950 font-black text-xs shadow-lg flex items-center gap-1.5 cursor-pointer"
           >
             <Navigation className="w-4 h-4" />
             <span>{lang === 'th' ? 'นำทาง Google Maps' : 'Start Google Maps'}</span>

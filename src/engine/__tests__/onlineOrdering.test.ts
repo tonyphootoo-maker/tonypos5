@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  buildAndroidGoogleNavigationUri,
   buildExternalGoogleMapsUrl,
   buildOnlineOrderNumberingMap,
   buildWebSyncDailySalesRecords,
@@ -1252,7 +1253,7 @@ describe('Online Ordering Engine', () => {
 
     expect(manifest.id).toBe('./rider.html');
     expect(manifest.start_url).toBe('./rider.html');
-    expect(manifest.scope).toBe('./');
+    expect(manifest.scope).toBe('./rider.html');
     expect(manifest.display).toBe('standalone');
     expect(manifest.name && manifest.name.length > 0).toBe(true);
     expect(manifest.short_name && manifest.short_name.length <= 12).toBe(true);
@@ -1292,7 +1293,88 @@ describe('Online Ordering Engine', () => {
 
     const viteConfig = fs.readFileSync(viteConfigPath, 'utf-8');
     expect(viteConfig).toContain('/\\/rider\\.html$/i');
+    expect(viteConfig).toContain('/\\/order\\.html$/i');
     expect(viteConfig).toContain('navigateFallbackAllowlist: [/^\\/$/]');
+  });
+
+  it('verifies Customer PWA isolation from Rider on Android, Store Logo icons, and native Android turn-by-turn navigation URIs', () => {
+    const rootDir = path.resolve(__dirname, '../../..');
+    const orderManifestPath = path.join(rootDir, 'public/manifest-order.webmanifest');
+    const riderManifestPath = path.join(rootDir, 'public/manifest-rider.webmanifest');
+    const orderHtmlPath = path.join(rootDir, 'order.html');
+
+    const orderManifest = JSON.parse(fs.readFileSync(orderManifestPath, 'utf-8')) as {
+      id?: string;
+      name?: string;
+      short_name?: string;
+      start_url?: string;
+      scope?: string;
+      display?: string;
+      icons?: Array<{ src: string; sizes: string; type: string; purpose?: string }>;
+    };
+    const riderManifest = JSON.parse(fs.readFileSync(riderManifestPath, 'utf-8')) as {
+      id?: string;
+      start_url?: string;
+      scope?: string;
+    };
+
+    // Completely separate Android WebAPK identity & scope from Rider
+    expect(orderManifest.id).toBe('./order.html');
+    expect(orderManifest.start_url).toBe('./order.html');
+    expect(orderManifest.scope).toBe('./order.html');
+    expect(orderManifest.id).not.toBe(riderManifest.id);
+    expect(orderManifest.start_url).not.toBe(riderManifest.start_url);
+    expect(orderManifest.scope).not.toBe(riderManifest.scope);
+    expect(orderManifest.display).toBe('standalone');
+    expect(orderManifest.short_name && orderManifest.short_name.length <= 12).toBe(true);
+
+    const icons = orderManifest.icons || [];
+    const orderAny192 = icons.find((i) => i.sizes === '192x192' && i.purpose === 'any');
+    const orderAny512 = icons.find((i) => i.sizes === '512x512' && i.purpose === 'any');
+    const orderMask512 = icons.find((i) => i.sizes === '512x512' && i.purpose === 'maskable');
+    expect(orderAny192?.src).toBe('order-192x192.png');
+    expect(orderAny512?.src).toBe('order-512x512.png');
+    expect(orderMask512?.src).toBe('order-maskable-512x512.png');
+
+    const readPngDimensions = (relPublicPath: string) => {
+      const buf = fs.readFileSync(path.join(rootDir, 'public', relPublicPath));
+      expect(buf.slice(1, 4).toString('ascii')).toBe('PNG');
+      return {
+        width: buf.readUInt32BE(16),
+        height: buf.readUInt32BE(20),
+      };
+    };
+    expect(readPngDimensions('order-192x192.png')).toEqual({ width: 192, height: 192 });
+    expect(readPngDimensions('order-512x512.png')).toEqual({ width: 512, height: 512 });
+    expect(readPngDimensions('order-maskable-512x512.png')).toEqual({ width: 512, height: 512 });
+    expect(readPngDimensions('order-apple-touch-icon.png')).toEqual({ width: 180, height: 180 });
+
+    const orderHtml = fs.readFileSync(orderHtmlPath, 'utf-8');
+    expect(orderHtml).toContain('href="./manifest-order.webmanifest"');
+    expect(orderHtml).toContain('href="./order-apple-touch-icon.png"');
+    expect(orderHtml).toContain('href="./order-192x192.png"');
+    expect(orderHtml).not.toContain('href="./manifest.webmanifest"');
+
+    // Dedicated /order.html path resolves cleanly to customer mode
+    expect(resolveAppMode('?store=abc', '/order.html')).toBe('customer');
+    expect(resolveAppMode('', '/subpath/order.html')).toBe('customer');
+
+    // Native Android Google Maps turn-by-turn navigation URIs
+    expect(
+      buildAndroidGoogleNavigationUri({
+        deliveryLat: 13.7563,
+        deliveryLng: 100.5018,
+        deliveryAddress: 'Bangkok',
+      })
+    ).toBe('google.navigation:q=13.7563,100.5018&mode=d');
+
+    expect(
+      buildAndroidGoogleNavigationUri({
+        deliveryLat: null,
+        deliveryLng: null,
+        deliveryAddress: '99 Rama 9 Bangkok',
+      })
+    ).toBe('google.navigation:q=99%20Rama%209%20Bangkok&mode=d');
   });
 });
 

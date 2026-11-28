@@ -1,0 +1,159 @@
+import { describe, it, expect } from 'vitest';
+import {
+  isPosOwnedCategory,
+  filterPosOwnedCategories,
+  resolveSafePosCategoryId,
+  moveDishToCategoryList,
+  buildInitialOptionSelections,
+} from '../posMenuHelpers';
+import { CategoryDoc, DishDoc, OptionChoice } from '../../types';
+
+const makeCategory = (id: string, name: string, order: number): CategoryDoc => ({
+  id,
+  name,
+  nameTh: name,
+  order,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  version: 1,
+});
+
+const makeDish = (id: string, categoryId: string, order: number, version = 1): DishDoc => ({
+  id,
+  name: id,
+  nameTh: id,
+  categoryId,
+  variants: [
+    {
+      id: `var_${id}`,
+      name: 'Standard',
+      nameTh: 'มาตรฐาน',
+      price: 60,
+      ingredients: [],
+      subRecipes: [],
+      packaging: [],
+    },
+  ],
+  optionGroupIds: [],
+  order,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+  version,
+});
+
+describe('posMenuHelpers', () => {
+  describe('POS-owned category filtering', () => {
+    it('keeps POS-created categories and excludes foreign cat_cost_* categories', () => {
+      const categories: CategoryDoc[] = [
+        makeCategory('cat_main', 'Main Dishes', 1),
+        makeCategory('cat_cost_rice', 'Costing Rice', 2),
+        makeCategory('cat_1700000123', 'Drinks', 3),
+        makeCategory('cat_cost_noodles', 'Costing Noodles', 4),
+        makeCategory('cat_dessert', 'Dessert', 5),
+      ];
+
+      expect(isPosOwnedCategory({ id: 'cat_main' })).toBe(true);
+      expect(isPosOwnedCategory({ id: 'cat_1700000123' })).toBe(true);
+      expect(isPosOwnedCategory({ id: 'cat_cost_rice' })).toBe(false);
+      expect(isPosOwnedCategory(null)).toBe(false);
+      expect(isPosOwnedCategory({ id: '' })).toBe(false);
+
+      const filtered = filterPosOwnedCategories(categories);
+      expect(filtered.map((c) => c.id)).toEqual([
+        'cat_main',
+        'cat_1700000123',
+        'cat_dessert',
+      ]);
+    });
+
+    it('resolves safe POS categoryId when stored categoryId is foreign or missing', () => {
+      const posCategories: CategoryDoc[] = [
+        makeCategory('cat_app', 'Appetizers', 1),
+        makeCategory('cat_main', 'Main', 2),
+        makeCategory('cat_cost_temp', 'Cost Temp', 3),
+      ];
+
+      expect(resolveSafePosCategoryId('cat_main', posCategories)).toBe('cat_main');
+      expect(resolveSafePosCategoryId('cat_cost_temp', posCategories)).toBe('cat_app');
+      expect(resolveSafePosCategoryId('cat_unknown', posCategories)).toBe('cat_app');
+      expect(resolveSafePosCategoryId(undefined, [])).toBe('cat_main');
+    });
+  });
+
+  describe('moveDishToCategoryList (cross-category dish drag-and-drop)', () => {
+    it('moves a dish to targetCategoryId, updates order/version, and updates categoryId cleanly', () => {
+      const dishes: DishDoc[] = [
+        makeDish('d1', 'cat_main', 1, 2),
+        makeDish('d2', 'cat_main', 2, 1),
+        makeDish('d3', 'cat_drink', 3, 1),
+      ];
+
+      const result = moveDishToCategoryList({
+        dishes,
+        dishId: 'd1',
+        targetCategoryId: 'cat_drink',
+        nowIso: '2026-05-01T10:00:00.000Z',
+      });
+
+      expect(result.changed).toBe(true);
+      expect(result.updatedDish?.categoryId).toBe('cat_drink');
+      expect(result.updatedDish?.version).toBe(3);
+      expect(result.updatedDish?.updatedAt).toBe('2026-05-01T10:00:00.000Z');
+      expect(result.updatedDish?.order).toBeGreaterThan(3);
+
+      const movedInList = result.nextDishes.find((d) => d.id === 'd1');
+      expect(movedInList?.categoryId).toBe('cat_drink');
+    });
+
+    it('returns changed: false when dropping into the same category or missing dish', () => {
+      const dishes: DishDoc[] = [makeDish('d1', 'cat_main', 1)];
+
+      const sameCat = moveDishToCategoryList({
+        dishes,
+        dishId: 'd1',
+        targetCategoryId: 'cat_main',
+      });
+      expect(sameCat.changed).toBe(false);
+      expect(sameCat.updatedDish).toBeNull();
+
+      const missingDish = moveDishToCategoryList({
+        dishes,
+        dishId: 'nonexistent',
+        targetCategoryId: 'cat_drink',
+      });
+      expect(missingDish.changed).toBe(false);
+    });
+  });
+
+  describe('buildInitialOptionSelections (no pre-selected add-on options)', () => {
+    const choiceA: OptionChoice = { id: 'c1', name: 'Fried Egg', price: 10 };
+    const choiceB: OptionChoice = { id: 'c2', name: 'Omelet', price: 15, hasQuantity: true };
+    const optionGroupMap = new Map<string, { choices: OptionChoice[] }>([
+      ['grp_required', { choices: [choiceA, choiceB] }],
+      ['grp_optional', { choices: [choiceA] }],
+    ]);
+
+    it('returns completely empty selections by default even when option groups exist', () => {
+      const init = buildInitialOptionSelections({
+        optionGroupIds: ['grp_required', 'grp_optional'],
+        optionGroupMap,
+      });
+
+      expect(init).toEqual({});
+    });
+
+    it('restores explicit saved favorite selections only when provided', () => {
+      const init = buildInitialOptionSelections({
+        optionGroupIds: ['grp_required', 'grp_optional'],
+        optionGroupMap,
+        savedSelections: {
+          grp_required: { c2: 2 },
+        },
+      });
+
+      expect(init).toEqual({
+        grp_required: { c2: 2 },
+      });
+    });
+  });
+});

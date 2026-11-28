@@ -23,6 +23,10 @@ import {
   resolveCostVariantLabel,
   resolveCostVariantDisplayNames,
 } from './spreadsheetCostHelper';
+import {
+  filterPosOwnedCategories,
+  isPosOwnedCategory,
+} from '../../engine/posMenuHelpers';
 
 export { resolveCostVariantLabel, resolveCostVariantDisplayNames };
 
@@ -106,26 +110,18 @@ async function syncSingleMenuWithContext(
   let updatedIngredients = 0;
   let updatedSauces = 0;
 
-  // 1. Ensure Category
+  // 1. Resolve Category strictly from existing POS-owned categories (never inject cat_cost_* foreign categories)
+  const posOwnedCategories = filterPosOwnedCategories(existingCategories);
   const catName = costMenu.category || 'อาหารจานหลัก';
-  let matchedCat = existingCategories.find(
-    (c) =>
-      c.name.toLowerCase() === catName.toLowerCase() ||
-      (c.nameTh && c.nameTh.toLowerCase() === catName.toLowerCase())
-  );
-  if (!matchedCat) {
-    matchedCat = {
-      id: `cat_cost_${normalizePosId(catName).slice(0, 24)}`,
-      name: resolveEntityEnglishName(catName) || catName,
-      nameTh: catName,
-      order: existingCategories.length + 1,
-      createdAt: now,
-      updatedAt: now,
-      version: 1,
-    };
-    await saveDocument('categories', matchedCat, true);
-    existingCategories.push(matchedCat);
-  }
+  const matchedCat =
+    posOwnedCategories.find(
+      (c) =>
+        c.name.toLowerCase() === catName.toLowerCase() ||
+        (c.nameTh && c.nameTh.toLowerCase() === catName.toLowerCase())
+    ) ||
+    posOwnedCategories.find((c) => c.id === 'cat_main') ||
+    posOwnedCategories[0];
+  const resolvedFallbackCategoryId = matchedCat?.id || 'cat_main';
 
   const ensureIngredientInPos = async (costIngId: string): Promise<string | null> => {
     const posId = `cost_ing_${normalizePosId(costIngId)}`;
@@ -449,7 +445,10 @@ async function syncSingleMenuWithContext(
         costMenu.name,
     nameTh: costMenu.thaiName?.trim() || existingDish?.nameTh || costMenu.name,
     ...(existingDish?.nameEnManual || costMenu.englishNameManual ? { nameEnManual: true } : {}),
-    categoryId: existingDish?.categoryId || matchedCat.id,
+    categoryId:
+      existingDish?.categoryId && isPosOwnedCategory({ id: existingDish.categoryId })
+        ? existingDish.categoryId
+        : resolvedFallbackCategoryId,
     ...(existingDish?.imageId ? { imageId: existingDish.imageId } : {}),
     costMenuId: costMenu.id,
     ...(syncedDesc.description ? { description: syncedDesc.description } : {}),

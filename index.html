@@ -27,8 +27,9 @@
         if (cleanPath === '/order' || cleanPath.endsWith('/order')) {
           var prefixO = cleanPath.slice(0, cleanPath.length - '/order'.length) || '';
           var paramsO = new URLSearchParams(window.location.search || '');
-          if (!paramsO.get('mode')) paramsO.set('mode', 'order');
-          window.location.replace(window.location.origin + prefixO + '/?' + paramsO.toString() + window.location.hash);
+          paramsO.delete('mode');
+          var qsO = paramsO.toString();
+          window.location.replace(window.location.origin + prefixO + '/order.html' + (qsO ? '?' + qsO : '') + window.location.hash);
           return;
         }
         if (cleanPath === '/rider' || cleanPath.endsWith('/rider')) {
@@ -43,10 +44,21 @@
         var earlyMode = (earlyParams.get('mode') || '').toLowerCase();
         var earlyHashLower = (window.location.hash || '').toLowerCase();
         if (
+          !cleanPath.toLowerCase().endsWith('/order.html') &&
+          (earlyMode === 'order' || earlyMode === 'customer' || earlyHashLower.indexOf('mode=order') !== -1 || earlyHashLower.indexOf('mode=customer') !== -1)
+        ) {
+          var cleanRootO = cleanPath.replace(/\/(index|rider|order)\.html$/i, '');
+          var prefixRootO = cleanRootO === '' ? '' : cleanRootO;
+          earlyParams.delete('mode');
+          var qsRootO = earlyParams.toString();
+          window.location.replace(window.location.origin + prefixRootO + '/order.html' + (qsRootO ? '?' + qsRootO : '') + window.location.hash);
+          return;
+        }
+        if (
           !cleanPath.toLowerCase().endsWith('/rider.html') &&
           (earlyMode === 'rider' || earlyHashLower.indexOf('mode=rider') !== -1)
         ) {
-          var cleanRoot = cleanPath.replace(/\/(index|rider)\.html$/i, '');
+          var cleanRoot = cleanPath.replace(/\/(index|rider|order)\.html$/i, '');
           var prefixRoot = cleanRoot === '' ? '' : cleanRoot;
           earlyParams.delete('mode');
           var qsRoot = earlyParams.toString();
@@ -73,6 +85,7 @@
           mode === 'customer' ||
           pathLower === '/order' ||
           pathLower.endsWith('/order') ||
+          pathLower.endsWith('/order.html') ||
           hashLower.indexOf('mode=order') !== -1 ||
           hashLower.indexOf('mode=customer') !== -1;
 
@@ -119,6 +132,13 @@
           document.title = "สั่งอาหารออนไลน์ | Online Order";
           var orderTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]');
           if (orderTitle) orderTitle.setAttribute('content', 'สั่งอาหาร');
+          var orderAppleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+          if (orderAppleIcon) orderAppleIcon.setAttribute('href', './order-apple-touch-icon.png');
+          var orderFavIcons = document.querySelectorAll('link[rel="icon"]');
+          for (var j = 0; j < orderFavIcons.length; j++) {
+            orderFavIcons[j].setAttribute('type', 'image/png');
+            orderFavIcons[j].setAttribute('href', './order-192x192.png');
+          }
           var orderManifest = document.createElement('link');
           orderManifest.rel = 'manifest';
           orderManifest.href = './manifest-order.webmanifest';

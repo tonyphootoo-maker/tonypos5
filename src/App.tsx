@@ -36,6 +36,7 @@ import {
   playIncomingOrderChime,
   resolveAppMode,
 } from './engine/onlineOrdering';
+import { filterPosOwnedCategories } from './engine/posMenuHelpers';
 import { Navigation, AppPage } from './components/Navigation';
 import { OnlineOrderFloatingAlert } from './components/OnlineOrderFloatingAlert';
 import { OnlineOrderCancelledAlert } from './components/OnlineOrderCancelledAlert';
@@ -104,7 +105,9 @@ const OwnerPublicMenuAutoSync: React.FC<{ user: User; settings: SettingsDoc }> =
     const unsubCats = subscribeCollection<CategoryDoc>(
       'categories',
       (data) => {
-        setCategories([...data].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+        setCategories(
+          filterPosOwnedCategories(data).sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        );
         setReadyFlags((prev) => (prev.cats ? prev : { ...prev, cats: true }));
       },
       (err) => console.warn('AutoSync categories warning:', err)

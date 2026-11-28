@@ -26,6 +26,7 @@ import {
   isOptionChoiceQuantityEnabled,
   roundTo2,
 } from './calculations';
+import { filterPosOwnedCategories } from './posMenuHelpers';
 
 export type OnlinePeriodFilter = 'today' | 'week' | 'month' | 'year' | 'all';
 export type OnlineManagerStatusFilter = 'all' | 'active' | 'delivering' | 'completed' | 'cancelled';
@@ -72,7 +73,12 @@ export function resolveAppMode(
   }
 
   const normalizedPath = (pathname || '').trim().toLowerCase().replace(/\/+$/, '');
-  if (normalizedPath === '/order' || normalizedPath.endsWith('/order')) {
+  if (
+    normalizedPath === '/order' ||
+    normalizedPath.endsWith('/order') ||
+    normalizedPath === '/order.html' ||
+    normalizedPath.endsWith('/order.html')
+  ) {
     return 'customer';
   }
   if (
@@ -112,7 +118,7 @@ export function sanitizeMenuForPublicStore(params: {
     publishedAt = new Date().toISOString(),
   } = params;
 
-  const sortedCategories = [...categories].sort(
+  const sortedCategories = [...filterPosOwnedCategories(categories)].sort(
     (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id)
   );
   const categoryRankMap = new Map<string, number>();
@@ -701,6 +707,89 @@ export function buildExternalGoogleMapsUrl(
   }
   const addr = encodeURIComponent((order.deliveryAddress || '').trim());
   return `https://www.google.com/maps/dir/?api=1&travelmode=driving&dir_action=navigate&destination=${addr}`;
+}
+
+/**
+ * Builds native Android Google Maps Turn-by-Turn Navigation URI (`google.navigation:q=...&mode=d`)
+ * so Android opens Google Maps directly in active GPS driving navigation rather than route preview.
+ */
+export function buildAndroidGoogleNavigationUri(
+  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
+): string {
+  if (
+    typeof order.deliveryLat === 'number' &&
+    typeof order.deliveryLng === 'number' &&
+    Number.isFinite(order.deliveryLat) &&
+    Number.isFinite(order.deliveryLng)
+  ) {
+    return `google.navigation:q=${order.deliveryLat},${order.deliveryLng}&mode=d`;
+  }
+  const addr = encodeURIComponent((order.deliveryAddress || '').trim());
+  return `google.navigation:q=${addr}&mode=d`;
+}
+
+/**
+ * Launches Google Maps turn-by-turn navigation:
+ * - On Android: invokes native `google.navigation:` intent URI so Google Maps starts active
+ *   voice/turn-by-turn navigation immediately, with automatic HTTPS fallback if app is absent.
+ * - On iOS / Desktop: opens Google Maps navigation URL in external tab/app.
+ */
+export function launchExternalGoogleMapsNavigation(
+  order: Pick<OnlineOrderDoc, 'deliveryLat' | 'deliveryLng' | 'deliveryAddress'>
+): void {
+  if (typeof window === 'undefined') return;
+  const httpsUrl = buildExternalGoogleMapsUrl(order);
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+
+  if (/android/i.test(ua)) {
+    const nativeUri = buildAndroidGoogleNavigationUri(order);
+    let appOpened = false;
+    const markOpened = () => {
+      appOpened = true;
+    };
+
+    const cleanup = () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisChange);
+      }
+      window.removeEventListener('pagehide', markOpened);
+      window.removeEventListener('blur', markOpened);
+    };
+
+    const onVisChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        markOpened();
+        cleanup();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisChange);
+    }
+    window.addEventListener('pagehide', markOpened, { once: true });
+    window.addEventListener('blur', markOpened, { once: true });
+
+    try {
+      window.location.href = nativeUri;
+    } catch {
+      cleanup();
+      window.open(httpsUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    window.setTimeout(() => {
+      cleanup();
+      const stillVisible =
+        typeof document === 'undefined' ||
+        (document.visibilityState === 'visible' && document.hasFocus());
+      if (!appOpened && stillVisible) {
+        window.open(httpsUrl, '_blank', 'noopener,noreferrer');
+      }
+    }, 1250);
+    return;
+  }
+
+  window.open(httpsUrl, '_blank', 'noopener,noreferrer');
 }
 
 /**
