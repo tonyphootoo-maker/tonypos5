@@ -3,15 +3,24 @@ import {
   isPosOwnedCategory,
   filterPosOwnedCategories,
   resolveSafePosCategoryId,
+  getUnifiedCostMenuCategoryValue,
+  getPosCategoryLabel,
+  resolveUnifiedPosCategory,
+  doesCostMenuMatchPosCategory,
   moveDishToCategoryList,
   buildInitialOptionSelections,
 } from '../posMenuHelpers';
 import { CategoryDoc, DishDoc, OptionChoice } from '../../types';
 
-const makeCategory = (id: string, name: string, order: number): CategoryDoc => ({
+const makeCategory = (
+  id: string,
+  name: string,
+  order: number,
+  nameTh?: string
+): CategoryDoc => ({
   id,
   name,
-  nameTh: name,
+  nameTh: nameTh ?? name,
   order,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
@@ -77,6 +86,41 @@ describe('posMenuHelpers', () => {
       expect(resolveSafePosCategoryId('cat_cost_temp', posCategories)).toBe('cat_app');
       expect(resolveSafePosCategoryId('cat_unknown', posCategories)).toBe('cat_app');
       expect(resolveSafePosCategoryId(undefined, [])).toBe('cat_main');
+    });
+  });
+
+  describe('Unified POS / Costing category resolution', () => {
+    const unifiedCats: CategoryDoc[] = [
+      makeCategory('cat_main', 'Main Dishes', 1, 'อาหารจานหลัก'),
+      makeCategory('cat_app', 'Appetizers', 2, 'ของทานเล่น'),
+      makeCategory('cat_drink', 'Drinks', 3, 'เครื่องดื่ม'),
+      makeCategory('cat_dessert', 'Desserts', 4, 'ของหวาน'),
+      makeCategory('cat_cost_legacy', 'Legacy', 5, 'Legacy'),
+    ];
+
+    it('formats unified category values and localized labels cleanly', () => {
+      expect(getUnifiedCostMenuCategoryValue(unifiedCats[0])).toBe('อาหารจานหลัก');
+      expect(getPosCategoryLabel(unifiedCats[0], 'th')).toBe('อาหารจานหลัก');
+      expect(getPosCategoryLabel(unifiedCats[0], 'en')).toBe('Main Dishes');
+    });
+
+    it('resolves IDs, exact TH/EN names, and legacy Costing categories to unified POS categories', () => {
+      expect(resolveUnifiedPosCategory('cat_drink', unifiedCats)?.id).toBe('cat_drink');
+      expect(resolveUnifiedPosCategory('อาหารจานหลัก', unifiedCats)?.id).toBe('cat_main');
+      expect(resolveUnifiedPosCategory('Appetizers', unifiedCats)?.id).toBe('cat_app');
+      expect(resolveUnifiedPosCategory('จานด่วน / ตามสั่ง', unifiedCats)?.id).toBe('cat_main');
+      expect(resolveUnifiedPosCategory('เส้นและก๋วยเตี๋ยว', unifiedCats)?.id).toBe('cat_main');
+      expect(resolveUnifiedPosCategory('ชุดเครื่องเคียง', unifiedCats)?.id).toBe('cat_app');
+      expect(resolveUnifiedPosCategory('กาแฟและชา', unifiedCats)?.id).toBe('cat_drink');
+      expect(resolveUnifiedPosCategory('ขนมไทย', unifiedCats)?.id).toBe('cat_dessert');
+      expect(resolveUnifiedPosCategory('cat_cost_legacy', unifiedCats)?.id).toBe('cat_main');
+    });
+
+    it('matches Costing menu items accurately against unified POS categories', () => {
+      expect(doesCostMenuMatchPosCategory('จานด่วน / ตามสั่ง', unifiedCats[0], unifiedCats)).toBe(true);
+      expect(doesCostMenuMatchPosCategory('ชุดเครื่องเคียง', unifiedCats[1], unifiedCats)).toBe(true);
+      expect(doesCostMenuMatchPosCategory('เครื่องดื่ม', unifiedCats[2], unifiedCats)).toBe(true);
+      expect(doesCostMenuMatchPosCategory('อาหารจานหลัก', unifiedCats[2], unifiedCats)).toBe(false);
     });
   });
 

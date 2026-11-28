@@ -102,6 +102,7 @@ import { StorageService } from '../costing/services/storageService';
 import {
   importCostingVariantToDishVariant,
   importCostingIngredientAsDishVariant,
+  syncLinkedCostMenuCategoryFromPos,
 } from '../costing/services/posBridge';
 import {
   calculateSpreadsheetRowMetrics,
@@ -1846,6 +1847,10 @@ export const TablesPosPage: React.FC<Props> = ({
       }
 
       await saveDocument('dishes', dishToSave, isNew);
+      const savedCategoryDoc = categories.find((c) => c.id === dishToSave.categoryId);
+      syncLinkedCostMenuCategoryFromPos(dishToSave, savedCategoryDoc, costMenus).catch((err) =>
+        console.warn('Sync dish category to Costing warning:', err)
+      );
       if (finalDishTh && dishToSave.name) {
         learnShopTranslation(finalDishTh, dishToSave.name, { isManual: isDishManual });
       }
@@ -1973,6 +1978,9 @@ export const TablesPosPage: React.FC<Props> = ({
 
     try {
       await saveDocument('dishes', movedDish, false);
+      syncLinkedCostMenuCategoryFromPos(movedDish, targetCat, costMenus).catch((err) =>
+        console.warn('Sync moved dish category to Costing warning:', err)
+      );
     } catch (err) {
       console.error('Move dish to category error:', err);
     }

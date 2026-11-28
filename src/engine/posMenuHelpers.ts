@@ -32,6 +32,83 @@ export function resolveSafePosCategoryId(
   return validPosCats[0]?.id || fallbackId;
 }
 
+export function getUnifiedCostMenuCategoryValue(cat: Pick<CategoryDoc, 'name' | 'nameTh'>): string {
+  return (cat.nameTh || cat.name || '').trim();
+}
+
+export function getPosCategoryLabel(
+  cat: Pick<CategoryDoc, 'name' | 'nameTh'>,
+  lang: 'th' | 'en' = 'th'
+): string {
+  if (lang === 'en') {
+    return (cat.name || cat.nameTh || '').trim();
+  }
+  return (cat.nameTh || cat.name || '').trim();
+}
+
+/**
+ * Resolves any category string stored on a Costing MenuItem (id, Thai/English name,
+ * or legacy costing category string) to a single unified POS-owned CategoryDoc.
+ */
+export function resolveUnifiedPosCategory(
+  rawCategoryOrId: string | null | undefined,
+  posCategories: CategoryDoc[]
+): CategoryDoc | null {
+  const validPosCats = filterPosOwnedCategories(posCategories);
+  if (validPosCats.length === 0) return null;
+
+  const raw = (rawCategoryOrId || '').trim();
+  if (raw) {
+    // 1. Direct ID match
+    const byId = validPosCats.find((c) => c.id === raw);
+    if (byId) return byId;
+
+    // 2. Exact Thai or English name match (case-insensitive)
+    const lower = raw.toLowerCase();
+    const byName = validPosCats.find(
+      (c) =>
+        (c.name && c.name.trim().toLowerCase() === lower) ||
+        (c.nameTh && c.nameTh.trim().toLowerCase() === lower)
+    );
+    if (byName) return byName;
+
+    // 3. Semantic legacy costing category mapping
+    if (/(ของหวาน|ขนม|เค้ก|ไอศกรีม|dessert|sweet)/i.test(lower)) {
+      const dessert =
+        validPosCats.find((c) => c.id === 'cat_dessert') ||
+        validPosCats.find((c) => /(ของหวาน|dessert)/i.test(`${c.name} ${c.nameTh || ''}`));
+      if (dessert) return dessert;
+    }
+    if (/(เครื่องดื่ม|กาแฟ|ชา|น้ำปั่น|น้ำหวาน|beverage|drink)/i.test(lower)) {
+      const drink =
+        validPosCats.find((c) => c.id === 'cat_drink') ||
+        validPosCats.find((c) => /(เครื่องดื่ม|beverage|drink)/i.test(`${c.name} ${c.nameTh || ''}`));
+      if (drink) return drink;
+    }
+    if (/(ทานเล่น|เครื่องเคียง|กับแกล้ม|ของว่าง|สลัด|appetizer|side|snack|starter)/i.test(lower)) {
+      const app =
+        validPosCats.find((c) => c.id === 'cat_app') ||
+        validPosCats.find((c) => /(ทานเล่น|appetizer|snack)/i.test(`${c.name} ${c.nameTh || ''}`));
+      if (app) return app;
+    }
+  }
+
+  return (
+    validPosCats.find((c) => c.id === 'cat_main') ||
+    validPosCats.find((c) => /(จานหลัก|main)/i.test(`${c.name} ${c.nameTh || ''}`)) ||
+    validPosCats[0]
+  );
+}
+
+export function doesCostMenuMatchPosCategory(
+  menuCategory: string | null | undefined,
+  targetCat: CategoryDoc,
+  posCategories: CategoryDoc[]
+): boolean {
+  const resolved = resolveUnifiedPosCategory(menuCategory, posCategories);
+  return resolved?.id === targetCat.id;
+}
+
 /**
  * Moves a dish into another category and updates its categoryId and order cleanly.
  */

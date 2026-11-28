@@ -36,8 +36,14 @@ import {
 import { StorageService, migrateSettings } from './services/storageService';
 import { FirebaseSyncService, COST_COLLECTIONS } from './services/firebaseSyncService';
 import { INITIAL_RICE_NOODLE_PORTIONS } from './data/initialData';
-import { subscribeCollection } from '../data/db';
-import { DailySummaryDoc } from '../types';
+import {
+  subscribeCollection,
+  fetchCollection,
+  saveDocument,
+  deleteDocument,
+} from '../data/db';
+import { CategoryDoc, DailySummaryDoc, DishDoc } from '../types';
+import { filterPosOwnedCategories } from '../engine/posMenuHelpers';
 import {
   calculateIngredientCost,
   recalculateMenusWithChannelMultipliers,
@@ -151,6 +157,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const [riceNoodlePortions, setRiceNoodlePortions] = useState<RiceNoodlePortion[]>(() =>
     StorageService.getRiceNoodlePortions()
   );
+  const [posCategories, setPosCategories] = useState<CategoryDoc[]>([]);
   const [salesChannels, setSalesChannels] = useState<SalesChannel[]>(DEFAULT_SALES_CHANNELS);
 
   const [recipeNavTarget, setRecipeNavTarget] = useState<{
@@ -295,6 +302,18 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           (items) => {
             setDailySales(items);
             StorageService.saveDailySales(items);
+          },
+          (err) => setCloudError(err.message)
+        ),
+        // Subscribe to unified POS food categories (users/{uid}/categories)
+        subscribeCollection<CategoryDoc>(
+          'categories',
+          (cats) => {
+            if (!isMounted) return;
+            const sorted = filterPosOwnedCategories(cats).sort(
+              (a, b) => (a.order || 0) - (b.order || 0)
+            );
+            setPosCategories(sorted);
           },
           (err) => setCloudError(err.message)
         ),
@@ -647,6 +666,30 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
   const handleDeleteMenu = (menuId: string) => {
     setMenus((prev) => prev.filter((m) => m.id !== menuId));
     FirebaseSyncService.deleteUserDoc(user.uid, COST_COLLECTIONS.MENUS, menuId);
+  };
+
+  const handleSavePosCategory = async (category: CategoryDoc, isNew: boolean) => {
+    await saveDocument('categories', category, isNew);
+  };
+
+  const handleDeletePosCategory = async (categoryId: string, fallbackCategoryId: string) => {
+    const existingDishes = await fetchCollection<DishDoc>('dishes');
+    const now = new Date().toISOString();
+    for (const dish of existingDishes) {
+      if (dish.categoryId === categoryId) {
+        await saveDocument(
+          'dishes',
+          {
+            ...dish,
+            categoryId: fallbackCategoryId,
+            updatedAt: now,
+            version: (dish.version || 0) + 1,
+          },
+          false
+        );
+      }
+    }
+    await deleteDocument('categories', categoryId);
   };
 
   const handleReorderMenus = (reordered: MenuItem[]) => {
@@ -1095,6 +1138,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             sauces={sauces}
             baseRecipes={baseRecipes}
             riceNoodlePortions={riceNoodlePortions}
+            posCategories={posCategories}
             settings={settings}
             lang={lang}
             initialServingMode="ON_RICE"
@@ -1104,6 +1148,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             onReorderMenus={handleReorderMenus}
             onUpdateVariantPrice={handleUpdateVariantPrice}
             onSaveSettings={handleSaveSettings}
+            onSavePosCategory={handleSavePosCategory}
+            onDeletePosCategory={handleDeletePosCategory}
             onNavigateToRecipeBuilder={handleNavigateToRecipeBuilder}
           />
         )}
@@ -1115,6 +1161,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             sauces={sauces}
             baseRecipes={baseRecipes}
             riceNoodlePortions={riceNoodlePortions}
+            posCategories={posCategories}
             settings={settings}
             lang={lang}
             initialServingMode="A_LA_CARTE"
@@ -1124,6 +1171,8 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
             onReorderMenus={handleReorderMenus}
             onUpdateVariantPrice={handleUpdateVariantPrice}
             onSaveSettings={handleSaveSettings}
+            onSavePosCategory={handleSavePosCategory}
+            onDeletePosCategory={handleDeletePosCategory}
             onNavigateToRecipeBuilder={handleNavigateToRecipeBuilder}
           />
         )}
@@ -1132,6 +1181,7 @@ export const CostingWorkspace: React.FC<CostingWorkspaceProps> = ({
           <QuickCostCalculatorView
             ingredients={ingredients}
             sauces={sauces}
+            posCategories={posCategories}
             settings={settings}
             lang={lang}
             onSaveSettings={handleSaveSettings}

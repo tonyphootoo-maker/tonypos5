@@ -22,6 +22,13 @@ import {
   Box,
 } from 'lucide-react';
 import { Ingredient, Sauce, MenuItem, RestaurantSettings } from '../types';
+import { CategoryDoc } from '../../types';
+import {
+  filterPosOwnedCategories,
+  getPosCategoryLabel,
+  getUnifiedCostMenuCategoryValue,
+  resolveUnifiedPosCategory,
+} from '../../engine/posMenuHelpers';
 import {
   calculateChannelSuggestedPrices,
   calculateMultipliedChannelPrices,
@@ -48,6 +55,7 @@ interface CalculatorItem {
 interface QuickCostCalculatorViewProps {
   ingredients: Ingredient[];
   sauces: Sauce[];
+  posCategories?: CategoryDoc[];
   settings: RestaurantSettings;
   lang?: 'th' | 'en';
   onSaveSettings?: (settings: RestaurantSettings) => void;
@@ -58,6 +66,7 @@ interface QuickCostCalculatorViewProps {
 export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = ({
   ingredients,
   sauces,
+  posCategories,
   settings,
   lang: propLang,
   onSaveSettings,
@@ -66,12 +75,37 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
 }) => {
   const { lang: ctxLang } = useLanguage();
   const lang = propLang ?? ctxLang;
+  const unifiedPosCategories = useMemo(
+    () =>
+      filterPosOwnedCategories(posCategories || []).sort(
+        (a, b) => (a.order || 0) - (b.order || 0)
+      ),
+    [posCategories]
+  );
+  const hasUnifiedPosCategories = unifiedPosCategories.length > 0;
   // Dish information
   const [dishName, setDishName] = useState<string>('ข้าวกะเพราหมูสับไข่ดาว (ตัวอย่าง)');
   const [dishEnglishName, setDishEnglishName] = useState<string>(() =>
     translateThaiToEnglish('ข้าวกะเพราหมูสับไข่ดาว (ตัวอย่าง)')
   );
-  const [category, setCategory] = useState<string>('ผัดและกะเพรา');
+  const [category, setCategory] = useState<string>(() =>
+    hasUnifiedPosCategories
+      ? getUnifiedCostMenuCategoryValue(unifiedPosCategories[0])
+      : 'อาหารจานหลัก'
+  );
+  React.useEffect(() => {
+    if (!hasUnifiedPosCategories) return;
+    const validValues = unifiedPosCategories.map(getUnifiedCostMenuCategoryValue);
+    if (!validValues.includes(category)) {
+      const resolved = resolveUnifiedPosCategory(category, unifiedPosCategories);
+      if (resolved) {
+        const nextVal = getUnifiedCostMenuCategoryValue(resolved);
+        if (nextVal && nextVal !== category) {
+          setCategory(nextVal);
+        }
+      }
+    }
+  }, [hasUnifiedPosCategories, unifiedPosCategories, category]);
   const [sellingPrice, setSellingPrice] = useState<number>(75);
   const [targetFcPercent, setTargetFcPercent] = useState<number>(settings.targetFoodCostPercent || 40);
   const [deliveryGpPercent, setDeliveryGpPercent] = useState<number>(settings.grabFoodCommissionPercent || 30);
@@ -789,12 +823,22 @@ export const QuickCostCalculatorView: React.FC<QuickCostCalculatorViewProps> = (
                   onChange={(e) => setCategory(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-[#D6CEBE] rounded-xl text-xs font-semibold text-stone-800 focus:outline-none focus:border-[#F27D26]"
                 >
-                  <option value="ผัดและกะเพรา">{lang === 'en' ? 'Stir-Fry & Holy Basil' : 'ผัดและกะเพรา'}</option>
-                  <option value="ทอดและกระเทียม">{lang === 'en' ? 'Fried & Garlic' : 'ทอดและกระเทียม'}</option>
-                  <option value="ต้มยำและแกง">{lang === 'en' ? 'Soups & Curries' : 'ต้มยำและแกง'}</option>
-                  <option value="ข้าวผัดและเส้น">{lang === 'en' ? 'Fried Rice & Noodles' : 'ข้าวผัดและเส้น'}</option>
-                  <option value="ทานเล่นและเครื่องดื่ม">{lang === 'en' ? 'Snacks & Drinks' : 'ทานเล่นและเครื่องดื่ม'}</option>
-                  <option value="สเต็กและอาหารจานเดียว">{lang === 'en' ? 'Steaks & Single-Dish Meals' : 'สเต็กและอาหารจานเดียว'}</option>
+                  {hasUnifiedPosCategories ? (
+                    unifiedPosCategories.map((catDoc) => (
+                      <option key={catDoc.id} value={getUnifiedCostMenuCategoryValue(catDoc)}>
+                        {getPosCategoryLabel(catDoc, lang)}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="ผัดและกะเพรา">{lang === 'en' ? 'Stir-Fry & Holy Basil' : 'ผัดและกะเพรา'}</option>
+                      <option value="ทอดและกระเทียม">{lang === 'en' ? 'Fried & Garlic' : 'ทอดและกระเทียม'}</option>
+                      <option value="ต้มยำและแกง">{lang === 'en' ? 'Soups & Curries' : 'ต้มยำและแกง'}</option>
+                      <option value="ข้าวผัดและเส้น">{lang === 'en' ? 'Fried Rice & Noodles' : 'ข้าวผัดและเส้น'}</option>
+                      <option value="ทานเล่นและเครื่องดื่ม">{lang === 'en' ? 'Snacks & Drinks' : 'ทานเล่นและเครื่องดื่ม'}</option>
+                      <option value="สเต็กและอาหารจานเดียว">{lang === 'en' ? 'Steaks & Single-Dish Meals' : 'สเต็กและอาหารจานเดียว'}</option>
+                    </>
+                  )}
                 </select>
               </div>
             </div>

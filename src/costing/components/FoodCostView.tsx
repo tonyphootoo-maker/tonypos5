@@ -80,6 +80,14 @@ import {
   loadCustomPurchaseUnits,
   mergeUniqueUnits,
 } from '../utils/customUnits';
+import { CategoryDoc } from '../../types';
+import {
+  filterPosOwnedCategories,
+  getPosCategoryLabel,
+  getUnifiedCostMenuCategoryValue,
+  resolveUnifiedPosCategory,
+  doesCostMenuMatchPosCategory,
+} from '../../engine/posMenuHelpers';
 
 const PORTION_UNITS_STORAGE_KEY = CUSTOM_PORTION_UNITS_STORAGE_KEY;
 const DEFAULT_PORTION_UNITS = [
@@ -205,6 +213,7 @@ interface FoodCostViewProps {
   sauces: Sauce[];
   baseRecipes?: CentralBaseRecipe[];
   riceNoodlePortions?: RiceNoodlePortion[];
+  posCategories?: CategoryDoc[];
   settings: RestaurantSettings;
   lang?: 'th' | 'en';
   initialServingMode?: 'ON_RICE' | 'A_LA_CARTE';
@@ -213,6 +222,8 @@ interface FoodCostViewProps {
   onSaveSettings?: (settings: RestaurantSettings) => void;
   onDeleteMenu?: (menuId: string) => void;
   onReorderMenus?: (reordered: MenuItem[]) => void;
+  onSavePosCategory?: (category: CategoryDoc, isNew: boolean) => Promise<void> | void;
+  onDeletePosCategory?: (categoryId: string, fallbackCategoryId: string) => Promise<void> | void;
   onUpdateVariantPrice: (
     menuId: string,
     variantId: string,
@@ -229,6 +240,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   sauces,
   baseRecipes = [],
   riceNoodlePortions = [],
+  posCategories,
   settings,
   lang: propLang,
   initialServingMode,
@@ -237,6 +249,8 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   onSaveSettings,
   onDeleteMenu,
   onReorderMenus,
+  onSavePosCategory,
+  onDeletePosCategory,
   onUpdateVariantPrice,
   onNavigateToRecipeBuilder,
 }) => {
@@ -641,6 +655,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
 
   // Modal state for editing existing category
   const [isEditCategoryModalOpen, setIsEditCategoryModalOpen] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryOldName, setEditingCategoryOldName] = useState('');
   const [editingCategoryNewName, setEditingCategoryNewName] = useState('');
   const [editCategoryEnglishInput, setEditCategoryEnglishInput] = useState('');
@@ -655,20 +670,143 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   // Warning review modal state for displaying alerted items immediately (Requirement 3)
   const [isWarningModalOpen, setIsWarningModalOpen] = useState(false);
 
-  // Combine menu categories and custom categories
+  // Unified POS-owned categories (same source as POS Storefront)
+  const unifiedPosCategories = useMemo(
+    () =>
+      filterPosOwnedCategories(posCategories || []).sort(
+        (a, b) => (a.order || 0) - (b.order || 0)
+      ),
+    [posCategories]
+  );
+  const hasUnifiedPosCategories = unifiedPosCategories.length > 0;
+
+  // Combine unified POS categories (preferred) or legacy local categories
   const categories = useMemo(() => {
+    if (hasUnifiedPosCategories) {
+      const unifiedNames = unifiedPosCategories
+        .map(getUnifiedCostMenuCategoryValue)
+        .filter(Boolean);
+      return ['ALL', ...Array.from(new Set(unifiedNames))];
+    }
     const fromMenus = menus.map((m) => m.category).filter(Boolean);
     const combined = Array.from(new Set([...fromMenus, ...customCategories]));
     return ['ALL', ...combined];
-  }, [menus, customCategories]);
+  }, [hasUnifiedPosCategories, unifiedPosCategories, menus, customCategories]);
 
-  const handleCreateCategory = (e: React.FormEvent) => {
+  React.useEffect(() => {
+    if (selectedCategory === 'ALL') return;
+    if (categories.includes(selectedCategory)) return;
+    if (hasUnifiedPosCategories) {
+      const resolved = resolveUnifiedPosCategory(selectedCategory, unifiedPosCategories);
+      if (resolved) {
+        const val = getUnifiedCostMenuCategoryValue(resolved);
+        if (val && categories.includes(val)) {
+          setSelectedCategory(val);
+          return;
+        }
+      }
+    }
+    setSelectedCategory('ALL');
+  }, [categories, selectedCategory, hasUnifiedPosCategories, unifiedPosCategories]);
+
+  const findUnifiedPosCategoryByKey = (catKey: string): CategoryDoc | undefined => {
+    if (!catKey || catKey === 'ALL' || !hasUnifiedPosCategories) return undefined;
+    return (
+      unifiedPosCategories.find((c) => getUnifiedCostMenuCategoryValue(c) === catKey) ||
+      resolveUnifiedPosCategory(catKey, unifiedPosCategories) ||
+      undefined
+    );
+  };
+
+  const matchesCategoryKey = (menuCategory: string | undefined, targetCatKey: string): boolean => {
+    if (!targetCatKey || targetCatKey === 'ALL') return true;
+    if (hasUnifiedPosCategories) {
+      const targetPosCat = unifiedPosCategories.find(
+        (c) => getUnifiedCostMenuCategoryValue(c) === targetCatKey
+      );
+      if (targetPosCat) {
+        return doesCostMenuMatchPosCategory(menuCategory, targetPosCat, unifiedPosCategories);
+      }
+    }
+    return (menuCategory || '') === targetCatKey;
+  };
+
+  const formatCategoryChipLabel = (catKey: string): string => {
+    if (catKey === 'ALL') return isEn ? 'All' : 'ทั้งหมด';
+    if (hasUnifiedPosCategories) {
+      const found = unifiedPosCategories.find(
+        (c) => getUnifiedCostMenuCategoryValue(c) === catKey
+      );
+      if (found) return getPosCategoryLabel(found, lang);
+    }
+    return getLocalizedText(lang, catKey);
+  };
+
+  const deleteFallbackPosCategory = useMemo(() => {
+    if (!hasUnifiedPosCategories) return null;
+    return (
+      unifiedPosCategories.find(
+        (c) => getUnifiedCostMenuCategoryValue(c) !== deletingCategoryName
+      ) || unifiedPosCategories[0]
+    );
+  }, [hasUnifiedPosCategories, unifiedPosCategories, deletingCategoryName]);
+
+  const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newCategoryInput.trim();
     if (!trimmed) {
       setCategoryError(isEn ? 'Please enter a category name' : 'กรุณากรอกชื่อหมวดหมู่');
       return;
     }
+
+    if (hasUnifiedPosCategories) {
+      const lower = trimmed.toLowerCase();
+      const duplicate = unifiedPosCategories.some(
+        (c) =>
+          getUnifiedCostMenuCategoryValue(c).toLowerCase() === lower ||
+          (c.name && c.name.trim().toLowerCase() === lower)
+      );
+      if (duplicate) {
+        setCategoryError(isEn ? 'This category already exists' : 'มีหมวดหมู่นี้อยู่ในระบบแล้ว');
+        return;
+      }
+
+      const trimmedEn = (newCategoryEnglishInput || '').trim();
+      const finalEn = trimmedEn || translateThaiToEnglish(trimmed) || trimmed;
+      const isManualEn = Boolean(trimmedEn) && !containsThaiCharacters(trimmedEn);
+      const maxOrder = unifiedPosCategories.reduce(
+        (max, c) => Math.max(max, Number(c.order) || 0),
+        0
+      );
+      const now = new Date().toISOString();
+      const newPosCat: CategoryDoc = {
+        id: `cat_${Date.now()}`,
+        name: finalEn,
+        nameEnManual: isManualEn,
+        nameTh: trimmed,
+        order: maxOrder + 1,
+        createdAt: now,
+        updatedAt: now,
+        version: 1,
+      };
+      if (onSavePosCategory) {
+        await onSavePosCategory(newPosCat, true);
+      }
+      if (trimmed && finalEn) {
+        learnShopTranslation(trimmed, finalEn, { isManual: isManualEn });
+      }
+      const nextVal = getUnifiedCostMenuCategoryValue(newPosCat);
+      setSelectedCategory(nextVal);
+      if (editingMenu) {
+        setEditingMenu({ ...editingMenu, category: nextVal });
+      }
+      setNewCategoryInput('');
+      setNewCategoryEnglishInput('');
+      setCategoryError(null);
+      setIsAddCategoryModalOpen(false);
+      return;
+    }
+
     if (categories.includes(trimmed)) {
       setCategoryError(isEn ? 'This category already exists' : 'มีหมวดหมู่นี้อยู่ในระบบแล้ว');
       return;
@@ -699,21 +837,91 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const handleOpenEditCategory = (categoryName: string) => {
     if (!categoryName || categoryName === 'ALL') return;
     translationScheduler.cancelAll();
-    setEditingCategoryOldName(categoryName);
-    setEditingCategoryNewName(categoryName);
-    prevEditCatThaiRef.current = categoryName;
-    setEditCategoryEnglishInput(translateThaiToEnglish(categoryName));
+    const matchedPosCat = findUnifiedPosCategoryByKey(categoryName);
+    const displayTh = matchedPosCat ? getUnifiedCostMenuCategoryValue(matchedPosCat) : categoryName;
+    const displayEn = matchedPosCat?.name || translateThaiToEnglish(displayTh);
+    setEditingCategoryId(matchedPosCat?.id || null);
+    setEditingCategoryOldName(displayTh);
+    setEditingCategoryNewName(displayTh);
+    prevEditCatThaiRef.current = displayTh;
+    setEditCategoryEnglishInput(displayEn);
     setEditCategoryError(null);
     setIsEditCategoryModalOpen(true);
   };
 
-  const handleSaveEditCategory = (e: React.FormEvent) => {
+  const handleSaveEditCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = editingCategoryNewName.trim();
     if (!trimmed) {
       setEditCategoryError(isEn ? 'Please enter a category name' : 'กรุณากรอกชื่อหมวดหมู่');
       return;
     }
+
+    if (hasUnifiedPosCategories && editingCategoryId) {
+      const existingPosCat = unifiedPosCategories.find((c) => c.id === editingCategoryId);
+      if (existingPosCat) {
+        const lower = trimmed.toLowerCase();
+        const duplicate = unifiedPosCategories.some(
+          (c) =>
+            c.id !== existingPosCat.id &&
+            (getUnifiedCostMenuCategoryValue(c).toLowerCase() === lower ||
+              (c.name && c.name.trim().toLowerCase() === lower))
+        );
+        if (duplicate) {
+          setEditCategoryError(isEn ? 'This category already exists' : 'มีหมวดหมู่นี้อยู่ในระบบแล้ว');
+          return;
+        }
+
+        const trimmedEn = (editCategoryEnglishInput || '').trim();
+        const finalEn = trimmedEn || translateThaiToEnglish(trimmed) || trimmed;
+        const isManualEn = Boolean(trimmedEn) && !containsThaiCharacters(trimmedEn);
+        const now = new Date().toISOString();
+        const updatedPosCat: CategoryDoc = {
+          ...existingPosCat,
+          name: finalEn,
+          nameEnManual: isManualEn,
+          nameTh: trimmed,
+          updatedAt: now,
+          version: (existingPosCat.version || 0) + 1,
+        };
+        if (onSavePosCategory) {
+          await onSavePosCategory(updatedPosCat, false);
+        }
+
+        if (trimmed !== editingCategoryOldName) {
+          const affectedMenus = menus.filter((m) =>
+            doesCostMenuMatchPosCategory(m.category, existingPosCat, unifiedPosCategories)
+          );
+          if (affectedMenus.length > 0) {
+            if (onBatchUpdateMenus) {
+              const affectedIds = new Set(affectedMenus.map((m) => m.id));
+              onBatchUpdateMenus(
+                menus.map((m) =>
+                  affectedIds.has(m.id) ? { ...m, category: trimmed, updatedAt: now } : m
+                )
+              );
+            } else {
+              affectedMenus.forEach((m) => {
+                onSaveMenu({ ...m, category: trimmed, updatedAt: now });
+              });
+            }
+          }
+          setSelectedCategory(trimmed);
+          if (editingMenu && matchesCategoryKey(editingMenu.category, editingCategoryOldName)) {
+            setEditingMenu({ ...editingMenu, category: trimmed });
+          }
+        }
+
+        if (trimmed && finalEn) {
+          learnShopTranslation(trimmed, finalEn, { isManual: isManualEn });
+        }
+        setEditingCategoryId(null);
+        setIsEditCategoryModalOpen(false);
+        setEditCategoryError(null);
+        return;
+      }
+    }
+
     if (trimmed !== editingCategoryOldName && categories.includes(trimmed)) {
       setEditCategoryError(isEn ? 'This category already exists' : 'มีหมวดหมู่นี้อยู่ในระบบแล้ว');
       return;
@@ -751,6 +959,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       learnShopTranslation(trimmed, editCategoryEnglishInput.trim(), { isManual: true });
     }
 
+    setEditingCategoryId(null);
     setIsEditCategoryModalOpen(false);
     setEditCategoryError(null);
   };
@@ -761,8 +970,52 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     setIsDeleteCategoryModalOpen(true);
   };
 
-  const handleConfirmDeleteCategory = () => {
+  const handleConfirmDeleteCategory = async () => {
     if (!deletingCategoryName || deletingCategoryName === 'ALL') return;
+
+    if (hasUnifiedPosCategories) {
+      if (unifiedPosCategories.length <= 1) {
+        setIsDeleteCategoryModalOpen(false);
+        return;
+      }
+      const targetPosCat = findUnifiedPosCategoryByKey(deletingCategoryName);
+      const fallbackCat = deleteFallbackPosCategory;
+      if (!targetPosCat || !fallbackCat || targetPosCat.id === fallbackCat.id) {
+        setIsDeleteCategoryModalOpen(false);
+        return;
+      }
+
+      const fallbackCategoryName = getUnifiedCostMenuCategoryValue(fallbackCat);
+      const now = new Date().toISOString();
+      const affectedMenus = menus.filter((m) =>
+        doesCostMenuMatchPosCategory(m.category, targetPosCat, unifiedPosCategories)
+      );
+      if (affectedMenus.length > 0) {
+        if (onBatchUpdateMenus) {
+          const affectedIds = new Set(affectedMenus.map((m) => m.id));
+          onBatchUpdateMenus(
+            menus.map((m) =>
+              affectedIds.has(m.id) ? { ...m, category: fallbackCategoryName, updatedAt: now } : m
+            )
+          );
+        } else {
+          affectedMenus.forEach((m) => {
+            onSaveMenu({ ...m, category: fallbackCategoryName, updatedAt: now });
+          });
+        }
+      }
+
+      if (onDeletePosCategory) {
+        await onDeletePosCategory(targetPosCat.id, fallbackCat.id);
+      }
+
+      if (editingMenu && matchesCategoryKey(editingMenu.category, deletingCategoryName)) {
+        setEditingMenu({ ...editingMenu, category: fallbackCategoryName });
+      }
+      setSelectedCategory('ALL');
+      setIsDeleteCategoryModalOpen(false);
+      return;
+    }
 
     const fallbackCategory = 'ทั่วไป / อื่นๆ';
 
@@ -834,8 +1087,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   // Filter & Search
   const qLower = searchTerm.toLowerCase();
   const filteredRows = allRows.filter(({ menu, variant }) => {
-    const matchesCategory =
-      selectedCategory === 'ALL' || menu.category === selectedCategory;
+    const matchesCategory = matchesCategoryKey(menu.category, selectedCategory);
     const matchesSearch =
       menu.name.toLowerCase().includes(qLower) ||
       (menu.englishName || '').toLowerCase().includes(qLower) ||
@@ -914,7 +1166,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   }, [warningRows]);
 
   const filteredMenus = menus.filter((m) => {
-    const matchesCategory = selectedCategory === 'ALL' || m.category === selectedCategory;
+    const matchesCategory = matchesCategoryKey(m.category, selectedCategory);
     const matchesSearch =
       !searchTerm ||
       m.name.toLowerCase().includes(qLower) ||
@@ -951,10 +1203,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
     translationScheduler.cancelAll();
     prevMenuThaiRef.current = '';
     prevMenuDescThaiRef.current = '';
-    const currentCat =
-      selectedCategory !== 'ALL'
-        ? selectedCategory
-        : (categories.find((c) => c !== 'ALL') || 'ผัดและกะเพรา');
+    const defaultPosCat =
+      categories.find((c) => c !== 'ALL') ||
+      (hasUnifiedPosCategories ? getUnifiedCostMenuCategoryValue(unifiedPosCategories[0]) : 'อาหารจานหลัก');
+    const currentCat = selectedCategory !== 'ALL' ? selectedCategory : defaultPosCat;
     const initialMenuSell = 60;
     const initialTakeaway = initialMenuSell + 5;
     const initialMultiplied = calculateMultipliedChannelPrices(initialTakeaway, settings);
@@ -999,6 +1251,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
   const handleOpenEditMenu = (menu: MenuItem) => {
     translationScheduler.cancelAll();
     const cloned = JSON.parse(JSON.stringify(menu));
+    if (hasUnifiedPosCategories) {
+      const resolvedCat = resolveUnifiedPosCategory(cloned.category, unifiedPosCategories);
+      if (resolvedCat) {
+        cloned.category = getUnifiedCostMenuCategoryValue(resolvedCat);
+      }
+    }
     const thName = cloned.thaiName || cloned.name || '';
     prevMenuThaiRef.current = thName;
     const storedEn = (cloned.englishName || '').trim();
@@ -1057,6 +1315,10 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
         }) || (finalDescTh ? translateThaiDescriptionToEnglish(finalDescTh) : '');
     const finalDescEn = containsThaiCharacters(computedDescEn) ? '' : computedDescEn.trim();
 
+    const defaultFallbackCat = hasUnifiedPosCategories
+      ? getUnifiedCostMenuCategoryValue(unifiedPosCategories[0])
+      : 'อาหารจานหลัก';
+
     const finalMenu: MenuItem = {
       id: editingMenu.id || `menu_${Date.now()}`,
       name: trimmedTh,
@@ -1067,7 +1329,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
       sku: editingMenu.sku,
       barcode: editingMenu.barcode,
       isOutOfStock: editingMenu.isOutOfStock,
-      category: editingMenu.category || 'ผัดและกะเพรา',
+      category: editingMenu.category || defaultFallbackCat,
       displayOrder: editingMenu.displayOrder || 1,
       variants: editingMenu.variants || [],
       active: editingMenu.active !== undefined ? editingMenu.active : true,
@@ -2121,7 +2383,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               const isActive = selectedCategory === cat;
               const count = isAll
                 ? menus.length
-                : menus.filter((m) => m.category === cat).length;
+                : menus.filter((m) => matchesCategoryKey(m.category, cat)).length;
 
               return (
                 <div
@@ -2139,7 +2401,7 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       isActive ? 'text-white' : 'text-stone-800'
                     }`}
                   >
-                    <span>{isAll ? (isEn ? 'All' : 'ทั้งหมด') : getLocalizedText(lang, cat)}</span>
+                    <span>{formatCategoryChipLabel(cat)}</span>
                     <span
                       className={`text-[10px] font-mono px-1 rounded ${
                         isActive ? 'bg-black/20 text-white' : 'bg-white text-stone-600'
@@ -2169,21 +2431,23 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                       >
                         <Edit2 className="w-3 h-3" />
                       </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenDeleteCategory(cat);
-                        }}
-                        title={isEn ? 'Delete category' : 'ลบหมวดหมู่'}
-                        className={`p-1 rounded-lg cursor-pointer transition-colors ${
-                          isActive
-                            ? 'text-white/90 hover:text-white hover:bg-black/15'
-                            : 'text-stone-400 hover:text-rose-600 hover:bg-white'
-                        }`}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+                      {(!hasUnifiedPosCategories || unifiedPosCategories.length > 1) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenDeleteCategory(cat);
+                          }}
+                          title={isEn ? 'Delete category' : 'ลบหมวดหมู่'}
+                          className={`p-1 rounded-lg cursor-pointer transition-colors ${
+                            isActive
+                              ? 'text-white/90 hover:text-white hover:bg-black/15'
+                              : 'text-stone-400 hover:text-rose-600 hover:bg-white'
+                          }`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3245,16 +3509,25 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
                   onChange={(e) => setEditingMenu({ ...editingMenu, category: e.target.value })}
                   className="w-full p-2.5 bg-white border border-[#D6CEBE] rounded-xl text-stone-900 text-xs font-semibold focus:outline-none focus:border-[#F27D26] cursor-pointer"
                 >
-                  {Array.from(
-                    new Set([
-                      ...categories.filter((c) => c !== 'ALL'),
-                      ...(editingMenu.category ? [editingMenu.category] : []),
-                    ])
-                  ).map((cat) => (
-                    <option key={cat} value={cat}>
-                      {getLocalizedText(lang, cat)}
-                    </option>
-                  ))}
+                  {hasUnifiedPosCategories
+                    ? unifiedPosCategories.map((catDoc) => {
+                        const val = getUnifiedCostMenuCategoryValue(catDoc);
+                        return (
+                          <option key={catDoc.id} value={val}>
+                            {getPosCategoryLabel(catDoc, lang)}
+                          </option>
+                        );
+                      })
+                    : Array.from(
+                        new Set([
+                          ...categories.filter((c) => c !== 'ALL'),
+                          ...(editingMenu.category ? [editingMenu.category] : []),
+                        ])
+                      ).map((cat) => (
+                        <option key={cat} value={cat}>
+                          {getLocalizedText(lang, cat)}
+                        </option>
+                      ))}
                 </select>
               </div>
 
@@ -3626,12 +3899,12 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-[11px] text-amber-900 leading-relaxed">
                 {isEn ? (
                   <>
-                    Menus in <strong>"{getLocalizedText('en', editingCategoryOldName)}"</strong> (
-                    {menus.filter((m) => m.category === editingCategoryOldName).length} items) will automatically update to this new category name.
+                    Menus in <strong>"{formatCategoryChipLabel(editingCategoryOldName)}"</strong> (
+                    {menus.filter((m) => matchesCategoryKey(m.category, editingCategoryOldName)).length} items) will automatically update to this new category name.
                   </>
                 ) : (
                   <>
-                    เมนูอาหารในหมวดหมู่เดิม <strong>"{editingCategoryOldName}"</strong> (จำนวน {menus.filter((m) => m.category === editingCategoryOldName).length} รายการ) จะถูกเปลี่ยนเป็นชื่อหมวดหมู่ใหม่นี้โดยอัตโนมัติ
+                    เมนูอาหารในหมวดหมู่เดิม <strong>"{formatCategoryChipLabel(editingCategoryOldName)}"</strong> (จำนวน {menus.filter((m) => matchesCategoryKey(m.category, editingCategoryOldName)).length} รายการ) จะถูกเปลี่ยนเป็นชื่อหมวดหมู่ใหม่นี้โดยอัตโนมัติ
                   </>
                 )}
               </div>
@@ -3684,35 +3957,54 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
             </div>
 
             <div className="modal-body space-y-4 text-xs">
-              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-800">
-                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="font-bold text-xs">
+              {hasUnifiedPosCategories && unifiedPosCategories.length <= 1 ? (
+                <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-amber-900">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-[11px] leading-relaxed font-medium">
                     {isEn
-                      ? `Delete category "${getLocalizedText('en', deletingCategoryName)}"?`
-                      : `ต้องการลบหมวดหมู่ "${deletingCategoryName}" ใช่หรือไม่?`}
+                      ? 'At least one POS category must remain. Please create another category before deleting this one.'
+                      : 'ต้องมีหมวดหมู่อาหารอย่างน้อย 1 หมวดหมู่ กรุณาเพิ่มหมวดหมู่อื่นก่อนลบหมวดหมู่นี้'}
                   </p>
-                  {menus.filter((m) => m.category === deletingCategoryName).length > 0 ? (
-                    <p className="text-[11px] text-rose-700 leading-relaxed">
-                      {isEn ? (
-                        <>
-                          There are <strong>{menus.filter((m) => m.category === deletingCategoryName).length} items</strong> in this category. They will automatically move to <strong>"General / Other"</strong> without being lost.
-                        </>
-                      ) : (
-                        <>
-                          มีเมนูอาหารในหมวดหมู่นี้อยู่ <strong>{menus.filter((m) => m.category === deletingCategoryName).length} รายการ</strong> ซึ่งเมนูเหล่านี้จะถูกย้ายไปยังหมวดหมู่ <strong>"ทั่วไป / อื่นๆ"</strong> โดยอัตโนมัติ (เมนูจะไม่สูญหาย)
-                        </>
-                      )}
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-rose-700 leading-relaxed">
-                      {isEn
-                        ? 'No menus in this category. It will be removed from all options immediately.'
-                        : 'ไม่มีเมนูอาหารในหมวดหมู่นี้ ระบบจะลบหมวดหมู่นี้ออกจากตัวเลือกทั้งหมดทันที'}
-                    </p>
-                  )}
                 </div>
-              </div>
+              ) : (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3 text-rose-800">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-xs">
+                      {isEn
+                        ? `Delete category "${formatCategoryChipLabel(deletingCategoryName)}"?`
+                        : `ต้องการลบหมวดหมู่ "${formatCategoryChipLabel(deletingCategoryName)}" ใช่หรือไม่?`}
+                    </p>
+                    {menus.filter((m) => matchesCategoryKey(m.category, deletingCategoryName)).length > 0 ? (
+                      <p className="text-[11px] text-rose-700 leading-relaxed">
+                        {isEn ? (
+                          <>
+                            There are <strong>{menus.filter((m) => matchesCategoryKey(m.category, deletingCategoryName)).length} items</strong> in this category. They will automatically move to{' '}
+                            <strong>
+                              "{deleteFallbackPosCategory ? getPosCategoryLabel(deleteFallbackPosCategory, lang) : 'General / Other'}"
+                            </strong>{' '}
+                            without being lost.
+                          </>
+                        ) : (
+                          <>
+                            มีเมนูอาหารในหมวดหมู่นี้อยู่ <strong>{menus.filter((m) => matchesCategoryKey(m.category, deletingCategoryName)).length} รายการ</strong> ซึ่งเมนูเหล่านี้จะถูกย้ายไปยังหมวดหมู่{' '}
+                            <strong>
+                              "{deleteFallbackPosCategory ? getPosCategoryLabel(deleteFallbackPosCategory, lang) : 'ทั่วไป / อื่นๆ'}"
+                            </strong>{' '}
+                            โดยอัตโนมัติ (เมนูจะไม่สูญหาย)
+                          </>
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-rose-700 leading-relaxed">
+                        {isEn
+                          ? 'No menus in this category. It will be removed from all options immediately.'
+                          : 'ไม่มีเมนูอาหารในหมวดหมู่นี้ ระบบจะลบหมวดหมู่นี้ออกจากตัวเลือกทั้งหมดทันที'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
             </div>
 
@@ -3726,8 +4018,9 @@ export const FoodCostView: React.FC<FoodCostViewProps> = ({
               </button>
               <button
                 type="button"
+                disabled={hasUnifiedPosCategories && unifiedPosCategories.length <= 1}
                 onClick={handleConfirmDeleteCategory}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{isEn ? 'Confirm Delete Category' : 'ยืนยันการลบหมวดหมู่'}</span>

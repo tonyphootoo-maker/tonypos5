@@ -54,6 +54,8 @@ import { StorageService } from '../costing/services/storageService';
 import {
   importCostingVariantToDishVariant,
   importCostingIngredientAsDishVariant,
+  syncLinkedCostMenuCategoryFromPos,
+  syncCostMenusOnPosCategoryChange,
 } from '../costing/services/posBridge';
 import {
   calculateSpreadsheetRowMetrics,
@@ -1014,6 +1016,10 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
     try {
       await saveDocument('dishes', dishToSave, isNew);
+      const savedCategoryDoc = categories.find((c) => c.id === dishToSave.categoryId);
+      syncLinkedCostMenuCategoryFromPos(dishToSave, savedCategoryDoc, costMenus).catch((err) =>
+        console.warn('Sync dish category to Costing warning:', err)
+      );
       if (finalDishTh && dishToSave.name) {
         learnShopTranslation(finalDishTh, dishToSave.name, { isManual: isDishManual });
       }
@@ -1090,6 +1096,9 @@ export const MenuFoodCostPage: React.FC<Props> = ({
 
     try {
       await saveDocument('dishes', movedDish, false);
+      syncLinkedCostMenuCategoryFromPos(movedDish, targetCat, costMenus).catch((err) =>
+        console.warn('Sync moved dish category to Costing warning:', err)
+      );
     } catch (err) {
       console.error('Move dish to category error:', err);
     }
@@ -2932,6 +2941,14 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 version: editingCategory.version || 1,
               };
               await saveDocument('categories', catToSave, isNew);
+              if (!isNew) {
+                syncCostMenusOnPosCategoryChange(
+                  catToSave.id,
+                  catToSave,
+                  costMenus,
+                  categories.map((c) => (c.id === catToSave.id ? catToSave : c))
+                ).catch((err) => console.warn('Sync category rename to Costing warning:', err));
+              }
               if (finalTh && catToSave.name) {
                 learnShopTranslation(finalTh, catToSave.name, { isManual: isCatManual });
               }
@@ -3895,6 +3912,32 @@ export const MenuFoodCostPage: React.FC<Props> = ({
                 : pendingDelete.type === 'category'
                 ? 'categories'
                 : 'channels';
+            if (pendingDelete.type === 'category') {
+              const fallbackCat = categories.find((c) => c.id !== pendingDelete.id);
+              if (fallbackCat) {
+                const nowIso = new Date().toISOString();
+                for (const d of dishes) {
+                  if (d.categoryId === pendingDelete.id) {
+                    await saveDocument(
+                      'dishes',
+                      {
+                        ...d,
+                        categoryId: fallbackCat.id,
+                        updatedAt: nowIso,
+                        version: (d.version || 0) + 1,
+                      },
+                      false
+                    );
+                  }
+                }
+                await syncCostMenusOnPosCategoryChange(
+                  pendingDelete.id,
+                  fallbackCat,
+                  costMenus,
+                  categories
+                ).catch((err) => console.warn('Sync category delete to Costing warning:', err));
+              }
+            }
             await deleteDocument(col, pendingDelete.id);
             setPendingDelete(null);
             loadData();

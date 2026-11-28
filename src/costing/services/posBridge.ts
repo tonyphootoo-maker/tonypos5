@@ -15,7 +15,8 @@ import {
   MenuVariant as CostMenuVariant,
   Sauce as CostSauce,
 } from '../types';
-import { fetchCollection, saveDocument } from '../../data/db';
+import { fetchCollection, getCurrentUid, saveDocument } from '../../data/db';
+import { COST_COLLECTIONS, FirebaseSyncService } from './firebaseSyncService';
 import { calculateIngredientCostPerBaseUnit } from '../../engine/calculations';
 import { resolveBilingualDescriptionFields, resolveEntityEnglishName } from '../../utils/thaiToEnglish';
 import { convertUnit } from '../engine/units';
@@ -25,7 +26,9 @@ import {
 } from './spreadsheetCostHelper';
 import {
   filterPosOwnedCategories,
+  getUnifiedCostMenuCategoryValue,
   isPosOwnedCategory,
+  resolveUnifiedPosCategory,
 } from '../../engine/posMenuHelpers';
 
 export { resolveCostVariantLabel, resolveCostVariantDisplayNames };
@@ -110,17 +113,9 @@ async function syncSingleMenuWithContext(
   let updatedIngredients = 0;
   let updatedSauces = 0;
 
-  // 1. Resolve Category strictly from existing POS-owned categories (never inject cat_cost_* foreign categories)
+  // 1. Resolve Category strictly from unified POS-owned categories (never inject cat_cost_* foreign categories)
   const posOwnedCategories = filterPosOwnedCategories(existingCategories);
-  const catName = costMenu.category || 'อาหารจานหลัก';
-  const matchedCat =
-    posOwnedCategories.find(
-      (c) =>
-        c.name.toLowerCase() === catName.toLowerCase() ||
-        (c.nameTh && c.nameTh.toLowerCase() === catName.toLowerCase())
-    ) ||
-    posOwnedCategories.find((c) => c.id === 'cat_main') ||
-    posOwnedCategories[0];
+  const matchedCat = resolveUnifiedPosCategory(costMenu.category, posOwnedCategories);
   const resolvedFallbackCategoryId = matchedCat?.id || 'cat_main';
 
   const ensureIngredientInPos = async (costIngId: string): Promise<string | null> => {
@@ -446,7 +441,9 @@ async function syncSingleMenuWithContext(
     nameTh: costMenu.thaiName?.trim() || existingDish?.nameTh || costMenu.name,
     ...(existingDish?.nameEnManual || costMenu.englishNameManual ? { nameEnManual: true } : {}),
     categoryId:
-      existingDish?.categoryId && isPosOwnedCategory({ id: existingDish.categoryId })
+      (costMenu.category || '').trim() && matchedCat
+        ? matchedCat.id
+        : existingDish?.categoryId && isPosOwnedCategory({ id: existingDish.categoryId })
         ? existingDish.categoryId
         : resolvedFallbackCategoryId,
     ...(existingDish?.imageId ? { imageId: existingDish.imageId } : {}),
@@ -486,11 +483,14 @@ async function syncSingleMenuWithContext(
 }
 
 /**
- * Propagates bilingual dish descriptions edited in Costing Menu List ("รายการเมนูอาหาร")
- * to any linked POS DishDoc so Customer Storefront updates immediately.
+ * Propagates bilingual dish descriptions and unified POS category changes edited in Costing Menu List ("รายการเมนูอาหาร")
+ * to any linked POS DishDoc so POS Storefront and Customer Storefront stay aligned immediately.
  */
 export async function propagateCostMenuDescriptionToPos(costMenu: CostMenuItem): Promise<void> {
-  const existingDishes = await fetchCollection<DishDoc>('dishes');
+  const [existingDishes, existingCategories] = await Promise.all([
+    fetchCollection<DishDoc>('dishes'),
+    fetchCollection<CategoryDoc>('categories'),
+  ]);
   const expectedPosId = `cost_dish_${normalizePosId(costMenu.id)}`;
   const costTh = (costMenu.thaiName || costMenu.name || '').trim().toLowerCase();
   const costEn = (costMenu.englishName || '').trim().toLowerCase();
@@ -505,6 +505,11 @@ export async function propagateCostMenuDescriptionToPos(costMenu: CostMenuItem):
   );
   if (matchingDishes.length === 0) return;
 
+  const posOwnedCategories = filterPosOwnedCategories(existingCategories);
+  const matchedCat = (costMenu.category || '').trim()
+    ? resolveUnifiedPosCategory(costMenu.category, posOwnedCategories)
+    : null;
+
   const resolvedDesc = resolveBilingualDescriptionFields(
     costMenu.description,
     costMenu.descriptionTh
@@ -515,16 +520,19 @@ export async function propagateCostMenuDescriptionToPos(costMenu: CostMenuItem):
     const nextDesc = resolvedDesc.description || '';
     const nextDescTh = resolvedDesc.descriptionTh || '';
     const nextManual = Boolean(costMenu.descriptionEnManual && nextDesc);
+    const nextCategoryId = matchedCat ? matchedCat.id : dish.categoryId;
     if (
       (dish.description || '') === nextDesc &&
       (dish.descriptionTh || '') === nextDescTh &&
-      Boolean(dish.descriptionEnManual) === nextManual
+      Boolean(dish.descriptionEnManual) === nextManual &&
+      dish.categoryId === nextCategoryId
     ) {
       continue;
     }
 
     const updatedDish: DishDoc = {
       ...dish,
+      categoryId: nextCategoryId,
       updatedAt: now,
       version: (dish.version || 0) + 1,
     };
@@ -536,6 +544,77 @@ export async function propagateCostMenuDescriptionToPos(costMenu: CostMenuItem):
     else delete updatedDish.descriptionEnManual;
 
     await saveDocument('dishes', updatedDish, false);
+  }
+}
+
+/**
+ * Syncs a POS dish's new category back to its linked Costing MenuItem so both POS and Costing stay unified.
+ */
+export async function syncLinkedCostMenuCategoryFromPos(
+  dish: Pick<DishDoc, 'id' | 'costMenuId' | 'name' | 'nameTh' | 'variants'>,
+  targetCategory: CategoryDoc | undefined,
+  costMenus: CostMenuItem[]
+): Promise<void> {
+  if (!targetCategory || costMenus.length === 0) return;
+  const uid = getCurrentUid();
+  if (!uid) return;
+
+  const targetCatName = getUnifiedCostMenuCategoryValue(targetCategory);
+  if (!targetCatName) return;
+
+  const dTh = (dish.nameTh || '').trim().toLowerCase();
+  const dEn = (dish.name || '').trim().toLowerCase();
+  const varMenuIds = new Set(
+    (dish.variants || []).map((v) => v.costMenuId).filter((id): id is string => Boolean(id))
+  );
+
+  const linkedMenus = costMenus.filter(
+    (m) =>
+      m.id === dish.costMenuId ||
+      `cost_dish_${normalizePosId(m.id)}` === dish.id ||
+      varMenuIds.has(m.id) ||
+      (dTh && ((m.thaiName || m.name || '').trim().toLowerCase() === dTh)) ||
+      (dEn && ((m.englishName || '').trim().toLowerCase() === dEn))
+  );
+
+  const now = new Date().toISOString();
+  for (const menu of linkedMenus) {
+    if ((menu.category || '').trim() === targetCatName) continue;
+    await FirebaseSyncService.saveUserDoc(uid, COST_COLLECTIONS.MENUS, menu.id, {
+      ...menu,
+      category: targetCatName,
+      updatedAt: now,
+    });
+  }
+}
+
+/**
+ * Updates linked CostMenuItem.category whenever a POS category is renamed or deleted on POS.
+ */
+export async function syncCostMenusOnPosCategoryChange(
+  affectedCategoryId: string,
+  replacementCategory: CategoryDoc | undefined,
+  costMenus: CostMenuItem[],
+  posCategories: CategoryDoc[]
+): Promise<void> {
+  if (!affectedCategoryId || !replacementCategory || costMenus.length === 0) return;
+  const uid = getCurrentUid();
+  if (!uid) return;
+
+  const replacementName = getUnifiedCostMenuCategoryValue(replacementCategory);
+  if (!replacementName) return;
+
+  const validPosCats = filterPosOwnedCategories(posCategories);
+  const now = new Date().toISOString();
+  for (const menu of costMenus) {
+    const resolved = resolveUnifiedPosCategory(menu.category, validPosCats);
+    if (resolved?.id === affectedCategoryId && (menu.category || '').trim() !== replacementName) {
+      await FirebaseSyncService.saveUserDoc(uid, COST_COLLECTIONS.MENUS, menu.id, {
+        ...menu,
+        category: replacementName,
+        updatedAt: now,
+      });
+    }
   }
 }
 
